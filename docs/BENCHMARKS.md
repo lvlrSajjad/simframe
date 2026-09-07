@@ -407,3 +407,43 @@ frames genuinely are not a translation of each other. The failure mode is a less
 specific answer rather than a wrong one, and every result carries the evidence it
 was decided from, so a misclassification can be argued with rather than guessed
 at.
+
+## Phase 5 — layout priors and intent matching
+
+`sim_find` / `simframe find` resolve an intent to one control, or say why they
+cannot. Region priors come from geometry, so they cost nothing and disambiguate
+a great deal: "Assets" the navigation title and "Assets" the tab differ only by
+where they are.
+
+Measured against a real app screen:
+
+| Intent | Resolved | Score |
+| --- | --- | --- |
+| `Work Orders tab` | tab bar (200, 836) | 1.00 |
+| `tap Invoices` | tab bar (275, 836) | 1.00 |
+| `Wrok Orders tab` (typo) | tab bar (200, 836) | 0.74 |
+| `Map` | nav bar (363, 90) | 1.00 |
+| `Assets` (title and tab both present) | **ambiguous, both listed** | — |
+| `back` (no back button on this screen) | **not on this screen** | — |
+
+Three bugs found while building it, each of which produced a confident wrong
+answer rather than an error:
+
+**A bail-out sentinel used as a measurement.** `editDistance` returns `cap + 1`
+when it gives up early. Scoring treated that as a real distance, so
+`1 - 9/200` gave every long string a similarity of 0.955 and a score of 0.687 —
+*against any query at all*. Two different queries scoring a row identically is
+what gave it away.
+
+**Substring matches unweighted by coverage.** "back" scored 0.78 against a
+two-hundred-character list row containing "Back of House" and beat the actual
+back button. A substring match is now worth the share of the name it covers.
+
+**Off-screen elements offered as answers.** A scrolled-away row still sits in
+the screen map with a negative `y`; tapping it lands somewhere else entirely.
+Candidates are now filtered to what is actually on screen.
+
+And one design mistake worth naming: when intent resolution found nothing, the
+code fell through to plain substring matching, which has none of the guards
+above. A fallback that is less safe than the thing it backs up is not a
+fallback. "Not found" is the answer.

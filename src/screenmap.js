@@ -11,6 +11,7 @@ import { hashDistance } from './analyze.js';
 import * as control from './control.js';
 import * as input from './input.js';
 import * as ocr from './ocr.js';
+import * as regions from './regions.js';
 import * as store from './store.js';
 
 const MAP_VERSION = 2; // layout hash crop changed; old maps no longer comparable
@@ -216,6 +217,10 @@ export async function build(udid, {
   return finish();
 
   function finish() {
+    // Region priors are geometry, so they cost nothing and disambiguate a great
+    // deal: "Assets" the nav title and "Assets" the tab differ only by where
+    // they are.
+    if (screen?.width && screen?.height) regions.annotate(targets, screen);
     const entry = {
       version: MAP_VERSION,
       hash,

@@ -410,6 +410,24 @@ async function main() {
       return;
     }
 
+    case 'find': {
+      const intent = positional.join(' ');
+      if (!intent) throw new Error('usage: simframe find "<intent>"');
+      try {
+        const r = await api.locate(flags.device, intent, { options });
+        console.log(
+          `${r.target.label ?? '(icon-only)'}  @(${r.target.x},${r.target.y})  ` +
+            `${r.target.region ?? 'content'}  ${r.target.type ?? '?'}/${r.target.source}  score ${r.score ?? '-'}`,
+        );
+        if (r.reasons?.length) console.log(`  because: ${r.reasons.join(', ')}`);
+        for (const a of r.alternatives ?? []) console.log(`  also considered: "${a.label}" ${a.score}`);
+      } catch (err) {
+        console.log(err.message);
+        process.exitCode = 1;
+      }
+      return;
+    }
+
     case 'devices': {
       const all = await listDevices();
       const shown = flags.all ? all : all.filter((d) => d.state === 'Booted');

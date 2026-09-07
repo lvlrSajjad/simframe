@@ -333,3 +333,73 @@ test('the MCP server reports the real package version', async () => {
   assert.ok(!/version: '\d+\.\d+\.\d+'/.test(source), 'version must not be hardcoded in mcp.js');
   assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
 });
+
+// --- intent matching: the rules that keep a wrong tap from happening ---
+import { editDistance, nameScore, rank as rankIntent, resolve } from '../src/matching.js';
+import { detectKeyboardTop, navSlot, regionFor } from '../src/regions.js';
+
+const SCREEN = { width: 402, height: 874 };
+const el = (label, x, y, type = 'Text', extra = {}) => ({
+  label, x, y, type,
+  frame: { x: x - 30, y: y - 10, width: 60, height: 20 },
+  source: 'ocr',
+  ...extra,
+});
+
+test('a bail-out from editDistance is not a measurement', () => {
+  const long = 'WO: 6322486 | L4 - 48 Hours, Anaheim, Henry the Handyman, Repair'.repeat(3);
+  // The cap sentinel once made this score 0.687 against any query at all.
+  assert.equal(nameScore(long, 'back'), 0, 'a long unrelated string must not match');
+  assert.ok(editDistance('back', long) > 8);
+});
+
+test('a substring match is weighted by how much of the name it covers', () => {
+  assert.ok(nameScore('Back', 'back') > nameScore('Ceiling Tile - Back of House, Repair', 'back'));
+});
+
+test('typos still resolve', () => {
+  const r = resolve([el('Work Orders', 200, 836)], 'Wrok Orders', { screen: SCREEN });
+  assert.equal(r.status, 'ok');
+  assert.equal(r.target.label, 'Work Orders');
+});
+
+test('a region hint separates a title from a tab of the same name', () => {
+  const targets = [
+    el('Assets', 201, 90, 'StaticText', { region: 'nav-bar' }),
+    el('Assets', 126, 836, 'Text', { region: 'tab-bar' }),
+  ];
+  assert.equal(resolve(targets, 'Assets tab', { screen: SCREEN }).target.y, 836);
+  // Without the hint it is genuinely ambiguous, and must say so.
+  assert.equal(resolve(targets, 'Assets', { screen: SCREEN }).status, 'ambiguous');
+});
+
+test('off-screen elements are never offered', () => {
+  const scrolledAway = el('Save', 200, -687);
+  scrolledAway.frame = { x: 0, y: -700, width: 402, height: 40 };
+  assert.equal(rankIntent([scrolledAway], 'Save', { screen: SCREEN }).length, 0);
+});
+
+test('an icon-only control is reachable by its common name', () => {
+  const chevron = { label: null, rawLabel: '', x: 30, y: 91, type: 'Button', region: 'nav-bar',
+                    frame: { x: 16, y: 78, width: 30, height: 30 }, source: 'ax' };
+  assert.equal(resolve([chevron], 'back', { screen: SCREEN }).status, 'ok');
+});
+
+test('nothing plausible means none, not a guess', () => {
+  assert.equal(resolve([el('Work Orders', 200, 836)], 'Nonexistent', { screen: SCREEN }).status, 'none');
+});
+
+test('regions follow the guidelines', () => {
+  assert.equal(regionFor({ x: 40, y: 20, width: 60, height: 20 }, SCREEN), 'status-bar');
+  assert.equal(regionFor({ x: 150, y: 80, width: 100, height: 30 }, SCREEN), 'nav-bar');
+  assert.equal(regionFor({ x: 180, y: 820, width: 60, height: 30 }, SCREEN), 'tab-bar');
+  assert.equal(regionFor({ x: 16, y: 400, width: 370, height: 90 }, SCREEN), 'content');
+  assert.equal(navSlot({ x: 16, y: 78, width: 30, height: 30 }, SCREEN), 'leading');
+  assert.equal(navSlot({ x: 340, y: 78, width: 50, height: 30 }, SCREEN), 'trailing');
+});
+
+test('a list of cells is not mistaken for a keyboard', () => {
+  const cells = Array.from({ length: 14 }, (_, i) =>
+    ({ frame: { x: 0, y: 640 + i * 90, width: 402, height: 90 } }));
+  assert.equal(detectKeyboardTop(cells, SCREEN), null);
+});

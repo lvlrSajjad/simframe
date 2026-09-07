@@ -156,6 +156,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'sim_find',
+    description:
+      'Resolve an intent to one control on screen: "tap Save", "the Assets tab", "back". Understands verbs, typos, where on screen you meant, and icon-only controls by their common name. Returns the element with its tap point and the reasons it was chosen. When two things answer equally well it says so and lists them rather than guessing — a wrong tap is worse than a question, because it can do something and leave you believing it did the right thing. Cheaper and more reliable than reading a screenshot to find a control.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...deviceProp,
+        intent: { type: 'string', description: 'What you want to act on, in your own words.' },
+      },
+      required: ['intent'],
+    },
+  },
+  {
     name: 'sim_capture',
     description:
       'Inspect or control the background capture loops: action "status" (what is running and how fresh), "start", "stop". Capture starts automatically on first use, so you rarely need this.',
@@ -254,6 +267,8 @@ export async function serve({ device: defaultDevice, options = {} } = {}) {
           return await strip(target, args, options);
         case 'sim_recall':
           return await recall(target, args, options);
+        case 'sim_find':
+          return await find(target, args, options);
         case 'sim_do':
           return await doScript(target, args, options);
         case 'sim_ui':
@@ -489,6 +504,23 @@ async function ui(target, args, options) {
   const head = `${device.name} — ${nodes.length} element${nodes.length === 1 ? '' : 's'} (type, tap point in points, label)`;
   const tail = nodes.length > 200 ? `\n  ... ${nodes.length - 200} more; use filter to narrow` : '';
   return { content: [text(`${head}\n${rows.join('\n')}${tail}`)] };
+}
+
+async function find(target, args, options) {
+  try {
+    const r = await api.locate(target, String(args.intent ?? ''), { options });
+    const lines = [
+      `${r.target.label ?? '(icon-only)'} — tap at (${r.target.x}, ${r.target.y})`,
+      `${r.target.region ?? 'content'} · ${r.target.type ?? '?'} · seen by ${r.target.source} · score ${r.score ?? '-'}`,
+    ];
+    if (r.reasons?.length) lines.push(`chosen because: ${r.reasons.join(', ')}`);
+    if (r.alternatives?.length) {
+      lines.push(`also considered: ${r.alternatives.map((a) => `"${a.label}" (${a.score})`).join(', ')}`);
+    }
+    return { content: [text(lines.join('\n'))] };
+  } catch (err) {
+    return { isError: true, content: [text(err.message)] };
+  }
 }
 
 async function capture(target, args, options) {

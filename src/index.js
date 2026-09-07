@@ -14,6 +14,7 @@ import {
   signatureDiff,
 } from './analyze.js';
 import * as input from './input.js';
+import * as matching from './matching.js';
 import * as screenmap from './screenmap.js';
 import { resolveDevice, resize, screenshot } from './simctl.js';
 import * as store from './store.js';
@@ -681,21 +682,43 @@ export async function locate(
     from = settled ? 'built' : 'built-unsettled';
   }
 
-  const candidates = screenmap.rank(entry, query);
-  if (candidates.length > 1 && index == null) {
-    const top = candidates[0];
-    const second = candidates[1];
-    const decisive = screenmap.isInteractive(top) && !screenmap.isInteractive(second);
-    if (!decisive) {
-      const list = candidates
-        .slice(0, 6)
-        .map((t, i) => `[${i}] "${t.label}" (${t.x},${t.y}) ${t.type}/${t.source}`)
+  const screenSize = { width: current.width, height: current.height };
+  const geo = await deviceGeometry(udid, current);
+  const points = { width: geo.pointWidth, height: geo.pointHeight };
+
+  // Intent resolution rather than string matching: it understands verbs
+  // ("tap Save"), typos, icon-only controls by synonym ("back"), and where on
+  // screen the caller meant ("Assets tab").
+  if (index == null) {
+    const outcome = matching.resolve(entry.targets, query, { screen: points });
+    if (outcome.status === 'ambiguous') {
+      const list = outcome.alternatives
+        .map((a, i) => `[${i}] "${a.label}" (${a.x},${a.y}) ${a.region ?? 'content'} ${a.score}`)
         .join(', ');
       throw new Error(
-        `"${query}" matches ${candidates.length} things on this screen — pass index to choose: ${list}`,
+        `"${query}" matches ${outcome.alternatives.length} things on this screen — say which, or pass index: ${list}`,
       );
     }
+    if (outcome.status === 'ok') {
+      return {
+        device, state: current, entry, target: outcome.target, from, distance, settled,
+        score: outcome.score, reasons: outcome.reasons, alternatives: outcome.alternatives,
+        screens: screenmap.stats(udid).screens,
+      };
+    }
+    // Nothing scored well enough. Falling through to plain substring matching
+    // here undoes every guard above — it has no off-screen filter and no
+    // coverage weighting, and it is what returned a scrolled-away list row for
+    // "back". "Not found" is the correct answer.
+    const sample = entry.targets
+      .filter((t) => t.label && t.y >= 0 && t.y <= points.height)
+      .slice(0, 12)
+      .map((t) => t.label.slice(0, 24))
+      .join(', ');
+    throw new Error(`"${query}" is not on this screen. Visible: ${sample || '(nothing readable)'}`);
   }
+
+  const candidates = screenmap.rank(entry, query);
   const target = index != null ? candidates[index] : candidates[0];
   if (!target) {
     const sample = entry.targets
