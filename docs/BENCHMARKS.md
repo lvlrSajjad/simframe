@@ -1,0 +1,126 @@
+# simframe benchmarks
+
+Numbers are medians unless stated. Each entry records the machine, toolchain and
+device, because private-framework performance is not portable across them.
+
+Reproduce with `native/simframed/.build/release/simframed bench --n=300`.
+
+## Environment
+
+| | |
+| --- | --- |
+| Chip | Apple M2 Pro |
+| macOS | 26.6.2 |
+| Xcode | Xcode 26.6 |
+| Device | iPhone 17 Pro, iOS 26.5 (1206×2622 @3x) |
+
+## Phase 0 — framebuffer capture
+
+The capture primitive, measured in isolation (`framebufferSurface` read plus a
+lock/unlock, no scaling or hashing):
+
+| Metric | N | Median | p95 |
+| --- | --- | --- | --- |
+| IOSurface grab | 202 | **0.13 ms** | 0.25 ms |
+
+The full per-frame pipeline a capture loop actually needs — grab, downscale to
+the ring size, then frame hash + layout hash:
+
+| Pipeline | N | Median | p95 |
+| --- | --- | --- | --- |
+| grab + scale to 700px | 300 | 6.02 ms | 8.70 ms |
+| grab + scale + both hashes | 300 | **6.74 ms** | 10.26 ms |
+| grab + scale to 420px + hashes | 300 | 5.52 ms | 6.28 ms |
+
+Against the path it replaces, doing the same work:
+
+| Path | Mean |
+| --- | --- |
+| `simctl io screenshot` + `sips -Z 700` | 210 ms |
+| simframed (grab + scale + hashes) | **6.74 ms** |
+
+**31× faster end to end; the capture primitive alone is ~1000× faster than a
+`simctl` screenshot.** Most of the remaining 6.7 ms is the downscale, not the
+capture, so the headroom is in scaling — dropping to a 420 px ring costs 5.5 ms.
+
+## Hash compatibility
+
+The Swift daemon must produce the hashes the JavaScript already produced, or
+every screen-memory key on disk is invalidated. Measured on a verified-static
+screen (two Node reads one second apart agreeing, stable for 11.5 s):
+
+| Scaler | frameHash | layoutHash |
+| --- | --- | --- |
+| **CoreGraphics** (default) | **Δ0 / 128 bits** | **Δ0 / 288 bits** |
+| Box average (`--box`) | Δ0 / 128 bits | Δ4 / 288 bits |
+
+CoreGraphics is byte-identical to the `sips` path, which is unsurprising once
+you know `sips` is a thin ImageIO wrapper. The box-average fallback stays within
+the layout-hash tolerance of 12 but is not exact, so it is opt-in only.
+
+Measuring this needs a genuinely still screen. An earlier run against a moving
+one reported Δ26/128 and Δ53/288 — an artefact of the screen changing between
+the two readings, not of the scaler.
+
+## Phase 0 — sanity checks
+
+Correct hashes prove nothing about channel order, row padding or orientation, so
+the capture was checked against `simctl io screenshot` pixel by pixel on a
+verified-static screen:
+
+| Check | Result |
+| --- | --- |
+| Pixels identical to `simctl` | **100.00 %** |
+| Mean absolute channel difference | 0.000 / 255 |
+| Max absolute channel difference | 1 |
+
+Behaviour under the conditions a daemon actually meets:
+
+| Check | Result |
+| --- | --- |
+| 3000 consecutive captures | median 6.56 ms, p95 7.04 ms, no drift |
+| Peak resident memory over that run | 70 MB |
+| Four concurrent captures | all succeeded, identical results |
+| Running alongside the Node capture loop | neither disturbed |
+| Simulator window hidden | works, 98.8 % non-black, same as `simctl` |
+| Bad UDID / bad command / missing frameworks | exit 1 with a readable message |
+
+Two notes for whoever reads this next:
+
+- **Window independence holds.** An earlier check appeared to show a black frame
+  while the window was hidden. That was a truncated hash being misread — the
+  screen simply had a large dark region. Always compare full hashes.
+- **The surface is re-read every capture rather than cached**, so a reallocated
+  surface (rotation, resize) is picked up automatically with no re-attach.
+
+## Phase 0 — second device class
+
+Port selection and geometry were the parts most likely to be written around one
+phone, so they were checked against a 2x iPad as soon as one was available.
+
+| | iPhone 17 Pro | iPad Pro 13-inch (M5) |
+| --- | --- | --- |
+| Native | 1206x2622 (3x) | 2064x2752 (2x) |
+| Scaled ring frame | 322x700 | 525x700 |
+| Pixels identical to `simctl` | 100.00 % | **100.00 %** |
+| Max channel difference | 1 | **0** |
+| grab + scale + hashes | 6.56 ms | 11.32 ms |
+
+The iPad is slower in proportion to its pixel count (5.7 M vs 3.2 M), which is
+what you would expect if the cost is the downscale rather than the capture.
+
+Both devices were also captured concurrently from separate processes, each
+returning its own correct frame.
+
+## Phase 0 — the change signal
+
+`registerCallbackWithUUID:damageRectanglesCallback:` on the live display port:
+
+| Metric | Result |
+| --- | --- |
+| Damage events during app switching | **51.9 / s** |
+
+This is the per-redraw signal the capture loop should be driven by. It means the
+daemon can be event-driven — wait for damage, then grab in 0.13 ms — instead of
+polling and discarding unchanged frames. Note it must be registered on the *live*
+port; the inactive display port reports nothing.

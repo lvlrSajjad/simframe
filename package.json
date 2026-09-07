@@ -40,7 +40,9 @@
   },
   "files": [
     "src",
-    "native",
+    "native/ocr.swift",
+    "native/simframed/Package.swift",
+    "native/simframed/Sources",
     "README.md",
     "LICENSE"
   ],
