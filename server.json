@@ -1,0 +1,23 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.lvlrSajjad/simframe",
+  "title": "simframe",
+  "description": "Always-warm iOS Simulator frames: a background capture loop keeps the newest frame ready, so an agent reads the screen in ~20ms instead of waiting ~130ms on a screenshot, and can check for change in text form for ~2ms.",
+  "version": "0.1.0",
+  "websiteUrl": "https://lvlrsajjad.github.io/simframe/",
+  "repository": {
+    "url": "https://github.com/lvlrSajjad/simframe",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "simframe",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

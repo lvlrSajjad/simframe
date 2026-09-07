@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>simframe — always-warm iOS Simulator frames for coding agents</title>
+<meta name="description" content="A background capture loop keeps the newest iOS Simulator frame warm, so a coding agent reads the screen in ~20ms instead of waiting ~130ms on a screenshot — and can check whether anything changed in text form for ~2ms.">
+<meta property="og:title" content="simframe">
+<meta property="og:description" content="Always-warm iOS Simulator frames for coding agents. Read the screen in ~20ms instead of waiting on a screenshot.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://lvlrsajjad.github.io/simframe/">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📱</text></svg>">
+<style>
+  :root {
+    --bg: #fbfbfa;
+    --panel: #ffffff;
+    --ink: #16181d;
+    --muted: #5f6570;
+    --line: #e3e4e6;
+    --accent: #2f6f4f;
+    --accent-soft: #eaf3ee;
+    --code-bg: #14161a;
+    --code-ink: #e7e9ec;
+    --warm: #a8622a;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1114;
+      --panel: #16181d;
+      --ink: #e8eaed;
+      --muted: #9aa1ac;
+      --line: #262a31;
+      --accent: #6fbf8f;
+      --accent-soft: #16261d;
+      --code-bg: #0a0c0e;
+      --code-ink: #e7e9ec;
+      --warm: #d99b5f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    padding: 0 20px 96px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header { padding: 72px 0 8px; }
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(34px, 7vw, 52px);
+    letter-spacing: -0.03em;
+    margin: 0 0 6px;
+  }
+  h1 .dot { color: var(--accent); }
+  .tagline { font-size: clamp(18px, 3vw, 22px); color: var(--ink); margin: 0 0 10px; font-weight: 500; }
+  .sub { color: var(--muted); max-width: 62ch; margin: 0 0 26px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 34px; }
+  .badge {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    text-decoration: none;
+    background: var(--panel);
+  }
+  .badge:hover { border-color: var(--accent); color: var(--accent); }
+  h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--muted);
+    font-weight: 600;
+    margin: 56px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  p { margin: 0 0 16px; }
+  a { color: var(--accent); }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 18px 20px;
+    border-radius: 10px;
+    overflow-x: auto;
+    margin: 0 0 18px;
+  }
+  code { font-family: var(--mono); font-size: 0.92em; }
+  p code, li code, td code {
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .cmt { color: #6d7580; }
+  .lit { color: var(--warm); }
+  .flow { display: grid; gap: 10px; margin: 0 0 22px; }
+  .row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: center;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 13px 16px;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .row.slow { border-left: 3px solid #c25b4a; }
+  .row.fast { border-left: 3px solid var(--accent); }
+  .ms { font-weight: 600; white-space: nowrap; }
+  .slow .ms { color: #c25b4a; }
+  .fast .ms { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; margin-bottom: 18px; }
+  th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); }
+  tbody tr:last-child td { border-bottom: none; }
+  .num { font-family: var(--mono); white-space: nowrap; }
+  .map { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+  .map pre { flex: 0 0 auto; margin-bottom: 0; }
+  .map .legend { flex: 1 1 240px; min-width: 220px; color: var(--muted); font-size: 14.5px; }
+  ul { padding-left: 20px; margin: 0 0 16px; }
+  li { margin-bottom: 9px; }
+  footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+  .note { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>simframe<span class="dot">.</span></h1>
+  <p class="tagline">Always-warm iOS Simulator frames for coding agents.</p>
+  <p class="sub">
+    An agent driving the iOS Simulator spends most of its time waiting on screenshots.
+    simframe keeps the newest frame permanently warm in the background, so looking at
+    the screen stops being something you wait for.
+  </p>
+  <div class="badges">
+    <a class="badge" href="https://github.com/lvlrSajjad/simframe">GitHub</a>
+    <a class="badge" href="https://www.npmjs.com/package/simframe">npm</a>
+    <span class="badge">MIT</span>
+    <span class="badge">macOS · Node ≥ 18.17</span>
+  </div>
+</header>
+
+<h2>The problem</h2>
+<p>
+  Every “let me check the screen” is a fresh <code>simctl io screenshot</code>: a process
+  spawn, a framebuffer grab, a file write, an image encode. That is roughly
+  <strong>130&nbsp;ms of pure blocking latency</strong>, paid again on every single look — and
+  paid twice whenever the agent captures mid-animation, sees a half-drawn frame, and has
+  to look again.
+</p>
+
+<div class="flow">
+  <div class="row slow"><span>screenshot &nbsp;→&nbsp; spawn simctl → grab → encode → image</span><span class="ms">~130–400 ms</span></div>
+  <div class="row fast"><span>sim_look &nbsp;→&nbsp; read the frame that is already there → image</span><span class="ms">~20 ms</span></div>
+  <div class="row fast"><span>sim_state &nbsp;→&nbsp; read 300 bytes of JSON → text, no image</span><span class="ms">~2 ms</span></div>
+</div>
+
+<h2>Install</h2>
+<pre><span class="cmt"># Claude Code</span>
+claude mcp add simframe -- npx -y simframe mcp
+
+<span class="cmt"># or use it directly</span>
+npm install -g simframe
+simframe doctor</pre>
+<p class="note">
+  Nothing to configure. Capture starts on the first call, targets the booted simulator,
+  and stops itself 15 minutes after the last request.
+</p>
+
+<h2>What the agent gets</h2>
+<table>
+  <thead><tr><th>Question</th><th>Before</th><th>With simframe</th></tr></thead>
+  <tbody>
+    <tr><td>What’s on screen?</td><td>screenshot, ~130–400 ms, a full image every time</td><td><code>sim_look</code> — warm frame, ~20 ms</td></tr>
+    <tr><td>Has it finished loading?</td><td>screenshot in a loop, an image per attempt</td><td><code>sim_state</code> — ~2 ms, <strong>text only</strong></td></tr>
+    <tr><td>Did my tap do anything?</td><td>screenshot, compare by eye</td><td><code>sim_state</code> — stable screen hash + region change map</td></tr>
+    <tr><td>Wait for the animation</td><td>sleep, screenshot, hope, repeat</td><td><code>sim_wait</code> — blocks until the screen really settles</td></tr>
+    <tr><td>What did that transition look like?</td><td>5 screenshots, 5 round trips, 5 images</td><td><code>sim_strip</code> — N buffered frames tiled into <strong>one</strong> image</td></tr>
+  </tbody>
+</table>
+
+<h2>The part that pays for itself</h2>
+<p>
+  A screen hash and a 4×8 movement grid cost a couple of hundred bytes, so an agent can
+  poll as often as it likes and spend image tokens only when there is genuinely something
+  new to look at.
+</p>
+<div class="map">
+<pre>$ simframe state
+iPhone 17 Pro  frame #3  age 124ms
+hash 007cfefefefefefefefefefefefefe00
+diff 0.15453  stable 0ms
+<span class="lit">@@@@
+###*
++*#*
+:.#*
+..#*
+..#*
+..#*
+@@@@</span></pre>
+  <div class="legend">
+    <p>Read top-left to bottom-right, <code>.</code> through <code>@</code> for more movement.</p>
+    <p>Full-width change at the top and bottom, a busy column down the right: a screen
+    sliding in from the right, caught mid-transition — and the agent knows that without
+    looking at a single pixel.</p>
+  </div>
+</div>
+
+<h2>How it works</h2>
+<pre>┌───────────────────── background, one loop per simulator ─────────────────────┐
+│   xcrun simctl io screenshot  ──►  sips -Z  ──►  decode PNG  ──►  compare    │
+│         ~130 ms                     ~30 ms         ~6 ms                     │
+│                                     │                                        │
+│                 rename into ~/.simframe/&lt;udid&gt;/                              │
+│                 latest.png · ring/&lt;seq&gt;.png · state.json                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                      │  a rename is atomic
+┌─────────────────────────────────────▼────────────────────────────────────────┐
+│   MCP server / CLI: stat + read.  No simctl anywhere in the request path.    │
+└──────────────────────────────────────────────────────────────────────────────┘</pre>
+<ul>
+  <li><strong>Files are the IPC.</strong> The loop renames completed frames into place and readers just read them. A rename is atomic, so a reader can never see a half-written frame — and there is no socket, port or protocol to get wrong.</li>
+  <li><strong>Zero image dependencies.</strong> Resizing uses <code>sips</code>, which ships with macOS. PNG encode/decode and all frame comparison are a few hundred lines of plain JavaScript over <code>node:zlib</code>. The only runtime dependency is the MCP SDK.</li>
+  <li><strong>It backs off when nothing is happening.</strong> 4&nbsp;fps while the screen moves, 1.5&nbsp;fps once it has been still for 2.5&nbsp;s, snapping back instantly on change — <strong>1.1&nbsp;% CPU idle, 3.1&nbsp;% active</strong>.</li>
+  <li><strong>Comparison happens on a small grayscale grid,</strong> which is why “did anything change?” costs microseconds. The hash is a 128-bit mean-threshold hash: the same screen always hashes the same, even though the bytes <code>simctl</code> emits are not stable frame to frame.</li>
+  <li><strong>One writer per device.</strong> Ownership lives in <code>meta.json</code>; a second loop refuses to start and a superseded loop retires itself, so two loops can never overwrite or prune each other’s frames.</li>
+  <li><strong>Capture ignores the window.</strong> <code>simctl</code> reads the framebuffer, so frames keep flowing while the Simulator is hidden, buried behind other windows, or on another Space.</li>
+</ul>
+
+<h2>Measured</h2>
+<p class="note">iPhone 17 Pro, iOS 26.5, Apple Silicon, default settings.</p>
+<table>
+  <tbody>
+    <tr><td>Warm frame read (<code>sim_look</code>)</td><td class="num">~20 ms</td></tr>
+    <tr><td>State check (<code>sim_state</code>)</td><td class="num">~2 ms</td></tr>
+    <tr><td>Contact sheet (<code>sim_strip</code>, 5 frames)</td><td class="num">~30 ms</td></tr>
+    <tr><td>Cold start, first frame</td><td class="num">~400 ms, once</td></tr>
+    <tr><td>Frame age when read</td><td class="num">≤ 250 ms active · ≤ 670 ms idle</td></tr>
+    <tr><td>Raw <code>simctl io screenshot</code>, for comparison</td><td class="num">~130 ms, every look</td></tr>
+    <tr><td>CPU</td><td class="num">1.1 % idle · 3.1 % active</td></tr>
+    <tr><td>Disk</td><td class="num">~2 MB per device</td></tr>
+  </tbody>
+</table>
+
+<h2>Honest limitations</h2>
+<ul>
+  <li>Simulators only — <code>simctl</code> cannot capture a physical device.</li>
+  <li>simframe <em>reads</em> the screen; it does not tap, swipe or type. It sits alongside whatever already drives input and replaces only the screenshot.</li>
+  <li>Capture tops out near 6&nbsp;fps, because <code>simctl io screenshot</code> costs ~130&nbsp;ms. Fast animations are sampled, not recorded.</li>
+</ul>
+
+<footer>
+  <p>
+    MIT licensed · built by <a href="https://github.com/lvlrSajjad">@lvlrSajjad</a> ·
+    <a href="https://github.com/lvlrSajjad/simframe">source</a> ·
+    <a href="https://github.com/lvlrSajjad/simframe/issues">issues</a>
+  </p>
+</footer>
+
+</div>
+</body>
+</html>
