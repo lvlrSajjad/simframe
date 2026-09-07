@@ -245,62 +245,119 @@ way to check a signature after an Xcode upgrade:
 strings SimulatorKit | grep '^IndigoHIDMessage'
 ```
 
-## Accessibility: what is mapped so far
+## Accessibility (partly verified)
 
-Partly explored, **not working yet**. Recorded so the next attempt starts here.
+**Verified working:** a host-side bridge that reaches the simulator's live
+accessibility server and resolves the frontmost application, with no code
+injected into the guest and no `NSView`.
 
-### The transport exists and needs no bridge delegate
+**Not yet working:** reading attributes off an element. See "where it stops".
+
+Sources read: `facebook/idb` (`SimulatorFrameworkBridge/AXPTranslationPrivate.h`,
+`AXPAttributes.h`, `AccessibilityRuntime.m`) and `valewnrt/testa`
+(`Sources/TestaEngine/TSTAccessibility.m`). Both are MIT and both write the
+constants out literally, which is faster and safer than sweeping for them.
+
+### The shape that works
 
 ```
-SimDevice                                             (CoreSimulator)
-  -sendAccessibilityRequestAsync:completionQueue:completionHandler:   ← responds: yes
-  -accessibilityConnection                            ← an XPC connection, present
+AXPTranslator                                   (/System/Library/PrivateFrameworks/
+                                                 AccessibilityPlatformTranslation.framework)
+  +sharedInstance                               ← this one, NOT sharediOSInstance
+  .bridgeTokenDelegate = <your delegate>        ← held WEAKLY; retain it yourself
+  -frontmostApplicationWithDisplayId:bridgeDelegateToken:   -> AXPTranslationObject (has .pid)
+  -processTranslatorRequest:                    -> AXPTranslatorResponse (.resultData)
 ```
 
-This matters: the obvious reading of the framework is that you must implement
-the `accessibilityTranslation*WithToken:` bridge delegate that
-`SimAccessibilityManager` declares — which is what idb does. But CoreSimulator
-already carries requests into the simulator, so that whole layer may be
-avoidable. `SimAccessibilityManager.addWithDisplayView:` wants an `NSView`,
-which a headless daemon does not have, so avoiding it matters.
+The delegate implements three selectors. The first is the one that matters:
 
-### The pieces
+```objc
+// Returns a block taking ONE argument and returning the response.
+- (id (^)(id))accessibilityTranslationDelegateBridgeCallbackWithToken:(NSString *)token;
+- (CGRect)accessibilityTranslationConvertPlatformFrameToSystem:(CGRect)r withToken:(NSString *)t; // return r
+- (id)accessibilityTranslationRootParentWithToken:(NSString *)token;                              // return nil
+```
 
-| Symbol | Notes |
+Inside that block, forward the request to the device and bridge async to sync:
+
+```
+SimDevice -sendAccessibilityRequestAsync:completionQueue:completionHandler:
+          completionHandler is ^(id response) — ONE argument
+```
+
+Wait on a dispatch group with a timeout (testa uses 10s) and return
+`AXPTranslatorResponse.emptyResponse` if it does not answer. **The completion
+queue must never be main**, and every translator call should run off the main
+queue — idb wraps them all in `FBAXBridgeRunOffMainQueue`.
+
+### Constants (from idb's AXPAttributes.h)
+
+| Request type | Value |
 | --- | --- |
-| `AXPTranslator` | `/System/Library/PrivateFrameworks/AccessibilityPlatformTranslation.framework` |
-| `+sharedInstance` | works; its `platformTranslator` is `AXPTranslator_macOS` |
-| `+sharediOSInstance` | present — presumably the simulator-side translator |
-| `+sharedmacOSInstance` | present |
-| `AXPTranslatorRequest` | NSSecureCoding. `requestType`, `attributeType`, `actionType`, `clientType`, `translation`, `parameters`; `+requestWithTranslation:` |
-| `AXPTranslatorResponse` | `resultData`, `attribute`, `boolResponse`, `error`, `translationResponse`, `associatedRequestType` |
-| Useful translator methods | `processPlatformAXTreeDump:`, `generateAXTreeDumpTypeOnBackgroundThread:completionHandler:`, `objectAtPoint:displayId:bridgeDelegateToken:`, `frontmostApplicationWithDisplayId:bridgeDelegateToken:`, `processAttributeRequest:`, `processHitTest:`, `enableAccessibility` |
+| `Attribute` | 2 |
+| `MultipleAttribute` | 5 |
 
-### What is not known
+| Attribute | Value | | Attribute | Value |
+| --- | --- | --- | --- | --- |
+| ClassName | 7 | | Label | 33 |
+| Children | 8 | | Role | 45 |
+| Frame | 21 | | Value | 53 |
+| Identifier | 25 | | Traits | 77 |
+| IsEnabled | 27 | | | |
 
-- The `requestType` / `attributeType` enum values. Sweeping 0–6 with an
-  otherwise-empty request produced no reply.
-- The completion handler's block signature. A two-argument
-  `(response, error)` block crashed the process with SIGTRAP, which suggests
-  the arity or types are wrong rather than the call being rejected.
-- Whether accessibility must be enabled on the device first
-  (`enableAccessibility` exists on the translator).
+A multiple-attribute request carries its list as
+`parameters[@"attributes"]` — **a dictionary with that key**, holding an
+`NSArray<NSNumber *>`. idb's header warns that passing a bare array "throws
+inside the guest and takes the reader down with it". idb also leaves
+`clientType` unset deliberately: setting it makes the app-side children handler
+answer from a stale `automationElements` override.
 
-### Traps already hit
+### Where it stops
 
-- Passing `DispatchQueue.main` as the completion queue and then blocking the
-  main thread waiting for the reply is a deadlock that looks exactly like "the
-  API returned nothing".
-- `objc_copyClassList` enumeration crashed the probe outright; dump named
+`frontmostApplicationWithDisplayId:0` returns a real `AXPTranslationObject`
+whose `pid` matches the app under test, so the bridge and transport are sound.
+A `MultipleAttribute` request built as above against that object returns a
+response with **nil `resultData`**, both on and off the main queue.
+
+Leads for the next attempt, cheapest first:
+
+- The application object may need `translationObjectFromPlatformElement:`
+  before it can be addressed, rather than being passed straight to
+  `requestWithTranslation:`.
+- `clientType` may in fact be required for a host-side reader, despite idb's
+  comment (idb reads in-guest, where the tradeoff differs).
+- Try single `Attribute` (2) with one `attributeType` before the batch form.
+- Compare against `idb ui describe-all` running at the same moment to see
+  whether the guest answers a differently-shaped request.
+
+### idb and testa differ, and it matters
+
+idb reads **in-guest**: `SimulatorFrameworkBridge` is loaded inside the
+simulator, dlopens the framework from the booted runtime root, and closes the
+loop locally through `processTranslatorRequest:`. testa reads **host-side**
+through `sendAccessibilityRequestAsync:`, which is the pattern above and the one
+that suits a daemon with no view. Read idb for the constants and semantics; read
+testa for the topology.
+
+## Probing pitfalls
+
+Every one of these cost real time here, and all of them look like "the private
+API is broken" rather than like a mistake:
+
+- **Handing a call `DispatchQueue.main` and then blocking main.** A deadlock
+  that presents as the API silently returning nothing. The AX callback queue
+  must never be main, and translator calls belong off the main queue entirely.
+- **Wrong block arity crashes the process.** A two-argument
+  `(response, error)` completion handler for `sendAccessibilityRequestAsync:`
+  exits with SIGTRAP and no output. It takes one argument.
+- **A weakly-held delegate that nobody retains** is deallocated immediately and
+  the translator answers nil, exactly as if it were never installed.
+- **`objc_copyClassList` enumeration crashes** the probe outright. Dump named
   classes instead.
-- Naming a loop variable `type` shadows `type(of:)` and produces a confusing
-  compile error.
-
-### Routes ruled out
-
-- `simctl` has no accessibility command; `simctl ui` only sets appearance.
-- idb links `AccessibilityPlatformTranslation` weakly and implements the bridge
-  delegate itself, so there is no simpler public path it is hiding.
+- **Naming a Swift loop variable `type`** shadows `type(of:)` and produces a
+  compile error that reads as unrelated.
+- **Reading a text field to check typing without clearing it first** confirms
+  whatever you hoped for, using text a previous attempt left behind.
 
 ## Not yet verified
 

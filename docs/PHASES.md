@@ -122,6 +122,54 @@ what sim_ui returns to Claude beyond the source tag.
 
 ---
 
+## Phase 2b — AXPTranslator in-process a11y tree
+
+**The last idb dependency.** Scheduled after Phase 4 or 5, depending on how much
+the OCR-only path actually costs on accessibility-poor screens. Do not start it
+before there is evidence from those phases about what is being missed.
+
+Most of the hard part is already done and recorded in `docs/PRIVATE_API.md`
+under "Accessibility (partly verified)":
+
+- A host-side bridge that reaches the simulator's live accessibility server,
+  with no injected code and no `NSView`, **works**: `frontmostApplicationWithDisplayId:`
+  returns a real application object whose pid matches the app under test.
+- The delegate protocol, the one-argument block signature, the request-type and
+  attribute constants, and the off-main-queue requirement are all written down.
+
+What remains is one specific failure: a `MultipleAttribute` request against that
+application object returns a response with nil `resultData`. Four leads are
+listed in `PRIVATE_API.md`, cheapest first.
+
+```
+Read CLAUDE.md and docs/PRIVATE_API.md, in particular "Accessibility (partly
+verified)" and "Probing pitfalls". Read the two reference implementations
+directly rather than sweeping for constants — facebook/idb
+(SimulatorFrameworkBridge/AXPAttributes.h, AccessibilityRuntime.m) for the
+constants and semantics, valewnrt/testa (Sources/TestaEngine/TSTAccessibility.m)
+for the host-side topology. They differ: idb reads in-guest, testa reads
+host-side, and host-side is what suits a daemon.
+
+Task: get an element tree out of the translator and implement
+accessibilityTree() on the Platform protocol, returning the same Element shape
+the OCR path already produces so sim_ui can merge them. Target 60ms warm.
+
+Start from the failure that is already isolated, not from scratch: the bridge
+works, the frontmost application resolves, and only the attribute read returns
+nil.
+
+Verify: on three screens (a full a11y tree, a custom tab bar, a React Native or
+WebView screen), compare against `idb ui describe-all` at the same moment.
+Nothing idb finds may be missing. Record a11y latency in docs/BENCHMARKS.md
+under "Phase 2b", then remove idb from doctor's required list and from the
+README.
+
+Do not: inject anything into the guest. Do not regress the OCR path, which is
+what carries a11y-poor screens today.
+```
+
+---
+
 ## Phase 3 — Cut over: daemon is the default engine
 
 ```
