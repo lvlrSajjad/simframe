@@ -98,6 +98,20 @@ case "run":
         try store.claim()
         defer { store.release() }
 
+        // `defer` does not run when a signal terminates the process, so a
+        // plain Ctrl-C would leave meta.json naming a dead pid. Node recovers
+        // from that on its own, but a daemon should tidy up after itself.
+        var stopping = false
+        let signalQueue = DispatchQueue(label: "simframe.signals")
+        var signalSources: [DispatchSourceSignal] = []
+        for sig in [SIGINT, SIGTERM] {
+            signal(sig, SIG_IGN)   // let the dispatch source own it
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: signalQueue)
+            source.setEventHandler { stopping = true }
+            source.resume()
+            signalSources.append(source)
+        }
+
         let minInterval = Double(flag("min-interval-ms") ?? "") ?? 80      // coalesce bursts
         let idleInterval = Double(flag("idle-interval-ms") ?? "") ?? 2000  // keep state fresh
         let idleExitMs = Double(flag("idle-exit-ms") ?? "") ?? 15 * 60_000
@@ -158,6 +172,10 @@ case "run":
                 frames = 0; latencies.removeAll(); lastReport = wall
             }
 
+            if stopping {
+                FileHandle.standardError.write("simframed: stopping\n".data(using: .utf8)!)
+                break
+            }
             if store.heartbeatAge() > idleExitMs {
                 FileHandle.standardError.write("simframed: exiting, no client heartbeat\n".data(using: .utf8)!)
                 break

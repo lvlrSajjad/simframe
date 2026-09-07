@@ -162,5 +162,5 @@ frames the Swift daemon produced:
 | `simframe ui` (needs a native-resolution frame for OCR) | works |
 | Node respawning its own loop | no — ownership is respected |
 | Four-tab flow via `sim_do` | 4/4 steps, screen memory hitting |
-| Clean shutdown on SIGINT | releases ownership; Node can take over |
+| Clean shutdown on SIGINT | releases ownership (`pid: null`, `stoppedAt` set) |
 | Capture errors during the run | 0 |
