@@ -1,0 +1,53 @@
+{
+  "name": "simframe",
+  "version": "0.1.0",
+  "description": "Always-warm iOS Simulator frame cache with an MCP server, so coding agents can see the screen instantly instead of waiting on screenshots.",
+  "keywords": [
+    "ios",
+    "simulator",
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "claude-code",
+    "screenshot",
+    "xcode",
+    "simctl",
+    "agent"
+  ],
+  "homepage": "https://github.com/lvlrSajjad/simframe#readme",
+  "bugs": {
+    "url": "https://github.com/lvlrSajjad/simframe/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lvlrSajjad/simframe.git"
+  },
+  "license": "MIT",
+  "author": "Sadjad Asadi (https://github.com/lvlrSajjad)",
+  "type": "module",
+  "os": [
+    "darwin"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "bin": {
+    "simframe": "src/cli.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/",
+    "mcp": "node src/cli.js mcp",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
