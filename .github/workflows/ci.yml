@@ -6,12 +6,13 @@ on:
   pull_request:
 
 jobs:
+  # macOS only: the package declares "os": ["darwin"], so npm correctly refuses
+  # to install it anywhere else.
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
         node: ['18', '20', '22']
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +23,28 @@ jobs:
       - run: npm test
       - name: CLI loads
         run: node src/cli.js --help
+      - name: Registry manifest agrees with package.json
+        run: |
+          node -e '
+            const pkg = require("./package.json");
+            const srv = require("./server.json");
+            const checks = {
+              "package.json mcpName matches server.json name": pkg.mcpName === srv.name,
+              "versions match": pkg.version === srv.version,
+              "package version matches": srv.packages[0].version === pkg.version,
+              "npm identifier matches": srv.packages[0].identifier === pkg.name,
+            };
+            let failed = false;
+            for (const [label, ok] of Object.entries(checks)) {
+              console.log(`${ok ? "ok  " : "FAIL"} ${label}`);
+              if (!ok) failed = true;
+            }
+            process.exit(failed ? 1 : 0);
+          '
 
   doctor:
-    # Only a macOS runner has simctl; a booted simulator is not guaranteed, so
-    # this checks that doctor runs and reports rather than that capture works.
+    # A hosted runner has simctl but no guarantee of a booted simulator, so this
+    # checks that doctor runs and reports rather than that capture succeeds.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
