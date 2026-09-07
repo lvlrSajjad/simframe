@@ -21,11 +21,29 @@ public struct DeviceInfo: Sendable {
     public let udid: String
     public let name: String
     public let runtime: String
-    public init(udid: String, name: String, runtime: String) {
+    /// Native pixels, as the framebuffer reports them.
+    public let pixelWidth: Int
+    public let pixelHeight: Int
+    /// Points per pixel. Input coordinates are in points, frames are in pixels.
+    public let scale: Double
+
+    public var pointWidth: Int { scale > 0 ? Int((Double(pixelWidth) / scale).rounded()) : pixelWidth }
+    public var pointHeight: Int { scale > 0 ? Int((Double(pixelHeight) / scale).rounded()) : pixelHeight }
+
+    public init(udid: String, name: String, runtime: String,
+                pixelWidth: Int = 0, pixelHeight: Int = 0, scale: Double = 1) {
         self.udid = udid
         self.name = name
         self.runtime = runtime
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.scale = scale
     }
+}
+
+/// Hardware buttons, named rather than numbered at call sites.
+public enum HardwareButton: String, Sendable, CaseIterable {
+    case home, lock, siri, volumeUp, volumeDown
 }
 
 public enum PrivateAPIError: Error, CustomStringConvertible {
@@ -34,6 +52,7 @@ public enum PrivateAPIError: Error, CustomStringConvertible {
     case deviceNotFound(String)
     case noDisplayPort
     case surfaceUnavailable
+    case hidUnavailable(String)
 
     public var description: String {
         switch self {
@@ -42,6 +61,7 @@ public enum PrivateAPIError: Error, CustomStringConvertible {
         case .deviceNotFound(let u): return "no simulator matching \(u)"
         case .noDisplayPort: return "the device exposes no active display port"
         case .surfaceUnavailable: return "the display surface could not be read"
+        case .hidUnavailable(let d): return "input is unavailable: \(d)"
         }
     }
 }
@@ -58,4 +78,15 @@ public protocol SimulatorPlatform: AnyObject {
     /// capture loop can be driven by the screen rather than by a timer.
     func observeChanges(_ handler: @escaping () -> Void) throws
     func detach()
+
+    // MARK: Input. Optional: a platform may observe without being able to touch.
+
+    /// Whether input is available, and why not when it is not.
+    func inputStatus() -> (available: Bool, detail: String)
+    /// A press and release at one point. `durationMs` above ~500 reads as a long press.
+    func tap(at point: CGPoint, durationMs: Double) throws
+    /// A real down, interpolated moves, then up — never a teleporting jump.
+    func swipe(from: CGPoint, to: CGPoint, durationMs: Double) throws
+    func type(_ text: String) throws
+    func press(_ button: HardwareButton) throws
 }

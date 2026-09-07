@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import PrivateAPI
 import SimframeCore
@@ -84,6 +85,43 @@ case "snap":
         }
         try PNGWriter.write(bmp, to: URL(fileURLWithPath: out))
         print("\(out) — \(bmp.width)x\(bmp.height)")
+    } catch { fail("\(error)") }
+
+case "input":
+    do {
+        let device = try platform.attach(udid: flag("udid"))
+        let status = platform.inputStatus()
+        print("\(status.available ? "ok  " : "FAIL") \(status.detail)")
+        print("     \(device.name): \(device.pixelWidth)x\(device.pixelHeight)px @\(device.scale)x = \(device.pointWidth)x\(device.pointHeight)pt")
+    } catch { fail("\(error)") }
+
+case "tap", "swipe", "type", "press":
+    do {
+        _ = try platform.attach(udid: flag("udid"))
+        let positional = args.filter { !$0.hasPrefix("--") }.dropFirst()
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        switch command {
+        case "tap":
+            guard positional.count >= 2, let x = Double(positional.first!), let y = Double(positional.dropFirst().first!) else {
+                fail("usage: simframed tap <x> <y> [--duration-ms=70]")
+            }
+            try platform.tap(at: CGPoint(x: x, y: y), durationMs: Double(flag("duration-ms") ?? "") ?? 70)
+        case "swipe":
+            let v = positional.compactMap(Double.init)
+            guard v.count >= 4 else { fail("usage: simframed swipe <x1> <y1> <x2> <y2> [--duration-ms=300]") }
+            try platform.swipe(from: CGPoint(x: v[0], y: v[1]), to: CGPoint(x: v[2], y: v[3]),
+                               durationMs: Double(flag("duration-ms") ?? "") ?? 300)
+        case "type":
+            guard let text = positional.first else { fail("usage: simframed type <text>") }
+            try platform.type(positional.joined(separator: " "))
+            _ = text
+        default:
+            guard let name = positional.first, let button = HardwareButton(rawValue: name) else {
+                fail("usage: simframed press <\(HardwareButton.allCases.map(\.rawValue).joined(separator: "|"))>")
+            }
+            try platform.press(button)
+        }
+        print(String(format: "%@ in %.0fms", command, Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6))
     } catch { fail("\(error)") }
 
 case "run":
@@ -191,5 +229,5 @@ case "run":
     } catch { fail("\(error)") }
 
 default:
-    fail("unknown command '\(command)' (try: devices, hash, bench, snap, run)")
+    fail("unknown command '\(command)' (try: devices, hash, bench, snap, run, input, tap, swipe, type, press)")
 }

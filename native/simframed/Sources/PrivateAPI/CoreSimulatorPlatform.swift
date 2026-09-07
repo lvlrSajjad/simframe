@@ -22,6 +22,9 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     // framework calling into freed memory.
     private var changeCallback: Any?
     private var changeUUID: NSUUID?
+    private var device: NSObject?
+    private var hid: IndigoHID?
+    private var simulatorKitHandle: UnsafeMutableRawPointer?
 
     private static let bootedState = 3
 
@@ -30,6 +33,7 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     // MARK: - Framework loading
 
     private static var loaded = false
+    private static var simulatorKitHandles: UnsafeMutableRawPointer?
 
     private static func loadFrameworks() throws {
         guard !loaded else { return }
@@ -42,10 +46,11 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
             guard FileManager.default.fileExists(atPath: path) else {
                 throw PrivateAPIError.frameworksUnavailable("\(name) not found at \(path)")
             }
-            if dlopen(path, RTLD_NOW) == nil {
+            guard let handle = dlopen(path, RTLD_NOW) else {
                 let reason = String(cString: dlerror())
                 throw PrivateAPIError.frameworksUnavailable("\(name): \(reason)")
             }
+            if name == "SimulatorKit" { simulatorKitHandles = handle }
         }
         loaded = true
     }
@@ -95,15 +100,30 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
         (try loadDeviceSet()).value(forKey: "availableDevices") as? [NSObject] ?? []
     }
 
+    /// KVC on these objects throws for unknown keys, so every read is guarded.
+    private func safeValue(_ object: NSObject, _ key: String) -> Any? {
+        object.responds(to: NSSelectorFromString(key)) ? object.value(forKey: key) : nil
+    }
+
     private func info(for device: NSObject) -> DeviceInfo {
-        let udid = (device.value(forKey: "UDID") as? NSUUID)?.uuidString ?? "?"
-        let name = device.value(forKey: "name") as? String ?? "?"
+        let udid = (safeValue(device, "UDID") as? NSUUID)?.uuidString ?? "?"
+        let name = safeValue(device, "name") as? String ?? "?"
         var runtime = "?"
-        if let rt = device.value(forKey: "runtime") as? NSObject {
-            runtime = (rt.value(forKey: "versionString") as? String).map { "iOS \($0)" }
-                ?? (rt.value(forKey: "name") as? String ?? "?")
+        if let rt = safeValue(device, "runtime") as? NSObject {
+            runtime = (safeValue(rt, "versionString") as? String).map { "iOS \($0)" }
+                ?? (safeValue(rt, "name") as? String ?? "?")
         }
-        return DeviceInfo(udid: udid, name: name, runtime: runtime)
+        // deviceType carries the screen in pixels plus its scale, which is how
+        // input coordinates (points) are derived without idb.
+        var pixels = CGSize.zero
+        var scale = 1.0
+        if let type = safeValue(device, "deviceType") as? NSObject {
+            if let size = safeValue(type, "mainScreenSize") as? NSValue { pixels = size.sizeValue }
+            if let s = safeValue(type, "mainScreenScale") as? NSNumber { scale = s.doubleValue }
+        }
+        return DeviceInfo(udid: udid, name: name, runtime: runtime,
+                          pixelWidth: Int(pixels.width), pixelHeight: Int(pixels.height),
+                          scale: scale > 0 ? scale : 1)
     }
 
     public func bootedDevices() throws -> [DeviceInfo] {
@@ -149,8 +169,12 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
             let size = unsafeBitCast(sizeImp, to: SizeFn.self)(descriptor, sizeSel)
             guard size.width > 0, size.height > 0 else { continue }
             display = descriptor
+            self.device = device
             let resolved = info(for: device)
             attached = resolved
+            // Warm the HID session once, so the first gesture is not slower
+            // than the rest. Input being unavailable must not stop capture.
+            hid = try? IndigoHID(device: device, simulatorKit: Self.simulatorKitHandles)
             return resolved
         }
         throw PrivateAPIError.noDisplayPort
@@ -206,5 +230,78 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
         changeUUID = nil
         display = nil
         attached = nil
+    }
+}
+
+// MARK: - Input
+
+extension CoreSimulatorPlatform {
+    /// Gestures are real down → move → up sequences with human timings. A
+    /// teleporting tap is not what a person does, and some UI treats it
+    /// differently — flings need intermediate points to carry velocity.
+    public enum Timing {
+        public static let tapMs: Double = 70
+        public static let stepMs: Double = 12          // ~83 Hz, finer than the display
+        public static let keyStrokeMs: Double = 18
+    }
+
+    public func inputStatus() -> (available: Bool, detail: String) {
+        if hid != nil { return (true, "Indigo HID (SimDeviceLegacyHIDClient)") }
+        if attached == nil { return (false, "not attached to a device") }
+        return (false, "the HID client could not be created")
+    }
+
+    private func requireHID() throws -> (IndigoHID, CGSize) {
+        guard let hid, let info = attached else {
+            throw PrivateAPIError.hidUnavailable(inputStatus().detail)
+        }
+        return (hid, CGSize(width: info.pointWidth, height: info.pointHeight))
+    }
+
+    public func tap(at point: CGPoint, durationMs: Double = Timing.tapMs) throws {
+        let (hid, screen) = try requireHID()
+        hid.mouse(at: point, event: .down, screen: screen)
+        Thread.sleep(forTimeInterval: max(0.01, durationMs / 1000))
+        hid.mouse(at: point, event: .up, screen: screen)
+    }
+
+    public func swipe(from: CGPoint, to: CGPoint, durationMs: Double = 300) throws {
+        let (hid, screen) = try requireHID()
+        let steps = max(2, Int(durationMs / Timing.stepMs))
+        hid.mouse(at: from, event: .down, screen: screen)
+        for i in 1...steps {
+            // Ease in and out, so the gesture accelerates and settles the way a
+            // finger does rather than moving at a constant machine speed.
+            let t = Double(i) / Double(steps)
+            let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+            let p = CGPoint(x: from.x + (to.x - from.x) * eased,
+                            y: from.y + (to.y - from.y) * eased)
+            hid.mouse(at: p, event: .dragged, screen: screen)
+            Thread.sleep(forTimeInterval: Timing.stepMs / 1000)
+        }
+        hid.mouse(at: to, event: .up, screen: screen)
+    }
+
+    public func type(_ text: String) throws {
+        let (hid, _) = try requireHID()
+        for character in text.unicodeScalars {
+            guard let usage = HIDKeyboard.usage(for: character) else { continue }
+            if usage.shift { hid.key(usage: HIDKeyboard.leftShift, op: .down) }
+            hid.key(usage: usage.code, op: .down)
+            Thread.sleep(forTimeInterval: Timing.keyStrokeMs / 1000)
+            hid.key(usage: usage.code, op: .up)
+            if usage.shift { hid.key(usage: HIDKeyboard.leftShift, op: .up) }
+            Thread.sleep(forTimeInterval: Timing.keyStrokeMs / 1000)
+        }
+    }
+
+    public func press(_ button: HardwareButton) throws {
+        let (hid, _) = try requireHID()
+        guard let code = HIDKeyboard.buttonCode(button) else {
+            throw PrivateAPIError.hidUnavailable("no key code for \(button.rawValue)")
+        }
+        hid.button(keyCode: code, op: .down)
+        Thread.sleep(forTimeInterval: 0.06)
+        hid.button(keyCode: code, op: .up)
     }
 }

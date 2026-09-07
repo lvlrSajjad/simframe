@@ -152,6 +152,38 @@ through the runtime, since `alloc()` is unavailable in Swift.
 
 A tap is a `leftMouseDown` followed by a `leftMouseUp` at the same point.
 
+### Buttons use a different target
+
+`IndigoHIDMessageForButton` does **not** use the digitizer target. Sending a
+home press to `0x32` is silently swallowed — no error, no effect. Target `0`
+works.
+
+| Button | `IndigoHIDButtonKeyCode` | Verified |
+| --- | --- | --- |
+| home | **2** (with target **0**) | yes — full transition to springboard |
+| lock, siri, volume | unknown | no |
+
+The unverified codes deliberately return nil rather than a guess. A wrong code
+here is not a no-op: reports exist of the Siri path crashing `backboardd`, and
+silently locking someone's simulator is a poor failure mode. To identify one,
+sweep codes with target 0 on a simulator you are willing to disturb and watch
+`simframe state --since` for a screen change.
+
+### Typing goes through the active keyboard layout
+
+`IndigoHIDMessageForKeyboardArbitrary` sends raw USB HID **usage codes**, not
+characters. iOS maps those through whatever keyboard is currently active, so
+the same usage produces different text on different layouts.
+
+Observed: typing `fryer` on a simulator with an Arabic keyboard active put
+`غنقب`/`فوق` into the field. The HID path was working perfectly; the mapping
+was not what the caller meant.
+
+This matters because the failure is **silent** — text appears, so nothing looks
+wrong. Anything that must be exact should go through the pasteboard
+(`simctl pbcopy` then paste), which is layout-independent. Key events are for
+interaction; the pasteboard is for content.
+
 ### Other message constructors, as declared by the binary
 
 All exported C, all `dlsym`-able from SimulatorKit:

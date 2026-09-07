@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// A deterministic platform for tests and for machines without Xcode.
@@ -8,6 +9,8 @@ public final class StubPlatform: SimulatorPlatform {
     public var height: Int
     public var tint: UInt8
     private var buffer: [UInt8] = []
+    /// What was asked of it, so tests can assert on gestures without a device.
+    public var recorded: [String] = []
 
     public init(width: Int = 1206, height: Int = 2622, tint: UInt8 = 0) {
         self.width = width
@@ -57,4 +60,14 @@ public final class StubPlatform: SimulatorPlatform {
     private var stubHandler: (() -> Void)?
 
     public func detach() { stubHandler = nil }
+}
+
+extension StubPlatform {
+    public func inputStatus() -> (available: Bool, detail: String) { (true, "stub") }
+    public func tap(at point: CGPoint, durationMs: Double) throws { recorded.append("tap(\(Int(point.x)),\(Int(point.y)))") }
+    public func swipe(from: CGPoint, to: CGPoint, durationMs: Double) throws {
+        recorded.append("swipe(\(Int(from.x)),\(Int(from.y))->\(Int(to.x)),\(Int(to.y)))")
+    }
+    public func type(_ text: String) throws { recorded.append("type(\(text))") }
+    public func press(_ button: HardwareButton) throws { recorded.append("press(\(button.rawValue))") }
 }
