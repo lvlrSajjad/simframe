@@ -160,3 +160,81 @@ final class PlatformSurfaceTests: XCTestCase {
         }
     }
 }
+
+/// Motion analysis, on synthetic frames so the expected answer is known.
+final class MotionTests: XCTestCase {
+    private func grid(_ fill: (Int, Int) -> UInt8) -> [UInt8] {
+        var g = [UInt8](repeating: 0, count: Motion.cols * Motion.rows)
+        for r in 0..<Motion.rows { for c in 0..<Motion.cols { g[r * Motion.cols + c] = fill(c, r) } }
+        return g
+    }
+
+    /// Content that varies in both directions, so a shift has a unique best
+    /// match. Horizontally uniform content makes every horizontal offset score
+    /// identically, and the search then reports an arbitrary one.
+    private func striped(offsetRows: Int = 0) -> [UInt8] {
+        grid { c, r in UInt8((((r + offsetRows) * 13) + c * 7) % 256) }
+    }
+
+    func testIdenticalFramesAreStill() {
+        XCTAssertEqual(Motion.difference(striped(), striped()), 0)
+    }
+
+    func testSettleNeedsConsecutiveStillFrames() {
+        let still = striped()
+        var history: [Motion.Frame] = []
+        for i in 0..<5 { history.append(Motion.Frame(at: Double(i) * 100, gray: still)) }
+        let state = Motion.state(history: history, now: 500)
+        XCTAssertTrue(state.settled)
+        XCTAssertGreaterThanOrEqual(state.stillFrames, Motion.stillFramesRequired)
+    }
+
+    func testAChangingScreenIsNotSettled() {
+        var history: [Motion.Frame] = []
+        for i in 0..<5 { history.append(Motion.Frame(at: Double(i) * 100, gray: striped(offsetRows: i * 6))) }
+        XCTAssertFalse(Motion.state(history: history, now: 500).settled)
+    }
+
+    func testSpinnerIsNeitherStillNorASceneChange() {
+        // Everything holds still except a small patch that keeps changing.
+        var history: [Motion.Frame] = []
+        for i in 0..<5 {
+            var g = striped()
+            for r in 40..<45 { for c in 20..<25 { g[r * Motion.cols + c] = UInt8((i * 90) % 256) } }
+            history.append(Motion.Frame(at: Double(i) * 100, gray: g))
+        }
+        let state = Motion.state(history: history, now: 500)
+        XCTAssertFalse(state.settled, "a spinner must not read as settled")
+        XCTAssertNotNil(state.animatingRegion, "the moving patch should be localised")
+    }
+
+    func testVerticalShiftIsMeasured() {
+        let (dx, dy, score) = Motion.shift(striped(), striped(offsetRows: 8))
+        XCTAssertEqual(dy, -8, "content moved up by eight rows")
+        XCTAssertEqual(dx, 0)
+        XCTAssertLessThan(score, 0.02)
+    }
+
+    func testScrollIsClassifiedWithAnOffset() throws {
+        let t = Motion.classify(before: striped(), after: striped(offsetRows: 8),
+                                pointHeight: 874, pointWidth: 402)
+        XCTAssertEqual(t.kind, .scroll)
+        // XCTUnwrap rather than `!`: a force unwrap here kills the whole test
+        // process with signal 5 and hides every other result.
+        let offset = try XCTUnwrap(t.offset)
+        // Eight of ninety-six rows of an 874pt screen.
+        XCTAssertEqual(offset.y, -874 * 8 / 96, accuracy: 1)
+    }
+
+    func testIdenticalScreensClassifyAsNoChange() {
+        let t = Motion.classify(before: striped(), after: striped(), pointHeight: 874, pointWidth: 402)
+        XCTAssertEqual(t.kind, .none)
+    }
+
+    func testDimmingTheWholeScreenReadsAsSomethingPresenting() {
+        let base = striped()
+        let dimmed = base.map { UInt8(max(0, Int($0) - 60)) }
+        let t = Motion.classify(before: base, after: dimmed, pointHeight: 874, pointWidth: 402)
+        XCTAssertTrue([.sheetPresent, .alertPresent].contains(t.kind), "got \(t.kind)")
+    }
+}

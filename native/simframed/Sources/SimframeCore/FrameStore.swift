@@ -29,7 +29,7 @@ public final class FrameStore {
 
     /// State version of the on-disk format. Must match STATE_VERSION in
     /// src/daemon.js, or Node will treat this daemon as stale and replace it.
-    public static let stateVersion = 5
+    public static let stateVersion = 6
 
     private let device: DeviceInfo
     private let options: Options
@@ -41,6 +41,11 @@ public final class FrameStore {
     private var prevSignature: [UInt8]?
     private var lastChangeAt = FrameStore.nowMs()
     private var history: [[String: Any]] = []
+    /// Recent frames as small grayscale grids, for settle and transition work.
+    private var motionHistory: [Motion.Frame] = []
+    private var lastSettledGray: [UInt8]?
+    private var lastTransition: Motion.Transition?
+    private var wasSettled = false
     private var ringIndex: [(seq: Int, at: Double, small: Bool)] = []
 
     public init(device: DeviceInfo, options: Options = Options()) throws {
@@ -166,6 +171,23 @@ public final class FrameStore {
         seq = nextSeq
         prevSignature = signature
 
+        // Motion analysis runs on its own grid: coarse enough to be free, fine
+        // enough to localise a spinner and measure a scroll offset.
+        let motionGray = Motion.grid(from: bmp)
+        motionHistory.append(Motion.Frame(at: now, gray: motionGray))
+        if motionHistory.count > 30 { motionHistory.removeFirst(motionHistory.count - 30) }
+        let motion = Motion.state(history: motionHistory, now: now)
+        // Classify only on the edge into settled: comparing two settled screens
+        // is the only comparison that describes a completed transition.
+        if motion.settled, !wasSettled, let previous = lastSettledGray {
+            lastTransition = Motion.classify(
+                before: previous, after: motionGray,
+                pointHeight: Double(device.pointHeight), pointWidth: Double(device.pointWidth)
+            )
+        }
+        if motion.settled { lastSettledGray = motionGray }
+        wasSettled = motion.settled
+
         let hash = Hashing.frameHash(bmp)
         history.append([
             "seq": nextSeq, "at": now, "hash": hash,
@@ -203,6 +225,9 @@ public final class FrameStore {
             "ring": ringIndex.map { r -> [String: Any] in
                 r.small ? ["seq": r.seq, "at": r.at, "small": true] : ["seq": r.seq, "at": r.at]
             },
+            "settled": motion.settled,
+            "motion": motion.json,
+            "transition": lastTransition?.json as Any? ?? NSNull(),
             "fullFile": fullURL.path,
             "ringFile": ringURL.path,
             "device": deviceJSON,

@@ -352,3 +352,58 @@ the rebuild is for.
 Shipping `Tests` fixes it, and CI now builds the daemon from an unpacked tarball
 so the packaged artefact is checked rather than the working tree. A clean install
 now builds and starts its own daemon in about 13 seconds, first time only.
+
+## Phase 4 — settle and transitions from frame history
+
+Motion analysis runs on every captured frame, on a 48x96 grayscale grid built
+with integer arithmetic. Per-frame cost is unchanged within noise — 13-21 ms
+with it, the same without — so the whole analysis is under about 2 ms.
+
+An earlier version cost 15 ms a frame because it reused `Hashing.grayGrid`,
+which averages every pixel in double precision. That precision exists so the
+hash matches the JavaScript byte for byte; motion has no such constraint, and a
+subsampled integer grid is free.
+
+### Settle
+
+Settled means N consecutive frames below the change threshold **and** a minimum
+duration. Frame count alone is not a measure of time: the capture loop drops to
+one frame every two seconds when nothing is happening, so requiring three
+consecutive still frames took six seconds to call a motionless screen settled.
+
+A localised-animation detector runs alongside, and **must run even when the
+frames look still globally**. A spinner covering half a percent of the screen
+moves the mean difference by about 0.001, well under the still threshold, so
+checking for one only when the global test already says "moving" never fires. A
+screen with a spinner is reported as neither settled nor changing, with the
+moving region localised.
+
+### Transition classification
+
+Measured against a real app, settled state to settled state:
+
+| Action | Classified | Offset |
+| --- | --- | --- |
+| Swipe up on a list | `scroll` | (0, 146) pt |
+| Swipe down on a list | `scroll` | (0, -164) pt |
+| Tab switch | `replace` | — |
+| Nothing | `none` | — |
+
+Two mistakes were needed to get there, and both are worth keeping in mind.
+
+**The fixed chrome pins the shift search.** Searching the whole frame for a
+translation found `dy=0` for a scroll that had visibly moved: a navigation bar,
+search field and filter row that stay put are a quarter of the screen and
+pixel-identical, so no shift beats no-shift. The search is now restricted to the
+rows that actually changed, which is what makes a real scroll measurable.
+
+**The score and its baseline must be measured over the same sample.** The shift
+score subsampled columns while the baseline it was compared against did not, so
+the ratio deciding "is this a translation" compared two different quantities.
+
+Classification on real screens is still imperfect — a scroll that hits the top
+of a list and rubber-bands reads as `replace`, because after the bounce the
+frames genuinely are not a translation of each other. The failure mode is a less
+specific answer rather than a wrong one, and every result carries the evidence it
+was decided from, so a misclassification can be argued with rather than guessed
+at.

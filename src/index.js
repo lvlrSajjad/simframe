@@ -629,7 +629,13 @@ export async function settledState(udid, { settleMs = MEMORY_SETTLE_MS, timeoutM
   let state = store.readJson(p.state);
   while (Date.now() < deadline) {
     state = store.readJson(p.state) ?? state;
-    if (state && state.stableForMs >= settleMs) return { state, settled: true };
+    // The daemon runs a real settle detector that can tell a spinner from a
+    // still screen. Prefer it; the duration check is the fallback for the
+    // simctl engine, which has no such thing.
+    if (state?.settled === true) return { state, settled: true };
+    if (state && state.settled === undefined && state.stableForMs >= settleMs) {
+      return { state, settled: true };
+    }
     await sleep(40);
   }
   return { state, settled: false };
