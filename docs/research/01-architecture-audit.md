@@ -40,6 +40,11 @@ simframe is an npm package (`npm install -g simframe`) exposing both a CLI and a
 
 ### 3.2 Fastest ways to control the simulator (benchmarked)
 
+> **Symbol names in this section are superseded by [`docs/PRIVATE_API.md`](../PRIVATE_API.md),**
+> which records what was actually verified against the runtime. Three claims
+> below did not survive contact with it.
+
+
 | Method | Capture | Input | Deps | iOS 26 status |
 |---|---|---|---|---|
 | `simctl io screenshot` | ~130ms/frame (simframe's figure); ~2000ms in one third-party claim | `simctl` has no reliable tap; needs idb | Xcode only | capture OK; no input |

@@ -104,6 +104,7 @@ export async function build(udid, {
   density = 3,
   useAx = true,
   useOcr = true,
+  persist = true,
   screen,
 } = {}) {
   const targets = [];
@@ -187,14 +188,17 @@ export async function build(udid, {
     }
   }
 
-  return remember(udid, {
+  const entry = {
     version: MAP_VERSION,
     hash,
     layoutHash,
     at: Date.now(),
     sources,
     targets,
-  });
+  };
+  // Only a map of a settled screen is worth keeping; remembering a transition
+  // fills the store with layouts that will never be seen again.
+  return persist ? remember(udid, entry) : entry;
 }
 
 const norm = (s) => String(s ?? '').toLowerCase().trim();

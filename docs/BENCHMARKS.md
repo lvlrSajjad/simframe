@@ -164,3 +164,46 @@ frames the Swift daemon produced:
 | Four-tab flow via `sim_do` | 4/4 steps, screen memory hitting |
 | Clean shutdown on SIGINT | releases ownership (`pid: null`, `stoppedAt` set) |
 | Capture errors during the run | 0 |
+
+## Phase 0 — screen memory and capture rate
+
+The Swift daemon captures faster than the Node loop it replaces, which raised a
+question: does capture rate change how often screen memory hits? The four-tab
+flow, three passes, memory cleared first, counting how many of the four controls
+resolved from memory.
+
+Before the settle gate:
+
+| Capture cap | pass 1 | pass 2 | pass 3 |
+| --- | --- | --- | --- |
+| 12.5 fps | 1/4 | 3/4 | 4/4 |
+| 4 fps | 0/4 | 4/4 | 4/4 |
+
+Both converge, so capture rate was **not** the main driver — the earlier
+observation of a persistent 1-2/4 was more likely the app still loading. But the
+two rates followed visibly different trajectories, which should not happen: what
+gets remembered must not depend on how fast frames arrive.
+
+The cause was structural. A screen map was keyed off whichever frame happened to
+be newest, including frames from the middle of a transition, whose layout
+belongs to neither the screen being left nor the one arriving. A faster loop
+samples more such frames.
+
+The fix is a settle gate: memory is looked up and built only from a frame that
+has been still for `MEMORY_SETTLE_MS`, and a map built while the screen was
+moving is used once and never persisted. After it:
+
+| Capture cap | pass 1 | pass 2 | pass 3 |
+| --- | --- | --- | --- |
+| 12.5 fps | 2/4 | 2/4 | 4/4 |
+| 4 fps | 1/4 | 2/4 | 4/4 |
+
+The trajectories now match, which was the point: capture rate no longer changes
+what is remembered. The gate does not make memory hit *sooner* — convergence
+still takes three passes, because a screen genuinely looks different while its
+data is loading — and it is deliberately crude. Phase 4 replaces it with a real
+settle detector that can tell a spinner from a still screen.
+
+Checked afterwards: five stored maps for a five-screen app, no pair within 30
+bits of another, and the gate reported settled on 6 of 6 lookups against a still
+screen. No transitional junk is being persisted.

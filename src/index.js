@@ -164,6 +164,21 @@ function readLogTail(file, lines = 6) {
 /** A frame this old means the capture loop is wedged, not that the screen is calm. */
 export const STALE_FRAME_MS = 2500;
 
+/**
+ * How still the screen must be before a frame may be used to key screen memory.
+ *
+ * A screen map describes a screen, so it must be built from a frame that shows
+ * one — not from the middle of a transition, where the layout belongs to
+ * neither the screen you left nor the one you are arriving at. Without this,
+ * the capture rate leaks into the hit rate: a faster loop samples more
+ * transitional frames and remembers more layouts that will never recur.
+ *
+ * Phase 4 replaces this with the real settle detector, which can tell a
+ * spinner from a still screen. Until then, "nothing moved for a while" is
+ * enough to decouple memory from frame rate.
+ */
+export const MEMORY_SETTLE_MS = 250;
+
 /** Below this a "change" is a clock digit or a caret, not a new screen. */
 export const MINOR_CHANGE = 0.004;
 export const MAJOR_CHANGE = 0.03;
@@ -577,15 +592,39 @@ export async function getFrameAt(deviceQuery, { msAgo = 0, options } = {}) {
  * A screen seen for the first time pays once to build its map, and every later
  * visit is a file read.
  */
-export async function locate(deviceQuery, query, { index, refresh = false, useAx = true, useOcr = true, options } = {}) {
-  const { device, state } = await ensureDaemon(deviceQuery, options);
+/**
+ * Wait, briefly, for a frame that is holding still. Returns whatever the newest
+ * frame is once the screen settles or the budget runs out, saying which.
+ */
+export async function settledState(udid, { settleMs = MEMORY_SETTLE_MS, timeoutMs = 1500 } = {}) {
+  const p = store.paths(udid);
+  const deadline = Date.now() + timeoutMs;
+  let state = store.readJson(p.state);
+  while (Date.now() < deadline) {
+    state = store.readJson(p.state) ?? state;
+    if (state && state.stableForMs >= settleMs) return { state, settled: true };
+    await sleep(40);
+  }
+  return { state, settled: false };
+}
+
+export async function locate(
+  deviceQuery,
+  query,
+  { index, refresh = false, useAx = true, useOcr = true, settleMs = MEMORY_SETTLE_MS, options } = {},
+) {
+  const { device, state: firstState } = await ensureDaemon(deviceQuery, options);
   const udid = device.udid;
+  // Key memory off a settled frame, never off whichever frame happened to be
+  // newest, so the capture rate cannot change what gets remembered.
+  const { state, settled } = await settledState(udid, { settleMs });
+  const current = state ?? firstState;
   let entry = null;
   let from = 'memory';
   let distance = 0;
 
   if (!refresh) {
-    const near = screenmap.recallNearest(udid, state.layoutHash);
+    const near = screenmap.recallNearest(udid, current.layoutHash);
     if (near) {
       entry = near.entry;
       distance = near.distance;
@@ -593,17 +632,20 @@ export async function locate(deviceQuery, query, { index, refresh = false, useAx
   }
 
   if (!entry) {
-    const geo = await deviceGeometry(udid, state);
+    const geo = await deviceGeometry(udid, current);
     entry = await screenmap.build(udid, {
-      hash: state.hash,
-      layoutHash: state.layoutHash,
-      fullFrame: await fullFrameFor(udid, state),
+      hash: current.hash,
+      layoutHash: current.layoutHash,
+      fullFrame: await fullFrameFor(udid, current),
       density: geo.density,
       screen: { width: geo.pointWidth, height: geo.pointHeight },
       useAx,
       useOcr,
+      // A map built while the screen was moving describes nothing that will
+      // recur, so it is used for this call and then thrown away.
+      persist: settled,
     });
-    from = 'built';
+    from = settled ? 'built' : 'built-unsettled';
   }
 
   const candidates = screenmap.rank(entry, query);
@@ -632,7 +674,7 @@ export async function locate(deviceQuery, query, { index, refresh = false, useAx
       `"${query}" is not on this screen. Visible: ${sample || '(nothing readable)'}`,
     );
   }
-  return { device, state, entry, target, from, distance, screens: screenmap.stats(udid).screens };
+  return { device, state: current, entry, target, from, distance, settled, screens: screenmap.stats(udid).screens };
 }
 
 export { DEFAULTS, screenmap, store };
