@@ -66,7 +66,17 @@ jobs:
         run: ./mcp-publisher validate
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        # Publishing by hand and then tagging is a normal thing to do, and npm
+        # rejects a version that already exists. That must not stop the run
+        # before the registry step, so an existing version is a skip, not a
+        # failure. Any other npm error still fails the job.
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "simframe@$VERSION" version >/dev/null 2>&1; then
+            echo "simframe@$VERSION is already on npm — skipping"
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
