@@ -234,6 +234,10 @@ async function main() {
           `${res.mode === 'change' ? 'changed' : 'settled'} after ${res.waitedMs}ms — frame #${res.state.seq}` +
             (res.changedBeforeWait ? ' (change had already happened before the call)' : ''),
         );
+      } else if (res.noVisibleChange) {
+        console.log(
+          `no visible change after ${res.waitedMs}ms — screen stable, nothing moved (the action may have had no visible effect)`,
+        );
       } else if (res.stalled) {
         console.log(`capture stalled after ${res.waitedMs}ms — ${res.live.note}`);
       } else {

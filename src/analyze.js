@@ -86,7 +86,7 @@ export function hexToSignature(hex) {
  */
 export const LAYOUT_COLS = 12;
 export const LAYOUT_ROWS = 24;
-export const LAYOUT_TOP_SKIP = 0.055; // the status bar, as a fraction of height
+export const LAYOUT_TOP_SKIP = 0.07; // the status bar, as a fraction of height
 
 export function layoutHash(bmp) {
   const top = Math.floor(bmp.height * LAYOUT_TOP_SKIP);

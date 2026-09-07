@@ -34,11 +34,11 @@ Same four-tab navigation flow, on a real production app:
 | "Did anything change?" | a full image | **~2 ms**, text only |
 | A 5-step flow | 5+ model round trips | **1 call**, ~7 s |
 | Finding a control | read tree (~570 ms) + reason | **~1 ms** from memory |
-| Same flow, 3rd run | no improvement — every run is the first | **5680 ms, 4/4 from memory** |
+| Same flow, 3rd run | no improvement — every run is the first | **3304 ms, 4/4 from memory** |
 
-That last number is the interesting one. 5680 ms across four screen transitions
-is **1420 ms each — which is the app's own animation and data-load time.** The
-tooling overhead is essentially gone; what remains is the app.
+The same four-tab tour, run three times back to back: **7370 ms → 5160 ms →
+3304 ms**, with 1, then 3, then 4 of the four controls resolved from memory and
+no mis-taps. What is left is mostly the app's own animation and data load.
 
 ## Install
 
@@ -177,11 +177,21 @@ distance 0 and taps landed on the wrong control. Measured on a real app:
 
 | | Hamming distance |
 | --- | --- |
-| Same screen, revisited (different rows, different clock) | **0–3** |
-| Different screens | **77–96** |
+| Same screen, revisited while settled | **0–4** |
+| Same screen, but loading vs loaded | 48–98 |
+| **Different screens** | **77–113** |
 
-The tolerance is 12 — four times the observed noise, six times below the nearest
-collision.
+Only one of those errors is dangerous. Matching the *wrong* screen would tap the
+wrong control, and that needs two different screens to land within 12 bits of
+each other — the closest pair ever measured was 77. Failing to recognise a screen
+you have seen is harmless: it rebuilds the map, costs ~600 ms, and taps correctly.
+So the tolerance is deliberately far below the collision floor rather than tuned
+to maximise hits.
+
+That middle row is worth knowing about: a screen mid-load genuinely does not look
+like the same screen loaded, so the first visit after a cold launch usually
+rebuilds. Hit rates climb as an app warms up, which is exactly what the three-pass
+numbers above show.
 
 ## Does this work on *your* app?
 
@@ -214,7 +224,7 @@ iPhone 17 Pro, iOS 26.5, Apple Silicon, default settings.
 | Contact sheet (`sim_strip`, 5 frames) | ~30 ms |
 | Accessibility tree read | ~570 ms |
 | On-device OCR of a full frame | ~290 ms |
-| Screen map: first visit / remembered | ~1000 ms / **~1 ms** |
+| Screen map: first visit / remembered | ~600 ms / **~1 ms** |
 | Raw `simctl io screenshot`, for comparison | ~130 ms, every look |
 | Cold start, first frame | ~400 ms, once |
 | CPU | 1.1 % idle · 3.1 % active |
@@ -246,6 +256,10 @@ iPhone 17 Pro, iOS 26.5, Apple Silicon, default settings.
   kill a loop another client is using unless forced.
 - **A wedged capture loop never looks like a calm screen.** Every answer carries
   a liveness check, and `wait` fails loudly rather than quietly timing out.
+- **An action with no visible effect is reported, not waited out.** Selecting a
+  radio button moves ~0.1 % of the screen — below the change threshold — which
+  used to burn the full timeout. Now the step returns in ~3 s marked
+  `[no visible change]`, so you know to check rather than wait.
 
 ## CLI
 
@@ -276,11 +290,14 @@ simframe status / stop [--force] / devices / doctor
 
 ## Roadmap
 
-- Reduce the input dependency: idb is the one heavyweight requirement, and most
-  of what it provides for a simulator is reachable other ways.
-- Verify-after-tap, so a tap that changes nothing is reported rather than assumed
-  to have worked.
-- Extend the confirm vocabulary beyond English.
+- **Verify-after-tap.** A tap can move the screen without doing what you meant —
+  a swipe that animates but does not navigate still reports `changed`. Comparing
+  against the expected destination would catch it.
+- **Reduce the input dependency.** idb is the one heavyweight requirement. Its
+  simulator input is a reimplementation of the Indigo HID transport rather than a
+  public API, so replacing it is real work, not a wrapper — but it is the last
+  thing standing between simframe and a zero-install tool.
+- **Extend the confirm vocabulary beyond English.**
 
 ## Releasing
 

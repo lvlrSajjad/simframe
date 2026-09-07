@@ -332,7 +332,7 @@ export async function getState(deviceQuery, { since, options } = {}) {
  */
 export async function waitFor(
   deviceQuery,
-  { mode = 'settle', since, stableMs = 600, timeoutMs = 8000, baselineHash, options } = {},
+  { mode = 'settle', since, stableMs = 600, timeoutMs = 8000, reactionMs = 2500, baselineHash, options } = {},
 ) {
   const { device, state: first } = await ensureDaemon(deviceQuery, options);
   const p = store.paths(device.udid);
@@ -372,6 +372,14 @@ export async function waitFor(
       if (!live.ok) return done(false, { stalled: true });
 
       if (!sawChange && state.hash !== baselineHashValue) sawChange = true;
+
+      // Some controls barely move the screen at all — a radio dot, a checkbox,
+      // a button changing state. Waiting the full timeout for a change that
+      // will never be visible turns a 100ms action into a 12s one, so give up
+      // early and say so, rather than silently burning the clock.
+      if (!sawChange && Date.now() - startedAt > reactionMs && state.stableForMs >= stableMs) {
+        return done(false, { noVisibleChange: true });
+      }
 
       if (mode === 'change') {
         if (sawChange) return done(true);

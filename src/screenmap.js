@@ -12,7 +12,7 @@ import * as input from './input.js';
 import * as ocr from './ocr.js';
 import * as store from './store.js';
 
-const MAP_VERSION = 1;
+const MAP_VERSION = 2; // layout hash crop changed; old maps no longer comparable
 
 function mapDir(udid) {
   return path.join(store.deviceDir(udid), 'screens');
@@ -108,6 +108,12 @@ export async function build(udid, {
 } = {}) {
   const targets = [];
   const sources = [];
+  // Kick OCR off before reading the tree: they are independent, and the OCR
+  // pass is pure computation on a file that already exists.
+  const ocrPromise =
+    useOcr && fullFrame && fs.existsSync(fullFrame)
+      ? ocr.readText(fullFrame, { density }).catch((err) => err)
+      : null;
   // With no geometry, treat every element as a potential control rather than
   // guessing a screen size and mis-classifying containers.
   const screenArea = screen?.width && screen?.height ? screen.width * screen.height : Infinity;
@@ -138,9 +144,10 @@ export async function build(udid, {
     }
   }
 
-  if (useOcr && fullFrame && fs.existsSync(fullFrame)) {
+  if (ocrPromise) {
     try {
-      const words = await ocr.readText(fullFrame, { density });
+      const words = await ocrPromise;
+      if (words instanceof Error) throw words;
       sources.push('ocr');
       for (const w of words) {
         if (!w.text.trim()) continue;

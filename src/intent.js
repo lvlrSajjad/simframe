@@ -56,7 +56,7 @@ export function findOptions(nodes, geo) {
       onScreen(n, geo) &&
       n.frame.y > 120 &&
       n.frame.y < floor &&
-      n.frame.height >= 18 &&
+      n.frame.height >= 12 &&
       n.frame.height <= 70 &&
       !DISMISS.test(n.label.trim()) &&
       !CONFIRM_TIERS.flat().some((re) => re.test(n.label.trim())) &&

@@ -244,3 +244,85 @@ test('a missing element is an error, not a silent no-op', () => {
 test('centerOf finds the middle of an element', () => {
   assert.deepEqual(centerOf(NODES[0]), { x: 50, y: 40 });
 });
+
+// --- screen memory: ranking, ambiguity, and container handling ---
+import { findConfirm, findOptions } from '../src/intent.js';
+import { isInteractive, rank } from '../src/screenmap.js';
+import { hashDistance, layoutHash } from '../src/analyze.js';
+
+const t = (label, x, y, type = 'Text', source = 'ocr', extra = {}) => ({
+  label, x, y, type, source,
+  frame: { x: x - 20, y: y - 12, width: 40, height: 24 },
+  ...extra,
+});
+
+test('a real control outranks a caption with the same words', () => {
+  const entry = { targets: [t('Assets', 201, 90, 'StaticText', 'ax'), t('Assets', 126, 836, 'Button', 'ocr')] };
+  assert.equal(rank(entry, 'Assets')[0].y, 836, 'the tappable one wins');
+});
+
+test('exact matches beat substring matches', () => {
+  const entry = { targets: [t('Work Orders Pending', 100, 200), t('Work Orders', 200, 835)] };
+  assert.equal(rank(entry, 'Work Orders')[0].y, 835);
+});
+
+test('aliases are matched as well as labels', () => {
+  const entry = { targets: [t('', 60, 400, 'Button', 'ax', { aliases: ['Continue'] })] };
+  assert.equal(rank(entry, 'continue').length, 1);
+});
+
+test('isInteractive distinguishes controls from captions', () => {
+  assert.equal(isInteractive({ type: 'Button' }), true);
+  assert.equal(isInteractive({ type: 'StaticText' }), false);
+  assert.equal(isInteractive({ type: 'TextField' }), true);
+});
+
+test('findConfirm prefers APPLY over SAVE and never picks CANCEL', () => {
+  const geo = { pointWidth: 402, pointHeight: 874 };
+  const nodes = [t('CANCEL', 107, 712, 'Button', 'ax'), t('SAVE', 296, 712, 'Button', 'ax'), t('APPLY', 292, 808, 'Button', 'ax')];
+  assert.equal(findConfirm(nodes, geo).label, 'APPLY');
+  assert.notEqual(findConfirm([nodes[0], nodes[1]], geo).label, 'CANCEL');
+});
+
+test('findConfirm prefers an enabled control over a disabled one', () => {
+  const geo = { pointWidth: 402, pointHeight: 874 };
+  const nodes = [
+    t('APPLY', 292, 808, 'Button', 'ax', { enabled: false }),
+    t('APPLY', 292, 700, 'Button', 'ax', { enabled: true }),
+  ];
+  assert.equal(findConfirm(nodes, geo).y, 700);
+});
+
+test('findOptions excludes the confirm row and the search box', () => {
+  const geo = { pointWidth: 402, pointHeight: 874 };
+  const nodes = [
+    t('Search', 200, 130, 'TextField', 'ax'),
+    t('Broken', 201, 573), t('Poor', 201, 616), t('Average', 201, 659),
+    t('APPLY', 292, 808, 'Button', 'ax'),
+  ];
+  const labels = findOptions(nodes, geo).map((o) => o.label);
+  assert.ok(labels.includes('Broken') && labels.includes('Poor'));
+  assert.ok(!labels.includes('APPLY') && !labels.includes('Search'));
+});
+
+test('layoutHash ignores the status bar but reacts to layout', () => {
+  const make = (fill) => {
+    const width = 40, height = 80;
+    const data = Buffer.alloc(width * height * 4, 0);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        const v = fill(x, y);
+        data[i] = data[i + 1] = data[i + 2] = v;
+        data[i + 3] = 255;
+      }
+    }
+    return { width, height, data };
+  };
+  // Same layout, different content in the status bar only.
+  const a = make((x, y) => (y < 5 ? (x * 37) % 256 : x < 20 ? 20 : 220));
+  const b = make((x, y) => (y < 5 ? (x * 91) % 256 : x < 20 ? 20 : 220));
+  const c = make((x, y) => (y < 5 ? 0 : x < 20 ? 220 : 20)); // mirrored layout
+  assert.equal(hashDistance(layoutHash(a), layoutHash(b)), 0, 'status bar must not matter');
+  assert.ok(hashDistance(layoutHash(a), layoutHash(c)) > 20, 'layout must matter');
+});

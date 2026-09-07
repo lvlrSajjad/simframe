@@ -65,9 +65,23 @@ export async function runScript(
           timeoutMs: step.timeoutMs ?? timeoutMs,
           options,
         });
-        settled = { ok: w.satisfied, waitedMs: w.waitedMs, sawChange: w.sawChange, stalled: Boolean(w.stalled) };
+        settled = {
+          ok: w.satisfied,
+          waitedMs: w.waitedMs,
+          sawChange: w.sawChange,
+          stalled: Boolean(w.stalled),
+          noVisibleChange: Boolean(w.noVisibleChange),
+        };
       }
-      results.push({ index: i, action: step.action, ok: true, ms: Date.now() - stepStart, detail, settled });
+      const note = settled?.noVisibleChange ? ' [no visible change]' : '';
+      results.push({
+        index: i,
+        action: step.action,
+        ok: true,
+        ms: Date.now() - stepStart,
+        detail: `${detail}${note}`,
+        settled,
+      });
     } catch (err) {
       results.push({ index: i, action: step.action, ok: false, ms: Date.now() - stepStart, error: err.message });
       failed = true;

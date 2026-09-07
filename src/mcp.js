@@ -324,6 +324,11 @@ async function wait(target, args, options) {
   if (res.satisfied) {
     note = `${res.mode === 'change' ? 'screen changed' : 'screen settled'} after ${res.waitedMs}ms`;
     if (res.changedBeforeWait) note += ' (the change had already happened before this call)';
+  } else if (res.noVisibleChange) {
+    note =
+      `no visible change after ${res.waitedMs}ms — the screen is stable but nothing moved. ` +
+      'The action may have done nothing, or its effect may be too small to see (a checkbox, a radio, a button state). ' +
+      'Check with sim_ui rather than waiting longer.';
   } else if (res.stalled) {
     note = `CAPTURE STALLED after ${res.waitedMs}ms — ${res.live.note}. This is a simframe problem, not a screen that failed to change.`;
   } else {
