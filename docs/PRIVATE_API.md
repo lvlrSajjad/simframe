@@ -115,17 +115,68 @@ registered.
 | `mainScreenSurfaceForSimulator:` is a SimulatorKit symbol | It does not exist in SimulatorKit. It appears to be a helper inside idb, not framework API. |
 | The unregister selector is `unregisterIOSurfaceChangeCallbackWithUUID:` | It is `unregisterIOSurfacesChangeCallbackWithUUID:` — **plural**. |
 | (implied) any port conforming to the renderable protocol will do | Several conform; only the one with non-zero `displaySize` vends a surface. Picking the first match yields a permanently nil `framebufferSurface`, which looks exactly like the API being broken. |
+| `IndigoHIDMessageForMouseNSEvent` takes **9 arguments** on iOS 26 | It takes **six** on this Xcode: `(CGPoint *, CGPoint *, IndigoHIDTarget, NSEventType, NSSize, IndigoHIDEdge)`. The binary states its own prototype as a string, so this needs no guessing. The digitizer target `0x32` was correct. |
+| The HID client is reached through the `SimLegacyHIDDescriptor` IO port | It is constructed directly from the `SimDevice` with `initWithDevice:error:`. The port exists but is not on the path used here. |
+
+## Input: the sequence that works
+
+Verified end to end: a single tap at (200, 835) points landed on the intended
+tab bar item and the screen changed, with idb not installed in the path at all.
+
+```
+SimulatorKit.SimDeviceLegacyHIDClient            (Swift class, ObjC-visible)
+  NSClassFromString("SimulatorKit.SimDeviceLegacyHIDClient")
+  -initWithDevice:error:                          -> client
+  -sendWithMessage:freeWhenDone:completionQueue:completion:
+  -resetHIDSession
+
+IndigoHIDMessageForMouseNSEvent                   (exported C, dlsym from SimulatorKit)
+  (CGPoint *location, CGPoint *unused, IndigoHIDTarget, NSEventType, NSSize screen, IndigoHIDEdge)
+```
+
+The class is **not** registered under a bare `SimDeviceLegacyHIDClient`; it is a
+Swift class, so look it up as `SimulatorKit.SimDeviceLegacyHIDClient` (or the
+mangled `_TtC12SimulatorKit24SimDeviceLegacyHIDClient`). Its `alloc` must go
+through the runtime, since `alloc()` is unavailable in Swift.
+
+### Verified argument values
+
+| Argument | Value that works |
+| --- | --- |
+| `location` | `CGPoint` in **points**, in the device's own coordinate space |
+| second `CGPoint *` | `nil` is accepted for down/up |
+| `IndigoHIDTarget` | **`0x32`** — the digitizer. The research's one correct guess. |
+| `NSEventType` | AppKit values: `leftMouseDown` (1), `leftMouseUp` (2), `leftMouseDragged` (6) |
+| `NSSize` | the device screen size in points, e.g. 402x874 |
+| `IndigoHIDEdge` | `0` |
+
+A tap is a `leftMouseDown` followed by a `leftMouseUp` at the same point.
+
+### Other message constructors, as declared by the binary
+
+All exported C, all `dlsym`-able from SimulatorKit:
+
+| Function | Signature |
+| --- | --- |
+| `IndigoHIDMessageForButton` | `(IndigoHIDButtonKeyCode, IndigoHIDButtonOp, IndigoHIDTarget)` |
+| `IndigoHIDMessageForKeyboardNSEvent` | `(NSEvent *)` |
+| `IndigoHIDMessageForKeyboardArbitrary` | `(uint32_t, IndigoHIDButtonOp)` |
+| `IndigoHIDMessageForScrollEvent` | `(uint32_t, double, double, double, IndigoHIDTarget)` |
+| `IndigoHIDMessageForPressureEvent` | `(CGPoint *, float, float, IndigoHIDTarget, NSSize)` |
+| `IndigoHIDMessageForDigitalCrownEvent` | `(double)` |
+
+The binary carries these prototypes verbatim as strings, which is the fastest
+way to check a signature after an Xcode upgrade:
+
+```
+strings SimulatorKit | grep '^IndigoHIDMessage'
+```
 
 ## Not yet verified
 
 Everything below is a **hypothesis** carried over from the research and must be
 checked against this machine before any code depends on it.
 
-- `IndigoHIDMessageForMouseNSEvent` with a **9-argument** signature (the
-  5-argument form is reported broken on iOS 26).
-- Digitizer target `0x32`.
-- `SimDeviceLegacyHIDClient` as the input client, reached via the
-  `SimLegacyHIDDescriptor` port above.
 - `AXPTranslator` / `AccessibilityPlatformTranslation` for the accessibility
   tree. Note `SimAccessibilityManager` also exists in SimulatorKit and may be
   the easier route; both are unverified.
