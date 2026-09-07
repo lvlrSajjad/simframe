@@ -245,6 +245,63 @@ way to check a signature after an Xcode upgrade:
 strings SimulatorKit | grep '^IndigoHIDMessage'
 ```
 
+## Accessibility: what is mapped so far
+
+Partly explored, **not working yet**. Recorded so the next attempt starts here.
+
+### The transport exists and needs no bridge delegate
+
+```
+SimDevice                                             (CoreSimulator)
+  -sendAccessibilityRequestAsync:completionQueue:completionHandler:   ← responds: yes
+  -accessibilityConnection                            ← an XPC connection, present
+```
+
+This matters: the obvious reading of the framework is that you must implement
+the `accessibilityTranslation*WithToken:` bridge delegate that
+`SimAccessibilityManager` declares — which is what idb does. But CoreSimulator
+already carries requests into the simulator, so that whole layer may be
+avoidable. `SimAccessibilityManager.addWithDisplayView:` wants an `NSView`,
+which a headless daemon does not have, so avoiding it matters.
+
+### The pieces
+
+| Symbol | Notes |
+| --- | --- |
+| `AXPTranslator` | `/System/Library/PrivateFrameworks/AccessibilityPlatformTranslation.framework` |
+| `+sharedInstance` | works; its `platformTranslator` is `AXPTranslator_macOS` |
+| `+sharediOSInstance` | present — presumably the simulator-side translator |
+| `+sharedmacOSInstance` | present |
+| `AXPTranslatorRequest` | NSSecureCoding. `requestType`, `attributeType`, `actionType`, `clientType`, `translation`, `parameters`; `+requestWithTranslation:` |
+| `AXPTranslatorResponse` | `resultData`, `attribute`, `boolResponse`, `error`, `translationResponse`, `associatedRequestType` |
+| Useful translator methods | `processPlatformAXTreeDump:`, `generateAXTreeDumpTypeOnBackgroundThread:completionHandler:`, `objectAtPoint:displayId:bridgeDelegateToken:`, `frontmostApplicationWithDisplayId:bridgeDelegateToken:`, `processAttributeRequest:`, `processHitTest:`, `enableAccessibility` |
+
+### What is not known
+
+- The `requestType` / `attributeType` enum values. Sweeping 0–6 with an
+  otherwise-empty request produced no reply.
+- The completion handler's block signature. A two-argument
+  `(response, error)` block crashed the process with SIGTRAP, which suggests
+  the arity or types are wrong rather than the call being rejected.
+- Whether accessibility must be enabled on the device first
+  (`enableAccessibility` exists on the translator).
+
+### Traps already hit
+
+- Passing `DispatchQueue.main` as the completion queue and then blocking the
+  main thread waiting for the reply is a deadlock that looks exactly like "the
+  API returned nothing".
+- `objc_copyClassList` enumeration crashed the probe outright; dump named
+  classes instead.
+- Naming a loop variable `type` shadows `type(of:)` and produces a confusing
+  compile error.
+
+### Routes ruled out
+
+- `simctl` has no accessibility command; `simctl ui` only sets appearance.
+- idb links `AccessibilityPlatformTranslation` weakly and implements the bridge
+  delegate itself, so there is no simpler public path it is hiding.
+
 ## Not yet verified
 
 Everything below is a **hypothesis** carried over from the research and must be
