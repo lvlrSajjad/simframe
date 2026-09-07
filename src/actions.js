@@ -3,6 +3,7 @@
 // Waiting uses a baseline captured BEFORE each action, which is the whole
 // reason these scripts are reliable rather than racy.
 import * as api from './index.js';
+import * as graph from './graph.js';
 import * as input from './input.js';
 import * as intent from './intent.js';
 import { launchApp, openUrl, setPasteboard, terminateApp } from './simctl.js';
@@ -29,7 +30,21 @@ export function normalizeStep(raw) {
 
 export async function runScript(
   deviceQuery,
-  { steps, autoSettle = true, stableMs = 500, timeoutMs = 8000, continueOnError = false, options } = {},
+  {
+    steps,
+    autoSettle = true,
+    stableMs = 500,
+    timeoutMs = 8000,
+    continueOnError = false,
+    // Check each action against what it did last time, and remember what it
+    // does this time. On by default: a flow that cannot tell a wrong turn from
+    // a right one is worse than no flow.
+    verify = true,
+    // Stop when a verified step lands somewhere it should not have. A flow
+    // continuing past a wrong turn taps controls on a screen nobody intended.
+    stopOnUnexpected = true,
+    options,
+  } = {},
 ) {
   if (!Array.isArray(steps) || !steps.length) throw new Error('a script needs at least one step');
   const { device } = await api.ensureDaemon(deviceQuery, options);
@@ -53,7 +68,11 @@ export async function runScript(
     const step = normalizeStep(raw);
     const stepStart = Date.now();
     // The baseline for "did the screen react" must predate the action itself.
-    const before = (await api.getState(deviceQuery, { options })).state.hash;
+    const beforeState = (await api.getState(deviceQuery, { options })).state;
+    const before = beforeState.hash;
+    const beforeLayout = beforeState.layoutHash;
+    // What this action did last time it was taken here, if ever.
+    const prediction = verify && beforeLayout ? graph.predict(udid, beforeLayout, step) : null;
     try {
       const detail = await runStep(deviceQuery, udid, step, { screen, options, frames });
       let settled = null;
@@ -73,15 +92,39 @@ export async function runScript(
           noVisibleChange: Boolean(w.noVisibleChange),
         };
       }
+      // Verify against what was predicted, and remember what actually
+      // happened. Without this a step that moved the screen the wrong way
+      // reports success, and the flow carries on believing it worked.
+      let verification = null;
+      if (verify && ACTION_STEPS.has(step.action) && beforeLayout) {
+        const afterState = (await api.getState(deviceQuery, { options })).state;
+        const kind = afterState.transition?.kind;
+        verification = {
+          ...graph.verdict({ prediction, before: beforeLayout, after: afterState.layoutHash, kind }),
+          predicted: prediction ? { to: prediction.to.slice(0, 12), kind: prediction.kind, seen: prediction.count } : null,
+          observed: { to: afterState.layoutHash?.slice(0, 12), kind },
+        };
+        if (afterState.settled !== false) {
+          graph.record(udid, { from: beforeLayout, action: step, to: afterState.layoutHash, kind });
+        }
+      }
+
+      const wrongTurn = verification && ['unexpected-screen', 'unexpected-transition'].includes(verification.verdict);
       const note = settled?.noVisibleChange ? ' [no visible change]' : '';
       results.push({
         index: i,
         action: step.action,
+        verification,
         ok: true,
         ms: Date.now() - stepStart,
-        detail: `${detail}${note}`,
+        detail: `${detail}${note}${wrongTurn ? ` [${verification.verdict}: ${verification.detail}]` : ''}`,
         settled,
       });
+      if (wrongTurn && stopOnUnexpected && !continueOnError) {
+        results[results.length - 1].ok = false;
+        results[results.length - 1].error = `${verification.verdict}: ${verification.detail}`;
+        break;
+      }
     } catch (err) {
       results.push({ index: i, action: step.action, ok: false, ms: Date.now() - stepStart, error: err.message });
       failed = true;

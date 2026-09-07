@@ -22,11 +22,18 @@ function mapDir(udid) {
 
 /**
  * How many of the 288 layout bits may differ and still count as the same screen.
- * Measured on a real app: revisiting a screen (with different list rows and a
- * different clock) moved 0-3 bits; different screens were 77-96 apart. 12 sits
- * well clear of both.
+ *
+ * Re-measured across four visits to each of five screens: a revisit is usually
+ * identical (median 0) but the tail reaches 62 when list content has changed,
+ * while different screens sit at 74 and above. That margin is much narrower
+ * than the first calibration suggested, and it is the reason this number stays
+ * conservative rather than being raised to cover the tail.
+ *
+ * The consequence is deliberate: a heavily changed screen is rebuilt rather
+ * than recognised. A rebuild costs ~300ms; a false match taps the wrong
+ * control. See docs/DEFERRED.md on fingerprinting structure instead of pixels.
  */
-export const DEFAULT_TOLERANCE = 12;
+export const DEFAULT_TOLERANCE = 20;
 
 export function recall(udid, hash) {
   if (!hash) return null;

@@ -447,3 +447,50 @@ And one design mistake worth naming: when intent resolution found nothing, the
 code fell through to plain substring matching, which has none of the guards
 above. A fallback that is less safe than the thing it backs up is not a
 fallback. "Not found" is the answer.
+
+## Phase 6 — transition graph and action verification
+
+Every action now records what it did — `(screen, action) -> screen'` with a
+count and the transition kind — and every action is checked against what it did
+last time.
+
+Verdicts: `ok`, `no-visible-change`, `unexpected-screen`,
+`unexpected-transition`, `unverified`. **A step with no prediction is
+`unverified`, not `ok`.** Not knowing what should have happened is not evidence
+that the right thing did, and reporting it as success is how a flow carries on
+past a wrong turn. `sim_do` stops at the first `unexpected-*`.
+
+Learning the four-tab tour, memory and graph cleared first:
+
+| Pass | Verdicts |
+| --- | --- |
+| 1 | unverified × 4 |
+| 2 | unverified, unverified, **ok**, unverified |
+| 4 | unverified, unverified, **ok**, **ok** |
+
+### Why it does not reach four of four
+
+The graph is keyed by the same layout hash as screen memory, and that hash
+fingerprints pixels. The phase's target — every step resolved from graph and
+memory by the third pass — is not met, and the reason is measured rather than
+guessed:
+
+| | Layout-hash distance |
+| --- | --- |
+| Same screen, revisited (n=30) | min 0, **median 0**, max **62** |
+| Different screens (n=10) | **min 74**, median 85 |
+
+A revisit is usually identical, but a list whose content has changed drifts as
+far as 62 bits — against a different-screen floor of 74. No threshold separates
+those cleanly. The tolerance was raised from 12 to 20, which collapsed the tour
+from six stored screens to three; the rest must rebuild.
+
+This also explains the "screen memory hit rate varies" note carried since
+Phase 3. The first calibration measured 0-3 against 77-96 and chose 12, but that
+was on screens whose content happened to be stable, and it was not
+representative.
+
+The fix is not a better threshold. It is to fingerprint **structure** — element
+roles and positions — rather than pixels, which is content-independent by
+construction and which the element map already has the ingredients for. It is
+now the highest-value item in `docs/DEFERRED.md`.

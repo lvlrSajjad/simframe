@@ -76,14 +76,35 @@ would be worth adding:
 `APPLY`, `OK`, `SAVE`, `DONE` and friends are hardcoded. A localised UI needs
 them extended, and the same applies to the synonym table Phase 5 introduces.
 
-## Unexplained
+## Known and unresolved
 
-### Screen-memory hit rate varies more than it should
-Phase 3's flow saw 1/1/2 of four controls resolved from memory where earlier runs
-saw 1/3/4. The app was mid-load on the first pass and its list screens carry live
-data, so it is probably that — but it was not isolated, so it is not known to be
-fine. Phase 4's settle detector should improve it; if it does not, this is worth
-a proper look before Phase 6 builds a transition graph on top of the same keys.
+### The layout hash fingerprints pixels, and content is pixels
+**This was the "unexplained variance", and it is now measured.** Across four
+visits to each of five screens: a revisit is usually identical (median 0 bits)
+but the tail reaches **62** when list content has changed, while different
+screens sit at **74** and above.
+
+The first calibration saw 0-3 against 77-96 and chose a tolerance of 12. That
+was measured on screens whose content happened to be stable, and it is not
+representative. The real margin is 62 against 74, which is narrow enough that no
+threshold separates the two cleanly.
+
+The tolerance is 20: it covers ordinary drift and leaves the tail to rebuild,
+because a rebuild costs about 300ms and a false match taps the wrong control.
+
+The fix is not a better threshold. It is to fingerprint **structure** rather
+than pixels — the research calls for "dHash of structure + role histogram", and
+the element map that would come from is already built. A fingerprint over
+element roles and positions is content-independent by construction, and would
+make both screen memory and the transition graph stable on exactly the screens
+where they are weakest today. This is the single highest-value item in this
+file.
+
+### Phase 6 left graph-assisted navigation unbuilt
+`simframe goto "<screen>"` and flow save/replay are specified in
+`docs/PHASES.md` and not implemented. Both need the graph to recognise screens
+reliably, which the pixel fingerprint does not yet do — so they are blocked on
+the structural fingerprint above rather than on effort.
 
 ## Product
 
