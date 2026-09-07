@@ -39,10 +39,15 @@ public final class IndigoHID {
     ) -> UnsafeMutableRawPointer?
     private typealias ButtonFn = @convention(c) (UInt32, UInt32, UInt32) -> UnsafeMutableRawPointer?
     private typealias KeyboardFn = @convention(c) (UInt32, UInt32) -> UnsafeMutableRawPointer?
+    /// Takes an NSEvent, which carries the *characters* rather than a key
+    /// position — this is how Simulator.app types, and why typing there is
+    /// layout-correct while raw usage codes are not.
+    private typealias KeyboardEventFn = @convention(c) (AnyObject) -> UnsafeMutableRawPointer?
 
     private let makeMouse: MouseFn
     private let makeButton: ButtonFn?
     private let makeKeyboard: KeyboardFn?
+    private let makeKeyboardEvent: KeyboardEventFn?
 
     public init(device: NSObject, simulatorKit: UnsafeMutableRawPointer?) throws {
         // A Swift class, so it is registered under its qualified name; a bare
@@ -75,6 +80,7 @@ public final class IndigoHID {
         makeMouse = unsafeBitCast(mouseSym, to: MouseFn.self)
         makeButton = dlsym(simulatorKit, "IndigoHIDMessageForButton").map { unsafeBitCast($0, to: ButtonFn.self) }
         makeKeyboard = dlsym(simulatorKit, "IndigoHIDMessageForKeyboardArbitrary").map { unsafeBitCast($0, to: KeyboardFn.self) }
+        makeKeyboardEvent = dlsym(simulatorKit, "IndigoHIDMessageForKeyboardNSEvent").map { unsafeBitCast($0, to: KeyboardEventFn.self) }
     }
 
     private func dispatch(_ message: UnsafeMutableRawPointer?) {
@@ -97,6 +103,15 @@ public final class IndigoHID {
     public func key(usage: UInt32, op: ButtonOp) {
         guard let makeKeyboard else { return }
         dispatch(makeKeyboard(usage, op.rawValue))
+    }
+
+    /// True when the character-carrying keyboard path is available.
+    public var canSendKeyboardEvents: Bool { makeKeyboardEvent != nil }
+
+    /// Send a key event built from characters rather than a key position.
+    public func keyboardEvent(_ event: AnyObject) {
+        guard let makeKeyboardEvent else { return }
+        dispatch(makeKeyboardEvent(event))
     }
 
     public func resetSession() {

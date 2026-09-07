@@ -199,9 +199,27 @@ is currently active, which iOS remembers per field. Automation cannot reliably
 control that, and switching the phone's keyboard to English does not fix a field
 iOS has already associated with another layout.
 
-So: **key events are for interaction, the pasteboard is for content.** `paste()`
-runs `simctl pbcopy` and then Command-V (usage `0x19` with left GUI `0xE3`),
-which carries characters rather than key positions.
+### The NSEvent path does not help — tested
+
+`IndigoHIDMessageForKeyboardNSEvent(NSEvent *)` looks like the answer, since an
+`NSEvent` carries `characters` as well as a `keyCode`, and it is what
+Simulator.app uses. It is not.
+
+Synthesising events with `NSEvent.keyEvent(... characters: "X" ... keyCode: 0)`
+produced `ش` for **every** character — letters, digits and space alike — with the
+count growing by exactly the number typed. The constructor reads `keyCode`, not
+`characters`, so `keyCode: 0` mapped everything to one key, which the Persian
+layout renders as `ش`. Supplying real virtual key codes only returns you to
+layout mapping.
+
+Beware a trap here: an earlier run appeared to type `Fryer` correctly through
+this path. That text was left in the field by a previous `paste()` call. Clear
+the field between attempts, or you will confirm whatever you hoped for.
+
+So: **key events are for interaction, the pasteboard is for content.** There is
+no layout-independent key-event route from outside the device. `paste()` runs
+`simctl pbcopy` and then Command-V (usage `0x19` with left GUI `0xE3`), which
+carries characters rather than key positions.
 
 Because the failure is silent — text appears, so nothing looks broken —
 `inputStatus()` reads `AppleKeyboards` and warns when any non-English, non-emoji

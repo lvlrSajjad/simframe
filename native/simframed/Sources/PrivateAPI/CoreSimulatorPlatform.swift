@@ -319,6 +319,10 @@ extension CoreSimulatorPlatform {
 
     public func type(_ text: String) throws {
         let (hid, _) = try requireHID()
+        // Key events carry a key *position*, which iOS maps through whatever
+        // keyboard layout is active. There is no way to make that
+        // layout-independent from out here — see docs/PRIVATE_API.md — so
+        // anything that must be exact goes through paste() instead.
         for character in text.unicodeScalars {
             guard let usage = HIDKeyboard.usage(for: character) else { continue }
             if usage.shift { hid.key(usage: HIDKeyboard.leftShift, op: .down) }
