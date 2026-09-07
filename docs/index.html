@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>simframe — always-warm iOS Simulator frames for coding agents</title>
-<meta name="description" content="A background capture loop keeps the newest iOS Simulator frame warm, so a coding agent reads the screen in ~20ms instead of waiting ~130ms on a screenshot — and can check whether anything changed in text form for ~2ms.">
+<title>simframe — eyes, hands and memory for an iOS Simulator agent</title>
+<meta name="description" content="Eyes, hands and memory for an agent driving the iOS Simulator: warm frames, whole flows in one call, on-device OCR, and screens remembered between visits.">
 <meta property="og:title" content="simframe">
-<meta property="og:description" content="Always-warm iOS Simulator frames for coding agents. Read the screen in ~20ms instead of waiting on a screenshot.">
+<meta property="og:description" content="Eyes, hands and memory for an agent driving the iOS Simulator.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://lvlrsajjad.github.io/simframe/">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📱</text></svg>">
@@ -139,11 +139,11 @@
 
 <header>
   <h1>simframe<span class="dot">.</span></h1>
-  <p class="tagline">Always-warm iOS Simulator frames for coding agents.</p>
+  <p class="tagline">Eyes, hands and memory for an agent driving the iOS&nbsp;Simulator.</p>
   <p class="sub">
-    An agent driving the iOS Simulator spends most of its time waiting on screenshots.
-    simframe keeps the newest frame permanently warm in the background, so looking at
-    the screen stops being something you wait for.
+    An agent driving the Simulator is slow for three reasons, and only the first is
+    obvious: every look is a wait, every step is a round trip, and nothing is ever
+    remembered. simframe fixes all three.
   </p>
   <div class="badges">
     <a class="badge" href="https://github.com/lvlrSajjad/simframe">GitHub</a>
@@ -153,175 +153,152 @@
   </div>
 </header>
 
-<h2>The problem</h2>
-<p>
-  Every “let me check the screen” is a fresh <code>simctl io screenshot</code>: a process
-  spawn, a framebuffer grab, a file write, an image encode. That is roughly
-  <strong>130&nbsp;ms of pure blocking latency</strong>, paid again on every single look — and
-  paid twice whenever the agent captures mid-animation, sees a half-drawn frame, and has
-  to look again.
-</p>
-
+<h2>What changed, measured</h2>
+<p>The same four-tab navigation flow, on a real production app:</p>
+<table>
+  <thead><tr><th>Question</th><th>Before</th><th>With simframe</th></tr></thead>
+  <tbody>
+    <tr><td>Look at the screen</td><td>~130–400 ms, blocking</td><td><strong>~20 ms</strong>, already captured</td></tr>
+    <tr><td>“Did anything change?”</td><td>a full image</td><td><strong>~2 ms</strong>, text only</td></tr>
+    <tr><td>A five-step flow</td><td>5+ model round trips</td><td><strong>one call</strong></td></tr>
+    <tr><td>Finding a control</td><td>read tree (~570 ms) + reason about it</td><td><strong>~1 ms</strong> from memory</td></tr>
+    <tr><td>The same flow, third run</td><td>no improvement — every run is the first</td><td><strong>3304 ms</strong>, 4/4 from memory</td></tr>
+  </tbody>
+</table>
 <div class="flow">
-  <div class="row slow"><span>screenshot &nbsp;→&nbsp; spawn simctl → grab → encode → image</span><span class="ms">~130–400 ms</span></div>
-  <div class="row fast"><span>sim_look &nbsp;→&nbsp; read the frame that is already there → image</span><span class="ms">~20 ms</span></div>
-  <div class="row fast"><span>sim_state &nbsp;→&nbsp; read 300 bytes of JSON → text, no image</span><span class="ms">~2 ms</span></div>
+  <div class="row slow"><span>run 1 &nbsp;·&nbsp; 1 of 4 controls known</span><span class="ms">7370 ms</span></div>
+  <div class="row fast"><span>run 2 &nbsp;·&nbsp; 3 of 4 controls known</span><span class="ms">5160 ms</span></div>
+  <div class="row fast"><span>run 3 &nbsp;·&nbsp; 4 of 4 from memory</span><span class="ms">3304 ms</span></div>
 </div>
+<p class="note">
+  No mis-taps in any run. What is left is mostly the app's own animation and data load.
+</p>
 
 <h2>Install</h2>
 <pre><span class="cmt"># Claude Code</span>
-claude mcp add simframe -- npx -y simframe mcp
+claude mcp add --scope user simframe -- npx -y simframe mcp
 
 <span class="cmt"># or use it directly</span>
 npm install -g simframe
 simframe doctor</pre>
 <p class="note">
-  Nothing to configure. Capture starts on the first call, targets the booted simulator,
-  and stops itself 15 minutes after the last request.
+  Capture starts on the first call, targets the booted simulator, and stops itself
+  15 minutes after the last request.
 </p>
 
-<h2>What the agent gets</h2>
+<h2>Capabilities are independent</h2>
+<p>
+  Each layer works without the ones below it, and <code>doctor</code> tells you which
+  you have. <strong>Watching the screen needs nothing but Xcode.</strong>
+</p>
 <table>
-  <thead><tr><th>Question</th><th>Before</th><th>With simframe</th></tr></thead>
+  <thead><tr><th>Capability</th><th>Needs</th><th>Without it</th></tr></thead>
   <tbody>
-    <tr><td>What’s on screen?</td><td>screenshot, ~130–400 ms, a full image every time</td><td><code>sim_look</code> — warm frame, ~20 ms</td></tr>
-    <tr><td>Has it finished loading?</td><td>screenshot in a loop, an image per attempt</td><td><code>sim_state</code> — ~2 ms, <strong>text only</strong></td></tr>
-    <tr><td>Did my tap do anything?</td><td>screenshot, compare by eye</td><td><code>sim_state</code> — what changed <strong>since your last look</strong>, as text</td></tr>
-    <tr><td>Wait for the animation</td><td>sleep, screenshot, hope, repeat</td><td><code>sim_wait</code> — waits for a change, <em>then</em> for stillness</td></tr>
-    <tr><td>What did that transition look like?</td><td>5 screenshots, 5 round trips, 5 images</td><td><code>sim_strip</code> — N buffered frames tiled into <strong>one</strong> image</td></tr>
-    <tr><td>The screen is already different — what did I miss?</td><td>nothing; re-run and watch harder</td><td><code>sim_recall</code> — a text timeline of the last minute</td></tr>
+    <tr><td>Watch, wait, recall</td><td>nothing extra</td><td>—</td></tr>
+    <tr><td>Read labels + coordinates from pixels</td><td><code>swiftc</code></td><td>falls back to the accessibility tree alone</td></tr>
+    <tr><td>Tap, type, swipe</td><td><code>idb</code></td><td>simframe observes but cannot touch</td></tr>
   </tbody>
 </table>
 
-<h2>The real bottleneck is round trips</h2>
-<p>
-  Once capture is warm, observation costs 1–23&nbsp;ms. A model turn costs <em>seconds</em>.
-  A flow that takes a person 30 seconds is maybe twelve interactions — done one tap per
-  turn, that is twelve turns of inference, and no amount of tool speed touches it.
-</p>
-<div class="flow">
-  <div class="row fast"><span>simframe observation</span><span class="ms">1–23 ms</span></div>
-  <div class="row fast"><span>an input call</span><span class="ms">tens of ms</span></div>
-  <div class="row slow"><span>one model turn</span><span class="ms">seconds</span></div>
-</div>
-<p>So <code>sim_do</code> runs the whole flow in one call, settling between steps:</p>
-<pre>[{"tap": "Assets"},
- {"tap": "Add Asset"},
- {"type": {"into": "Name", "text": "Fryer 3"}},
- {"tap": "Save"},
- {"waitText": "Saved", "timeoutMs": 5000}]</pre>
-<p>
-  Taps go by accessibility label, not coordinates, so they cannot miss — mis-taps from
-  pixel-measuring are where agent time actually goes. Assertions live inside the script, so
-  the flow verifies itself instead of spending a turn asking whether it worked. Input needs
-  <a href="https://github.com/facebook/idb">idb</a>; observation needs only Xcode.
-</p>
-
 <h2>Baselines: the thing to understand</h2>
 <p>
-  Every change question is really “changed <em>since when</em>?” — and the answer is almost
-  never “since the previous frame”. A UI transition is over in about 700&nbsp;ms, so
-  comparing consecutive frames tells a caller that polls every few seconds “nothing
+  Every change question is really “changed <em>since when</em>?” — and the answer is
+  almost never “since the previous frame”. A UI transition is over in about 700&nbsp;ms,
+  so comparing consecutive frames tells a caller that polls every few seconds “nothing
   changed”, even though the screen is completely different from when it last looked.
 </p>
 <p>
-  So simframe compares against <strong>the last frame you observed</strong>. Over MCP that is
-  automatic — each call remembers what it showed you. From the CLI you capture a baseline
-  before acting:
+  So simframe compares against <strong>the last frame you observed</strong>. Over MCP that
+  is automatic. From the CLI you capture a baseline before acting:
 </p>
-<pre>H=$(simframe mark)          <span class="cmt"># hash of what is on screen now</span>
+<pre>H=$(simframe mark)
 <span class="cmt"># ...tap, launch, navigate...</span>
 simframe wait --since=$H    <span class="cmt"># change, then settle</span>
 simframe state --since=$H   <span class="cmt"># what moved, as text</span></pre>
 
-<h2>It remembers the last minute</h2>
+<h2>Screen memory</h2>
 <p>
-  Looking only at the newest frame is like having no short-term memory: if the screen is
-  already different by the time you look, the change is simply gone. simframe keeps every
-  frame for the last 6&nbsp;seconds, thinned to about 2&nbsp;fps out to 60&nbsp;seconds —
-  and reads that memory back as text first.
+  An accessibility tree is a promise apps do not always keep. Tested against a real
+  production app, its custom tab bar published <strong>no children at all</strong>, its icon
+  buttons carried unreadable private-use glyphs, and its React&nbsp;Native text inputs were
+  absent entirely — the controls used most were exactly the ones that could not be
+  tapped by name.
 </p>
-<pre>$ simframe recall
-iPhone 17 Pro — remembering 32s, 45 frames buffered
-  30.7s ago  screen changed  25%  over 1.0s
-  24.8s ago  screen changed  25%  over 1.4s
-  18.5s ago  screen changed  28%  over 1.1s
-  12.4s ago  screen changed  29%  over 1.2s
-   6.3s ago  screen changed  25%  over 0.9s
-still for 5.6s</pre>
-<p>
-  Five transitions reconstructed after the fact, for no image tokens at all — then fetch
-  whichever one matters with <code>recall --ago=25000</code>.
-</p>
-
-<h2>The part that pays for itself</h2>
-<p>
-  A screen hash and a 4×8 movement grid cost a couple of hundred bytes, so an agent can
-  poll as often as it likes and spend image tokens only when there is genuinely something
-  new to look at.
-</p>
-<div class="map">
-<pre>$ simframe state --since=$H
-iPhone 17 Pro  frame #22  age 41ms
-hash 10ff8f3effef8f8f8fcf8fcfcfefcf83
-CHANGED since 3523ms ago: 25.4%
-<span class="lit">#@@@
-*#*@
-#@@@
-##@@
-##@#
-##@#
-@@@@
-@@@@</span></pre>
-  <div class="legend">
-    <p>Read top-left to bottom-right, <code>.</code> through <code>@</code> for more movement.</p>
-    <p>A new screen replaced the old one while the agent was not looking — and it knows
-    that, and roughly where the movement was, without spending a single image token.</p>
-  </div>
-</div>
-
-<h2>How it works</h2>
-<pre>┌───────────────────── background, one loop per simulator ─────────────────────┐
-│   xcrun simctl io screenshot  ──►  sips -Z  ──►  decode PNG  ──►  compare    │
-│         ~130 ms                     ~30 ms         ~6 ms                     │
-│                                     │                                        │
-│                 rename into ~/.simframe/&lt;udid&gt;/                              │
-│                 latest.png · ring/&lt;seq&gt;.png · state.json                     │
-└──────────────────────────────────────────────────────────────────────────────┘
-                                      │  a rename is atomic
-┌─────────────────────────────────────▼────────────────────────────────────────┐
-│   MCP server / CLI: stat + read.  No simctl anywhere in the request path.    │
-└──────────────────────────────────────────────────────────────────────────────┘</pre>
+<p>So simframe reads the screen two ways and remembers the result:</p>
 <ul>
-  <li><strong>Files are the IPC.</strong> The loop renames completed frames into place and readers just read them. A rename is atomic, so a reader can never see a half-written frame — and there is no socket, port or protocol to get wrong.</li>
-  <li><strong>Zero image dependencies.</strong> Resizing uses <code>sips</code>, which ships with macOS. PNG encode/decode and all frame comparison are a few hundred lines of plain JavaScript over <code>node:zlib</code>. The only runtime dependency is the MCP SDK.</li>
-  <li><strong>It backs off when nothing is happening.</strong> 4&nbsp;fps while the screen moves, 1.5&nbsp;fps once it has been still for 2.5&nbsp;s, snapping back instantly on change — <strong>1.1&nbsp;% CPU idle, 3.1&nbsp;% active</strong>.</li>
-  <li><strong>Comparison happens on a small grayscale grid,</strong> which is why “did anything change?” costs microseconds. The hash is a 128-bit mean-threshold hash: the same screen always hashes the same, even though the bytes <code>simctl</code> emits are not stable frame to frame.</li>
-  <li><strong>One writer per device.</strong> Ownership lives in <code>meta.json</code>; a second loop refuses to start and a superseded loop retires itself, so two loops can never overwrite or prune each other’s frames.</li>
-  <li><strong>Capture ignores the window.</strong> <code>simctl</code> reads the framebuffer, so frames keep flowing while the Simulator is hidden, buried behind other windows, or on another Space.</li>
+  <li><strong>Accessibility</strong> gives real hit targets, types and enabled state.</li>
+  <li><strong>On-device OCR</strong> (Apple's Vision, ~290&nbsp;ms, no model round trip) gives every label a person can actually see, with coordinates.</li>
+  <li>The merge is keyed by a <strong>layout hash</strong>, so the next visit is a file read.</li>
 </ul>
+<div class="flow">
+  <div class="row slow"><span>first visit to a screen &nbsp;·&nbsp; read tree + OCR, store the map</span><span class="ms">~600 ms</span></div>
+  <div class="row fast"><span>every visit after that &nbsp;·&nbsp; look it up</span><span class="ms">~1 ms</span></div>
+</div>
+<p>
+  OCR also beats measuring by eye. On one tab bar the first tab's centre sat at
+  x&nbsp;=&nbsp;62, not the x&nbsp;=&nbsp;40 an even five-way split predicts — a silent mis-tap
+  on every attempt.
+</p>
+
+<h2>Why a layout hash, not a frame hash</h2>
+<p>
+  A frame hash changes whenever any pixel group changes — a clock digit, one new row of
+  data — which makes it useless as a key for “have I seen this screen before?”. The
+  layout hash crops the status bar and takes a difference hash over a 12×24 grid.
+</p>
+<table>
+  <tbody>
+    <tr><td>Same screen, revisited while settled</td><td class="num"><strong>0–4</strong></td></tr>
+    <tr><td>Same screen, but loading vs loaded</td><td class="num">48–98</td></tr>
+    <tr><td><strong>Different screens</strong></td><td class="num"><strong>77–113</strong></td></tr>
+  </tbody>
+</table>
+<p>
+  Only one of those errors is dangerous. Matching the <em>wrong</em> screen would tap the
+  wrong control, and that needs two different screens within 12 bits of each other — the
+  closest pair ever measured was 77. Failing to recognise a screen you have seen is
+  harmless: it rebuilds the map and taps correctly. So the tolerance sits far below the
+  collision floor rather than being tuned to maximise hits.
+</p>
+
+<h2>Does this work on <em>your</em> app?</h2>
+<p>
+  Nothing here is written for a particular app. What varies is how much accessibility
+  tree an app publishes, and simframe is built to degrade rather than fail:
+</p>
+<ul>
+  <li><strong>Good tree</strong> → tap by label, batch aggressively.</li>
+  <li><strong>Partial tree</strong> (custom tab bars, icon buttons) → OCR fills the gaps; tap by the visible text.</li>
+  <li><strong>No tree at all</strong> → OCR alone still yields labels and coordinates.</li>
+</ul>
+<p class="note">
+  Run <code>simframe ui</code> on any screen to see exactly what simframe can see, each
+  target marked <code>ax</code> or <code>ocr</code>. Two honest caveats: OCR reads
+  <em>text</em>, so a purely graphical icon is invisible to it, and the confirm vocabulary
+  (<code>APPLY</code>, <code>OK</code>, <code>SAVE</code>…) is English.
+</p>
 
 <h2>Measured</h2>
 <p class="note">iPhone 17 Pro, iOS 26.5, Apple Silicon, default settings.</p>
 <table>
   <tbody>
-    <tr><td>Warm frame read (<code>sim_look</code>)</td><td class="num">~20 ms</td></tr>
-    <tr><td>State check (<code>sim_state</code>)</td><td class="num">~2 ms</td></tr>
-    <tr><td>Contact sheet (<code>sim_strip</code>, 5 frames)</td><td class="num">~30 ms</td></tr>
-    <tr><td>Cold start, first frame</td><td class="num">~400 ms, once</td></tr>
-    <tr><td>Frame age when read</td><td class="num">≤ 250 ms active · ≤ 670 ms idle</td></tr>
+    <tr><td>Warm frame read</td><td class="num">~20 ms</td></tr>
+    <tr><td>State check, text only</td><td class="num">~2 ms</td></tr>
+    <tr><td>Accessibility tree read</td><td class="num">~570 ms</td></tr>
+    <tr><td>On-device OCR of a full frame</td><td class="num">~290 ms</td></tr>
+    <tr><td>Screen map: first visit / remembered</td><td class="num">~600 ms / ~1 ms</td></tr>
     <tr><td>Raw <code>simctl io screenshot</code>, for comparison</td><td class="num">~130 ms, every look</td></tr>
     <tr><td>CPU</td><td class="num">1.1 % idle · 3.1 % active</td></tr>
-    <tr><td>Disk</td><td class="num">~2.7 MB for 32 s of memory</td></tr>
+    <tr><td>Frame memory</td><td class="num">~60 s of screen, ~2.7 MB</td></tr>
   </tbody>
 </table>
 
 <h2>Honest limitations</h2>
 <ul>
   <li>Simulators only — <code>simctl</code> cannot capture a physical device.</li>
-  <li>Input depends on idb, which uses private CoreSimulator APIs and can lag a new Xcode release. Observation depends only on <code>simctl</code>.</li>
+  <li>Capture tops out near 6&nbsp;fps, so fast animations are sampled, not recorded.</li>
+  <li>A screen mid-load genuinely does not look like that screen loaded, so the first visit after a cold launch usually rebuilds its map.</li>
   <li>It speeds up <em>confirming</em> a fix, not <em>locating</em> one. A bug living in a memo comparator or a stale closure is not visible in any frame.</li>
-  <li>Capture tops out near 6&nbsp;fps, because <code>simctl io screenshot</code> costs ~130&nbsp;ms. Fast animations are sampled, not recorded.</li>
 </ul>
 
 <footer>
