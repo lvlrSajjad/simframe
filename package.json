@@ -2,7 +2,7 @@
   "name": "simframe",
   "version": "0.1.0",
   "mcpName": "io.github.lvlrSajjad/simframe",
-  "description": "Always-warm iOS Simulator frame cache with an MCP server, so coding agents can see the screen instantly instead of waiting on screenshots.",
+  "description": "Always-warm iOS Simulator frames: agents read the screen in ~20ms instead of waiting on screenshots. MCP server + CLI.",
   "keywords": [
     "ios",
     "simulator",

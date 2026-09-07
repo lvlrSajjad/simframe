@@ -1,0 +1,76 @@
+name: release
+
+# Publishes to npm and to the official MCP Registry when a v* tag is pushed.
+#
+# One-time setup: add an npm automation token as the NPM_TOKEN repository
+# secret. The MCP Registry needs no secret — it trusts this workflow's GitHub
+# OIDC identity, which is why `id-token: write` is granted below.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    # macOS, because package.json declares "os": ["darwin"] and npm ci honours it.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+      - run: npm test
+
+      - name: Tag, package.json and server.json must agree
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          node -e '
+            const tag = process.argv[1];
+            const pkg = require("./package.json");
+            const srv = require("./server.json");
+            const problems = [];
+            if (pkg.version !== tag) problems.push(`tag ${tag} != package.json ${pkg.version}`);
+            if (srv.version !== tag) problems.push(`tag ${tag} != server.json ${srv.version}`);
+            if (srv.packages[0].version !== tag) problems.push(`tag ${tag} != server.json package version ${srv.packages[0].version}`);
+            if (pkg.mcpName !== srv.name) problems.push(`mcpName ${pkg.mcpName} != server.json name ${srv.name}`);
+            if (problems.length) {
+              console.error(problems.join("\n"));
+              process.exit(1);
+            }
+            console.log(`version ${tag} is consistent across package.json and server.json`);
+          ' "$TAG"
+
+      - name: Install mcp-publisher
+        run: |
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            arm64|aarch64) ASSET_ARCH=arm64 ;;
+            x86_64) ASSET_ARCH=amd64 ;;
+            *) echo "unsupported arch $ARCH"; exit 1 ;;
+          esac
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_darwin_${ASSET_ARCH}.tar.gz" \
+            | tar -xz mcp-publisher
+          ./mcp-publisher --version
+
+      - name: Validate server.json
+        run: ./mcp-publisher validate
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to the MCP Registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

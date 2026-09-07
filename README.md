@@ -1,6 +1,12 @@
 # simframe
 
+[![ci](https://github.com/lvlrSajjad/simframe/actions/workflows/ci.yml/badge.svg)](https://github.com/lvlrSajjad/simframe/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/simframe.svg)](https://www.npmjs.com/package/simframe)
+[![license](https://img.shields.io/npm/l/simframe.svg)](./LICENSE)
+
 **Always-warm iOS Simulator frames for coding agents.**
+
+[Website](https://lvlrsajjad.github.io/simframe/) · [npm](https://www.npmjs.com/package/simframe)
 
 An agent that drives the iOS Simulator spends most of its time waiting on
 screenshots. Every "let me check the screen" is a fresh `simctl io screenshot`:
@@ -195,6 +201,35 @@ readable. `sim_state` sends no image at all.
   labels without spending image tokens.
 - Fusing input with settle-and-look, so tap → wait → see is one round trip
   rather than three.
+
+## Releasing
+
+`npm version <patch|minor|major>` does not update `server.json`, so bump both,
+then push the tag:
+
+```bash
+npm version minor --no-git-tag-version      # bumps package.json
+$EDITOR server.json                         # match "version" and packages[0].version
+git commit -am "Release v0.2.0" && git tag v0.2.0
+git push && git push --tags
+```
+
+The `release` workflow then verifies that the tag, `package.json` and
+`server.json` all agree, validates `server.json` against the live registry, and
+publishes to npm and to the MCP Registry. It needs an npm automation token in
+the `NPM_TOKEN` repository secret; the MCP Registry needs no secret, because it
+trusts the workflow's GitHub OIDC identity.
+
+To publish by hand instead:
+
+```bash
+npm publish --access public
+
+curl -fsSL https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_darwin_arm64.tar.gz | tar -xz mcp-publisher
+./mcp-publisher validate
+./mcp-publisher login github
+./mcp-publisher publish
+```
 
 ## License
 
