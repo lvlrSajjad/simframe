@@ -83,3 +83,115 @@ test('scaleBitmap preserves a solid colour at any size', () => {
   assert.equal(small.height, 9);
   assert.deepEqual(Array.from(small.data.subarray(0, 4)), [10, 20, 30, 255]);
 });
+
+// --- baseline resolution: the bug that made the change signal look broken ---
+import { hexToSignature, signatureToHex } from '../src/analyze.js';
+import { resolveBaseline } from '../src/index.js';
+
+// Epoch milliseconds, because a numeric baseline is read as a timestamp only
+// when it is far larger than any plausible frame sequence number.
+const T = 1_757_000_000_000;
+
+function fakeState() {
+  return {
+    seq: 30,
+    hash: 'cccc',
+    lastChangeAt: T + 5000,
+    history: [
+      { seq: 28, at: T + 4000, hash: 'aaaa', sig: signatureToHex([1, 2, 3]) },
+      { seq: 29, at: T + 4500, hash: 'bbbb', sig: signatureToHex([4, 5, 6]) },
+      { seq: 30, at: T + 5000, hash: 'cccc', sig: signatureToHex([7, 8, 9]) },
+    ],
+  };
+}
+
+test('signature hex round-trips', () => {
+  assert.deepEqual(hexToSignature(signatureToHex([0, 15, 16, 255])), [0, 15, 16, 255]);
+});
+
+test('a baseline resolves by frame hash', () => {
+  const b = resolveBaseline(fakeState(), 'aaaa');
+  assert.equal(b.kind, 'history');
+  assert.equal(b.entry.seq, 28);
+});
+
+test('a baseline resolves by sequence number', () => {
+  const b = resolveBaseline(fakeState(), 29);
+  assert.equal(b.kind, 'history');
+  assert.equal(b.entry.hash, 'bbbb');
+});
+
+test('a baseline older than the history still answers whether it changed', () => {
+  const changed = resolveBaseline(fakeState(), T + 4999);
+  assert.equal(changed.kind, 'coarse');
+  assert.equal(changed.changed, true, 'lastChangeAt is after this baseline');
+
+  const unchanged = resolveBaseline(fakeState(), T + 5001);
+  assert.equal(unchanged.kind, 'coarse');
+  assert.equal(unchanged.changed, false);
+});
+
+test('an unknown baseline is reported rather than silently ignored', () => {
+  assert.equal(resolveBaseline(fakeState(), 'deadbeef').kind, 'unmatched');
+});
+
+test('no baseline means no comparison', () => {
+  assert.equal(resolveBaseline(fakeState(), undefined), null);
+});
+
+// --- frame memory: retention thinning and even sampling ---
+import { thinRing } from '../src/daemon.js';
+import { spreadEvenly } from '../src/index.js';
+
+const RETENTION = { retainMs: 60_000, fineMs: 6_000, keyframeMs: 450 };
+
+test('thinRing keeps every recent frame and thins older ones', () => {
+  const now = 1_000_000;
+  // 4fps for 30s: recent frames should survive intact, older ones get thinned.
+  const index = [];
+  for (let at = now - 30_000; at <= now; at += 250) index.push({ seq: at, at });
+
+  const dropped = [];
+  const kept = thinRing(index, now, RETENTION, (seq) => dropped.push(seq));
+
+  const recent = kept.filter((f) => now - f.at <= RETENTION.fineMs);
+  const older = kept.filter((f) => now - f.at > RETENTION.fineMs);
+  assert.equal(recent.length, 25, 'every frame inside the fine window is kept');
+  assert.ok(older.length > 0 && older.length < 96, 'older frames are thinned, not dropped');
+  assert.equal(kept.length + dropped.length, index.length, 'every frame is kept or dropped');
+
+  for (let i = 1; i < older.length; i++) {
+    assert.ok(
+      older[i].at - older[i - 1].at >= RETENTION.keyframeMs - 1,
+      'thinned frames are at least keyframeMs apart',
+    );
+  }
+  assert.deepEqual(kept, [...kept].sort((a, b) => a.at - b.at), 'kept frames stay in order');
+});
+
+test('thinRing drops everything past the retention window', () => {
+  const now = 1_000_000;
+  const index = [
+    { seq: 1, at: now - 90_000 },
+    { seq: 2, at: now - 61_000 },
+    { seq: 3, at: now - 1_000 },
+  ];
+  const dropped = [];
+  const kept = thinRing(index, now, RETENTION, (seq) => dropped.push(seq));
+  assert.deepEqual(kept.map((f) => f.seq), [3]);
+  assert.deepEqual(dropped.sort(), [1, 2]);
+});
+
+test('spreadEvenly samples across a span and keeps both ends', () => {
+  const items = Array.from({ length: 20 }, (_, i) => i);
+  const picked = spreadEvenly(items, 5);
+  assert.equal(picked.length, 5);
+  assert.equal(picked[0], 0, 'keeps the oldest');
+  assert.equal(picked[4], 19, 'keeps the newest');
+  assert.deepEqual(picked, [...picked].sort((a, b) => a - b));
+});
+
+test('spreadEvenly returns everything when asked for more than it has', () => {
+  assert.deepEqual(spreadEvenly([1, 2, 3], 10), [1, 2, 3]);
+  assert.deepEqual(spreadEvenly([1, 2, 3], 1), [3], 'a single sample is the newest');
+});

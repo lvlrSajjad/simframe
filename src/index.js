@@ -5,7 +5,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULTS, STATE_VERSION } from './daemon.js';
 import { decodePng, encodePng, scaleBitmap } from './png.js';
-import { REGION_COLS, regionMap } from './analyze.js';
+import {
+  REGION_COLS,
+  hexToSignature,
+  regionDeltas,
+  regionMap,
+  signatureDiff,
+} from './analyze.js';
 import { resolveDevice, resize } from './simctl.js';
 import * as store from './store.js';
 
@@ -120,9 +126,100 @@ function readLogTail(file, lines = 6) {
   return safeRead(file).trim().split('\n').slice(-lines).join('\n');
 }
 
-export function stopDaemon(udid) {
+/** A frame this old means the capture loop is wedged, not that the screen is calm. */
+export const STALE_FRAME_MS = 2500;
+
+/** Below this a "change" is a clock digit or a caret, not a new screen. */
+export const MINOR_CHANGE = 0.004;
+export const MAJOR_CHANGE = 0.03;
+
+export function changeLevel(diff) {
+  if (diff > MAJOR_CHANGE) return 'major';
+  if (diff > MINOR_CHANGE) return 'minor';
+  return 'none';
+}
+
+export function liveness(udid, state) {
+  const ageMs = Date.now() - state.capturedAt;
+  const { running } = daemonStatus(udid);
+  if (!running) {
+    return { ok: false, ageMs, note: 'the capture loop has died; the frame you are looking at is the last one it wrote' };
+  }
+  if (ageMs > STALE_FRAME_MS) {
+    return { ok: false, ageMs, note: `capture loop is stalled: newest frame is ${ageMs}ms old` };
+  }
+  return { ok: true, ageMs, note: null };
+}
+
+/**
+ * Find the frame a caller is diffing against. `since` may be a frame hash, a
+ * sequence number, or a millisecond timestamp. Baselines older than the history
+ * window fall back to a coarse answer derived from lastChangeAt, which is still
+ * correct about *whether* anything changed.
+ */
+export function resolveBaseline(state, since) {
+  if (since == null) return null;
+  const history = state.history || [];
+  const key = String(since);
+  let entry = null;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i];
+    if (h.hash === key || String(h.seq) === key) {
+      entry = h;
+      break;
+    }
+  }
+  if (entry) return { kind: 'history', entry };
+
+  const at = Number(since);
+  if (Number.isFinite(at) && at > 1e12) {
+    return { kind: 'coarse', at, changed: (state.lastChangeAt ?? 0) > at };
+  }
+  return { kind: 'unmatched', requested: key };
+}
+
+function compareToBaseline(state, baseline) {
+  if (!baseline) return null;
+  if (baseline.kind === 'history') {
+    const from = hexToSignature(baseline.entry.sig);
+    const to = hexToSignature(
+      (state.history || []).find((h) => h.seq === state.seq)?.sig || '',
+    );
+    if (!to.length) return { kind: 'unmatched', requested: String(baseline.entry.seq) };
+    const diff = signatureDiff(to, from);
+    const deltas = regionDeltas(to, from);
+    return {
+      kind: 'history',
+      matched: true,
+      seq: baseline.entry.seq,
+      hash: baseline.entry.hash,
+      at: baseline.entry.at,
+      ageMs: Date.now() - baseline.entry.at,
+      changed: diff > MINOR_CHANGE,
+      level: changeLevel(diff),
+      diff: Number(diff.toFixed(5)),
+      regions: deltas.map((d) => Number(d.toFixed(4))),
+      map: regionMap(deltas, REGION_COLS),
+    };
+  }
+  if (baseline.kind === 'coarse') {
+    return {
+      kind: 'coarse',
+      matched: false,
+      at: baseline.at,
+      ageMs: Date.now() - baseline.at,
+      changed: baseline.changed,
+      note: 'baseline is older than the buffered history; only whether-it-changed is known',
+    };
+  }
+  return { kind: 'unmatched', matched: false, requested: baseline.requested };
+}
+
+export function stopDaemon(udid, { force = false } = {}) {
   const { pid, running } = daemonStatus(udid);
   if (!running) return false;
+  // Another client may be mid-session on this device; do not yank it away.
+  if (!force && store.heartbeatAge(udid) < 60_000) return 'in-use';
   try {
     process.kill(pid, 'SIGTERM');
     return true;
@@ -171,13 +268,15 @@ function pngSize(png) {
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 }
 
-export async function getState(deviceQuery, { options } = {}) {
+export async function getState(deviceQuery, { since, options } = {}) {
   const { device, state } = await ensureDaemon(deviceQuery, options);
   return {
     device,
     state,
     ageMs: Date.now() - state.capturedAt,
     map: regionMap(state.regions || [], REGION_COLS),
+    since: compareToBaseline(state, resolveBaseline(state, since)),
+    live: liveness(device.udid, state),
   };
 }
 
@@ -185,29 +284,78 @@ export async function getState(deviceQuery, { options } = {}) {
  * Wait for the screen to settle (`mode: 'stable'`) or to move away from what it
  * shows right now (`mode: 'change'`). Removes the screenshot-retry loop.
  */
+/**
+ * Wait for the screen to do something.
+ *
+ *   change  the screen differs from `since` (or from now, if no baseline)
+ *   stable  the screen holds still for `stableMs`, observed within this call
+ *   settle  change first, then stable — what you want after a tap or a launch
+ *
+ * Pass `since` (a hash captured BEFORE the action) whenever you can: a baseline
+ * sampled after the fact is the single most common way to wait for a change
+ * that has already happened.
+ */
 export async function waitFor(
   deviceQuery,
-  { mode = 'stable', stableMs = 600, timeoutMs = 8000, baselineHash, options } = {},
+  { mode = 'settle', since, stableMs = 600, timeoutMs = 8000, baselineHash, options } = {},
 ) {
   const { device, state: first } = await ensureDaemon(deviceQuery, options);
   const p = store.paths(device.udid);
-  const baseline = baselineHash || first.hash;
-  const deadline = Date.now() + timeoutMs;
+  const requested = since ?? baselineHash;
+  const resolved = resolveBaseline(first, requested);
+  const baselineHashValue =
+    resolved?.kind === 'history' ? resolved.entry.hash : (requested ?? first.hash);
+  const baselineResolved = resolved?.kind === 'history' || requested == null;
+
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  const startSeq = first.seq;
   let last = first;
+  let sawChange = mode === 'stable' || first.hash !== baselineHashValue;
+  const changedAtStart = sawChange && mode !== 'stable';
+
+  const done = (satisfied, extra = {}) => ({
+    device,
+    state: last,
+    satisfied,
+    mode,
+    sawChange,
+    changedBeforeWait: changedAtStart,
+    baselineHash: baselineHashValue,
+    baselineResolved,
+    waitedMs: Date.now() - startedAt,
+    live: liveness(device.udid, last),
+    ...extra,
+  });
 
   while (Date.now() < deadline) {
     const state = store.readJson(p.state);
     if (state) {
       last = state;
+      // A wedged capture loop must not look like a calm screen.
+      const live = liveness(device.udid, state);
+      if (!live.ok) return done(false, { stalled: true });
+
+      if (!sawChange && state.hash !== baselineHashValue) sawChange = true;
+
       if (mode === 'change') {
-        if (state.hash !== baseline) return { device, state, satisfied: true, mode, waitedMs: timeoutMs - (deadline - Date.now()) };
-      } else if (state.stableForMs >= stableMs) {
-        return { device, state, satisfied: true, mode, waitedMs: timeoutMs - (deadline - Date.now()) };
+        if (sawChange) return done(true);
+      } else {
+        // "settle" requires a change first, so accumulated stillness from before
+        // the caller acted can never satisfy it; once the change is seen,
+        // stableForMs is measured from that change. Plain "stable" has no such
+        // requirement — an already-still screen genuinely is stable.
+        // At least one frame must arrive during the call, so the answer is
+        // never derived purely from what was already on disk.
+        const freshFrames = state.seq - startSeq;
+        if (sawChange && freshFrames >= 1 && state.stableForMs >= stableMs) {
+          return done(true);
+        }
       }
     }
     await sleep(60);
   }
-  return { device, state: last, satisfied: false, mode, waitedMs: timeoutMs };
+  return done(false, { timedOut: true });
 }
 
 /**
@@ -224,13 +372,24 @@ export async function getStrip(deviceQuery, { count = 5, spanMs, thumbMaxDim = 2
     .filter((e) => Number.isFinite(e.seq))
     .sort((a, b) => a.seq - b.seq);
 
-  entries = entries.map((e) => ({ ...e, mtimeMs: safeMtime(e.file) })).filter((e) => e.mtimeMs);
+  const stamps = new Map(((await ensureDaemon(deviceQuery, options)).state.ring || []).map((f) => [f.seq, f.at]));
+  entries = entries
+    .map((e) => ({ ...e, mtimeMs: stamps.get(e.seq) ?? safeMtime(e.file) }))
+    .filter((e) => e.mtimeMs);
+  const want = Math.max(1, count);
   if (spanMs) {
+    // "Show me the last 40 seconds" means frames spread ACROSS that window, not
+    // the newest few frames that happen to fall inside it.
     const cutoff = Date.now() - spanMs;
     const within = entries.filter((e) => e.mtimeMs >= cutoff);
-    if (within.length) entries = within;
+    if (within.length) {
+      entries = within.length <= want ? within : spreadEvenly(within, want);
+    } else {
+      entries = entries.slice(-want);
+    }
+  } else {
+    entries = entries.slice(-want);
   }
-  entries = entries.slice(-Math.max(1, count));
   if (!entries.length) throw new Error('no frames buffered yet');
 
   const frames = entries.map((e) => decodePng(fs.readFileSync(e.file)));
@@ -260,12 +419,112 @@ export async function getStrip(deviceQuery, { count = 5, spanMs, thumbMaxDim = 2
   };
 }
 
+/** Pick `count` items spaced as evenly as possible across a list, keeping the ends. */
+export function spreadEvenly(items, count) {
+  if (count >= items.length) return items;
+  if (count === 1) return [items[items.length - 1]];
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    out.push(items[Math.round((i * (items.length - 1)) / (count - 1))]);
+  }
+  return out;
+}
+
 function safeMtime(file) {
   try {
     return fs.statSync(file).mtimeMs;
   } catch {
     return 0;
   }
+}
+
+/**
+ * What happened on screen over the last `spanMs`, derived from the buffered
+ * frame signatures. This is the "memory" view: not every frame, but the events
+ * worth knowing about, each with when it started, how long it took and how much
+ * of the screen it moved.
+ */
+export async function getTimeline(deviceQuery, { spanMs = 60_000, options } = {}) {
+  const { device, state } = await ensureDaemon(deviceQuery, options);
+  const now = Date.now();
+  const hist = (state.history || []).filter((h) => h.at >= now - spanMs);
+  const events = [];
+  let current = null;
+
+  hist.forEach((h, i) => {
+    if ((h.diff ?? 0) > MINOR_CHANGE) {
+      if (!current) {
+        const before = hist[i - 1] || h;
+        current = { startAt: before.at, fromSig: before.sig, endAt: h.at, frames: 1, peak: h.diff };
+      } else {
+        current.endAt = h.at;
+        current.frames += 1;
+        current.peak = Math.max(current.peak, h.diff);
+      }
+      current.toSig = h.sig;
+    } else if (current) {
+      current.endAt = h.at;
+      current.toSig = h.sig;
+      events.push(current);
+      current = null;
+    }
+  });
+  if (current) events.push(current);
+
+  const shaped = events.map((e) => {
+    const from = hexToSignature(e.fromSig || '');
+    const to = hexToSignature(e.toSig || '');
+    const magnitude = from.length && to.length ? signatureDiff(to, from) : e.peak;
+    const deltas = from.length && to.length ? regionDeltas(to, from) : [];
+    return {
+      startedMsAgo: now - e.startAt,
+      endedMsAgo: now - e.endAt,
+      durationMs: Math.max(0, e.endAt - e.startAt),
+      magnitude: Number(magnitude.toFixed(4)),
+      level: changeLevel(magnitude),
+      frames: e.frames,
+      map: deltas.length ? regionMap(deltas, REGION_COLS) : null,
+    };
+  });
+
+  return {
+    device,
+    state,
+    spanMs,
+    coveredMs: hist.length ? now - hist[0].at : 0,
+    frames: hist.length,
+    buffered: (state.ring || []).length,
+    events: shaped,
+    idleForMs: state.stableForMs,
+    live: liveness(device.udid, state),
+  };
+}
+
+/** The buffered frame closest to a moment in the past. */
+export async function getFrameAt(deviceQuery, { msAgo = 0, options } = {}) {
+  const { device, state } = await ensureDaemon(deviceQuery, options);
+  const ring = state.ring || [];
+  if (!ring.length) throw new Error('no frames buffered yet');
+  const target = Date.now() - msAgo;
+  let best = ring[0];
+  for (const frame of ring) {
+    if (Math.abs(frame.at - target) < Math.abs(best.at - target)) best = frame;
+  }
+  const file = path.join(store.paths(device.udid).ring, `${best.seq}.png`);
+  if (!fs.existsSync(file)) throw new Error(`frame #${best.seq} is no longer buffered`);
+  const png = fs.readFileSync(file);
+  return {
+    device,
+    state,
+    png,
+    seq: best.seq,
+    at: best.at,
+    actualMsAgo: Date.now() - best.at,
+    requestedMsAgo: msAgo,
+    width: png.readUInt32BE(16),
+    height: png.readUInt32BE(20),
+    oldestMsAgo: Date.now() - ring[0].at,
+  };
 }
 
 export { DEFAULTS, store };

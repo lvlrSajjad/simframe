@@ -186,11 +186,49 @@ simframe doctor</pre>
   <tbody>
     <tr><td>What’s on screen?</td><td>screenshot, ~130–400 ms, a full image every time</td><td><code>sim_look</code> — warm frame, ~20 ms</td></tr>
     <tr><td>Has it finished loading?</td><td>screenshot in a loop, an image per attempt</td><td><code>sim_state</code> — ~2 ms, <strong>text only</strong></td></tr>
-    <tr><td>Did my tap do anything?</td><td>screenshot, compare by eye</td><td><code>sim_state</code> — stable screen hash + region change map</td></tr>
-    <tr><td>Wait for the animation</td><td>sleep, screenshot, hope, repeat</td><td><code>sim_wait</code> — blocks until the screen really settles</td></tr>
+    <tr><td>Did my tap do anything?</td><td>screenshot, compare by eye</td><td><code>sim_state</code> — what changed <strong>since your last look</strong>, as text</td></tr>
+    <tr><td>Wait for the animation</td><td>sleep, screenshot, hope, repeat</td><td><code>sim_wait</code> — waits for a change, <em>then</em> for stillness</td></tr>
     <tr><td>What did that transition look like?</td><td>5 screenshots, 5 round trips, 5 images</td><td><code>sim_strip</code> — N buffered frames tiled into <strong>one</strong> image</td></tr>
+    <tr><td>The screen is already different — what did I miss?</td><td>nothing; re-run and watch harder</td><td><code>sim_recall</code> — a text timeline of the last minute</td></tr>
   </tbody>
 </table>
+
+<h2>Baselines: the thing to understand</h2>
+<p>
+  Every change question is really “changed <em>since when</em>?” — and the answer is almost
+  never “since the previous frame”. A UI transition is over in about 700&nbsp;ms, so
+  comparing consecutive frames tells a caller that polls every few seconds “nothing
+  changed”, even though the screen is completely different from when it last looked.
+</p>
+<p>
+  So simframe compares against <strong>the last frame you observed</strong>. Over MCP that is
+  automatic — each call remembers what it showed you. From the CLI you capture a baseline
+  before acting:
+</p>
+<pre>H=$(simframe mark)          <span class="cmt"># hash of what is on screen now</span>
+<span class="cmt"># ...tap, launch, navigate...</span>
+simframe wait --since=$H    <span class="cmt"># change, then settle</span>
+simframe state --since=$H   <span class="cmt"># what moved, as text</span></pre>
+
+<h2>It remembers the last minute</h2>
+<p>
+  Looking only at the newest frame is like having no short-term memory: if the screen is
+  already different by the time you look, the change is simply gone. simframe keeps every
+  frame for the last 6&nbsp;seconds, thinned to about 2&nbsp;fps out to 60&nbsp;seconds —
+  and reads that memory back as text first.
+</p>
+<pre>$ simframe recall
+iPhone 17 Pro — remembering 32s, 45 frames buffered
+  30.7s ago  screen changed  25%  over 1.0s
+  24.8s ago  screen changed  25%  over 1.4s
+  18.5s ago  screen changed  28%  over 1.1s
+  12.4s ago  screen changed  29%  over 1.2s
+   6.3s ago  screen changed  25%  over 0.9s
+still for 5.6s</pre>
+<p>
+  Five transitions reconstructed after the fact, for no image tokens at all — then fetch
+  whichever one matters with <code>recall --ago=25000</code>.
+</p>
 
 <h2>The part that pays for itself</h2>
 <p>
@@ -199,23 +237,22 @@ simframe doctor</pre>
   new to look at.
 </p>
 <div class="map">
-<pre>$ simframe state
-iPhone 17 Pro  frame #3  age 124ms
-hash 007cfefefefefefefefefefefefefe00
-diff 0.15453  stable 0ms
-<span class="lit">@@@@
-###*
-+*#*
-:.#*
-..#*
-..#*
-..#*
+<pre>$ simframe state --since=$H
+iPhone 17 Pro  frame #22  age 41ms
+hash 10ff8f3effef8f8f8fcf8fcfcfefcf83
+CHANGED since 3523ms ago: 25.4%
+<span class="lit">#@@@
+*#*@
+#@@@
+##@@
+##@#
+##@#
+@@@@
 @@@@</span></pre>
   <div class="legend">
     <p>Read top-left to bottom-right, <code>.</code> through <code>@</code> for more movement.</p>
-    <p>Full-width change at the top and bottom, a busy column down the right: a screen
-    sliding in from the right, caught mid-transition — and the agent knows that without
-    looking at a single pixel.</p>
+    <p>A new screen replaced the old one while the agent was not looking — and it knows
+    that, and roughly where the movement was, without spending a single image token.</p>
   </div>
 </div>
 
@@ -251,7 +288,7 @@ diff 0.15453  stable 0ms
     <tr><td>Frame age when read</td><td class="num">≤ 250 ms active · ≤ 670 ms idle</td></tr>
     <tr><td>Raw <code>simctl io screenshot</code>, for comparison</td><td class="num">~130 ms, every look</td></tr>
     <tr><td>CPU</td><td class="num">1.1 % idle · 3.1 % active</td></tr>
-    <tr><td>Disk</td><td class="num">~2 MB per device</td></tr>
+    <tr><td>Disk</td><td class="num">~2.7 MB for 32 s of memory</td></tr>
   </tbody>
 </table>
 
@@ -259,6 +296,7 @@ diff 0.15453  stable 0ms
 <ul>
   <li>Simulators only — <code>simctl</code> cannot capture a physical device.</li>
   <li>simframe <em>reads</em> the screen; it does not tap, swipe or type. It sits alongside whatever already drives input and replaces only the screenshot.</li>
+  <li>It speeds up <em>confirming</em> a fix, not <em>locating</em> one. A bug living in a memo comparator or a stale closure is not visible in any frame.</li>
   <li>Capture tops out near 6&nbsp;fps, because <code>simctl io screenshot</code> costs ~130&nbsp;ms. Fast animations are sampled, not recorded.</li>
 </ul>
 

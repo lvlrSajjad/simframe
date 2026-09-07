@@ -63,3 +63,14 @@ export function regionMap(deltas, cols = REGION_COLS) {
   }
   return lines.join('\n');
 }
+
+/** Signatures live in state.json, so they are stored as compact hex. */
+export function signatureToHex(sig) {
+  return sig.map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+export function hexToSignature(hex) {
+  const out = [];
+  for (let i = 0; i < hex.length; i += 2) out.push(parseInt(hex.slice(i, i + 2), 16));
+  return out;
+}

@@ -45,21 +45,37 @@ const TOOLS = [
   {
     name: 'sim_state',
     description:
-      'Cheap TEXT-ONLY check of what the simulator screen is doing: a stable screen hash, how long it has been still, how much changed since the last frame, and an ASCII map of which regions moved. Costs a tiny fraction of an image. Use this to poll ("has it finished loading?", "did my tap do anything?") and only call sim_look when you actually need to see pixels.',
-    inputSchema: { type: 'object', properties: { ...deviceProp } },
+      'Cheap TEXT-ONLY check of the simulator screen: a stable screen hash, whether anything has changed SINCE YOUR LAST LOOK in this session, how long the screen has been still, and an ASCII map of which regions moved. Costs a tiny fraction of an image. Use it to poll ("has it finished loading?", "did my tap register?") and call sim_look only when you need to see pixels. The comparison is against the last frame you observed through any simframe tool, so calling this before and after an action is the reliable way to tell whether the action did anything.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...deviceProp,
+        since: {
+          type: 'string',
+          description:
+            'Compare against this specific frame hash instead of your last look. Defaults to your previous observation in this session.',
+        },
+      },
+    },
   },
   {
     name: 'sim_wait',
     description:
-      'Block until the simulator screen settles (mode "stable") or until it changes away from what it shows now (mode "change"), then return the frame. Use this after a tap, launch or navigation instead of screenshotting repeatedly and hoping the animation finished.',
+      'Block until the screen finishes reacting, then return the frame. Use after a tap, launch or navigation instead of sleeping and screenshotting. Default mode "settle" waits for the screen to CHANGE and then hold still, which is what you want after acting — plain "stable" can return instantly if you call it in the moment before an animation starts. The baseline is whatever you last observed in this session, so the normal pattern is: call sim_state or sim_look, act, then call sim_wait. If the change already completed before you call, that is detected rather than waited out.',
     inputSchema: {
       type: 'object',
       properties: {
         ...deviceProp,
         mode: {
           type: 'string',
-          enum: ['stable', 'change'],
-          description: 'stable: wait for the screen to stop moving. change: wait for it to differ from now.',
+          enum: ['settle', 'change', 'stable'],
+          description:
+            'settle (default): wait for a change, then for it to hold still. change: return as soon as it differs from the baseline. stable: return once it is still, even if nothing ever changed.',
+        },
+        since: {
+          type: 'string',
+          description:
+            'Frame hash to treat as the "before" state. Defaults to your last observation in this session. Pass this when you captured a hash before acting.',
         },
         stableMs: { type: 'number', description: 'How long the screen must hold still for mode "stable" (default 600).' },
         timeoutMs: { type: 'number', description: 'Give up after this long (default 8000).' },
@@ -79,6 +95,20 @@ const TOOLS = [
         count: { type: 'number', description: 'How many frames to tile (default 5, max 12).' },
         spanMs: { type: 'number', description: 'Only include frames from the last N milliseconds.' },
         thumbMaxDim: { type: 'number', description: 'Height budget per frame in pixels (default 240).' },
+      },
+    },
+  },
+  {
+    name: 'sim_recall',
+    description:
+      'Look BACKWARDS in time. simframe remembers roughly the last 60 seconds of the screen — every frame for the last 10s, thinned to about 2fps before that. action "timeline" (default) returns a TEXT-ONLY summary of what happened and when: each change, how long ago it started, how long it took, how much of the screen it moved. action "at" returns the buffered frame from a moment in the past. Use this when you look up and find the screen already different, or when something flashed by and you need to know what it was — instead of guessing or re-running the action.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...deviceProp,
+        action: { type: 'string', enum: ['timeline', 'at'], description: 'timeline (default) or at.' },
+        spanMs: { type: 'number', description: 'For timeline: how far back to summarise (default 60000).' },
+        msAgo: { type: 'number', description: 'For at: how long ago the moment of interest was, in milliseconds.' },
       },
     },
   },
@@ -103,6 +133,22 @@ const TOOLS = [
   },
 ];
 
+// What this MCP session last observed, per device. This is the baseline that
+// makes "what changed since I last looked?" answerable without the caller
+// having to thread a hash through every call — the mistake that made the
+// frame-to-frame delta look broken in practice.
+const lastSeen = new Map();
+
+function remember(udid, state) {
+  lastSeen.set(udid, { hash: state.hash, seq: state.seq, at: state.capturedAt });
+}
+
+function baselineFor(udid, explicit) {
+  if (explicit != null) return explicit;
+  const seen = lastSeen.get(udid);
+  return seen ? seen.hash : undefined;
+}
+
 const text = (s) => ({ type: 'text', text: s });
 const image = (png) => ({ type: 'image', data: png.toString('base64'), mimeType: 'image/png' });
 
@@ -111,6 +157,25 @@ function header(device, state, ageMs, extra = '') {
     `${device.name} · ${device.runtime} · frame #${state.seq} · ${ageMs}ms old · ` +
     `${state.width}x${state.height} · still for ${state.stableForMs}ms${extra ? ` · ${extra}` : ''}`
   );
+}
+
+function livenessLine(live) {
+  return live?.ok ? null : `WARNING: ${live.note}`;
+}
+
+function sinceLine(since) {
+  if (!since) return 'no previous look in this session to compare against';
+  if (since.kind === 'unmatched') {
+    return `baseline ${since.requested} is not in the buffered history — cannot compare`;
+  }
+  if (since.kind === 'coarse') {
+    return since.changed
+      ? `the screen HAS changed since your baseline ${Math.round(since.ageMs / 1000)}s ago (too old for a detailed diff)`
+      : `the screen has NOT changed since your baseline ${Math.round(since.ageMs / 1000)}s ago`;
+  }
+  return since.changed
+    ? `CHANGED since your last look ${since.ageMs}ms ago (${(since.diff * 100).toFixed(1)}% of the screen)`
+    : `unchanged since your last look ${since.ageMs}ms ago`;
 }
 
 export async function serve({ device: defaultDevice, options = {} } = {}) {
@@ -129,11 +194,13 @@ export async function serve({ device: defaultDevice, options = {} } = {}) {
         case 'sim_look':
           return await look(target, args, options);
         case 'sim_state':
-          return await state(target, options);
+          return await state(target, args, options);
         case 'sim_wait':
           return await wait(target, args, options);
         case 'sim_strip':
           return await strip(target, args, options);
+        case 'sim_recall':
+          return await recall(target, args, options);
         case 'sim_capture':
           return await capture(target, args, options);
         case 'sim_devices':
@@ -163,34 +230,66 @@ async function look(target, args, options) {
     }
     res = await api.getFrame(target, { detail: args.detail ?? 'normal', options });
   }
-  return {
-    content: [text(header(res.device, res.state, res.ageMs)), image(res.png)],
-  };
+  const prior = baselineFor(res.device.udid, undefined);
+  const st = await api.getState(target, { since: prior, options });
+  remember(res.device.udid, res.state);
+  const lines = [header(res.device, res.state, res.ageMs), sinceLine(st.since)];
+  const warn = livenessLine(st.live);
+  if (warn) lines.unshift(warn);
+  return { content: [text(lines.filter(Boolean).join('\n')), image(res.png)] };
 }
 
-async function state(target, options) {
-  const res = await api.getState(target, { options });
+async function state(target, args, options) {
+  const { device } = await api.ensureDaemon(target, options);
+  const requested = baselineFor(device.udid, args.since);
+  const res = await api.getState(target, { since: requested, options });
   const s = res.state;
-  const body = [
+  const lines = [
     header(res.device, s, res.ageMs),
-    `screen hash: ${s.hash}   change since previous frame: ${(s.diff * 100).toFixed(1)}%`,
-    s.stableForMs > 1200 ? 'screen is idle' : 'screen is currently changing',
-    `region change map (${REGION_COLS}x${REGION_ROWS}, top-left to bottom-right; "." to "#" = more movement):`,
-    regionMap(s.regions || []),
-  ].join('\n');
-  return { content: [text(body)] };
+    `screen hash: ${s.hash}`,
+    sinceLine(res.since),
+    s.firstFrame
+      ? 'this is the first frame of a freshly started capture loop'
+      : s.stableForMs > 1200
+        ? 'screen is idle right now'
+        : 'screen is moving right now',
+  ];
+  if (res.since?.kind === 'history') {
+    lines.push(
+      `what moved since your last look (${REGION_COLS}x${REGION_ROWS}, top-left to bottom-right; "." to "@" = more movement):`,
+      res.since.map,
+    );
+  }
+  const warn = livenessLine(res.live);
+  if (warn) lines.unshift(warn);
+  remember(device.udid, s);
+  return { content: [text(lines.filter(Boolean).join('\n'))] };
 }
 
 async function wait(target, args, options) {
+  const { device } = await api.ensureDaemon(target, options);
   const res = await api.waitFor(target, {
-    mode: args.mode ?? 'stable',
+    mode: args.mode ?? 'settle',
+    since: baselineFor(device.udid, args.since),
     stableMs: args.stableMs ?? 600,
     timeoutMs: args.timeoutMs ?? 8000,
     options,
   });
-  const note = res.satisfied
-    ? `${res.mode === 'change' ? 'screen changed' : 'screen settled'} after ${res.waitedMs}ms`
-    : `TIMED OUT after ${res.waitedMs}ms — screen never ${res.mode === 'change' ? 'changed' : 'settled'}`;
+  let note;
+  if (res.satisfied) {
+    note = `${res.mode === 'change' ? 'screen changed' : 'screen settled'} after ${res.waitedMs}ms`;
+    if (res.changedBeforeWait) note += ' (the change had already happened before this call)';
+  } else if (res.stalled) {
+    note = `CAPTURE STALLED after ${res.waitedMs}ms — ${res.live.note}. This is a simframe problem, not a screen that failed to change.`;
+  } else {
+    note = `TIMED OUT after ${res.waitedMs}ms — screen never ${res.mode === 'change' ? 'changed' : 'settled'}`;
+    if (!res.sawChange) {
+      note += res.baselineResolved
+        ? '. No change was seen at all; if the change happened before this call, pass the hash you saw beforehand as `since`.'
+        : `. The baseline you passed was not in the buffered history, so "changed" could not be judged.`;
+    }
+  }
+  remember(device.udid, res.state);
   const content = [text(`${note}\n${header(res.device, res.state, Date.now() - res.state.capturedAt)}`)];
   if (args.includeImage !== false) {
     const frame = await api.getFrame(target, { detail: args.detail ?? 'normal', options });
@@ -215,6 +314,50 @@ async function strip(target, args, options) {
       image(res.png),
     ],
   };
+}
+
+function ago(ms) {
+  return ms < 1000 ? `${Math.round(ms)}ms ago` : `${(ms / 1000).toFixed(1)}s ago`;
+}
+
+async function recall(target, args, options) {
+  if (args.action === 'at') {
+    const res = await api.getFrameAt(target, { msAgo: args.msAgo ?? 0, options });
+    return {
+      content: [
+        text(
+          `${res.device.name} · frame #${res.seq} from ${ago(res.actualMsAgo)}` +
+            (Math.abs(res.actualMsAgo - res.requestedMsAgo) > 400
+              ? ` (nearest buffered frame to the ${ago(res.requestedMsAgo)} you asked for)`
+              : '') +
+            `\nbuffered memory reaches back ${ago(res.oldestMsAgo)}`,
+        ),
+        image(res.png),
+      ],
+    };
+  }
+
+  const res = await api.getTimeline(target, { spanMs: args.spanMs ?? 60_000, options });
+  const lines = [
+    `${res.device.name} · remembering the last ${ago(res.coveredMs)} · ${res.buffered} frames buffered`,
+  ];
+  if (!res.events.length) {
+    lines.push(`nothing changed in that window; the screen has been still for ${ago(res.idleForMs)}`);
+  } else {
+    lines.push(`${res.events.length} change${res.events.length === 1 ? '' : 's'}, oldest first:`);
+    for (const e of res.events) {
+      lines.push(
+        `  ${ago(e.startedMsAgo).padStart(9)}  ${e.level === 'major' ? 'screen changed' : 'small change '}  ` +
+          `${(e.magnitude * 100).toFixed(0)}% of the screen, over ${ago(e.durationMs).replace(' ago', '')}`,
+      );
+    }
+    lines.push(`the screen has been still for ${ago(res.idleForMs)}`);
+    const last = res.events[res.events.length - 1];
+    if (last.map) lines.push('what moved in the most recent change:', last.map);
+  }
+  const warn = livenessLine(res.live);
+  if (warn) lines.unshift(warn);
+  return { content: [text(lines.join('\n'))] };
 }
 
 async function capture(target, args, options) {

@@ -56,6 +56,8 @@ for (const [name, args] of [
   ['sim_state', {}],
   ['sim_look', { detail: 'low' }],
   ['sim_strip', { count: 4 }],
+  ['sim_recall', { action: 'timeline' }],
+  ['sim_recall', { action: 'at', msAgo: 8000 }],
   ['sim_capture', { action: 'status' }],
 ]) {
   const t0 = Date.now();

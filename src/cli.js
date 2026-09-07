@@ -14,8 +14,10 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe status  [device]          show daemon and newest-frame status
   simframe frame   [device]          write the newest frame to a file
   simframe state   [device]          print frame metadata and the change map
-  simframe wait    [device]          wait for the screen to settle
+  simframe mark    [device]          print the current frame hash, to use as --since
+  simframe wait    [device]          wait for the screen to react (see --mode)
   simframe strip   [device]          write a contact sheet of recent frames
+  simframe recall  [device]          what happened in the last minute (--ago=<ms> for a frame)
   simframe devices                   list simulators
   simframe doctor                    check that this machine can capture
 
@@ -25,9 +27,19 @@ Options
   --detail=low|normal|high|full   or --detail=<max pixels>
   --fps=<n>              capture rate while the screen is moving (default ${DEFAULTS.fps})
   --count=<n>            frames in a strip (default 5)
+  --since=<hash|seq>     compare against this frame (see: simframe mark)
+  --mode=settle|change|stable   what wait waits for (default settle)
   --stable-ms=<n>        settle window for wait (default 600)
   --timeout-ms=<n>       give up after this long (default 8000)
+  --force                let stop kill a loop another client is using
   --json                 machine-readable output
+
+The reliable pattern around an action is:
+
+  H=$(simframe mark)
+  ...tap, launch or navigate...
+  simframe wait --since=$H --mode=settle
+  simframe state --since=$H
 `;
 
 function parseArgs(argv) {
@@ -99,8 +111,16 @@ async function main() {
           : []
         : [(await resolveDevice(device)).udid];
       let stopped = 0;
-      for (const udid of targets) if (api.stopDaemon(udid)) stopped++;
-      console.log(`stopped ${stopped} daemon${stopped === 1 ? '' : 's'}`);
+      let inUse = 0;
+      for (const udid of targets) {
+        const result = api.stopDaemon(udid, { force: Boolean(flags.force) });
+        if (result === 'in-use') inUse++;
+        else if (result) stopped++;
+      }
+      console.log(
+        `stopped ${stopped} daemon${stopped === 1 ? '' : 's'}` +
+          (inUse ? `; left ${inUse} in use by another client (pass --force to stop anyway)` : ''),
+      );
       return;
     }
 
@@ -147,30 +167,67 @@ async function main() {
       return;
     }
 
-    case 'state': {
+    case 'mark': {
       const res = await api.getState(device, { options });
+      console.log(res.state.hash);
+      return;
+    }
+
+    case 'state': {
+      const res = await api.getState(device, { since: flags.since, options });
       if (flags.json) {
-        console.log(JSON.stringify({ ...res.state, ageMs: res.ageMs }, null, 2));
+        console.log(JSON.stringify({ ...res.state, history: undefined, ageMs: res.ageMs, since: res.since, live: res.live }, null, 2));
       } else {
         const s = res.state;
-        console.log(
-          `${res.device.name}  frame #${s.seq}  age ${res.ageMs}ms  ${s.width}x${s.height}\n` +
-            `hash ${s.hash}  diff ${s.diff}  stable ${s.stableForMs}ms\n${res.map}`,
-        );
+        const out = [];
+        if (!res.live.ok) out.push(`WARNING: ${res.live.note}`);
+        out.push(`${res.device.name}  frame #${s.seq}  age ${res.ageMs}ms  ${s.width}x${s.height}`);
+        out.push(`hash ${s.hash}  stable ${s.stableForMs}ms`);
+        if (res.since?.kind === 'history') {
+          out.push(
+            res.since.changed
+              ? `CHANGED since ${res.since.ageMs}ms ago: ${(res.since.diff * 100).toFixed(1)}% of the screen`
+              : `unchanged since ${res.since.ageMs}ms ago`,
+            res.since.map,
+          );
+        } else if (res.since?.kind === 'coarse') {
+          out.push(`${res.since.changed ? 'CHANGED' : 'unchanged'} since your baseline (too old for a detailed diff)`);
+        } else if (res.since?.kind === 'unmatched') {
+          out.push(`baseline ${res.since.requested} is not in the buffered history`);
+        } else {
+          out.push(
+            s.firstFrame
+              ? 'first frame of this capture loop — nothing to compare against yet'
+              : `change vs the previous frame only: ${(s.diff * 100).toFixed(1)}%`,
+          );
+          if (!s.firstFrame) out.push(res.map);
+        }
+        console.log(out.join('\n'));
       }
       return;
     }
 
     case 'wait': {
       const res = await api.waitFor(device, {
-        mode: flags.mode || (flags.change ? 'change' : 'stable'),
+        mode: flags.mode || (flags.change ? 'change' : 'settle'),
+        since: flags.since,
         stableMs: num(flags.stableMs, 600),
         timeoutMs: num(flags.timeoutMs, 8000),
         options,
       });
-      console.log(
-        `${res.satisfied ? 'settled' : 'timed out'} after ${res.waitedMs}ms — frame #${res.state.seq}, stable ${res.state.stableForMs}ms`,
-      );
+      if (res.satisfied) {
+        console.log(
+          `${res.mode === 'change' ? 'changed' : 'settled'} after ${res.waitedMs}ms — frame #${res.state.seq}` +
+            (res.changedBeforeWait ? ' (change had already happened before the call)' : ''),
+        );
+      } else if (res.stalled) {
+        console.log(`capture stalled after ${res.waitedMs}ms — ${res.live.note}`);
+      } else {
+        console.log(
+          `timed out after ${res.waitedMs}ms — no ${res.mode === 'change' ? 'change' : 'settle'}` +
+            (res.sawChange ? '' : '; if the change happened before this call, pass `--since` from `simframe mark`'),
+        );
+      }
       process.exitCode = res.satisfied ? 0 : 1;
       return;
     }
@@ -186,6 +243,39 @@ async function main() {
       console.log(
         `${out} — ${res.frames.length} frames over ${res.spanMs}ms (${res.width}x${res.height})`,
       );
+      return;
+    }
+
+    case 'recall': {
+      if (flags.ago != null) {
+        const res = await api.getFrameAt(device, { msAgo: num(flags.ago), options });
+        const out = flags.out || path.join(process.cwd(), 'simframe-recall.png');
+        fs.writeFileSync(out, res.png);
+        console.log(
+          `${out} — frame #${res.seq} from ${Math.round(res.actualMsAgo)}ms ago ` +
+            `(memory reaches back ${Math.round(res.oldestMsAgo / 1000)}s)`,
+        );
+        return;
+      }
+      const res = await api.getTimeline(device, { spanMs: num(flags.spanMs, 60_000), options });
+      if (flags.json) {
+        console.log(JSON.stringify({ ...res, state: undefined }, null, 2));
+        return;
+      }
+      console.log(
+        `${res.device.name} — remembering ${Math.round(res.coveredMs / 1000)}s, ${res.buffered} frames buffered`,
+      );
+      if (!res.events.length) {
+        console.log(`nothing changed; still for ${Math.round(res.idleForMs / 1000)}s`);
+      } else {
+        for (const e of res.events) {
+          console.log(
+            `  ${(e.startedMsAgo / 1000).toFixed(1)}s ago  ${e.level === 'major' ? 'screen changed' : 'small change '}  ` +
+              `${(e.magnitude * 100).toFixed(0)}%  over ${(e.durationMs / 1000).toFixed(1)}s`,
+          );
+        }
+        console.log(`still for ${(res.idleForMs / 1000).toFixed(1)}s`);
+      }
       return;
     }
 

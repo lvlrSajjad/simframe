@@ -2,21 +2,38 @@
 // newest frame permanently warm on disk so a reader never waits on simctl.
 import fs from 'node:fs';
 import path from 'node:path';
-import { decodePng } from './png.js';
-import { frameHash, regionSignature, signatureDiff, regionDeltas } from './analyze.js';
+import { decodePng, encodePng, scaleBitmap } from './png.js';
+import {
+  frameHash,
+  regionSignature,
+  signatureDiff,
+  regionDeltas,
+  signatureToHex,
+} from './analyze.js';
 import * as store from './store.js';
 import { isBootedSync, resize, screenshot } from './simctl.js';
 
 // Bump whenever the shape of state.json changes, so an upgraded client retires
 // a capture loop left running by an older install instead of misreading it.
-export const STATE_VERSION = 2;
+export const STATE_VERSION = 4;
 
 export const DEFAULTS = {
   fps: 4,
   idleFps: 1.5,
   idleAfterMs: 2500,
   maxDim: 700,
-  ringSize: 24,
+  // Frame memory: every frame for the last few seconds, thinned to roughly
+  // 2fps further back. Fine detail where transitions live, cheap recall beyond.
+  retainMs: 60_000,
+  fineMs: 6_000,
+  keyframeMs: 450,
+  // Frames older than fineMs are re-encoded at half size: still legible enough
+  // to tell which screen was showing, at roughly a quarter of the bytes.
+  recallScale: 0.5,
+  maxRingBytes: 12 << 20,
+  ringSize: 400,
+  historySize: 400,
+  historyMs: 90_000,
   fullKeep: 3,
   changeThreshold: 0.004,
   idleExitMs: 15 * 60_000,
@@ -53,6 +70,11 @@ export async function runDaemon(device, options = {}) {
 
   let seq = 0;
   let prevSignature = null;
+  /** Recent frames, so a caller can diff against whatever it last saw rather
+   *  than only against the frame that happened to precede this one. */
+  let history = [];
+  /** seq + timestamp for every frame still on disk, so retention can be thinned by age. */
+  let ringIndex = [];
   let lastChangeAt = Date.now();
   let consecutiveErrors = 0;
   let lastBootCheck = Date.now();
@@ -102,6 +124,7 @@ export async function runDaemon(device, options = {}) {
 
       const bmp = decodePng(fs.readFileSync(ringFile));
       const signature = regionSignature(bmp);
+      const prevWasNull = prevSignature === null;
       const diff = signatureDiff(signature, prevSignature);
       const deltas = regionDeltas(signature, prevSignature);
       const changed = diff > opts.changeThreshold;
@@ -111,6 +134,17 @@ export async function runDaemon(device, options = {}) {
       seq = nextSeq;
       prevSignature = signature;
       consecutiveErrors = 0;
+
+      const hash = frameHash(bmp);
+      history.push({
+        seq,
+        at: now,
+        hash,
+        sig: signatureToHex(signature),
+        diff: prevWasNull ? 0 : Number(diff.toFixed(5)),
+      });
+      const historyCutoff = now - opts.historyMs;
+      history = history.filter((h) => h.at >= historyCutoff).slice(-opts.historySize);
 
       fs.copyFileSync(ringFile, path.join(p.dir, 'latest.png.tmp'));
       fs.renameSync(path.join(p.dir, 'latest.png.tmp'), path.join(p.dir, 'latest.png'));
@@ -123,17 +157,33 @@ export async function runDaemon(device, options = {}) {
           captureMs: now - tickStart,
           width: bmp.width,
           height: bmp.height,
-          hash: frameHash(bmp),
-          diff: Number(diff.toFixed(5)),
-          changed,
+          hash,
+          diff: prevWasNull ? null : Number(diff.toFixed(5)),
+          changed: prevWasNull ? false : changed,
+          firstFrame: prevWasNull,
           stableForMs: now - lastChangeAt,
-          regions: deltas.map((d) => Number(d.toFixed(4))),
+          regions: prevWasNull ? deltas.map(() => 0) : deltas.map((d) => Number(d.toFixed(4))),
+          // Absolute instant of the last detected change: lets a caller reason
+          // about baselines older than the history window.
+          lastChangeAt,
+          history,
+          ring: ringIndex,
           fullFile,
           ringFile,
           device,
         }),
       );
 
+      ringIndex.push({ seq, at: now });
+      ringIndex = thinRing(ringIndex, now, opts, (dropped) => {
+        try {
+          fs.unlinkSync(path.join(p.ring, `${dropped}.png`));
+        } catch {
+          /* already gone */
+        }
+      });
+      shrinkAgedFrames(p.ring, ringIndex, now, opts, log);
+      enforceByteBudget(p.ring, ringIndex, opts);
       store.pruneDir(p.ring, opts.ringSize);
       store.pruneDir(p.full, opts.fullKeep);
     } catch (err) {
@@ -167,4 +217,81 @@ export async function runDaemon(device, options = {}) {
     /* nothing useful to do on the way out */
   }
   return outcome;
+}
+
+/**
+ * Decide which buffered frames to keep. Everything inside `fineMs` survives, so
+ * a transition can be replayed frame by frame; beyond that only one frame per
+ * `keyframeMs` is kept, out to `retainMs`. Calls `drop` for each discarded seq
+ * and returns the retained index.
+ */
+export function thinRing(index, now, opts, drop = () => {}) {
+  const kept = [];
+  let lastKeptAt = null;
+  for (let i = index.length - 1; i >= 0; i--) {
+    const frame = index[i];
+    const age = now - frame.at;
+    if (age > opts.retainMs) {
+      drop(frame.seq);
+      continue;
+    }
+    if (age <= opts.fineMs || lastKeptAt === null || lastKeptAt - frame.at >= opts.keyframeMs) {
+      kept.push(frame);
+      lastKeptAt = frame.at;
+    } else {
+      drop(frame.seq);
+    }
+  }
+  return kept.reverse();
+}
+
+/**
+ * Re-encode frames that have aged out of the fine window at a smaller size.
+ * Done in-process with the bundled PNG codec, so recall stays cheap on disk
+ * without adding a dependency or another process spawn per frame.
+ */
+function shrinkAgedFrames(dir, index, now, opts, log) {
+  for (const frame of index) {
+    if (frame.small || now - frame.at <= opts.fineMs) continue;
+    const file = path.join(dir, `${frame.seq}.png`);
+    try {
+      const bmp = decodePng(fs.readFileSync(file));
+      const small = scaleBitmap(
+        bmp,
+        Math.max(1, Math.round(bmp.width * opts.recallScale)),
+        Math.max(1, Math.round(bmp.height * opts.recallScale)),
+      );
+      store.writeAtomic(file, encodePng(small));
+      frame.small = true;
+    } catch (err) {
+      // A frame we cannot shrink is still a frame we can serve.
+      frame.small = true;
+      log?.(`shrink failed for #${frame.seq}: ${err.message}`);
+    }
+  }
+}
+
+/** Last-resort cap so a long session cannot grow the buffer without bound. */
+function enforceByteBudget(dir, index, opts) {
+  let total = 0;
+  const sizes = index.map((frame) => {
+    let size = 0;
+    try {
+      size = fs.statSync(path.join(dir, `${frame.seq}.png`)).size;
+    } catch {
+      /* counted as zero */
+    }
+    total += size;
+    return size;
+  });
+  for (let i = 0; i < index.length && total > opts.maxRingBytes; i++) {
+    try {
+      fs.unlinkSync(path.join(dir, `${index[i].seq}.png`));
+      total -= sizes[i];
+      index[i].dropped = true;
+    } catch {
+      /* already gone */
+    }
+  }
+  for (let i = index.length - 1; i >= 0; i--) if (index[i].dropped) index.splice(i, 1);
 }
