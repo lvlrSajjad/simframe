@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runDaemon, DEFAULTS } from './daemon.js';
 import { bootedDevices, listDevices, resolveDevice } from './simctl.js';
+import * as actions from './actions.js';
 import * as api from './index.js';
+import * as input from './input.js';
 import * as store from './store.js';
 
 const USAGE = `simframe — always-warm iOS Simulator frames
@@ -18,6 +20,9 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe wait    [device]          wait for the screen to react (see --mode)
   simframe strip   [device]          write a contact sheet of recent frames
   simframe recall  [device]          what happened in the last minute (--ago=<ms> for a frame)
+  simframe ui      [device]          read the screen as an accessibility tree
+  simframe tap     <label>            tap an element by its accessibility label
+  simframe do      <script.json>      run a scripted flow (see below)
   simframe devices                   list simulators
   simframe doctor                    check that this machine can capture
 
@@ -33,6 +38,15 @@ Options
   --timeout-ms=<n>       give up after this long (default 8000)
   --force                let stop kill a loop another client is using
   --json                 machine-readable output
+
+A script is a JSON array of steps, run in one go with a settle between each:
+
+  [{"tap":"Assets"},{"tap":"Add Asset"},
+   {"type":{"into":"Name","text":"Fryer 3"}},
+   {"tap":"Save"},{"waitText":"Saved","timeoutMs":5000}]
+
+Input needs idb (brew tap facebook/fb && brew install idb-companion,
+then pipx install fb-idb). Observation works without it.
 
 The reliable pattern around an action is:
 
@@ -279,6 +293,67 @@ async function main() {
       return;
     }
 
+    case 'ui': {
+      const { device: dev } = await api.ensureDaemon(device, options);
+      const driver = await input.detectDriver();
+      if (!driver.available) {
+        process.stderr.write(`${driver.reason}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      let nodes = await input.describeAll(dev.udid);
+      if (flags.filter) {
+        const q = String(flags.filter).toLowerCase();
+        nodes = nodes.filter((n) => [n.label, n.value, n.identifier].filter(Boolean).join(' ').toLowerCase().includes(q));
+      }
+      if (flags.json) {
+        console.log(JSON.stringify(nodes.map(({ raw, ...n }) => n), null, 2));
+        return;
+      }
+      for (const n of nodes) {
+        const c = input.centerOf(n);
+        console.log(
+          `${(n.type || '?').padEnd(14)} ${String(`${c.x},${c.y}`).padEnd(10)} ` +
+            `${[n.label, n.value && `= ${n.value}`, n.identifier && `#${n.identifier}`].filter(Boolean).join(' ') || '(unlabelled)'}`,
+        );
+      }
+      return;
+    }
+
+    case 'tap': {
+      const label = positional[0];
+      if (!label) throw new Error('usage: simframe tap <label>');
+      const res = await actions.runScript(flags.device, {
+        steps: [{ tap: label, index: flags.index != null ? num(flags.index) : undefined }],
+        options,
+      });
+      const step = res.results[0];
+      if (!step.ok) throw new Error(step.error);
+      console.log(`${step.detail}${step.settled?.ok ? `, settled in ${step.settled.waitedMs}ms` : ''}`);
+      return;
+    }
+
+    case 'do': {
+      const file = positional[0];
+      if (!file) throw new Error('usage: simframe do <script.json>');
+      const steps = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const res = await actions.runScript(flags.device, {
+        steps,
+        autoSettle: flags.autoSettle !== 'false',
+        stableMs: num(flags.stableMs, 500),
+        timeoutMs: num(flags.timeoutMs, 8000),
+        continueOnError: Boolean(flags.continueOnError),
+        options,
+      });
+      for (const r of res.results) {
+        const settle = r.settled ? (r.settled.ok ? ` (settled ${r.settled.waitedMs}ms)` : ' (never settled)') : '';
+        console.log(`${r.ok ? 'ok  ' : 'FAIL'} [${r.index}] ${r.action}: ${r.ok ? r.detail : r.error}${settle}`);
+      }
+      console.log(`${res.ok ? 'flow completed' : 'FLOW FAILED'} — ${res.ranSteps}/${res.totalSteps} steps in ${res.totalMs}ms`);
+      process.exitCode = res.ok ? 0 : 1;
+      return;
+    }
+
     case 'devices': {
       const all = await listDevices();
       const shown = flags.all ? all : all.filter((d) => d.state === 'Booted');
@@ -321,6 +396,8 @@ async function doctor() {
   } catch (err) {
     add('sips', false, err.message);
   }
+  const driver = await input.detectDriver();
+  add('input driver (idb)', driver.available, driver.available ? driver.version : driver.reason);
   try {
     const booted = await bootedDevices();
     add('booted simulator', booted.length > 0, booted.map((d) => `${d.name} (${d.runtime})`).join(', ') || 'none');
@@ -333,8 +410,13 @@ async function doctor() {
     add('capture', false, err.message);
   }
 
-  for (const c of checks) console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.name.padEnd(18)} ${c.detail}`);
-  process.exitCode = checks.every((c) => c.ok) ? 0 : 1;
+  for (const c of checks) {
+    const mark = c.ok ? 'ok  ' : c.name.startsWith('input driver') ? 'none' : 'FAIL';
+    console.log(`${mark} ${c.name.padEnd(18)} ${c.detail}`);
+  }
+  // Input is optional: simframe is still useful as a pure observer.
+  const required = checks.filter((c) => !c.name.startsWith('input driver'));
+  process.exitCode = required.every((c) => c.ok) ? 0 : 1;
 }
 
 main().catch((err) => {

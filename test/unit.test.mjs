@@ -195,3 +195,52 @@ test('spreadEvenly returns everything when asked for more than it has', () => {
   assert.deepEqual(spreadEvenly([1, 2, 3], 10), [1, 2, 3]);
   assert.deepEqual(spreadEvenly([1, 2, 3], 1), [3], 'a single sample is the newest');
 });
+
+// --- batch scripting: shorthand parsing and element matching ---
+import { normalizeStep } from '../src/actions.js';
+import { centerOf, matchElement } from '../src/input.js';
+
+test('step shorthand keeps sibling options', () => {
+  assert.deepEqual(normalizeStep({ tap: 'Save' }), { value: 'Save', action: 'tap' });
+  assert.deepEqual(normalizeStep({ waitText: 'Saved', timeoutMs: 5000 }), {
+    timeoutMs: 5000,
+    value: 'Saved',
+    action: 'waitText',
+  });
+  assert.deepEqual(normalizeStep({ type: { into: 'Name', text: 'Fryer 3' } }), {
+    into: 'Name',
+    text: 'Fryer 3',
+    action: 'type',
+  });
+  assert.deepEqual(normalizeStep('settle'), { action: 'settle' });
+  assert.throws(() => normalizeStep({}), /empty step/);
+});
+
+const NODES = [
+  { label: 'Save', identifier: null, value: null, type: 'Button', frame: { x: 10, y: 20, width: 80, height: 40 } },
+  { label: 'Save Draft', identifier: null, value: null, type: 'Button', frame: { x: 10, y: 80, width: 80, height: 40 } },
+  { label: null, identifier: 'asset-name', value: 'Fryer', type: 'TextField', frame: { x: 0, y: 0, width: 100, height: 30 } },
+];
+
+test('an exact label beats a substring match', () => {
+  assert.equal(matchElement(NODES, 'Save').frame.y, 20, 'exact "Save" wins over "Save Draft"');
+});
+
+test('elements are findable by identifier and by substring', () => {
+  assert.equal(matchElement(NODES, 'asset-name').type, 'TextField');
+  assert.equal(matchElement(NODES, 'draft').label, 'Save Draft');
+});
+
+test('an ambiguous match refuses to guess', () => {
+  const ambiguous = [NODES[0], { ...NODES[0], frame: { x: 0, y: 200, width: 10, height: 10 } }];
+  assert.throws(() => matchElement(ambiguous, 'Save'), /matched 2 elements/);
+  assert.equal(matchElement(ambiguous, 'Save', { index: 1 }).frame.y, 200, 'index disambiguates');
+});
+
+test('a missing element is an error, not a silent no-op', () => {
+  assert.throws(() => matchElement(NODES, 'Delete'), /no element matching/);
+});
+
+test('centerOf finds the middle of an element', () => {
+  assert.deepEqual(centerOf(NODES[0]), { x: 50, y: 40 });
+});

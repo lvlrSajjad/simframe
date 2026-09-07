@@ -101,6 +101,8 @@ booted simulator, and stops itself 15 minutes after the last request.
 | `sim_wait` | Waits for the screen to react, then returns the frame. `mode`: `settle` (default — change, then stillness), `change`, or `stable`. Baseline defaults to your last look. |
 | `sim_strip` | N buffered frames tiled into one image, oldest first, with millisecond offsets. With `spanMs`, frames are spread evenly across that window rather than taken from the end. |
 | `sim_recall` | Look backwards. `timeline` (default) is a text summary of what changed in the last minute and when; `at` returns the buffered frame from a moment in the past. |
+| `sim_do` | Run a whole flow in one call — tap, type, scroll, wait, assert — settling between steps. The main speedup. Needs idb for input. |
+| `sim_ui` | The screen as an accessibility tree: labels, types and exact tap points. Often cheaper than an image. Needs idb. |
 | `sim_capture` | `status` / `start` / `stop` for the background loops. Rarely needed. |
 | `sim_devices` | Booted simulators simframe can capture. |
 
@@ -123,8 +125,11 @@ simframe recall --ago=25000    # the frame from 25 seconds ago
 simframe strip --count=6 --span-ms=45000   # six frames spread across 45s
 simframe status                # what is running, and how fresh
 simframe stop [--force]        # --force stops a loop another client is using
+simframe ui                    # accessibility tree, with tap points
+simframe tap "Save"            # tap by label, then wait for the screen to settle
+simframe do flow.json          # run a scripted flow
 simframe devices --all
-simframe doctor
+simframe doctor                # reports whether input is available
 ```
 
 ## How it works
@@ -205,8 +210,8 @@ readable. `sim_state` sends no image at all.
 ## Limitations
 
 - Simulators only. `simctl` cannot capture a physical device.
-- simframe **reads** the screen; it does not tap, swipe or type. It is meant to
-  sit alongside whatever already drives input, replacing only the screenshot.
+- Input depends on idb, which uses private CoreSimulator APIs and can lag a new
+  Xcode release. Observation depends only on `simctl` and keeps working.
 - Capture tops out near 6 fps, because `simctl io screenshot` costs ~130 ms.
   Fast animations are sampled, not recorded.
 - Region maps need a baseline within the ~90 s history window. Beyond that you
@@ -223,10 +228,10 @@ readable. `sim_state` sends no image at all.
   used automatically when ffmpeg is present.
 - Optional accessibility-tree text alongside the frame, so an agent can read
   labels without spending image tokens.
-- Input, via the accessibility tree: `tap --ref` beats faster pixels, because
-  hand-measuring tap coordinates off a screenshot is where the time actually goes.
-- Fusing input with settle-and-look, so tap → wait → see is one round trip
-  rather than three.
+- Recording a walked path as a named, replayable flow, so a regression check is
+  one call with no reasoning at all.
+- Reading text from the frame itself, so assertions work on apps with thin
+  accessibility coverage.
 
 ## Releasing
 

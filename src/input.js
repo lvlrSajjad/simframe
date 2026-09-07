@@ -1,0 +1,184 @@
+// Input driver. simframe observes without any of this; input is an optional
+// capability layered on top, so every entry point here has to answer "is this
+// even available?" before it answers anything else.
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const run = promisify(execFile);
+
+const IDB_HINT =
+  'install it with: brew tap facebook/fb && brew install idb-companion && pipx install fb-idb';
+
+let driverCache = null;
+
+/** @returns {Promise<{name: string, available: boolean, version: string|null, reason: string|null}>} */
+export async function detectDriver({ refresh = false } = {}) {
+  if (driverCache && !refresh) return driverCache;
+  try {
+    const { stdout } = await run('idb', ['--version'], { timeout: 5000 });
+    driverCache = { name: 'idb', available: true, version: stdout.trim().split('\n')[0], reason: null };
+  } catch (err) {
+    driverCache = {
+      name: 'idb',
+      available: false,
+      version: null,
+      reason:
+        err.code === 'ENOENT'
+          ? `idb is not installed, so simframe can observe the screen but cannot touch it — ${IDB_HINT}`
+          : `idb is present but did not run: ${err.message}`,
+    };
+  }
+  return driverCache;
+}
+
+async function requireDriver() {
+  const driver = await detectDriver();
+  if (!driver.available) throw new Error(driver.reason);
+  return driver;
+}
+
+async function idb(args, { timeout = 20_000 } = {}) {
+  await requireDriver();
+  const { stdout } = await run('idb', args, { timeout, maxBuffer: 32 << 20 });
+  return stdout;
+}
+
+/**
+ * Screen geometry, needed because the accessibility tree speaks in points while
+ * a simframe frame is a scaled bitmap. Without this mapping, a coordinate read
+ * off an image lands in the wrong place.
+ */
+export async function screenInfo(udid) {
+  const out = await idb(['describe', '--json', '--udid', udid]);
+  const info = JSON.parse(out.trim().split('\n').filter(Boolean).pop());
+  const dims = info.screen_dimensions || {};
+  const density = dims.density || 1;
+  return {
+    pixelWidth: dims.width ?? null,
+    pixelHeight: dims.height ?? null,
+    density,
+    pointWidth: dims.width ? Math.round(dims.width / density) : null,
+    pointHeight: dims.height ? Math.round(dims.height / density) : null,
+  };
+}
+
+/** The accessibility tree, flattened. This is what makes tap-by-label possible. */
+export async function describeAll(udid) {
+  const out = await idb(['ui', 'describe-all', '--udid', udid, '--json']);
+  const nodes = [];
+  for (const line of out.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      for (const node of Array.isArray(parsed) ? parsed : [parsed]) nodes.push(normalizeNode(node));
+    } catch {
+      /* idb interleaves non-JSON status lines; skip them */
+    }
+  }
+  return nodes.filter((n) => n.frame);
+}
+
+function normalizeNode(node) {
+  const frame = node.frame || node.AXFrame || null;
+  return {
+    label: node.AXLabel ?? node.label ?? null,
+    value: node.AXValue ?? node.value ?? null,
+    type: node.type ?? node.AXType ?? null,
+    identifier: node.AXUniqueId ?? node.identifier ?? null,
+    enabled: node.AXEnabled ?? node.enabled ?? null,
+    frame: frame
+      ? {
+          x: frame.x ?? frame.X ?? 0,
+          y: frame.y ?? frame.Y ?? 0,
+          width: frame.width ?? frame.Width ?? 0,
+          height: frame.height ?? frame.Height ?? 0,
+        }
+      : null,
+    raw: node,
+  };
+}
+
+const text = (n) => [n.label, n.value, n.identifier].filter(Boolean).join(' ');
+
+/**
+ * Find the element a caller means. Exact label first, then identifier, then a
+ * case-insensitive substring — and an ambiguous match is an error rather than a
+ * guess, because a wrong tap is worse than no tap.
+ */
+export function matchElement(nodes, query, { index } = {}) {
+  const q = String(query).toLowerCase();
+  const tiers = [
+    nodes.filter((n) => (n.label ?? '').toLowerCase() === q),
+    nodes.filter((n) => (n.identifier ?? '').toLowerCase() === q),
+    nodes.filter((n) => text(n).toLowerCase().includes(q)),
+  ];
+  for (const tier of tiers) {
+    if (!tier.length) continue;
+    if (index != null) {
+      if (index >= tier.length) {
+        throw new Error(`"${query}" matched ${tier.length} elements; index ${index} is out of range`);
+      }
+      return tier[index];
+    }
+    if (tier.length > 1) {
+      const shown = tier.slice(0, 6).map((n, i) => `[${i}] ${text(n) || n.type}`).join(', ');
+      throw new Error(
+        `"${query}" matched ${tier.length} elements — pass index to choose: ${shown}`,
+      );
+    }
+    return tier[0];
+  }
+  throw new Error(`no element matching "${query}" is on screen`);
+}
+
+export function centerOf(node) {
+  return {
+    x: Math.round(node.frame.x + node.frame.width / 2),
+    y: Math.round(node.frame.y + node.frame.height / 2),
+  };
+}
+
+export async function tapPoint(udid, x, y, { durationMs } = {}) {
+  const args = ['ui', 'tap', '--udid', udid, String(Math.round(x)), String(Math.round(y))];
+  if (durationMs) args.push('--duration', String(durationMs / 1000));
+  await idb(args);
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+export async function tapLabel(udid, query, { index, durationMs } = {}) {
+  const node = matchElement(await describeAll(udid), query, { index });
+  const point = centerOf(node);
+  await tapPoint(udid, point.x, point.y, { durationMs });
+  return { node, point };
+}
+
+export async function typeText(udid, value) {
+  await idb(['ui', 'text', '--udid', udid, String(value)]);
+}
+
+export async function pressKey(udid, keycode) {
+  await idb(['ui', 'key', '--udid', udid, String(keycode)]);
+}
+
+export async function pressButton(udid, name) {
+  await idb(['ui', 'button', '--udid', udid, String(name).toUpperCase()]);
+}
+
+export async function swipe(udid, from, to, { durationMs = 300 } = {}) {
+  await idb([
+    'ui', 'swipe', '--udid', udid,
+    String(Math.round(from.x)), String(Math.round(from.y)),
+    String(Math.round(to.x)), String(Math.round(to.y)),
+    '--duration', String(durationMs / 1000),
+  ]);
+}
+
+/** Map a coordinate read off a simframe image into the points idb expects. */
+export function imageToPoints({ x, y }, { imageWidth, imageHeight, pointWidth, pointHeight }) {
+  if (!pointWidth || !pointHeight) throw new Error('screen geometry is unknown');
+  return {
+    x: Math.round((x / imageWidth) * pointWidth),
+    y: Math.round((y / imageHeight) * pointHeight),
+  };
+}

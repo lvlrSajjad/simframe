@@ -193,6 +193,30 @@ simframe doctor</pre>
   </tbody>
 </table>
 
+<h2>The real bottleneck is round trips</h2>
+<p>
+  Once capture is warm, observation costs 1–23&nbsp;ms. A model turn costs <em>seconds</em>.
+  A flow that takes a person 30 seconds is maybe twelve interactions — done one tap per
+  turn, that is twelve turns of inference, and no amount of tool speed touches it.
+</p>
+<div class="flow">
+  <div class="row fast"><span>simframe observation</span><span class="ms">1–23 ms</span></div>
+  <div class="row fast"><span>an input call</span><span class="ms">tens of ms</span></div>
+  <div class="row slow"><span>one model turn</span><span class="ms">seconds</span></div>
+</div>
+<p>So <code>sim_do</code> runs the whole flow in one call, settling between steps:</p>
+<pre>[{"tap": "Assets"},
+ {"tap": "Add Asset"},
+ {"type": {"into": "Name", "text": "Fryer 3"}},
+ {"tap": "Save"},
+ {"waitText": "Saved", "timeoutMs": 5000}]</pre>
+<p>
+  Taps go by accessibility label, not coordinates, so they cannot miss — mis-taps from
+  pixel-measuring are where agent time actually goes. Assertions live inside the script, so
+  the flow verifies itself instead of spending a turn asking whether it worked. Input needs
+  <a href="https://github.com/facebook/idb">idb</a>; observation needs only Xcode.
+</p>
+
 <h2>Baselines: the thing to understand</h2>
 <p>
   Every change question is really “changed <em>since when</em>?” — and the answer is almost
@@ -295,7 +319,7 @@ CHANGED since 3523ms ago: 25.4%
 <h2>Honest limitations</h2>
 <ul>
   <li>Simulators only — <code>simctl</code> cannot capture a physical device.</li>
-  <li>simframe <em>reads</em> the screen; it does not tap, swipe or type. It sits alongside whatever already drives input and replaces only the screenshot.</li>
+  <li>Input depends on idb, which uses private CoreSimulator APIs and can lag a new Xcode release. Observation depends only on <code>simctl</code>.</li>
   <li>It speeds up <em>confirming</em> a fix, not <em>locating</em> one. A bug living in a memo comparator or a stale closure is not visible in any frame.</li>
   <li>Capture tops out near 6&nbsp;fps, because <code>simctl io screenshot</code> costs ~130&nbsp;ms. Fast animations are sampled, not recorded.</li>
 </ul>

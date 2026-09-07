@@ -8,7 +8,9 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'node:fs';
 import { REGION_COLS, REGION_ROWS, regionMap } from './analyze.js';
+import * as actions from './actions.js';
 import * as api from './index.js';
+import * as input from './input.js';
 import { bootedDevices } from './simctl.js';
 import * as store from './store.js';
 
@@ -113,6 +115,45 @@ const TOOLS = [
     },
   },
   {
+    name: 'sim_do',
+    description:
+      'Run a whole flow in ONE call: tap, type, scroll, wait and assert, in order. Each action automatically waits for the screen to settle before the next step, using a baseline captured before that action, so steps do not race the UI. This is the fastest way to drive the simulator — a twelve-step flow costs one round trip instead of twelve. Prefer it over single taps whenever you know more than one step ahead. Steps stop at the first failure and the result says exactly which step failed and why. Requires idb for input; observation-only steps work without it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...deviceProp,
+        steps: {
+          type: 'array',
+          description:
+            'Ordered steps. Shorthand forms: {"tap":"Save"} (by accessibility label; add "index" if ambiguous), {"tapAt":{"x":100,"y":200,"space":"points"|"image"}}, {"type":{"into":"Name","text":"Fryer 3"}}, {"paste":{"into":"Notes","text":"long text"}}, {"scroll":"down"}, {"swipe":{"from":[x,y],"to":[x,y]}}, {"button":"HOME"}, {"launch":"com.example.app"}, {"openUrl":"myapp://x"}, {"waitText":"Saved","timeoutMs":5000}, {"assertText":"Saved"}, {"assertGone":"Spinner"}, {"settle":{"stableMs":600}}, {"look":{"detail":"low"}}, {"pause":300}.',
+          items: { type: 'object' },
+        },
+        autoSettle: {
+          type: 'boolean',
+          description: 'Wait for the screen to settle after each action (default true). Turn off only for deliberate rapid input.',
+        },
+        stableMs: { type: 'number', description: 'How still the screen must be to count as settled (default 500).' },
+        timeoutMs: { type: 'number', description: 'Per-step settle timeout (default 8000).' },
+        continueOnError: { type: 'boolean', description: 'Keep going after a failed step (default false).' },
+        finalLook: { type: 'boolean', description: 'Attach a frame of the end state (default true).' },
+      },
+      required: ['steps'],
+    },
+  },
+  {
+    name: 'sim_ui',
+    description:
+      'Read the screen as an accessibility tree instead of an image: every element with its label, value, type and position in points. Often cheaper AND more useful than a screenshot, because it tells you what is actually tappable and gives exact coordinates — no measuring pixels by eye. Use it before tapping something you are unsure about. Requires idb.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...deviceProp,
+        filter: { type: 'string', description: 'Only elements whose label, value or identifier contains this text.' },
+        interactive: { type: 'boolean', description: 'Only elements that look tappable (buttons, fields, cells).' },
+      },
+    },
+  },
+  {
     name: 'sim_capture',
     description:
       'Inspect or control the background capture loops: action "status" (what is running and how fresh), "start", "stop". Capture starts automatically on first use, so you rarely need this.',
@@ -201,6 +242,10 @@ export async function serve({ device: defaultDevice, options = {} } = {}) {
           return await strip(target, args, options);
         case 'sim_recall':
           return await recall(target, args, options);
+        case 'sim_do':
+          return await doScript(target, args, options);
+        case 'sim_ui':
+          return await ui(target, args, options);
         case 'sim_capture':
           return await capture(target, args, options);
         case 'sim_devices':
@@ -358,6 +403,70 @@ async function recall(target, args, options) {
   const warn = livenessLine(res.live);
   if (warn) lines.unshift(warn);
   return { content: [text(lines.join('\n'))] };
+}
+
+async function doScript(target, args, options) {
+  const res = await actions.runScript(target, {
+    steps: args.steps,
+    autoSettle: args.autoSettle,
+    stableMs: args.stableMs,
+    timeoutMs: args.timeoutMs,
+    continueOnError: args.continueOnError,
+    options,
+  });
+
+  const lines = [
+    `${res.ok ? 'flow completed' : 'FLOW FAILED'} — ${res.ranSteps}/${res.totalSteps} steps in ${res.totalMs}ms`,
+  ];
+  for (const r of res.results) {
+    const settle = r.settled
+      ? r.settled.ok
+        ? ` · settled in ${r.settled.waitedMs}ms`
+        : ` · WARNING: ${r.settled.stalled ? 'capture stalled' : 'never settled'} after ${r.settled.waitedMs}ms`
+      : '';
+    lines.push(
+      `  ${r.ok ? 'ok  ' : 'FAIL'} [${r.index}] ${r.action}: ${r.ok ? r.detail : r.error}${settle}`,
+    );
+  }
+  if (!res.ok) lines.push('later steps were not run; the screen is left wherever the failing step stopped');
+
+  const content = [text(lines.join('\n'))];
+  for (const f of res.frames) content.push(image(f.png));
+  if (args.finalLook !== false) {
+    const frame = await api.getFrame(target, { detail: args.detail ?? 'normal', options });
+    remember(res.device.udid, frame.state);
+    content.push(text(`end state — ${header(frame.device, frame.state, frame.ageMs)}`), image(frame.png));
+  }
+  return { content, isError: !res.ok };
+}
+
+async function ui(target, args, options) {
+  const { device } = await api.ensureDaemon(target, options);
+  const driver = await input.detectDriver();
+  if (!driver.available) return { isError: true, content: [text(driver.reason)] };
+
+  let nodes = await input.describeAll(device.udid);
+  if (args.filter) {
+    const q = String(args.filter).toLowerCase();
+    nodes = nodes.filter((n) =>
+      [n.label, n.value, n.identifier].filter(Boolean).join(' ').toLowerCase().includes(q),
+    );
+  }
+  if (args.interactive) {
+    nodes = nodes.filter((n) => /button|field|cell|link|switch|slider|tab|menu/i.test(n.type || ''));
+  }
+  if (!nodes.length) return { content: [text('no matching elements on screen')] };
+
+  const rows = nodes.slice(0, 200).map((n) => {
+    const c = input.centerOf(n);
+    const name = [n.label, n.value && `= ${n.value}`, n.identifier && `#${n.identifier}`]
+      .filter(Boolean)
+      .join(' ');
+    return `  ${(n.type || '?').padEnd(14)} ${String(`${c.x},${c.y}`).padEnd(10)} ${name || '(unlabelled)'}`;
+  });
+  const head = `${device.name} — ${nodes.length} element${nodes.length === 1 ? '' : 's'} (type, tap point in points, label)`;
+  const tail = nodes.length > 200 ? `\n  ... ${nodes.length - 200} more; use filter to narrow` : '';
+  return { content: [text(`${head}\n${rows.join('\n')}${tail}`)] };
 }
 
 async function capture(target, args, options) {

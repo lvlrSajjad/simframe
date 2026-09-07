@@ -102,3 +102,25 @@ export async function screenshot(udid, outFile, { mask = 'ignored' } = {}) {
 export async function resize(inFile, outFile, maxDim) {
   await run('sips', ['-Z', String(maxDim), inFile, '--out', outFile], { timeout: 10_000 });
 }
+
+export async function launchApp(udid, bundleId) {
+  await run('xcrun', ['simctl', 'launch', udid, bundleId], { timeout: 20_000 });
+}
+
+export async function terminateApp(udid, bundleId) {
+  await run('xcrun', ['simctl', 'terminate', udid, bundleId], { timeout: 20_000 });
+}
+
+export async function openUrl(udid, url) {
+  await run('xcrun', ['simctl', 'openurl', udid, url], { timeout: 20_000 });
+}
+
+/** Put text on the device pasteboard — far faster than typing a long string. */
+export async function setPasteboard(udid, value) {
+  const child = execFile('xcrun', ['simctl', 'pbcopy', udid], { timeout: 10_000 });
+  child.stdin.end(value);
+  await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`pbcopy exited ${code}`))));
+  });
+}
