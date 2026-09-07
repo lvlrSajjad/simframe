@@ -594,3 +594,68 @@ three different screens were all named "help center e" — a button that happene
 to sit in the nav bar, mistaken for a title — and the tour stored five nodes for
 four tabs. After it, four tabs store four nodes named `invoices`, `work orders`,
 `more`, and the tab bar itself for the one screen with no title.
+
+## Phase 6c — structural settle gate, and what it did not fix
+
+Same machine and app. This phase set out to do two things: widen the narrow
+same-screen gap left by 6b, and claw back the verification cost 6b introduced.
+**It achieved neither of its stated goals.** It is recorded because of what it
+found on the way.
+
+### Goal 1: widen the gap — not achieved
+
+The theory was that the 0.41 same-screen floor came from screens caught after
+their pixels settled but before their rows arrived, and that making a novel
+fingerprint prove itself twice would remove the transients. A gate was built:
+two readings, 300 ms apart, agreeing by similarity rather than exact hash.
+
+The first measurement after it looked like a triumph — Home read 7/7/7 tokens,
+same-screen floor 1.00, gap 0.69. That measurement was luck. Re-run:
+
+| | Home tokens, three cold visits | Same-screen floor | Gap |
+| --- | --- | --- | --- |
+| Before the gate | 17 / 7 / 7 | 0.41 | 0.11 |
+| After the gate, first run | 7 / 7 / 7 | 1.00 | 0.69 |
+| After the gate, re-run | **8 / 17 / 6** | **0.35** | **0.05** |
+
+Home is not catching a transient. Its structure genuinely differs between
+visits, and a settle gate cannot wait out something that was never unsettled.
+Every other screen scores 1.00 against itself in every run; the entire margin
+problem is this one screen, and it needs a different fix — see
+`docs/DEFERRED.md`.
+
+### Goal 2: reduce the verification cost — not achieved
+
+Carrying the previous step's after-screen forward as the next step's before-
+screen is sound and is kept, but it is swamped. The warm pass is still far above
+where Phase 6 left it.
+
+### What it did achieve: correctness, and two real bugs
+
+A/B on the same tour, gate off versus on, everything else equal:
+
+| | Pass 1 | Pass 2 | Pass 3 | Screens |
+| --- | --- | --- | --- | --- |
+| Gate **off** | 33.2 s, 0/4 ok, 3/4 memory | 27.1 s, 3/4 ok, 3/4 memory | 16.6 s, 4/4 ok, 4/4 memory | 3 |
+| Gate **on** | 30.4 s, 0/4 ok, **4/4** memory | 28.6 s, **4/4** ok, **4/4** memory | 27.4 s, 4/4 ok, 4/4 memory | 4 |
+
+The gate reaches full memory from the first pass and full verification from the
+second, one pass earlier than without it, and costs about 10 s on the warm pass.
+It is on by default and `confirmNovel: false` turns it off.
+
+Two genuine bugs surfaced while diagnosing, both invisible until a per-step
+diagnostic printed `settled` and `confirmed`:
+
+- **Identity settled with its own patience, not the caller's.** `settledState`
+  times out at 1.5 s. Inside a flow allowing twelve seconds this reported
+  `settled=false` on three of four screens while the flow was still waiting
+  happily — and an unsettled screen recorded no edge, so **pass 1 recorded zero
+  edges** and every later step read `unverified`.
+- **The fix for that overshot.** Passing the caller's timeout straight through
+  made screens that never settle — live content, a looping animation — burn the
+  flow's whole 12 s budget, twice per step: the tour went from 7 s to 53 s on
+  the warm pass. Identity now waits `IDENTITY_SETTLE_TIMEOUT_MS` (2.5 s), long
+  enough to outlast a transition, short enough to give up cheaply.
+
+The lesson worth keeping is the first measurement. It showed exactly what the
+change was supposed to show, and it was wrong; only re-running it caught that.

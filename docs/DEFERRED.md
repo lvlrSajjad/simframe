@@ -108,6 +108,24 @@ so `goto` works, but it is not a name anybody would type. A better fallback
 would be the label of the *selected* tab, which needs a selected-state signal
 the fused element list does not currently carry.
 
+### A screen can legitimately have more than one structure
+This is the real cause of the narrow same-screen margin, and Phase 6c's settle
+gate does not fix it. One screen reads 8, 17 and 6 tokens on three cold visits
+with no transient to wait out: sections arrive from different sources at
+different times, and more than one of the results is a genuine settled state of
+that screen. Every other screen scores 1.00 against itself.
+
+A threshold cannot express this, because the two structures are as far apart as
+two different screens are. What can is letting a node hold **several** accepted
+fingerprints — match if the reading agrees with any variant, add a variant when
+a confirmed reading arrives at a node reached by a known edge. That keeps
+identity exact rather than loosening it, and it is bounded: a screen with three
+async sections has a few variants, not unlimited ones.
+
+The alternative — excluding a region that changes between visits — was
+considered and is worse: it needs to know which region is async, which is the
+same problem again.
+
 ### A screen fingerprinted while still loading becomes its own screen
 The four-tab tour stores five graph nodes, not four. All five are genuinely
 distinct (max pairwise similarity 0.31, well under the 0.45 threshold), so

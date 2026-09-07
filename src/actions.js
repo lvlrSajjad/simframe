@@ -35,6 +35,7 @@ export async function runScript(
     autoSettle = true,
     stableMs = 500,
     timeoutMs = 8000,
+    confirmNovel = true,
     continueOnError = false,
     // Check each action against what it did last time, and remember what it
     // does this time. On by default: a flow that cannot tell a wrong turn from
@@ -63,6 +64,7 @@ export async function runScript(
   const results = [];
   const frames = [];
   let failed = false;
+  let carriedScreen = null;
 
   for (const [i, raw] of steps.entries()) {
     const step = normalizeStep(raw);
@@ -72,7 +74,13 @@ export async function runScript(
     const before = beforeState.hash;
     // Identity is structural: a list with new rows is the same screen, and the
     // pixel hash cannot say so.
-    const beforeScreen = verify ? await api.screenIdentity(deviceQuery, { options }) : null;
+    // The screen this step starts on is the screen the last one ended on —
+    // nothing happens in between. Recomputing it cost a full perception pass
+    // per step for an answer already in hand.
+    const beforeScreen = verify
+      ? (carriedScreen ?? await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, confirmNovel }))
+      : null;
+    carriedScreen = null;
     // What this action did last time it was taken here, if ever.
     const prediction = verify && beforeScreen?.hash ? graph.predict(udid, beforeScreen, step) : null;
     try {
@@ -101,7 +109,7 @@ export async function runScript(
       if (verify && ACTION_STEPS.has(step.action) && beforeScreen?.hash) {
         const afterState = (await api.getState(deviceQuery, { options })).state;
         const kind = afterState.transition?.kind;
-        const afterScreen = await api.screenIdentity(deviceQuery, { options });
+        const afterScreen = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, confirmNovel });
         verification = {
           ...graph.verdict({ prediction, before: beforeScreen.hash, after: afterScreen.hash, kind }),
           predicted: prediction ? { to: prediction.to.slice(0, 10), kind: prediction.kind, seen: prediction.count } : null,
@@ -109,8 +117,13 @@ export async function runScript(
         };
         // Only remember what was seen on a settled screen: an edge recorded
         // mid-transition points at a screen that never really existed.
-        if (afterScreen.settled && afterScreen.hash) {
+        // `confirmed` already means the fingerprint held still across two
+        // independent readings, which is the thing `settled` was standing in
+        // for. Requiring both meant a screen that settled slowly recorded
+        // nothing at all.
+        if (afterScreen.confirmed && afterScreen.hash) {
           graph.record(udid, { from: beforeScreen, action: step, to: afterScreen.hash, kind });
+          carriedScreen = afterScreen;
         }
       }
 

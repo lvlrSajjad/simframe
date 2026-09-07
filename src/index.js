@@ -14,6 +14,8 @@ import {
   signatureDiff,
 } from './analyze.js';
 import * as input from './input.js';
+import * as fingerprint from './fingerprint.js';
+import * as graph from './graph.js';
 import * as matching from './matching.js';
 import * as screenmap from './screenmap.js';
 import { resolveDevice, resize, screenshot } from './simctl.js';
@@ -740,30 +742,104 @@ export async function locate(
  * does not. The pixel hash is what makes the lookup cheap; the structural hash
  * is what makes the answer right.
  */
-export async function screenIdentity(deviceQuery, { options } = {}) {
+/**
+ * Structural settle: how long to let a screen finish arriving before believing
+ * a fingerprint that nothing recognises.
+ */
+export const STRUCTURAL_SETTLE_MS = 300;
+
+/**
+ * How long identity will wait for pixels to go quiet.
+ *
+ * Not the caller's timeout. A flow allows twelve seconds for a screen to
+ * arrive, but some screens never report settled at all — live content, a
+ * looping animation — and spending the flow's whole budget waiting for a flag
+ * that will not come cost 53s on a tour that had taken 7s. Long enough to
+ * outlast a normal transition, short enough that a screen which never settles
+ * is cheap to give up on.
+ */
+export const IDENTITY_SETTLE_TIMEOUT_MS = 2500;
+const STRUCTURAL_SETTLE_SAMPLES = 3;
+
+/**
+ * What screen is this?
+ *
+ * `settled` is a question about pixels, and it is answered before a screen has
+ * necessarily finished arriving: a list whose spinner has gone but whose rows
+ * have not landed is perfectly still and structurally wrong. Measured, that put
+ * one screen at 17 tokens on one visit and 7 on the next, which is the whole
+ * reason the same-screen floor sits at 0.41 instead of somewhere comfortable.
+ *
+ * So structural identity gets a structural settle of its own — but only where
+ * it costs something worth paying for. A fingerprint that matches a screen we
+ * already know is taken at face value; the risk is not that we mislabel a known
+ * screen, it is that a half-drawn one becomes a new node nobody can navigate
+ * to. Novel fingerprints, and only those, are re-sampled until two consecutive
+ * readings agree.
+ */
+export async function screenIdentity(deviceQuery, { options, confirmNovel = true, settleMs, timeoutMs } = {}) {
   const { device, state } = await ensureDaemon(deviceQuery, options);
   const udid = device.udid;
-  const { state: settledFrame, settled } = await settledState(udid, {});
-  const current = settledFrame ?? state;
-  let entry = screenmap.recallNearest(udid, current.layoutHash)?.entry;
-  if (!entry) {
-    const geo = await deviceGeometry(udid, current);
-    entry = await screenmap.build(udid, {
-      hash: current.hash,
-      layoutHash: current.layoutHash,
-      fullFrame: await fullFrameFor(udid, current),
-      density: geo.density,
-      screen: { width: geo.pointWidth, height: geo.pointHeight },
-      persist: settled,
+
+  const read = async ({ fresh = false } = {}) => {
+    // Settle with the caller's patience, not a default. settledState times out
+    // at 1.5s on its own, so inside a flow that allows twelve seconds this was
+    // calling a screen unsettled while the flow was still happily waiting for
+    // it — and an unsettled screen records no edge, so the graph learned
+    // nothing and every later step read `unverified`.
+    const { state: settledFrame, settled } = await settledState(udid, {
+      settleMs,
+      timeoutMs: Math.min(timeoutMs ?? IDENTITY_SETTLE_TIMEOUT_MS, IDENTITY_SETTLE_TIMEOUT_MS),
     });
-  }
-  return {
-    hash: entry.structuralHash,
-    tokens: entry.structuralTokens ?? [],
-    keyboard: Boolean(entry.keyboard),
-    layoutHash: current.layoutHash,
-    settled,
+    const current = settledFrame ?? state;
+    let entry = fresh ? null : screenmap.recallNearest(udid, current.layoutHash)?.entry;
+    if (!entry) {
+      const geo = await deviceGeometry(udid, current);
+      entry = await screenmap.build(udid, {
+        hash: current.hash,
+        layoutHash: current.layoutHash,
+        fullFrame: await fullFrameFor(udid, current),
+        density: geo.density,
+        screen: { width: geo.pointWidth, height: geo.pointHeight },
+        persist: settled,
+      });
+    }
+    return {
+      hash: entry.structuralHash,
+      tokens: entry.structuralTokens ?? [],
+      keyboard: Boolean(entry.keyboard),
+      layoutHash: current.layoutHash,
+      settled,
+    };
   };
+
+  let identity = await read();
+  if (!confirmNovel) return { ...identity, confirmed: identity.settled };
+  // Being recognised is stronger evidence than the pixel settle flag: a
+  // fingerprint that matches a screen already trusted has nothing left to
+  // prove, and some screens (live content, a looping animation) never report
+  // settled at all. The gate exists to stop a half-drawn screen becoming a new
+  // node — not to re-interrogate a known one.
+  if (graph.nearestScreen(udid, identity)) return { ...identity, confirmed: true, known: true };
+
+  // Nothing recognises this, or the pixels have not gone quiet. Either way, make
+  // it prove it is the same screen twice running before it becomes a node.
+  for (let i = 1; i < STRUCTURAL_SETTLE_SAMPLES; i += 1) {
+    await sleep(STRUCTURAL_SETTLE_MS);
+    const again = await read({ fresh: true });
+    // Two readings agree if they are the same screen — the same test identity
+    // itself uses. Demanding an identical hash is a stricter question than the
+    // one being asked, and a row a grid-unit wider fails it.
+    const agrees = again.hash === identity.hash
+      || fingerprint.similarity(again.tokens, identity.tokens) >= graph.SIMILARITY_THRESHOLD;
+    if (agrees) {
+      return { ...again, confirmed: true, known: Boolean(graph.nearestScreen(udid, again)) };
+    }
+    identity = again;
+  }
+  // Still moving structurally. Report the latest reading and say it is unproven,
+  // so callers can decline to record an edge to a screen that never held still.
+  return { ...identity, confirmed: false, known: false };
 }
 
 export { DEFAULTS, screenmap, store };
