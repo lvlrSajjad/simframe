@@ -23,6 +23,22 @@ jobs:
       - run: npm test
       - name: CLI loads
         run: node src/cli.js --help
+      - name: The package ships everything the code needs at runtime
+        # A file missing from "files" does not fail a build or a test — it fails
+        # silently for whoever installs it. OCR shipped disabled exactly this way.
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const files = require("/tmp/pack.json")[0].files.map((f) => f.path);
+            const required = ["native/ocr.swift", "src/ocr.js", "src/cli.js", "src/mcp.js"];
+            const missing = required.filter((r) => !files.includes(r));
+            for (const f of required) console.log(`${missing.includes(f) ? "MISSING" : "ok     "} ${f}`);
+            if (missing.length) {
+              console.error(`\n${missing.length} runtime file(s) absent from the published package`);
+              process.exit(1);
+            }
+          '
+
       - name: Registry manifest agrees with package.json
         run: |
           node -e '
