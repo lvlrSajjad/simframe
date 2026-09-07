@@ -361,8 +361,12 @@ async function strip(target, args, options) {
   };
 }
 
+function dur(ms) {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
 function ago(ms) {
-  return ms < 1000 ? `${Math.round(ms)}ms ago` : `${(ms / 1000).toFixed(1)}s ago`;
+  return `${dur(ms)} ago`;
 }
 
 async function recall(target, args, options) {
@@ -384,19 +388,19 @@ async function recall(target, args, options) {
 
   const res = await api.getTimeline(target, { spanMs: args.spanMs ?? 60_000, options });
   const lines = [
-    `${res.device.name} · remembering the last ${ago(res.coveredMs)} · ${res.buffered} frames buffered`,
+    `${res.device.name} · remembering the last ${dur(res.coveredMs)} · ${res.buffered} frames buffered`,
   ];
   if (!res.events.length) {
-    lines.push(`nothing changed in that window; the screen has been still for ${ago(res.idleForMs)}`);
+    lines.push(`nothing changed in that window; the screen has been still for ${dur(res.idleForMs)}`);
   } else {
     lines.push(`${res.events.length} change${res.events.length === 1 ? '' : 's'}, oldest first:`);
     for (const e of res.events) {
       lines.push(
         `  ${ago(e.startedMsAgo).padStart(9)}  ${e.level === 'major' ? 'screen changed' : 'small change '}  ` +
-          `${(e.magnitude * 100).toFixed(0)}% of the screen, over ${ago(e.durationMs).replace(' ago', '')}`,
+          `${(e.magnitude * 100).toFixed(0)}% of the screen, over ${dur(e.durationMs)}`,
       );
     }
-    lines.push(`the screen has been still for ${ago(res.idleForMs)}`);
+    lines.push(`the screen has been still for ${dur(res.idleForMs)}`);
     const last = res.events[res.events.length - 1];
     if (last.map) lines.push('what moved in the most recent change:', last.map);
   }
@@ -462,7 +466,8 @@ async function ui(target, args, options) {
     const name = [n.label, n.value && `= ${n.value}`, n.identifier && `#${n.identifier}`]
       .filter(Boolean)
       .join(' ');
-    return `  ${(n.type || '?').padEnd(14)} ${String(`${c.x},${c.y}`).padEnd(10)} ${name || '(unlabelled)'}`;
+    const fallback = n.rawLabel ? '(icon-only — tap by these coordinates)' : '(unlabelled)';
+    return `  ${(n.type || '?').padEnd(14)} ${String(`${c.x},${c.y}`).padEnd(10)} ${name || fallback}`;
   });
   const head = `${device.name} — ${nodes.length} element${nodes.length === 1 ? '' : 's'} (type, tap point in points, label)`;
   const tail = nodes.length > 200 ? `\n  ... ${nodes.length - 200} more; use filter to narrow` : '';

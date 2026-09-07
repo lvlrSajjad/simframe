@@ -74,3 +74,51 @@ export function hexToSignature(hex) {
   for (let i = 0; i < hex.length; i += 2) out.push(parseInt(hex.slice(i, i + 2), 16));
   return out;
 }
+
+/**
+ * A hash of the screen's LAYOUT rather than its content.
+ *
+ * The frame hash changes whenever any pixel group changes — a clock digit, a new
+ * row of data — which makes it useless as a key for "have I seen this screen
+ * before?". This one skips the status bar and thresholds a coarse grid, so two
+ * visits to the same list with different rows still land close together, while a
+ * genuinely different screen lands far away.
+ */
+export const LAYOUT_COLS = 12;
+export const LAYOUT_ROWS = 24;
+export const LAYOUT_TOP_SKIP = 0.055; // the status bar, as a fraction of height
+
+export function layoutHash(bmp) {
+  const top = Math.floor(bmp.height * LAYOUT_TOP_SKIP);
+  const cropped = {
+    width: bmp.width,
+    height: bmp.height - top,
+    data: bmp.data.subarray(top * bmp.width * 4),
+  };
+  // A difference hash: each bit compares a cell with its right-hand neighbour.
+  // Thresholding against a global mean collapses low-contrast app screens onto
+  // the same value; local gradients stay discriminative.
+  const { gray } = grayGrid(cropped, LAYOUT_COLS + 1, LAYOUT_ROWS);
+  const bits = [];
+  for (let r = 0; r < LAYOUT_ROWS; r++) {
+    for (let c = 0; c < LAYOUT_COLS; c++) {
+      const i = r * (LAYOUT_COLS + 1) + c;
+      bits.push(gray[i] > gray[i + 1] ? 1 : 0);
+    }
+  }
+  let hex = '';
+  for (let i = 0; i < bits.length; i += 4) {
+    hex += (bits[i] | (bits[i + 1] << 1) | (bits[i + 2] << 2) | (bits[i + 3] << 3)).toString(16);
+  }
+  return hex;
+}
+
+const BITS = [0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4];
+
+/** Hamming distance between two hex hashes of equal length. */
+export function hashDistance(a, b) {
+  if (!a || !b || a.length !== b.length) return Infinity;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d += BITS[(parseInt(a[i], 16) ^ parseInt(b[i], 16)) & 0xf];
+  return d;
+}

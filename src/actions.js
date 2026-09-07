@@ -4,6 +4,7 @@
 // reason these scripts are reliable rather than racy.
 import * as api from './index.js';
 import * as input from './input.js';
+import * as intent from './intent.js';
 import { launchApp, openUrl, setPasteboard, terminateApp } from './simctl.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -11,7 +12,7 @@ const MAX_PAUSE_MS = 5000;
 
 const ACTION_STEPS = new Set([
   'tap', 'tapAt', 'type', 'paste', 'swipe', 'scroll', 'button', 'key',
-  'launch', 'terminate', 'openUrl',
+  'launch', 'terminate', 'openUrl', 'confirm', 'chooseAny', 'fillRequired',
 ]);
 
 /** Accept both `{tap: "Save"}` shorthand and `{action: "tap", target: "Save"}`. */
@@ -88,11 +89,11 @@ export async function runScript(
 async function runStep(deviceQuery, udid, step, ctx) {
   switch (step.action) {
     case 'tap': {
-      const { node, point } = await input.tapLabel(udid, step.value ?? step.target ?? step.label, {
-        index: step.index,
-        durationMs: step.durationMs,
-      });
-      return `tapped "${node.label ?? node.identifier ?? node.type}" at ${point.x},${point.y}`;
+      const query = step.value ?? step.target ?? step.label;
+      // Screen memory first: a familiar screen needs no tree read and no OCR.
+      const found = await api.locate(deviceQuery, query, { index: step.index, refresh: step.refresh });
+      await input.tapPoint(udid, found.target.x, found.target.y, { durationMs: step.durationMs });
+      return `tapped "${found.target.label}" at ${found.target.x},${found.target.y} (${found.from}${found.from === 'memory' ? ` d=${found.distance}` : ''}, via ${found.target.source})`;
     }
     case 'tapAt': {
       const geo = await ctx.screen();
@@ -163,6 +164,57 @@ async function runStep(deviceQuery, udid, step, ctx) {
       await openUrl(udid, step.value ?? step.url);
       return `opened ${step.value ?? step.url}`;
 
+    // Human-level steps: act on what is on screen without reasoning about it.
+    case 'confirm': {
+      const geo = await ctx.screen();
+      const r = await intent.confirm(udid, { geo });
+      return `confirmed via "${r.label}" at ${r.point.x},${r.point.y}`;
+    }
+    case 'chooseAny': {
+      const geo = await ctx.screen();
+      const r = await intent.chooseAny(udid, { prefer: step.value ?? step.prefer, geo });
+      return `chose "${r.label}" of ${r.optionCount} options`;
+    }
+    case 'fillRequired': {
+      const geo = await ctx.screen();
+      const filled = [];
+      const skipped = [];
+      const maxRounds = step.rounds ?? 6;
+      for (let round = 0; round < maxRounds; round++) {
+        const nodes = await input.describeAll(udid);
+        const pending = intent.findUnsatisfied(nodes).filter((n) => intent.onScreen(n, geo));
+        const offscreen = intent.findUnsatisfied(nodes).filter((n) => !intent.onScreen(n, geo));
+        for (const o of offscreen) {
+          const name = (o.label || o.type || '?').slice(0, 40);
+          if (!skipped.includes(name)) skipped.push(name);
+        }
+        if (!pending.length) break;
+        const target = pending[0];
+        const point = input.centerOf(target);
+        const name = (target.label || target.type || 'field').split(',')[0].slice(0, 32);
+        await input.tapPoint(udid, point.x, point.y);
+        await sleep(step.settleMs ?? 900);
+        if (intent.isTextInput(target)) {
+          await input.typeText(udid, step.text ?? 'simframe');
+          filled.push(`${name}=text`);
+        } else {
+          try {
+            const chosen = await intent.chooseAny(udid, { geo });
+            await sleep(400);
+            await intent.confirm(udid, { geo });
+            filled.push(`${name}="${chosen.label.slice(0, 24)}"`);
+          } catch (err) {
+            // A control that opened nothing pickable is not worth another round.
+            skipped.push(`${name} (${err.message})`);
+          }
+        }
+        await sleep(step.settleMs ?? 900);
+      }
+      const parts = [];
+      if (filled.length) parts.push(`filled ${filled.join(', ')}`);
+      if (skipped.length) parts.push(`could not reach: ${skipped.join('; ')}`);
+      return parts.join(' | ') || 'nothing required was outstanding';
+    }
     case 'settle': {
       const w = await api.waitFor(deviceQuery, {
         mode: step.mode ?? 'stable',

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { decodePng, encodePng, scaleBitmap } from './png.js';
 import {
   frameHash,
+  layoutHash,
   regionSignature,
   signatureDiff,
   regionDeltas,
@@ -15,7 +16,7 @@ import { isBootedSync, resize, screenshot } from './simctl.js';
 
 // Bump whenever the shape of state.json changes, so an upgraded client retires
 // a capture loop left running by an older install instead of misreading it.
-export const STATE_VERSION = 4;
+export const STATE_VERSION = 5;
 
 export const DEFAULTS = {
   fps: 4,
@@ -34,7 +35,7 @@ export const DEFAULTS = {
   ringSize: 400,
   historySize: 400,
   historyMs: 90_000,
-  fullKeep: 3,
+  fullKeep: 8,
   changeThreshold: 0.004,
   idleExitMs: 15 * 60_000,
 };
@@ -136,6 +137,7 @@ export async function runDaemon(device, options = {}) {
       consecutiveErrors = 0;
 
       const hash = frameHash(bmp);
+      const layout = layoutHash(bmp);
       history.push({
         seq,
         at: now,
@@ -158,6 +160,7 @@ export async function runDaemon(device, options = {}) {
           width: bmp.width,
           height: bmp.height,
           hash,
+          layoutHash: layout,
           diff: prevWasNull ? null : Number(diff.toFixed(5)),
           changed: prevWasNull ? false : changed,
           firstFrame: prevWasNull,

@@ -57,7 +57,17 @@ async function idb(args, { timeout = 20_000 } = {}) {
  * a simframe frame is a scaled bitmap. Without this mapping, a coordinate read
  * off an image lands in the wrong place.
  */
-export async function screenInfo(udid) {
+const geometryCache = new Map();
+
+/** Cached: geometry costs an idb round trip and never changes while booted. */
+export async function screenInfo(udid, { refresh = false } = {}) {
+  if (!refresh && geometryCache.has(udid)) return geometryCache.get(udid);
+  const info = await readScreenInfo(udid);
+  geometryCache.set(udid, info);
+  return info;
+}
+
+async function readScreenInfo(udid) {
   const out = await idb(['describe', '--json', '--udid', udid]);
   const info = JSON.parse(out.trim().split('\n').filter(Boolean).pop());
   const dims = info.screen_dimensions || {};

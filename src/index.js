@@ -12,7 +12,9 @@ import {
   regionMap,
   signatureDiff,
 } from './analyze.js';
-import { resolveDevice, resize } from './simctl.js';
+import * as input from './input.js';
+import * as screenmap from './screenmap.js';
+import { resolveDevice, resize, screenshot } from './simctl.js';
 import * as store from './store.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +27,39 @@ export function resolveMaxDim(detail) {
   if (typeof detail === 'number') return detail;
   if (detail && detail in DETAIL_LEVELS) return DETAIL_LEVELS[detail];
   return DETAIL_LEVELS.normal;
+}
+
+/**
+ * A full-resolution frame to read text from. The capture loop prunes these
+ * aggressively, so by the time a caller wants one it is often already gone —
+ * in which case take a fresh shot rather than silently skipping OCR.
+ */
+async function fullFrameFor(udid, state) {
+  if (state.fullFile && fs.existsSync(state.fullFile)) return state.fullFile;
+  const p = store.paths(udid);
+  const file = path.join(p.dir, 'ocr-source.png');
+  await screenshot(udid, file, { mask: 'ignored' });
+  return file;
+}
+
+/**
+ * Points-per-pixel and screen size for this device. idb reports both exactly;
+ * without it, fall back to the captured frame's aspect and a 3x guess, which is
+ * only used for OCR coordinates that nothing can tap anyway.
+ */
+async function deviceGeometry(udid, state) {
+  try {
+    const geo = await input.screenInfo(udid);
+    if (geo.pointWidth && geo.pointHeight) return geo;
+  } catch {
+    /* idb absent: fall through */
+  }
+  const density = 3;
+  return {
+    density,
+    pointWidth: Math.round((state.width * (state.nativeScale ?? 1)) / 1) || 402,
+    pointHeight: Math.round((state.height * (state.nativeScale ?? 1)) / 1) || 874,
+  };
 }
 
 export function daemonStatus(udid) {
@@ -527,4 +562,69 @@ export async function getFrameAt(deviceQuery, { msAgo = 0, options } = {}) {
   };
 }
 
-export { DEFAULTS, store };
+/**
+ * Find where to tap for a label on the screen showing right now.
+ *
+ * Familiar screens answer from memory: no accessibility read, no OCR, no image.
+ * A screen seen for the first time pays once to build its map, and every later
+ * visit is a file read.
+ */
+export async function locate(deviceQuery, query, { index, refresh = false, useAx = true, useOcr = true, options } = {}) {
+  const { device, state } = await ensureDaemon(deviceQuery, options);
+  const udid = device.udid;
+  let entry = null;
+  let from = 'memory';
+  let distance = 0;
+
+  if (!refresh) {
+    const near = screenmap.recallNearest(udid, state.layoutHash);
+    if (near) {
+      entry = near.entry;
+      distance = near.distance;
+    }
+  }
+
+  if (!entry) {
+    const geo = await deviceGeometry(udid, state);
+    entry = await screenmap.build(udid, {
+      hash: state.hash,
+      layoutHash: state.layoutHash,
+      fullFrame: await fullFrameFor(udid, state),
+      density: geo.density,
+      screen: { width: geo.pointWidth, height: geo.pointHeight },
+      useAx,
+      useOcr,
+    });
+    from = 'built';
+  }
+
+  const candidates = screenmap.rank(entry, query);
+  if (candidates.length > 1 && index == null) {
+    const top = candidates[0];
+    const second = candidates[1];
+    const decisive = screenmap.isInteractive(top) && !screenmap.isInteractive(second);
+    if (!decisive) {
+      const list = candidates
+        .slice(0, 6)
+        .map((t, i) => `[${i}] "${t.label}" (${t.x},${t.y}) ${t.type}/${t.source}`)
+        .join(', ');
+      throw new Error(
+        `"${query}" matches ${candidates.length} things on this screen — pass index to choose: ${list}`,
+      );
+    }
+  }
+  const target = index != null ? candidates[index] : candidates[0];
+  if (!target) {
+    const sample = entry.targets
+      .filter((t) => t.label)
+      .slice(0, 12)
+      .map((t) => t.label)
+      .join(', ');
+    throw new Error(
+      `"${query}" is not on this screen. Visible: ${sample || '(nothing readable)'}`,
+    );
+  }
+  return { device, state, entry, target, from, distance, screens: screenmap.stats(udid).screens };
+}
+
+export { DEFAULTS, screenmap, store };

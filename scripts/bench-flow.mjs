@@ -5,8 +5,13 @@ import * as input from '../src/input.js';
 import * as api from '../src/index.js';
 import { launchApp, terminateApp } from '../src/simctl.js';
 
-const BUNDLE = process.argv[2] || 'com.ecotrak.etm2';
+const BUNDLE = process.argv[2];
 const device = process.argv[3];
+
+if (!BUNDLE) {
+  console.error('usage: node scripts/bench-flow.mjs <bundle-id> [device]');
+  process.exit(2);
+}
 
 const driver = await input.detectDriver();
 console.log(`driver: ${driver.available ? driver.version : driver.reason}`);
