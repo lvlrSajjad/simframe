@@ -733,4 +733,37 @@ export async function locate(
   return { device, state: current, entry, target, from, distance, settled, screens: screenmap.stats(udid).screens };
 }
 
+/**
+ * What screen this is, structurally.
+ *
+ * Uses the screen map — recalled when the pixel index finds one, built when it
+ * does not. The pixel hash is what makes the lookup cheap; the structural hash
+ * is what makes the answer right.
+ */
+export async function screenIdentity(deviceQuery, { options } = {}) {
+  const { device, state } = await ensureDaemon(deviceQuery, options);
+  const udid = device.udid;
+  const { state: settledFrame, settled } = await settledState(udid, {});
+  const current = settledFrame ?? state;
+  let entry = screenmap.recallNearest(udid, current.layoutHash)?.entry;
+  if (!entry) {
+    const geo = await deviceGeometry(udid, current);
+    entry = await screenmap.build(udid, {
+      hash: current.hash,
+      layoutHash: current.layoutHash,
+      fullFrame: await fullFrameFor(udid, current),
+      density: geo.density,
+      screen: { width: geo.pointWidth, height: geo.pointHeight },
+      persist: settled,
+    });
+  }
+  return {
+    hash: entry.structuralHash,
+    tokens: entry.structuralTokens ?? [],
+    keyboard: Boolean(entry.keyboard),
+    layoutHash: current.layoutHash,
+    settled,
+  };
+}
+
 export { DEFAULTS, screenmap, store };

@@ -26,14 +26,22 @@ const BANDS = {
 /** Keyboards occupy the bottom of the screen and are unusually tall. */
 const KEYBOARD_MIN_FRACTION = 0.28;
 
+/**
+ * Chrome is short. Position alone is not enough: the last row of a long list
+ * reaches into the tab-bar band, and calling a 90pt cell a tab item makes a
+ * seven-row list a different screen from a three-row one.
+ */
+const CHROME_MAX_HEIGHT_FRACTION = 0.075;
+
 export function regionFor(frame, screen, { keyboardTop } = {}) {
   if (!frame || !screen?.height) return 'content';
   const top = frame.y / screen.height;
   const bottom = (frame.y + (frame.height ?? 0)) / screen.height;
   if (keyboardTop != null && frame.y >= keyboardTop) return 'keyboard';
+  const short = (frame.height ?? 0) <= screen.height * CHROME_MAX_HEIGHT_FRACTION;
   if (bottom <= BANDS.statusBar) return 'status-bar';
-  if (top < BANDS.navBar && bottom < BANDS.navBar * 1.6) return 'nav-bar';
-  if (top >= BANDS.tabBar - 0.06) return 'tab-bar';
+  if (short && top < BANDS.navBar && bottom < BANDS.navBar * 1.6) return 'nav-bar';
+  if (short && top >= BANDS.tabBar - 0.06) return 'tab-bar';
   return 'content';
 }
 

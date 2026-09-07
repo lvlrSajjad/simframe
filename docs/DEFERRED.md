@@ -102,9 +102,25 @@ file.
 
 ### Phase 6 left graph-assisted navigation unbuilt
 `simframe goto "<screen>"` and flow save/replay are specified in
-`docs/PHASES.md` and not implemented. Both need the graph to recognise screens
-reliably, which the pixel fingerprint does not yet do — so they are blocked on
-the structural fingerprint above rather than on effort.
+`docs/PHASES.md` and not implemented. Phase 6b removed the blocker — the
+structural fingerprint separates same from different screens with a clear gap
+(`docs/BENCHMARKS.md`) — so these are now blocked on effort alone.
+
+### A screen fingerprinted while still loading becomes its own screen
+The four-tab tour stores five graph nodes, not four. All five are genuinely
+distinct (max pairwise similarity 0.31, well under the 0.45 threshold), so
+nothing was wrongly merged; one tab was captured twice in states different
+enough to be different screens, almost certainly once before its content
+arrived.
+
+This is the safe direction to fail in. A spurious extra screen costs one
+re-derivation; a wrong merge costs a tap on the wrong element. But the cause is
+structural and worth fixing: `settled` is a *pixel* criterion, and a screen
+whose spinner has gone but whose rows have not yet landed is pixel-stable and
+structurally sparse. The fix is a structural settle gate — sample the token set
+twice a short interval apart and only key on it once it stops growing — which
+costs a second perception pass and so needs measuring before it is adopted.
+Which of the four tabs produced the extra node has not been isolated.
 
 ## Product
 

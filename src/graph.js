@@ -7,10 +7,25 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { hashDistance } from './analyze.js';
+import * as fingerprint from './fingerprint.js';
 import * as store from './store.js';
 
 const GRAPH_VERSION = 1;
-/** Same tolerance as screen memory: these must agree or the keys diverge. */
+/**
+ * Screens are matched by structural hash, exactly, and then by how alike their
+ * token sets are — which tolerates one optional element appearing (a badge, a
+ * banner) without tolerating a different screen.
+ *
+ * The pixel layout hash is not used for identity here. Measured, a same-screen
+ * revisit with changed content reached 62 bits against a different-screen floor
+ * of 74; no threshold separates those. See docs/BENCHMARKS.md, Phase 6.
+ *
+ * Structurally the same measurement separates cleanly: revisits score 0.54 to
+ * 1.00, different screens 0.00 to 0.31. 0.45 sits in that gap with margin on
+ * both sides. Most revisits match on the hash outright and never reach it.
+ */
+export const SIMILARITY_THRESHOLD = 0.45;
+/** Only for the legacy pixel path, kept so old graphs still load. */
 export const TOLERANCE = 20;
 
 function graphDir(udid) {
@@ -34,9 +49,12 @@ export function actionSignature(step) {
   return `${key}:${JSON.stringify(step[key]).slice(0, 40)}`;
 }
 
-function load(udid, hash) {
-  const entry = store.readJson(path.join(graphDir(udid), `${hash}.json`));
-  return entry?.version === GRAPH_VERSION ? entry : { version: GRAPH_VERSION, hash, edges: [] };
+function load(udid, screen) {
+  const key = typeof screen === 'string' ? { hash: screen, tokens: [] } : screen;
+  const entry = store.readJson(path.join(graphDir(udid), `${key.hash}.json`));
+  return entry?.version === GRAPH_VERSION
+    ? entry
+    : { version: GRAPH_VERSION, hash: key.hash, tokens: key.tokens ?? [], edges: [] };
 }
 
 function save(udid, node) {
@@ -58,39 +76,56 @@ function allNodes(udid) {
 }
 
 /** The stored screen closest to `hash`, by layout rather than content. */
-export function nearestScreen(udid, hash, { tolerance = TOLERANCE } = {}) {
-  if (!hash) return null;
+/**
+ * The stored screen matching this one.
+ *
+ * `screen` is `{ hash, tokens }` from the structural fingerprint. An exact hash
+ * match is the common case; the token comparison catches the screen that gained
+ * a badge since last time.
+ */
+export function nearestScreen(udid, screen, { threshold = SIMILARITY_THRESHOLD } = {}) {
+  const key = typeof screen === 'string' ? { hash: screen, tokens: null } : screen;
+  if (!key?.hash) return null;
+  const nodes = allNodes(udid);
+  const exact = nodes.find((n) => n.hash === key.hash);
+  if (exact) return { node: exact, similarity: 1 };
+  if (!key.tokens?.length) return null;
   let best = null;
-  let bestDistance = Infinity;
-  for (const node of allNodes(udid)) {
-    const d = hashDistance(node.hash, hash);
-    if (d < bestDistance) {
-      bestDistance = d;
+  let bestSimilarity = 0;
+  for (const node of nodes) {
+    if (!node.tokens?.length) continue;
+    const s = fingerprint.similarity(node.tokens, key.tokens);
+    if (s > bestSimilarity) {
+      bestSimilarity = s;
       best = node;
     }
   }
-  return best && bestDistance <= tolerance ? { node: best, distance: bestDistance } : null;
+  return best && bestSimilarity >= threshold ? { node: best, similarity: bestSimilarity } : null;
 }
 
 /** Remember that doing `action` on `from` led to `to`. */
 export function record(udid, { from, action, to, kind }) {
-  if (!from || !to) return null;
-  const node = nearestScreen(udid, from)?.node ?? load(udid, from);
+  const fromKey = typeof from === 'string' ? { hash: from } : from;
+  const toHash = typeof to === 'string' ? to : to?.hash;
+  if (!fromKey?.hash || !toHash) return null;
+  const node = nearestScreen(udid, fromKey)?.node ?? load(udid, fromKey);
+  if (fromKey.tokens?.length) node.tokens = fromKey.tokens;
+  const to_ = toHash;
   const signature = actionSignature(action);
   const existing = node.edges.find((e) => e.action === signature);
   if (existing) {
     // A different outcome from the same action is worth knowing about: it is
     // how a screen that looks the same but behaves differently shows up.
-    if (hashDistance(existing.to, to) > TOLERANCE) {
+    if (existing.to !== to_) {
       existing.previousTo = existing.to;
       existing.changedOutcomes = (existing.changedOutcomes ?? 0) + 1;
     }
-    existing.to = to;
+    existing.to = to_;
     existing.kind = kind ?? existing.kind;
     existing.count += 1;
     existing.lastSeen = Date.now();
   } else {
-    node.edges.push({ action: signature, to, kind, count: 1, lastSeen: Date.now() });
+    node.edges.push({ action: signature, to: to_, kind, count: 1, lastSeen: Date.now() });
   }
   save(udid, node);
   return node;
@@ -127,7 +162,7 @@ export function forget(udid) {
 export function route(udid, fromHash, toHash, { maxDepth = 8 } = {}) {
   const start = nearestScreen(udid, fromHash);
   if (!start) return null;
-  const goal = (h) => hashDistance(h, toHash) <= TOLERANCE;
+  const goal = (h) => h === toHash;
   if (goal(start.node.hash)) return [];
 
   const byHash = new Map(allNodes(udid).map((n) => [n.hash, n]));
@@ -159,20 +194,19 @@ export const VERDICTS = ['ok', 'no-visible-change', 'unexpected-screen', 'unexpe
  */
 export function verdict({ prediction, before, after, kind }) {
   if (!before || !after) return { verdict: 'unverified', detail: 'no state to compare' };
-  const moved = hashDistance(before, after) > TOLERANCE;
+  const moved = before !== after;
   if (!prediction) {
     if (!moved) return { verdict: 'no-visible-change', detail: 'the screen did not change, and nothing predicted it would' };
     return { verdict: 'unverified', detail: 'this action has not been seen on this screen before' };
   }
-  const expectedMove = hashDistance(prediction.to, before) > TOLERANCE;
+  const expectedMove = prediction.to !== before;
   if (!moved && expectedMove) {
     return { verdict: 'no-visible-change', detail: `expected to reach a different screen (seen ${prediction.count}x)` };
   }
-  const distance = hashDistance(prediction.to, after);
-  if (distance > TOLERANCE) {
+  if (prediction.to !== after) {
     return {
       verdict: 'unexpected-screen',
-      detail: `expected the screen this action reached ${prediction.count}x before; landed ${distance} bits away`,
+      detail: `expected the screen this action reached ${prediction.count}x before, and landed somewhere else`,
     };
   }
   if (prediction.kind && kind && prediction.kind !== kind && kind !== 'none') {

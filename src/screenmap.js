@@ -9,12 +9,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { hashDistance } from './analyze.js';
 import * as control from './control.js';
+import * as fingerprint from './fingerprint.js';
 import * as input from './input.js';
 import * as ocr from './ocr.js';
 import * as regions from './regions.js';
 import * as store from './store.js';
 
-const MAP_VERSION = 2; // layout hash crop changed; old maps no longer comparable
+const MAP_VERSION = 3; // entries now carry a structural fingerprint
 
 function mapDir(udid) {
   return path.join(store.deviceDir(udid), 'screens');
@@ -228,10 +229,20 @@ export async function build(udid, {
     // deal: "Assets" the nav title and "Assets" the tab differ only by where
     // they are.
     if (screen?.width && screen?.height) regions.annotate(targets, screen);
+    // Two hashes, two jobs. The pixel layout hash indexes this entry, because
+    // it can be computed from a frame alone and so can find a map without
+    // building one. The structural hash identifies the screen, because content
+    // is pixels and a list with new rows is not a new screen.
+    const structure = screen?.width && screen?.height
+      ? fingerprint.fingerprint(targets, screen)
+      : { hash: null, tokens: [], keyboard: false };
     const entry = {
       version: MAP_VERSION,
       hash,
       layoutHash,
+      structuralHash: structure.hash,
+      structuralTokens: structure.tokens,
+      keyboard: structure.keyboard,
       at: Date.now(),
       sources,
       targets,

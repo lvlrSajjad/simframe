@@ -494,3 +494,74 @@ The fix is not a better threshold. It is to fingerprint **structure** — elemen
 roles and positions — rather than pixels, which is content-independent by
 construction and which the element map already has the ingredients for. It is
 now the highest-value item in `docs/DEFERRED.md`.
+
+## Phase 6b — structural fingerprint
+
+M4 Pro, Xcode 26, iOS 26.0, iPhone 17 Pro (402×874 pt), a real third-party app.
+
+Phase 6 keyed screen identity on the pixel dHash and could not reach its target.
+6b keeps that hash for *change* and *settle* — questions about pixels, which it
+answers well — and adds a second, structural hash for *identity*. Memory and the
+graph are keyed by the structural hash; the pixel hash remains the trigger that
+says a frame is settled enough to compute one.
+
+What goes in: element roles, frames quantised to 24 px, the region each element
+sits in, and repeated siblings bucketed rather than counted. Labels go in for
+chrome only — nav title, tab labels, toolbar buttons — because two list screens
+with identical structure are told apart by their title and nothing else. Out:
+all content text and values, the status bar, and the keyboard region when a
+keyboard is up (`keyboard: true` is recorded separately instead).
+
+### The two distributions
+
+Jaccard similarity over token sets, four tabs, three visits each.
+
+| | Same screen, revisited | Different screens | Gap |
+| --- | --- | --- | --- |
+| Full element list | 0.54–1.00 | 0.00–**0.31** | 0.23 |
+| OCR-only (accessibility discarded) | — | 0.00–**0.35** | — |
+
+The threshold is **0.45**, in the gap. Compare the pixel hash it replaces, where
+same-screen revisits reached 62 bits against a different-screen floor of 74 and
+no threshold existed to choose.
+
+### Accessibility-poor screens
+
+Every screen in this app fuses both sources — 8–33 accessibility targets and
+10–32 OCR targets each. Discarding the accessibility half entirely and
+fingerprinting from OCR boxes alone still separates the four tabs, with a
+different-screen ceiling of 0.35 against the same 0.45 threshold. Structural
+identity does not depend on the accessibility tree being present.
+
+### The tour, three passes
+
+| Pass | Steps verified `ok` | Controls from memory | Wall clock |
+| --- | --- | --- | --- |
+| 1 | 0/4 | 3/4 | 30.0 s |
+| 2 | 3/4 | **4/4** | 7.3 s |
+| 3 | **4/4** | **4/4** | 19.4 s |
+
+Phase 6 never exceeded 2/4 verified on the same tour. The phase target — every
+step resolved from graph and memory by the third pass — is met.
+
+Two honest caveats in those numbers. The wall clock is worse than Phase 6, not
+better: verification now builds a screen map both before *and* after every step,
+roughly doubling the per-step cost, and passes 1 and 3 also paid for cold
+perception on screens the map had not yet seen. The variance between 7.3 s and
+19.4 s is that cost appearing or not, not a change in the tool. Second, the tour
+stores five graph nodes for four tabs; all five are pairwise distinct at ≤0.31,
+so nothing was wrongly merged, but one tab was captured twice in states far
+enough apart to count as different screens. Both are recorded in
+`docs/DEFERRED.md`.
+
+### Measurement traps hit in this phase
+
+A first run showed different screens scoring 1.00 against each other, which
+would have condemned the whole approach. The taps were not switching tabs; both
+reads were of the same screen. Navigation was verified (74–94 bit pixel moves
+between tabs) before any similarity number was believed.
+
+A later run showed same-screen pairs at exactly 1.00 with identical token *and*
+target counts across all three visits. That is a screen-map cache hit being
+measured, not three independent perceptions of the same screen — the number is
+tautological. Same-screen figures here come from runs with the map forced cold.

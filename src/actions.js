@@ -70,9 +70,11 @@ export async function runScript(
     // The baseline for "did the screen react" must predate the action itself.
     const beforeState = (await api.getState(deviceQuery, { options })).state;
     const before = beforeState.hash;
-    const beforeLayout = beforeState.layoutHash;
+    // Identity is structural: a list with new rows is the same screen, and the
+    // pixel hash cannot say so.
+    const beforeScreen = verify ? await api.screenIdentity(deviceQuery, { options }) : null;
     // What this action did last time it was taken here, if ever.
-    const prediction = verify && beforeLayout ? graph.predict(udid, beforeLayout, step) : null;
+    const prediction = verify && beforeScreen?.hash ? graph.predict(udid, beforeScreen, step) : null;
     try {
       const detail = await runStep(deviceQuery, udid, step, { screen, options, frames });
       let settled = null;
@@ -96,20 +98,27 @@ export async function runScript(
       // happened. Without this a step that moved the screen the wrong way
       // reports success, and the flow carries on believing it worked.
       let verification = null;
-      if (verify && ACTION_STEPS.has(step.action) && beforeLayout) {
+      if (verify && ACTION_STEPS.has(step.action) && beforeScreen?.hash) {
         const afterState = (await api.getState(deviceQuery, { options })).state;
         const kind = afterState.transition?.kind;
+        const afterScreen = await api.screenIdentity(deviceQuery, { options });
         verification = {
-          ...graph.verdict({ prediction, before: beforeLayout, after: afterState.layoutHash, kind }),
-          predicted: prediction ? { to: prediction.to.slice(0, 12), kind: prediction.kind, seen: prediction.count } : null,
-          observed: { to: afterState.layoutHash?.slice(0, 12), kind },
+          ...graph.verdict({ prediction, before: beforeScreen.hash, after: afterScreen.hash, kind }),
+          predicted: prediction ? { to: prediction.to.slice(0, 10), kind: prediction.kind, seen: prediction.count } : null,
+          observed: { to: afterScreen.hash?.slice(0, 10), kind },
         };
-        if (afterState.settled !== false) {
-          graph.record(udid, { from: beforeLayout, action: step, to: afterState.layoutHash, kind });
+        // Only remember what was seen on a settled screen: an edge recorded
+        // mid-transition points at a screen that never really existed.
+        if (afterScreen.settled && afterScreen.hash) {
+          graph.record(udid, { from: beforeScreen, action: step, to: afterScreen.hash, kind });
         }
       }
 
-      const wrongTurn = verification && ['unexpected-screen', 'unexpected-transition'].includes(verification.verdict);
+      // Only an unexpected *screen* stops a flow. Identity is reliable now
+      // that it is structural; the transition kind is not — Phase 4's
+      // classifier reports `replace` for a scroll that rubber-bands, and
+      // halting a correct flow on that is worse than noting it.
+      const wrongTurn = verification?.verdict === 'unexpected-screen';
       const note = settled?.noVisibleChange ? ' [no visible change]' : '';
       results.push({
         index: i,
