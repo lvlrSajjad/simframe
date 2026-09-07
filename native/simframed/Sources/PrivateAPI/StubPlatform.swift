@@ -43,5 +43,18 @@ public final class StubPlatform: SimulatorPlatform {
         }
     }
 
-    public func detach() {}
+    public func observeChanges(_ handler: @escaping () -> Void) throws {
+        // The stub never changes on its own; tests drive `tint` and call this.
+        stubHandler = handler
+    }
+
+    /// Test hook: mutate the synthetic screen and announce it.
+    public func simulateChange() {
+        tint = tint &+ 40
+        stubHandler?()
+    }
+
+    private var stubHandler: (() -> Void)?
+
+    public func detach() { stubHandler = nil }
 }

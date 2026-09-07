@@ -54,5 +54,8 @@ public protocol SimulatorPlatform: AnyObject {
     func attach(udid: String?) throws -> DeviceInfo
     /// Borrow the current framebuffer. The pointer is only valid inside `body`.
     func withFrame<T>(_ body: (RawFrame) throws -> T) throws -> T
+    /// Called whenever the display reports damage — the per-redraw signal, so a
+    /// capture loop can be driven by the screen rather than by a timer.
+    func observeChanges(_ handler: @escaping () -> Void) throws
     func detach()
 }

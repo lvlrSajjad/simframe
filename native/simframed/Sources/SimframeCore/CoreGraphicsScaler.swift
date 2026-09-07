@@ -1,4 +1,5 @@
 import CoreGraphics
+import ImageIO
 import Foundation
 import PrivateAPI
 
@@ -36,6 +37,32 @@ public enum CoreGraphicsScaler {
             ) else { return false }
             ctx.interpolationQuality = .high
             ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: tw, height: th))
+            return true
+        }
+        return ok ? Bitmap(width: tw, height: th, data: out) : nil
+    }
+}
+
+extension CoreGraphicsScaler {
+    /// Re-encode an existing PNG at a fraction of its size. Frames that have
+    /// aged out of the fine window stay legible enough to tell which screen was
+    /// showing, at roughly a quarter of the bytes.
+    public static func downscalePNG(at url: URL, factor: Double) -> Bitmap? {
+        guard factor > 0, factor < 1,
+              let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        let tw = max(1, Int(Double(image.width) * factor))
+        let th = max(1, Int(Double(image.height) * factor))
+        var out = [UInt8](repeating: 0, count: tw * th * 4)
+        let ok = out.withUnsafeMutableBytes { buf -> Bool in
+            guard let ctx = CGContext(
+                data: buf.baseAddress, width: tw, height: th,
+                bitsPerComponent: 8, bytesPerRow: tw * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            ctx.interpolationQuality = .high
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: tw, height: th))
             return true
         }
         return ok ? Bitmap(width: tw, height: th, data: out) : nil

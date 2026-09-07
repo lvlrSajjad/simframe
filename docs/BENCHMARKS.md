@@ -124,3 +124,43 @@ This is the per-redraw signal the capture loop should be driven by. It means the
 daemon can be event-driven — wait for damage, then grab in 0.13 ms — instead of
 polling and discarding unchanged frames. Note it must be registered on the *live*
 port; the inactive display port reports nothing.
+
+## Phase 0 — the capture loop
+
+The daemon is driven by the damage callback rather than a timer, so an idle
+screen costs nothing and a moving one is picked up at once. Per-capture cost
+includes the PNG encode and the `state.json` write, which the raw pipeline
+figures above do not.
+
+| | Median per capture | Frame rate |
+| --- | --- | --- |
+| First working loop | 121 ms | 1 fps |
+| Full-res encode moved off the capture path | 30 ms | 8 fps |
+| PNG encoded once, housekeeping throttled | **12–21 ms** | **12 fps** |
+| Node loop it replaces, for comparison | ~210 ms | 4 fps |
+
+The remaining frame rate is capped by the 80 ms coalescing window, not by cost.
+
+Three things dominated the early cost and are worth remembering:
+
+- A native-resolution PNG encode is ~115 ms. It belongs on a background queue
+  and behind a throttle, never on the capture path.
+- The ring frame and `latest.png` are the same picture. Encoding it twice
+  doubled the per-frame cost for nothing.
+- Retention housekeeping stats every retained file. Running it every frame cost
+  more than the capture; every twentieth frame is plenty.
+
+## Phase 0 — acceptance
+
+With the Node capture loop stopped and `simframed run` in its place, against
+frames the Swift daemon produced:
+
+| Check | Result |
+| --- | --- |
+| `simframe status` sees the daemon | yes, by pid from meta.json |
+| `simframe state` / `frame` / `wait` / `recall` | all work unchanged |
+| `simframe ui` (needs a native-resolution frame for OCR) | works |
+| Node respawning its own loop | no — ownership is respected |
+| Four-tab flow via `sim_do` | 4/4 steps, screen memory hitting |
+| Clean shutdown on SIGINT | releases ownership; Node can take over |
+| Capture errors during the run | 0 |

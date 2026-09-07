@@ -18,6 +18,10 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     private var deviceSet: NSObject?
     private var display: NSObject?
     private var attached: DeviceInfo?
+    // The block must outlive registration; releasing it would leave the
+    // framework calling into freed memory.
+    private var changeCallback: Any?
+    private var changeUUID: NSUUID?
 
     private static let bootedState = 3
 
@@ -172,7 +176,34 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
         return try body(frame)
     }
 
+    /// `registerCallbackWithUUID:damageRectanglesCallback:` on the *live* port
+    /// fires roughly per redraw (~52/s while an app is switching). Registering
+    /// it on the inactive port yields nothing, which is why this path is easy
+    /// to dismiss as broken.
+    public func observeChanges(_ handler: @escaping () -> Void) throws {
+        guard let display else { throw PrivateAPIError.noDisplayPort }
+        let sel = NSSelectorFromString("registerCallbackWithUUID:damageRectanglesCallback:")
+        guard display.responds(to: sel), let imp = display.method(for: sel) else {
+            throw PrivateAPIError.frameworksUnavailable("damageRectanglesCallback missing")
+        }
+        let block: @convention(block) (AnyObject?) -> Void = { _ in handler() }
+        changeCallback = block
+        let uuid = NSUUID()
+        changeUUID = uuid
+        typealias RegFn = @convention(c) (AnyObject, Selector, NSUUID, AnyObject) -> Void
+        unsafeBitCast(imp, to: RegFn.self)(display, sel, uuid, block as AnyObject)
+    }
+
     public func detach() {
+        if let display, let uuid = changeUUID {
+            let sel = NSSelectorFromString("unregisterDamageRectanglesCallbackWithUUID:")
+            if display.responds(to: sel), let imp = display.method(for: sel) {
+                typealias UnregFn = @convention(c) (AnyObject, Selector, NSUUID) -> Void
+                unsafeBitCast(imp, to: UnregFn.self)(display, sel, uuid)
+            }
+        }
+        changeCallback = nil
+        changeUUID = nil
         display = nil
         attached = nil
     }
