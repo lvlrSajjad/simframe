@@ -95,32 +95,6 @@ export async function confirm(udid, { geo } = {}) {
   return { label: target.label, point, enabled: target.enabled };
 }
 
-const ERROR_TEXT = /this field is required|please select|is required|required field/i;
-
-/**
- * Controls the form is complaining about. An error message sits directly below
- * the control it belongs to, so the nearest thing above it is the owner.
- */
-export function findUnsatisfied(nodes) {
-  const errors = nodes.filter((n) => ERROR_TEXT.test(n.label || ''));
-  const owners = [];
-  for (const err of errors) {
-    const owner = nodes
-      .filter(
-        (n) =>
-          n !== err &&
-          n.frame.y < err.frame.y &&
-          n.frame.y > err.frame.y - 110 &&
-          (n.frame.height ?? 0) >= 16 &&
-          !ERROR_TEXT.test(n.label || '') &&
-          (n.label || /TextField|TextView/i.test(n.type || '')),
-      )
-      .sort((a, b) => b.frame.y - a.frame.y)[0];
-    if (owner && !owners.includes(owner)) owners.push(owner);
-  }
-  return owners;
-}
-
 export function isTextInput(node) {
   return /TextField|TextView|SearchField/i.test(node.type || '');
 }
