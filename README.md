@@ -86,7 +86,12 @@ have. **Observation needs nothing but Xcode.**
 | --- | --- | --- |
 | Watch the screen, wait, recall | nothing extra | — |
 | Read labels + coordinates from pixels | `swiftc` (Xcode CLT) | falls back to the accessibility tree alone |
-| Tap, type, swipe | [`idb`](https://fbidb.io) | simframe observes but cannot touch |
+| Tap, type, swipe | nothing extra, or [`idb`](https://fbidb.io) as a fallback | simframe observes but cannot touch |
+| Accessibility tree | [`idb`](https://fbidb.io) | OCR alone still yields labels and coordinates |
+
+`simframe doctor` names which engine is carrying each capability, per device.
+**idb is now required only for the accessibility tree** — capture, input and text
+recognition all run in-process.
 
 ```bash
 # input, optional
@@ -222,9 +227,10 @@ iPhone 17 Pro, iOS 26.5, Apple Silicon, default settings.
 | Warm frame read (`sim_look`) | ~20 ms |
 | State check (`sim_state`) | ~2 ms |
 | Contact sheet (`sim_strip`, 5 frames) | ~30 ms |
-| Accessibility tree read | ~570 ms |
-| On-device OCR of a full frame | ~290 ms |
-| Screen map: first visit / remembered | ~600 ms / **~1 ms** |
+| Accessibility tree read (idb) | ~570 ms |
+| Text recognition, in-process off the framebuffer | **~174 ms** |
+| Text recognition, via PNG + helper (fallback) | ~555 ms |
+| Screen map: first visit / remembered | ~305 ms / **~1 ms** |
 | Raw `simctl io screenshot`, for comparison | ~130 ms, every look |
 | Cold start, first frame | ~400 ms, once |
 | CPU | 1.1 % idle · 3.1 % active |

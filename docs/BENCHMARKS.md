@@ -275,3 +275,39 @@ ok  input driver  (iPhone 17 Pro)   simframed: Indigo HID (SimDeviceLegacyHIDCli
 ok  capture engine (iPad Pro 13-inch (M5))  simctl
 ok  input driver  (iPad Pro 13-inch (M5))   idb: companion built Sep 1 2026
 ```
+
+## Phase 2 — text recognition in-process
+
+Vision now runs against the IOSurface the daemon already has mapped, rather than
+against a PNG the daemon wrote and a helper process decoded.
+
+| Route | N | Median |
+| --- | --- | --- |
+| In-process, off the framebuffer | 12 | **174 ms** |
+| PNG encode + write + spawn + decode | 8 | 555 ms |
+
+**3.2x faster**, and the first call is 301 ms because Vision warms up — measure
+the second onwards or the improvement disappears into the warm-up.
+
+The effect on the path that matters, building a screen map:
+
+| | Before | After |
+| --- | --- | --- |
+| First visit to a screen | ~600 ms | **~305 ms** |
+| Remembered | ~1 ms | ~1 ms |
+
+Same 47 targets, same resolved coordinates. A regression worth recording: the
+first attempt ran the daemon OCR *after* the accessibility read rather than
+alongside it, which cost 1126 ms — slower than the path it replaced. Both routes
+now start before the tree read.
+
+### What idb is still for
+
+| Capability | Engine |
+| --- | --- |
+| Capture | simframed |
+| Input | simframed (idb as fallback) |
+| Text recognition | simframed, in-process |
+| **Accessibility tree** | **idb — the only remaining dependency** |
+
+Phase 2b removes the last one.

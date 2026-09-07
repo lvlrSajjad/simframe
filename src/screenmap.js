@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { hashDistance } from './analyze.js';
+import * as control from './control.js';
 import * as input from './input.js';
 import * as ocr from './ocr.js';
 import * as store from './store.js';
@@ -109,12 +110,20 @@ export async function build(udid, {
 } = {}) {
   const targets = [];
   const sources = [];
-  // Kick OCR off before reading the tree: they are independent, and the OCR
-  // pass is pure computation on a file that already exists.
-  const ocrPromise =
-    useOcr && fullFrame && fs.existsSync(fullFrame)
-      ? ocr.readText(fullFrame, { density }).catch((err) => err)
-      : null;
+  // OCR starts before the tree read: they are independent, and running them in
+  // series costs the whole recognition pass.
+  //
+  // The daemon reads text straight off the framebuffer. The fallback encodes a
+  // PNG, writes it, spawns a helper and decodes it again — measured at 555ms
+  // against 174ms — so it is only used when no daemon is listening.
+  const viaDaemon = useOcr && control.available(udid);
+  const ocrPromise = !useOcr
+    ? null
+    : viaDaemon
+      ? control.request(udid, { action: 'ui' }).catch((err) => err)
+      : fullFrame && fs.existsSync(fullFrame)
+        ? ocr.readText(fullFrame, { density }).catch((err) => err)
+        : null;
   // With no geometry, treat every element as a potential control rather than
   // guessing a screen size and mis-classifying containers.
   const screenArea = screen?.width && screen?.height ? screen.width * screen.height : Infinity;
@@ -147,8 +156,24 @@ export async function build(udid, {
 
   if (ocrPromise) {
     try {
-      const words = await ocrPromise;
-      if (words instanceof Error) throw words;
+      const result = await ocrPromise;
+      if (result instanceof Error) throw result;
+      // The daemon answers in points; readText answers in points too, having
+      // divided by density. Normalise the daemon's element shape to match.
+      const words = viaDaemon
+        ? (result.screen?.elements ?? [])
+            .filter((e) => e.label?.trim())
+            .map((e) => ({
+              text: e.label,
+              confidence: e.confidence,
+              x: e.frame.x,
+              y: e.frame.y,
+              width: e.frame.width,
+              height: e.frame.height,
+              centerX: e.center.x,
+              centerY: e.center.y,
+            }))
+        : result;
       sources.push('ocr');
       for (const w of words) {
         if (!w.text.trim()) continue;
@@ -188,17 +213,21 @@ export async function build(udid, {
     }
   }
 
-  const entry = {
-    version: MAP_VERSION,
-    hash,
-    layoutHash,
-    at: Date.now(),
-    sources,
-    targets,
-  };
-  // Only a map of a settled screen is worth keeping; remembering a transition
-  // fills the store with layouts that will never be seen again.
-  return persist ? remember(udid, entry) : entry;
+  return finish();
+
+  function finish() {
+    const entry = {
+      version: MAP_VERSION,
+      hash,
+      layoutHash,
+      at: Date.now(),
+      sources,
+      targets,
+    };
+    // Only a map of a settled screen is worth keeping; remembering a transition
+    // fills the store with layouts that will never be seen again.
+    return persist ? remember(udid, entry) : entry;
+  }
 }
 
 const norm = (s) => String(s ?? '').toLowerCase().trim();

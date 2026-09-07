@@ -197,6 +197,26 @@ case "run":
                                    "scale": device.scale],
                         "engine": "simframed",
                     ])
+                case "ui":
+                    // OCR straight off the framebuffer: no PNG encode, no file,
+                    // no process spawn. Runs on the socket queue, so a slow
+                    // recognition pass cannot stall frame capture.
+                    let started = DispatchTime.now().uptimeNanoseconds
+                    let elements = try platform.withFrame { frame in
+                        try VisionOCR.recognise(frame: frame, scale: device.scale)
+                    }
+                    let latest = store.latestState()
+                    let map = ScreenMap(
+                        fingerprint: latest?["layoutHash"] as? String ?? "",
+                        hash: latest?["hash"] as? String ?? "",
+                        size: CGSize(width: device.pointWidth, height: device.pointHeight),
+                        elements: elements,
+                        sources: ["ocr"],
+                        capturedAt: FrameStore.nowMs()
+                    )
+                    var payload = map.json
+                    payload["ocrMs"] = (Double(DispatchTime.now().uptimeNanoseconds - started) / 1e6 * 100).rounded() / 100
+                    return done(["screen": payload])
                 case "tap":
                     guard let p = point("x", "y") else { return ["ok": false, "error": "tap needs x and y"] }
                     try platform.tap(at: p, durationMs: request["durationMs"] as? Double ?? 70)

@@ -461,9 +461,22 @@ async function doctor() {
       const control = await import('./control.js');
       for (const d of booted) {
         const driver = await input.driverFor(d.udid);
-        const engine = control.available(d.udid) ? 'simframed' : 'simctl';
-        add(`capture engine (${d.name})`, true, engine);
+        const daemon = control.available(d.udid);
+        add(`capture engine (${d.name})`, true, daemon ? 'simframed' : 'simctl');
         add(`input driver (${d.name})`, driver.available, driver.available ? `${driver.name}: ${driver.version}` : driver.reason);
+        add(
+          `text recognition (${d.name})`,
+          true,
+          daemon ? 'simframed (in-process, off the framebuffer)' : 'sips + helper binary',
+        );
+        // idb's only remaining job. Say so, so nobody assumes it is load-bearing
+        // for capture or input, which it no longer is.
+        const ax = await input.detectDriver();
+        add(
+          `accessibility tree (${d.name})`,
+          ax.available,
+          ax.available ? 'idb — the only thing idb is still required for' : `unavailable: ${ax.reason}`,
+        );
       }
     }
     if (booted.length) {

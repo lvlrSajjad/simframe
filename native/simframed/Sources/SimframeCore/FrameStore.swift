@@ -36,6 +36,7 @@ public final class FrameStore {
     private let root: URL
     private let fm = FileManager.default
 
+    private let startedAt = FrameStore.nowMs()
     private var seq = 0
     private var prevSignature: [UInt8]?
     private var lastChangeAt = FrameStore.nowMs()
@@ -72,6 +73,13 @@ public final class FrameStore {
     /// one directory is the whole contract between daemon and clients.
     public var controlSocketPath: String { root.appendingPathComponent("control.sock").path }
 
+    /// The newest state written, for callers that need the current hashes
+    /// without recomputing them.
+    public func latestState() -> [String: Any]? {
+        guard let data = try? Data(contentsOf: root.appendingPathComponent("state.json")) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
     public func claim() throws {
         let meta: [String: Any] = [
             "pid": Int(getpid()),
@@ -95,12 +103,20 @@ public final class FrameStore {
 
     /// Milliseconds since a client last asked for anything, so an unattended
     /// daemon can retire itself the way the Node one does.
+    ///
+    /// Measured from daemon start when no client has ever checked in. Returning
+    /// infinity for a missing heartbeat made a freshly started daemon exit on
+    /// its first loop, before any client had the chance to connect.
     public func heartbeatAge() -> Double {
         let url = root.appendingPathComponent("heartbeat")
-        if let text = try? String(contentsOf: url, encoding: .utf8), let at = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
-            return Self.nowMs() - at
+        let since: Double
+        if let text = try? String(contentsOf: url, encoding: .utf8),
+           let at = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            since = max(at, startedAt)
+        } else {
+            since = startedAt
         }
-        return .infinity
+        return Self.nowMs() - since
     }
 
     /// Whether meta.json still names this process. A replacement daemon taking
