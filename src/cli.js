@@ -20,6 +20,11 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe wait    [device]          wait for the screen to react (see --mode)
   simframe strip   [device]          write a contact sheet of recent frames
   simframe recall  [device]          what happened in the last minute (--ago=<ms> for a frame)
+  simframe tapAt   <x> <y>           tap at a point, in points
+  simframe swipe   <x1> <y1> <x2> <y2>   swipe between two points
+  simframe type    <text>            enter text (exact; uses the pasteboard)
+  simframe keys    <text>            send key events instead (layout-dependent)
+  simframe press   <button>          a hardware button, e.g. home
   simframe ui      [device]          read the screen as an accessibility tree
   simframe tap     <label>            tap an element by its accessibility label
   simframe do      <script.json>      run a scripted flow (see below)
@@ -358,6 +363,47 @@ async function main() {
       return;
     }
 
+    case 'tapAt':
+    case 'swipe':
+    case 'type':
+    case 'keys':
+    case 'press': {
+      const input = await import('./input.js');
+      const dev = await resolveDevice(flags.device);
+      const nums = positional.map(Number);
+      const t0 = Date.now();
+      switch (command) {
+        case 'tapAt': {
+          if (positional.length < 2 || nums.slice(0, 2).some(Number.isNaN)) {
+            throw new Error('usage: simframe tapAt <x> <y>');
+          }
+          await input.tapPoint(dev.udid, nums[0], nums[1], flags.durationMs ? { durationMs: num(flags.durationMs) } : {});
+          break;
+        }
+        case 'swipe': {
+          if (positional.length < 4 || nums.slice(0, 4).some(Number.isNaN)) {
+            throw new Error('usage: simframe swipe <x1> <y1> <x2> <y2>');
+          }
+          await input.swipe(dev.udid, { x: nums[0], y: nums[1] }, { x: nums[2], y: nums[3] }, { durationMs: num(flags.durationMs, 300) });
+          break;
+        }
+        case 'type':
+          if (!positional.length) throw new Error('usage: simframe type <text>');
+          await input.typeText(dev.udid, positional.join(' '));
+          break;
+        case 'keys':
+          if (!positional.length) throw new Error('usage: simframe keys <text>');
+          await input.typeKeys(dev.udid, positional.join(' '));
+          break;
+        default:
+          if (!positional.length) throw new Error('usage: simframe press <button>');
+          await input.pressButton(dev.udid, positional[0]);
+      }
+      const driver = await input.driverFor(dev.udid);
+      console.log(`${command} in ${Date.now() - t0}ms via ${driver.name}`);
+      return;
+    }
+
     case 'devices': {
       const all = await listDevices();
       const shown = flags.all ? all : all.filter((d) => d.state === 'Booted');
@@ -400,8 +446,6 @@ async function doctor() {
   } catch (err) {
     add('sips', false, err.message);
   }
-  const driver = await input.detectDriver();
-  add('input driver (idb)', driver.available, driver.available ? driver.version : driver.reason);
   try {
     const ocr = await import('./ocr.js');
     const built = await ocr.ensureBinary();
@@ -412,6 +456,16 @@ async function doctor() {
   try {
     const booted = await bootedDevices();
     add('booted simulator', booted.length > 0, booted.map((d) => `${d.name} (${d.runtime})`).join(', ') || 'none');
+    if (booted.length) {
+      const input = await import('./input.js');
+      const control = await import('./control.js');
+      for (const d of booted) {
+        const driver = await input.driverFor(d.udid);
+        const engine = control.available(d.udid) ? 'simframed' : 'simctl';
+        add(`capture engine (${d.name})`, true, engine);
+        add(`input driver (${d.name})`, driver.available, driver.available ? `${driver.name}: ${driver.version}` : driver.reason);
+      }
+    }
     if (booted.length) {
       const t0 = Date.now();
       const res = await api.getFrame(booted[0].udid);

@@ -167,6 +167,76 @@ case "run":
             lock.lock(); dirty = true; lock.unlock()
         }
 
+        // Control socket: requests are served off the capture loop, because a
+        // swipe sleeps for its whole duration and must not stall frames.
+        let socketPath = store.controlSocketPath
+        let control = ControlSocket(path: socketPath) { request in
+            let action = request["action"] as? String ?? ""
+            let started = DispatchTime.now().uptimeNanoseconds
+            func done(_ extra: [String: Any] = [:]) -> [String: Any] {
+                var r: [String: Any] = ["ok": true]
+                r["ms"] = (Double(DispatchTime.now().uptimeNanoseconds - started) / 1e6 * 100).rounded() / 100
+                for (k, v) in extra { r[k] = v }
+                return r
+            }
+            func point(_ xKey: String, _ yKey: String) -> CGPoint? {
+                guard let x = request[xKey] as? Double ?? (request[xKey] as? Int).map(Double.init),
+                      let y = request[yKey] as? Double ?? (request[yKey] as? Int).map(Double.init) else { return nil }
+                return CGPoint(x: x, y: y)
+            }
+            do {
+                switch action {
+                case "ping":
+                    return done(["device": device.name, "udid": device.udid])
+                case "status":
+                    let input = platform.inputStatus()
+                    return done([
+                        "input": ["available": input.available, "detail": input.detail],
+                        "device": ["name": device.name, "udid": device.udid,
+                                   "pointWidth": device.pointWidth, "pointHeight": device.pointHeight,
+                                   "scale": device.scale],
+                        "engine": "simframed",
+                    ])
+                case "tap":
+                    guard let p = point("x", "y") else { return ["ok": false, "error": "tap needs x and y"] }
+                    try platform.tap(at: p, durationMs: request["durationMs"] as? Double ?? 70)
+                    return done()
+                case "swipe":
+                    guard let from = point("x1", "y1"), let to = point("x2", "y2") else {
+                        return ["ok": false, "error": "swipe needs x1, y1, x2, y2"]
+                    }
+                    try platform.swipe(from: from, to: to, durationMs: request["durationMs"] as? Double ?? 300)
+                    return done()
+                case "type":
+                    guard let text = request["text"] as? String else { return ["ok": false, "error": "type needs text"] }
+                    try platform.type(text)
+                    return done()
+                case "paste":
+                    guard let text = request["text"] as? String else { return ["ok": false, "error": "paste needs text"] }
+                    try platform.paste(text)
+                    return done()
+                case "press":
+                    guard let name = request["button"] as? String, let button = HardwareButton(rawValue: name) else {
+                        return ["ok": false, "error": "press needs a known button name"]
+                    }
+                    try platform.press(button)
+                    return done()
+                default:
+                    return ["ok": false, "error": "unknown action '\(action)'"]
+                }
+            } catch {
+                return ["ok": false, "error": "\(error)"]
+            }
+        }
+        do {
+            try control.start()
+            FileHandle.standardError.write("simframed: control socket at \(socketPath)\n".data(using: .utf8)!)
+        } catch {
+            // Capture is still useful without input; say so rather than dying.
+            FileHandle.standardError.write("simframed: control socket unavailable: \(error)\n".data(using: .utf8)!)
+        }
+        defer { control.stop() }
+
         FileHandle.standardError.write("simframed: capturing \(device.name) (\(device.udid))\n".data(using: .utf8)!)
 
         while true {

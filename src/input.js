@@ -2,6 +2,7 @@
 // capability layered on top, so every entry point here has to answer "is this
 // even available?" before it answers anything else.
 import { execFile } from 'node:child_process';
+import * as control from './control.js';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -10,6 +11,28 @@ const IDB_HINT =
   'install it with: brew tap facebook/fb && brew install idb-companion && pipx install fb-idb';
 
 let driverCache = null;
+
+/**
+ * Which input driver to use for a device.
+ *
+ * simframed is preferred when its control socket is live: it needs no install,
+ * speaks points natively, and is the path that survives idb breaking on a new
+ * iOS. idb remains the fallback so a machine without the daemon still works.
+ */
+export async function driverFor(udid) {
+  if (udid && control.available(udid)) {
+    try {
+      const status = await control.status(udid);
+      if (status.input?.available) {
+        return { name: 'simframed', available: true, version: status.input.detail, reason: null, viaSocket: true };
+      }
+      return { name: 'simframed', available: false, version: null, reason: status.input?.detail ?? 'input unavailable', viaSocket: true };
+    } catch {
+      /* daemon went away mid-call; fall through to idb */
+    }
+  }
+  return detectDriver();
+}
 
 /** @returns {Promise<{name: string, available: boolean, version: string|null, reason: string|null}>} */
 export async function detectDriver({ refresh = false } = {}) {
@@ -177,10 +200,15 @@ export function centerOf(node) {
 }
 
 export async function tapPoint(udid, x, y, { durationMs } = {}) {
-  const args = ['ui', 'tap', '--udid', udid, String(Math.round(x)), String(Math.round(y))];
+  const point = { x: Math.round(x), y: Math.round(y) };
+  if (control.available(udid)) {
+    await control.tap(udid, point.x, point.y, durationMs ? { durationMs } : {});
+    return point;
+  }
+  const args = ['ui', 'tap', '--udid', udid, String(point.x), String(point.y)];
   if (durationMs) args.push('--duration', String(durationMs / 1000));
   await idb(args);
-  return { x: Math.round(x), y: Math.round(y) };
+  return point;
 }
 
 export async function tapLabel(udid, query, { index, durationMs } = {}) {
@@ -191,6 +219,21 @@ export async function tapLabel(udid, query, { index, durationMs } = {}) {
 }
 
 export async function typeText(udid, value) {
+  if (control.available(udid)) {
+    // The daemon's paste path carries characters rather than key positions, so
+    // it is not reinterpreted by the device's keyboard layout.
+    await control.paste(udid, String(value));
+    return;
+  }
+  await idb(['ui', 'text', '--udid', udid, String(value)]);
+}
+
+/** Key events rather than text: for shortcuts and search-as-you-type. */
+export async function typeKeys(udid, value) {
+  if (control.available(udid)) {
+    await control.type(udid, String(value));
+    return;
+  }
   await idb(['ui', 'text', '--udid', udid, String(value)]);
 }
 
@@ -199,10 +242,23 @@ export async function pressKey(udid, keycode) {
 }
 
 export async function pressButton(udid, name) {
+  if (control.available(udid)) {
+    try {
+      await control.press(udid, String(name).toLowerCase());
+      return;
+    } catch (err) {
+      // Only home is verified through Indigo; anything else falls back.
+      if (!(await detectDriver()).available) throw err;
+    }
+  }
   await idb(['ui', 'button', '--udid', udid, String(name).toUpperCase()]);
 }
 
 export async function swipe(udid, from, to, { durationMs = 300 } = {}) {
+  if (control.available(udid)) {
+    await control.swipe(udid, from, to, { durationMs });
+    return;
+  }
   await idb([
     'ui', 'swipe', '--udid', udid,
     String(Math.round(from.x)), String(Math.round(from.y)),

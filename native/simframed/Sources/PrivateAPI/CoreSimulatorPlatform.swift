@@ -25,6 +25,8 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     private var device: NSObject?
     private var hid: IndigoHID?
     private var simulatorKitHandle: UnsafeMutableRawPointer?
+    // Read once at attach: spawning simctl per status call cost 300ms.
+    private var cachedKeyboardWarning: [String]?
 
     private static let bootedState = 3
 
@@ -175,6 +177,7 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
             // Warm the HID session once, so the first gesture is not slower
             // than the rest. Input being unavailable must not stop capture.
             hid = try? IndigoHID(device: device, simulatorKit: Self.simulatorKitHandles)
+            cachedKeyboardWarning = nonEnglishKeyboards()
             return resolved
         }
         throw PrivateAPIError.noDisplayPort
@@ -248,7 +251,7 @@ extension CoreSimulatorPlatform {
     public func inputStatus() -> (available: Bool, detail: String) {
         if hid != nil {
             var detail = "Indigo HID (SimDeviceLegacyHIDClient)"
-            if let layouts = nonEnglishKeyboards(), !layouts.isEmpty {
+            if let layouts = cachedKeyboardWarning, !layouts.isEmpty {
                 // Silent wrong text is the worst failure this layer has, so say
                 // so up front rather than letting it surface as odd characters.
                 detail += "; WARNING: \(layouts.joined(separator: ", ")) keyboard(s) installed — "

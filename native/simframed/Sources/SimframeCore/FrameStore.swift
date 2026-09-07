@@ -68,11 +68,15 @@ public final class FrameStore {
 
     /// Claim the device. Node checks meta.json to decide whether a capture loop
     /// is already running, so writing it is what makes the Node CLI defer to us.
+    /// Where the control socket lives for this device. Beside the frames, so
+    /// one directory is the whole contract between daemon and clients.
+    public var controlSocketPath: String { root.appendingPathComponent("control.sock").path }
+
     public func claim() throws {
         let meta: [String: Any] = [
             "pid": Int(getpid()),
             "device": deviceJSON,
-            "options": ["engine": "simframed", "maxDim": options.maxDim],
+            "options": ["engine": "simframed", "maxDim": options.maxDim, "control": controlSocketPath],
             "startedAt": Self.nowMs(),
             "version": Self.stateVersion,
         ]

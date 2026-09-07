@@ -207,3 +207,51 @@ settle detector that can tell a spinner from a still screen.
 Checked afterwards: five stored maps for a five-screen app, no pair within 30
 bits of another, and the gate reported settled on 6 of 6 lookups against a still
 screen. No transitional junk is being persisted.
+
+## Phase 1 — input through the daemon
+
+Gestures go over a per-device Unix socket at `~/.simframe/<udid>/control.sock`,
+mode 0600, one JSON object per line. Measured from Node against a live daemon.
+
+| Request | N | Median | p95 |
+| --- | --- | --- | --- |
+| `ping` — pure round trip | 100 | **0 ms** | 1 ms |
+| `status` | 50 | **0 ms** | — |
+| `tap` (70 ms hold) | 100 | 76 ms | 79 ms |
+| `tap` (10 ms hold) | 100 | **13 ms** | 14 ms |
+| `swipe` (300 ms gesture) | 20 | 358 ms | 373 ms |
+
+The transport costs nothing measurable. A tap's latency is almost entirely the
+hold it was asked for: dropping the hold from 70 ms to 10 ms takes the whole
+call from 76 ms to 13 ms, which puts fixed overhead at roughly 3 ms. Holds are
+deliberate — a zero-length press is not what a finger does — but they are the
+budget, not the plumbing.
+
+`status` was 315 ms until the keyboard-layout check was cached at attach time.
+It shells out to `simctl` to read `AppleKeyboards`, and it was doing so on every
+call, on a path the CLI hits for every command.
+
+### End to end
+
+The four-tab flow with every tap carried by simframed rather than idb, memory
+cleared first:
+
+| Pass | Time | Steps | From memory |
+| --- | --- | --- | --- |
+| 1 | 2881 ms | 3/4 | 1/4 |
+| 2 | 3441 ms | 4/4 | 2/4 |
+| 3 | 2841 ms | 4/4 | 3/4 |
+
+The one failed step was the ambiguity guard doing its job: "Invoices" is both
+the screen title and a tab, and it reported both with coordinates rather than
+picking one.
+
+`simframe doctor` now reports capture and input per device, so a machine part
+way through the transition reads honestly:
+
+```
+ok  capture engine (iPhone 17 Pro)  simframed
+ok  input driver  (iPhone 17 Pro)   simframed: Indigo HID (SimDeviceLegacyHIDClient)
+ok  capture engine (iPad Pro 13-inch (M5))  simctl
+ok  input driver  (iPad Pro 13-inch (M5))   idb: companion built Sep 1 2026
+```
