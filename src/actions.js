@@ -143,6 +143,9 @@ export async function runScript(
 
   return {
     device,
+    // Returned so a run that verified end to end can be handed straight to
+    // navigate.saveFlow without the caller reassembling what it just ran.
+    steps,
     results,
     ok: !failed,
     totalMs: Date.now() - startedAt,

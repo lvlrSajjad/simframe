@@ -100,11 +100,13 @@ make both screen memory and the transition graph stable on exactly the screens
 where they are weakest today. This is the single highest-value item in this
 file.
 
-### Phase 6 left graph-assisted navigation unbuilt
-`simframe goto "<screen>"` and flow save/replay are specified in
-`docs/PHASES.md` and not implemented. Phase 6b removed the blocker — the
-structural fingerprint separates same from different screens with a clear gap
-(`docs/BENCHMARKS.md`) — so these are now blocked on effort alone.
+### Screens without a nav title are named by their tab bar
+`simframe screens` lists one screen as `assets / home / more / •.. / $ /
+invoices / work orders` — the whole tab bar, including two OCR misreads, because
+that screen has no nav title to name it by. It is addressable and unambiguous,
+so `goto` works, but it is not a name anybody would type. A better fallback
+would be the label of the *selected* tab, which needs a selected-state signal
+the fused element list does not currently carry.
 
 ### A screen fingerprinted while still loading becomes its own screen
 The four-tab tour stores five graph nodes, not four. All five are genuinely

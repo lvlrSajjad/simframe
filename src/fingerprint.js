@@ -72,7 +72,11 @@ export function tokens(targets, screen) {
     // siblings — the rows of a list — differ only in position, and including
     // position in the key makes a four-row list a different screen from a
     // three-row one.
-    const parts = [role, region, `w${quantise(frame.width)}`, `h${quantise(frame.height)}`];
+    const parts = [role, region];
+    // Where in the nav bar a thing sits is structure, not content — and it is
+    // what tells a title apart from a button that happens to be up there.
+    if (CHROME.has(region) && t.navSlot) parts.push(`@${t.navSlot}`);
+    parts.push(`w${quantise(frame.width)}`, `h${quantise(frame.height)}`);
     // Chrome labels are the only text that survives: two list screens with
     // identical structure differ by their title, and nothing else says so.
     if (CHROME.has(region) && t.label) parts.push(`"${normLabel(t.label)}"`);

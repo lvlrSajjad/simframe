@@ -518,12 +518,24 @@ Jaccard similarity over token sets, four tabs, three visits each.
 
 | | Same screen, revisited | Different screens | Gap |
 | --- | --- | --- | --- |
-| Full element list | 0.54–1.00 | 0.00–**0.31** | 0.23 |
-| OCR-only (accessibility discarded) | — | 0.00–**0.35** | — |
+| Full element list, screen map warm | 0.54–1.00 | 0.00–0.31 | 0.23 |
+| Full element list, **map forced cold** | **0.41**–1.00 | 0.00–**0.31** | **0.11** |
+| OCR-only (accessibility discarded) | — | 0.00–0.35 | — |
 
-The threshold is **0.45**, in the gap. Compare the pixel hash it replaces, where
-same-screen revisits reached 62 bits against a different-screen floor of 74 and
-no threshold existed to choose.
+The cold row is the honest one; the warm row is partly measuring screen-map
+cache hits. The threshold is **0.36**, the middle of the cold gap.
+
+That gap is narrow, and one screen causes it. Home fingerprinted at 17 tokens on
+one visit and 7 on the next two — a screen caught after its pixels settled but
+before its rows arrived. Every other screen scored 1.00 against itself. So the
+distributions do separate, but the margin is thin and it is thin for a reason
+that is fixable: `settled` is a pixel criterion, and structural identity needs a
+structural one. That is recorded in `docs/DEFERRED.md` rather than papered over
+with a looser tolerance.
+
+Even so, compare what it replaces. The pixel hash put same-screen revisits at 62
+bits against a different-screen floor of 74 — overlapping, with no threshold
+available to choose at all.
 
 ### Accessibility-poor screens
 
@@ -551,8 +563,9 @@ perception on screens the map had not yet seen. The variance between 7.3 s and
 19.4 s is that cost appearing or not, not a change in the tool. Second, the tour
 stores five graph nodes for four tabs; all five are pairwise distinct at ≤0.31,
 so nothing was wrongly merged, but one tab was captured twice in states far
-enough apart to count as different screens. Both are recorded in
-`docs/DEFERRED.md`.
+enough apart to count as different screens. That is the same Home-tab
+mid-load capture the 0.41 figure comes from — the anomaly and the measurement
+are one finding, not two. Both are recorded in `docs/DEFERRED.md`.
 
 ### Measurement traps hit in this phase
 
@@ -565,3 +578,19 @@ A later run showed same-screen pairs at exactly 1.00 with identical token *and*
 target counts across all three visits. That is a screen-map cache hit being
 measured, not three independent perceptions of the same screen — the number is
 tautological. Same-screen figures here come from runs with the map forced cold.
+
+### Graph-assisted navigation
+
+With the four tabs learned (two teaching passes, the second verifying 4/4),
+`simframe goto` plans over known edges and walks them with no model call:
+
+| | Route | Steps | Result |
+| --- | --- | --- | --- |
+| `goto invoices` | more → home → work orders → invoices | 3 | every step `ok`, arrived |
+| `goto "work orders"` | invoices → more → home → work orders | 3 | every step `ok`, arrived |
+
+Adding the nav slot to chrome tokens is what made this addressable. Before it,
+three different screens were all named "help center e" — a button that happened
+to sit in the nav bar, mistaken for a title — and the tour stored five nodes for
+four tabs. After it, four tabs store four nodes named `invoices`, `work orders`,
+`more`, and the tab bar itself for the one screen with no title.

@@ -15,7 +15,7 @@ import * as ocr from './ocr.js';
 import * as regions from './regions.js';
 import * as store from './store.js';
 
-const MAP_VERSION = 3; // entries now carry a structural fingerprint
+const MAP_VERSION = 4; // chrome tokens carry their nav slot
 
 function mapDir(udid) {
   return path.join(store.deviceDir(udid), 'screens');

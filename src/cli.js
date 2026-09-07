@@ -6,6 +6,7 @@ import { bootedDevices, listDevices, resolveDevice } from './simctl.js';
 import * as actions from './actions.js';
 import * as api from './index.js';
 import * as input from './input.js';
+import * as navigate from './navigate.js';
 import * as store from './store.js';
 
 const USAGE = `simframe — always-warm iOS Simulator frames
@@ -28,6 +29,11 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe ui      [device]          read the screen as an accessibility tree
   simframe tap     <label>            tap an element by its accessibility label
   simframe do      <script.json>      run a scripted flow (see below)
+  simframe screens [device]          list screens this device has learned
+  simframe goto    <screen>          walk to a known screen through known steps
+  simframe flow    save <name> <script.json>   run a flow and save it if every step verifies
+  simframe flow    run  <name>       replay a saved flow
+  simframe flow    list              list saved flows
   simframe devices                   list simulators
   simframe doctor                    check that this machine can capture
 
@@ -367,6 +373,104 @@ async function main() {
       console.log(`${res.ok ? 'flow completed' : 'FLOW FAILED'} — ${res.ranSteps}/${res.totalSteps} steps in ${res.totalMs}ms`);
       process.exitCode = res.ok ? 0 : 1;
       return;
+    }
+
+    case 'goto': {
+      const target = positional.join(' ').trim();
+      if (!target) throw new Error('usage: simframe goto "<screen>"');
+      const res = await navigate.goto(flags.device, target, {
+        stableMs: num(flags.stableMs, 500),
+        timeoutMs: num(flags.timeoutMs, 8000),
+        options,
+      });
+      if (!res.ok && res.reason === 'unknown-screen') {
+        console.log(`no screen matching "${target}". known screens:`);
+        for (const s of res.known) console.log(`  ${s.name}  (${s.hash}, ${s.edges} edges)`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!res.ok && res.reason === 'ambiguous') {
+        console.log(`"${target}" matches more than one screen:`);
+        for (const c of res.candidates) console.log(`  ${c.name}  (${c.hash.slice(0, 8)})`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!res.ok && res.reason) {
+        console.log(`${res.reason}: cannot reach "${res.to ?? target}" from here`);
+        process.exitCode = 1;
+        return;
+      }
+      if (res.already) {
+        console.log(`already on ${res.screen}`);
+        return;
+      }
+      for (const r of res.results ?? []) {
+        console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.action}: ${r.verification?.verdict ?? (r.ok ? r.detail : r.error)}`);
+      }
+      console.log(res.ok ? `arrived at ${res.screen} in ${res.ranSteps} step(s)` : `ended at ${res.arrived}, wanted ${res.screen}`);
+      process.exitCode = res.ok ? 0 : 1;
+      return;
+    }
+
+    case 'screens': {
+      const { device } = await api.ensureDaemon(flags.device, options);
+      const known = navigate.knownScreens(device.udid);
+      if (!known.length) {
+        console.log('no screens known yet — run a flow first');
+        return;
+      }
+      for (const s of known) console.log(`${s.hash}  ${s.edges} edges  ${s.name}`);
+      return;
+    }
+
+    case 'flow': {
+      const [sub, name] = positional;
+      const { device } = await api.ensureDaemon(flags.device, options);
+      if (sub === 'list') {
+        const flows = navigate.listFlows(device.udid);
+        if (!flows.length) console.log('no saved flows');
+        for (const f of flows) console.log(`${f.name}  ${f.steps} steps`);
+        return;
+      }
+      if (sub === 'save') {
+        const file = positional[2];
+        if (!name || !file) throw new Error('usage: simframe flow save <name> <script.json>');
+        const steps = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const res = await actions.runScript(flags.device, {
+          steps,
+          stableMs: num(flags.stableMs, 500),
+          timeoutMs: num(flags.timeoutMs, 8000),
+          options,
+        });
+        const saved = navigate.saveFlow(device.udid, name, res, { force: Boolean(flags.force) });
+        if (!saved.ok) {
+          console.log(`not saved: ${saved.reason} (${saved.verdicts.join(', ')}) — re-run, or pass --force`);
+          process.exitCode = 1;
+          return;
+        }
+        console.log(`saved ${saved.name} — ${saved.steps} steps`);
+        return;
+      }
+      if (sub === 'run') {
+        if (!name) throw new Error('usage: simframe flow run <name>');
+        const res = await navigate.runFlow(flags.device, name, {
+          stableMs: num(flags.stableMs, 500),
+          timeoutMs: num(flags.timeoutMs, 8000),
+          options,
+        });
+        if (res.reason === 'unknown-flow') {
+          console.log(`no flow "${name}". known: ${res.known.join(', ') || '(none)'}`);
+          process.exitCode = 1;
+          return;
+        }
+        for (const r of res.results ?? []) {
+          console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.action}: ${r.verification?.verdict ?? (r.ok ? r.detail : r.error)}`);
+        }
+        console.log(`${res.ok ? 'flow completed' : 'FLOW FAILED'} — ${res.ranSteps}/${res.totalSteps} steps`);
+        process.exitCode = res.ok ? 0 : 1;
+        return;
+      }
+      throw new Error('usage: simframe flow <list|save|run>');
     }
 
     case 'tapAt':

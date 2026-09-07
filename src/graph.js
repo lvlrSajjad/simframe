@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { hashDistance } from './analyze.js';
 import * as fingerprint from './fingerprint.js';
+import * as matching from './matching.js';
 import * as store from './store.js';
 
 const GRAPH_VERSION = 1;
@@ -20,11 +21,20 @@ const GRAPH_VERSION = 1;
  * revisit with changed content reached 62 bits against a different-screen floor
  * of 74; no threshold separates those. See docs/BENCHMARKS.md, Phase 6.
  *
- * Structurally the same measurement separates cleanly: revisits score 0.54 to
- * 1.00, different screens 0.00 to 0.31. 0.45 sits in that gap with margin on
- * both sides. Most revisits match on the hash outright and never reach it.
+ * Structurally the two distributions do separate, but not by much: measured
+ * with the screen map forced cold, revisits score 0.41 to 1.00 against a
+ * different-screen ceiling of 0.31. 0.36 is the middle of that gap.
+ *
+ * The gap is narrow because of one screen, and the cause is known: a screen
+ * caught after its pixels settle but before its rows arrive fingerprints sparse
+ * (17 tokens on one visit, 7 on the next). The fix is a structural settle gate
+ * rather than a looser threshold — see docs/DEFERRED.md. Until then this errs
+ * toward recording a duplicate screen, which costs a re-derivation, over
+ * merging two, which costs a tap on the wrong element.
+ *
+ * Most revisits match on the hash outright and never reach this at all.
  */
-export const SIMILARITY_THRESHOLD = 0.45;
+export const SIMILARITY_THRESHOLD = 0.36;
 /** Only for the legacy pixel path, kept so old graphs still load. */
 export const TOLERANCE = 20;
 
@@ -63,7 +73,7 @@ function save(udid, node) {
   store.writeAtomic(path.join(dir, `${node.hash}.json`), JSON.stringify(node));
 }
 
-function allNodes(udid) {
+export function allNodes(udid) {
   try {
     return fs
       .readdirSync(graphDir(udid))
@@ -103,6 +113,54 @@ export function nearestScreen(udid, screen, { threshold = SIMILARITY_THRESHOLD }
   return best && bestSimilarity >= threshold ? { node: best, similarity: bestSimilarity } : null;
 }
 
+/** Only actions worth replaying — a launch or a URL open is a flow's start, not a step within it. */
+function replayable(step) {
+  if (!step || typeof step !== 'object') return null;
+  return step.launch != null || step.openUrl != null ? null : step;
+}
+
+/**
+ * What to call this screen, for a human typing `goto`.
+ *
+ * Chrome labels are the only text in a fingerprint, which makes them the only
+ * thing available to name it by — and they are the right thing anyway: a screen
+ * is called what its nav bar says it is.
+ */
+export function describe(node) {
+  const labels = (pattern) => (node.tokens ?? [])
+    .filter((t) => pattern.test(t) && t.includes('"'))
+    .map((t) => t.slice(t.indexOf('"') + 1, t.lastIndexOf('"')))
+    .filter(Boolean);
+  // The nav title first, because that is what the screen is called. A button
+  // that happens to sit in the nav bar is not a name for anything.
+  const title = labels(/:nav-bar:@title:/);
+  if (title.length) return title.join(' ');
+  const tabs = labels(/:tab-bar:/);
+  if (tabs.length) return tabs.join(' / ');
+  const anyChrome = labels(/:(nav-bar|tab-bar):/);
+  if (anyChrome.length) return anyChrome.slice(0, 3).join(' ');
+  return node.hash.slice(0, 8);
+}
+
+/** Find a known screen by what a human would call it. */
+export function findScreen(udid, query) {
+  const wanted = String(query ?? '').trim();
+  if (!wanted) return null;
+  const scored = allNodes(udid)
+    .map((node) => ({ node, name: describe(node) }))
+    .map((c) => ({ ...c, score: matching.nameScore(c.name, wanted) }))
+    .filter((c) => c.score > 0)
+    .sort((a, b) => b.score - a.score);
+  const [best, next] = scored;
+  if (!best) return null;
+  // Two screens that fit the query equally well is a question for the caller,
+  // not a coin flip that navigates somewhere wrong.
+  if (next && best.score - next.score < 0.08) {
+    return { ambiguous: [best, next].map((c) => ({ name: c.name, hash: c.node.hash })) };
+  }
+  return { node: best.node, name: best.name, score: best.score };
+}
+
 /** Remember that doing `action` on `from` led to `to`. */
 export function record(udid, { from, action, to, kind }) {
   const fromKey = typeof from === 'string' ? { hash: from } : from;
@@ -121,11 +179,21 @@ export function record(udid, { from, action, to, kind }) {
       existing.changedOutcomes = (existing.changedOutcomes ?? 0) + 1;
     }
     existing.to = to_;
+    existing.step = replayable(action) ?? existing.step;
     existing.kind = kind ?? existing.kind;
     existing.count += 1;
     existing.lastSeen = Date.now();
   } else {
-    node.edges.push({ action: signature, to: to_, kind, count: 1, lastSeen: Date.now() });
+    node.edges.push({
+      action: signature,
+      // The signature is lossy — it lowercases labels and truncates. Routing
+      // has to replay the action exactly, so keep the step that produced it.
+      step: replayable(action),
+      to: to_,
+      kind,
+      count: 1,
+      lastSeen: Date.now(),
+    });
   }
   save(udid, node);
   return node;

@@ -337,6 +337,9 @@ test('the MCP server reports the real package version', async () => {
 // --- intent matching: the rules that keep a wrong tap from happening ---
 import { editDistance, nameScore, rank as rankIntent, resolve } from '../src/matching.js';
 import { detectKeyboardTop, navSlot, regionFor } from '../src/regions.js';
+import { fingerprint } from '../src/fingerprint.js';
+import { describe } from '../src/graph.js';
+import { stepFor, saveFlow } from '../src/navigate.js';
 
 const SCREEN = { width: 402, height: 874 };
 const el = (label, x, y, type = 'Text', extra = {}) => ({
@@ -402,4 +405,47 @@ test('a list of cells is not mistaken for a keyboard', () => {
   const cells = Array.from({ length: 14 }, (_, i) =>
     ({ frame: { x: 0, y: 640 + i * 90, width: 402, height: 90 } }));
   assert.equal(detectKeyboardTop(cells, SCREEN), null);
+});
+
+// --- screen naming and routing -------------------------------------------
+
+const nav = (label, slot) => ({
+  type: 'StaticText', label, navSlot: slot, region: 'nav-bar',
+  frame: { x: 150, y: 78, width: 100, height: 24 },
+});
+const tabItem = (label, x) => ({
+  type: 'Button', label, region: 'tab-bar',
+  frame: { x, y: 820, width: 60, height: 30 },
+});
+const node = (targets) => ({ hash: 'a'.repeat(32), edges: [], tokens: fingerprint(targets, SCREEN).tokens });
+
+test('a screen is named by its nav title, not by a button that sits up there', () => {
+  const n = node([nav('Help Center', 'trailing'), nav('Invoices', 'title')]);
+  // Lowercased because that is how the token stores it; `goto` matches
+  // case-insensitively, so the name never needs its original case.
+  assert.equal(describe(n), 'invoices');
+});
+
+test('a screen with no title falls back to its tabs, then to its hash', () => {
+  assert.equal(describe(node([tabItem('Home', 20), tabItem('More', 300)])), 'home / more');
+  assert.equal(describe(node([])), 'a'.repeat(8));
+});
+
+test('the nav slot is part of identity, so a title and a button do not collide', () => {
+  const asTitle = fingerprint([nav('Save', 'title')], SCREEN);
+  const asButton = fingerprint([nav('Save', 'trailing')], SCREEN);
+  assert.notEqual(asTitle.hash, asButton.hash);
+});
+
+test('an edge keeps the step that made it, because the signature is lossy', () => {
+  assert.deepEqual(stepFor({ action: 'tap:work orders', step: { tap: 'Work Orders' } }), { tap: 'Work Orders' });
+  // Older edges predate `step` and have to be reconstructed from the signature.
+  assert.deepEqual(stepFor({ action: 'tap:work orders' }), { tap: 'work orders' });
+  assert.deepEqual(stepFor({ action: 'swipe:10,20->10,300' }), { swipe: { from: [10, 20], to: [10, 300] } });
+  assert.equal(stepFor({ action: 'type:"hello"' }), null);
+});
+
+test('a flow with an unverified step is not saved', () => {
+  const script = { steps: [{ tap: 'A' }], results: [{ verification: { verdict: 'unverified' } }] };
+  assert.equal(saveFlow('nonexistent-udid', 'x', script).ok, false);
 });
