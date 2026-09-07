@@ -246,9 +246,44 @@ extension CoreSimulatorPlatform {
     }
 
     public func inputStatus() -> (available: Bool, detail: String) {
-        if hid != nil { return (true, "Indigo HID (SimDeviceLegacyHIDClient)") }
+        if hid != nil {
+            var detail = "Indigo HID (SimDeviceLegacyHIDClient)"
+            if let layouts = nonEnglishKeyboards(), !layouts.isEmpty {
+                // Silent wrong text is the worst failure this layer has, so say
+                // so up front rather than letting it surface as odd characters.
+                detail += "; WARNING: \(layouts.joined(separator: ", ")) keyboard(s) installed — "
+                    + "key events follow the active layout, so use paste for exact text"
+            }
+            return (true, detail)
+        }
         if attached == nil { return (false, "not attached to a device") }
         return (false, "the HID client could not be created")
+    }
+
+    /// Keyboards installed on the device other than English and emoji. With
+    /// `hw=Automatic` the hardware layout follows whichever of these is active,
+    /// so their presence makes key-event typing unpredictable.
+    private func nonEnglishKeyboards() -> [String]? {
+        guard let udid = attached?.udid else { return nil }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        p.arguments = ["simctl", "spawn", udid, "defaults", "read", ".GlobalPreferences", "AppleKeyboards"]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        return text
+            .split(separator: "\n")
+            .compactMap { line -> String? in
+                guard let at = line.range(of: "@sw=") else { return nil }
+                let code = line[line.startIndex..<at.lowerBound]
+                    .trimmingCharacters(in: CharacterSet(charactersIn: " \",\t"))
+                guard !code.isEmpty, code != "emoji", !code.hasPrefix("en") else { return nil }
+                return code
+            }
     }
 
     private func requireHID() throws -> (IndigoHID, CGSize) {
@@ -293,6 +328,32 @@ extension CoreSimulatorPlatform {
             if usage.shift { hid.key(usage: HIDKeyboard.leftShift, op: .up) }
             Thread.sleep(forTimeInterval: Timing.keyStrokeMs / 1000)
         }
+    }
+
+    public func paste(_ text: String) throws {
+        let (hid, _) = try requireHID()
+        guard let info = attached else { throw PrivateAPIError.hidUnavailable("not attached") }
+
+        let copy = Process()
+        copy.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        copy.arguments = ["simctl", "pbcopy", info.udid]
+        let pipe = Pipe()
+        copy.standardInput = pipe
+        copy.standardError = FileHandle.nullDevice
+        try copy.run()
+        pipe.fileHandleForWriting.write(Data(text.utf8))
+        pipe.fileHandleForWriting.closeFile()
+        copy.waitUntilExit()
+        guard copy.terminationStatus == 0 else {
+            throw PrivateAPIError.hidUnavailable("simctl pbcopy failed (\(copy.terminationStatus))")
+        }
+
+        // Command-V. Modifiers are ordinary key usages held around the keystroke.
+        hid.key(usage: HIDKeyboard.leftGUI, op: .down)
+        hid.key(usage: HIDKeyboard.vKey, op: .down)
+        Thread.sleep(forTimeInterval: 0.04)
+        hid.key(usage: HIDKeyboard.vKey, op: .up)
+        hid.key(usage: HIDKeyboard.leftGUI, op: .up)
     }
 
     public func press(_ button: HardwareButton) throws {

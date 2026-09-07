@@ -95,7 +95,7 @@ case "input":
         print("     \(device.name): \(device.pixelWidth)x\(device.pixelHeight)px @\(device.scale)x = \(device.pointWidth)x\(device.pointHeight)pt")
     } catch { fail("\(error)") }
 
-case "tap", "swipe", "type", "press":
+case "tap", "swipe", "type", "paste", "press":
     do {
         _ = try platform.attach(udid: flag("udid"))
         let positional = args.filter { !$0.hasPrefix("--") }.dropFirst()
@@ -112,9 +112,11 @@ case "tap", "swipe", "type", "press":
             try platform.swipe(from: CGPoint(x: v[0], y: v[1]), to: CGPoint(x: v[2], y: v[3]),
                                durationMs: Double(flag("duration-ms") ?? "") ?? 300)
         case "type":
-            guard let text = positional.first else { fail("usage: simframed type <text>") }
+            guard !positional.isEmpty else { fail("usage: simframed type <text>") }
             try platform.type(positional.joined(separator: " "))
-            _ = text
+        case "paste":
+            guard !positional.isEmpty else { fail("usage: simframed paste <text>") }
+            try platform.paste(positional.joined(separator: " "))
         default:
             guard let name = positional.first, let button = HardwareButton(rawValue: name) else {
                 fail("usage: simframed press <\(HardwareButton.allCases.map(\.rawValue).joined(separator: "|"))>")

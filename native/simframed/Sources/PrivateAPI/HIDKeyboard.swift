@@ -7,6 +7,8 @@ import Foundation
 /// which is a separate path rather than something to fake here.
 public enum HIDKeyboard {
     public static let leftShift: UInt32 = 0xE1
+    public static let leftGUI: UInt32 = 0xE3   // Command
+    public static let vKey: UInt32 = 0x19
 
     public struct Key {
         public let code: UInt32

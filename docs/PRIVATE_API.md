@@ -175,14 +175,37 @@ sweep codes with target 0 on a simulator you are willing to disturb and watch
 characters. iOS maps those through whatever keyboard is currently active, so
 the same usage produces different text on different layouts.
 
-Observed: typing `fryer` on a simulator with an Arabic keyboard active put
-`غنقب`/`فوق` into the field. The HID path was working perfectly; the mapping
-was not what the caller meant.
+Measured on the same field, same device, back to back:
 
-This matters because the failure is **silent** — text appears, so nothing looks
-wrong. Anything that must be exact should go through the pasteboard
-(`simctl pbcopy` then paste), which is layout-independent. Key events are for
-interaction; the pasteboard is for content.
+| Route | Result for `"Fryer 3"` |
+| --- | --- |
+| `type()` — key events | `إقغثق ۳` |
+| `paste()` — pasteboard | `Fryer 3` |
+
+The device had `fa` (Persian) among its installed keyboards. Note the mangled
+text is exactly five letters, a space and a digit: the usage codes were right,
+the layout mapped them elsewhere.
+
+The device setting is what decides this, and it is not the software keyboard
+picker:
+
+```
+AppleKeyboards = ( "en_US@sw=QWERTY;hw=Automatic",
+                   "fa@sw=Persian;hw=Automatic", ... )
+```
+
+`hw=Automatic` means the **hardware** layout follows whichever software keyboard
+is currently active, which iOS remembers per field. Automation cannot reliably
+control that, and switching the phone's keyboard to English does not fix a field
+iOS has already associated with another layout.
+
+So: **key events are for interaction, the pasteboard is for content.** `paste()`
+runs `simctl pbcopy` and then Command-V (usage `0x19` with left GUI `0xE3`),
+which carries characters rather than key positions.
+
+Because the failure is silent — text appears, so nothing looks broken —
+`inputStatus()` reads `AppleKeyboards` and warns when any non-English, non-emoji
+keyboard is installed. `simframe doctor` surfaces it.
 
 ### Other message constructors, as declared by the binary
 

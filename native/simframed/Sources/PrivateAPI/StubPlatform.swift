@@ -69,5 +69,6 @@ extension StubPlatform {
         recorded.append("swipe(\(Int(from.x)),\(Int(from.y))->\(Int(to.x)),\(Int(to.y)))")
     }
     public func type(_ text: String) throws { recorded.append("type(\(text))") }
+    public func paste(_ text: String) throws { recorded.append("paste(\(text))") }
     public func press(_ button: HardwareButton) throws { recorded.append("press(\(button.rawValue))") }
 }

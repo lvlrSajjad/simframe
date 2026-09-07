@@ -88,5 +88,12 @@ public protocol SimulatorPlatform: AnyObject {
     /// A real down, interpolated moves, then up — never a teleporting jump.
     func swipe(from: CGPoint, to: CGPoint, durationMs: Double) throws
     func type(_ text: String) throws
+    /// Put text on the device pasteboard and paste it.
+    ///
+    /// Key events are mapped by whatever keyboard layout iOS has active, so
+    /// typing "Fryer 3" against a Persian layout yields Persian text with no
+    /// error. The pasteboard carries characters rather than key positions, so
+    /// it is the only reliable route for content that must be exact.
+    func paste(_ text: String) throws
     func press(_ button: HardwareButton) throws
 }
