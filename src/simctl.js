@@ -36,7 +36,10 @@ async function fetchDevices() {
       out.push({
         udid: d.udid,
         name: d.name,
-        runtime: runtime.replace('com.apple.CoreSimulator.SimRuntime.', '').replace(/-/g, '.'),
+        runtime: runtime
+          .replace('com.apple.CoreSimulator.SimRuntime.', '')
+          .replace(/-/, ' ')
+          .replace(/-/g, '.'),
         state: d.state,
       });
     }

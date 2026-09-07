@@ -399,6 +399,13 @@ async function doctor() {
   const driver = await input.detectDriver();
   add('input driver (idb)', driver.available, driver.available ? driver.version : driver.reason);
   try {
+    const ocr = await import('./ocr.js');
+    const built = await ocr.ensureBinary();
+    add('on-device OCR', built.available, built.available ? 'available' : built.reason);
+  } catch (err) {
+    add('on-device OCR', false, err.message);
+  }
+  try {
     const booted = await bootedDevices();
     add('booted simulator', booted.length > 0, booted.map((d) => `${d.name} (${d.runtime})`).join(', ') || 'none');
     if (booted.length) {
