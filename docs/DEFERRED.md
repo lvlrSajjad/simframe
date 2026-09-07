@@ -54,6 +54,24 @@ The last idb dependency. Most of the hard part is done and recorded: a host-side
 bridge that resolves the frontmost application works. See **Phase 2b** in
 `docs/PHASES.md`.
 
+### Phase 5 left four things unbuilt
+`sim_find` covers the part agents use every call. Not built, in the order they
+would be worth adding:
+
+- **SF Symbol template bank.** Icon-only controls are reachable by synonym
+  ("back", "close", "more") but not identified. Template matching against
+  rendered symbols would name them, which matters because these are exactly the
+  controls with no text for OCR to find.
+- **Contour / rectangle candidates** for regions the accessibility tree leaves
+  empty. Lower value while OCR plus the tree already cover most screens; it
+  matters on canvas and WebView surfaces.
+- **NLEmbedding similarity.** Fuzzy matching and synonyms handle typos and
+  common names; embeddings would handle paraphrase ("go back" vs "return").
+  Needs the NaturalLanguage framework, so it belongs in the daemon.
+- **The eval harness** over fifteen screens from three apps, which is what would
+  turn "it works on the screens I tried" into a recall number — and which
+  Phase 2b's scheduling is supposed to depend on.
+
 ### Confirm vocabulary is English
 `APPLY`, `OK`, `SAVE`, `DONE` and friends are hardcoded. A localised UI needs
 them extended, and the same applies to the synonym table Phase 5 introduces.
