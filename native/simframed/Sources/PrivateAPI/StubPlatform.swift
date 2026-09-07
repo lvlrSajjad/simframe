@@ -71,4 +71,19 @@ extension StubPlatform {
     public func type(_ text: String) throws { recorded.append("type(\(text))") }
     public func paste(_ text: String) throws { recorded.append("paste(\(text))") }
     public func press(_ button: HardwareButton) throws { recorded.append("press(\(button.rawValue))") }
+    public func longPress(at point: CGPoint, durationMs: Double) throws {
+        recorded.append("longPress(\(Int(point.x)),\(Int(point.y)),\(Int(durationMs)))")
+    }
+    public func drag(from: CGPoint, to: CGPoint, holdMs: Double, durationMs: Double) throws {
+        recorded.append("drag(\(Int(from.x)),\(Int(from.y))->\(Int(to.x)),\(Int(to.y)),hold=\(Int(holdMs)))")
+    }
+    @discardableResult
+    public func launch(bundleId: String, arguments: [String], environment: [String: String]) throws -> Int32 {
+        recorded.append("launch(\(bundleId))"); return 1234
+    }
+    public func terminate(bundleId: String) throws { recorded.append("terminate(\(bundleId))") }
+    public func openURL(_ url: String) throws { recorded.append("openURL(\(url))") }
+    public func permission(action: String, service: String, bundleId: String?) throws {
+        recorded.append("permission(\(action),\(service),\(bundleId ?? "-"))")
+    }
 }

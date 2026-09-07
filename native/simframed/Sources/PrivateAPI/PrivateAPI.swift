@@ -53,6 +53,7 @@ public enum PrivateAPIError: Error, CustomStringConvertible {
     case noDisplayPort
     case surfaceUnavailable
     case hidUnavailable(String)
+    case simctlFailed(String)
 
     public var description: String {
         switch self {
@@ -62,6 +63,7 @@ public enum PrivateAPIError: Error, CustomStringConvertible {
         case .noDisplayPort: return "the device exposes no active display port"
         case .surfaceUnavailable: return "the display surface could not be read"
         case .hidUnavailable(let d): return "input is unavailable: \(d)"
+        case .simctlFailed(let d): return "simctl \(d)"
         }
     }
 }
@@ -83,8 +85,15 @@ public protocol SimulatorPlatform: AnyObject {
 
     /// Whether input is available, and why not when it is not.
     func inputStatus() -> (available: Bool, detail: String)
-    /// A press and release at one point. `durationMs` above ~500 reads as a long press.
+    /// A press and release at one point.
     func tap(at point: CGPoint, durationMs: Double) throws
+    /// A deliberate hold. Named separately from `tap` because callers mean
+    /// something different by it, even though the mechanism is a longer hold.
+    func longPress(at point: CGPoint, durationMs: Double) throws
+    /// Press, hold in place, then move and release. The hold is what separates
+    /// a drag from a swipe: reorderable lists and drag-and-drop need the UI to
+    /// register a pick-up before movement starts.
+    func drag(from: CGPoint, to: CGPoint, holdMs: Double, durationMs: Double) throws
     /// A real down, interpolated moves, then up — never a teleporting jump.
     func swipe(from: CGPoint, to: CGPoint, durationMs: Double) throws
     func type(_ text: String) throws
@@ -96,4 +105,13 @@ public protocol SimulatorPlatform: AnyObject {
     /// it is the only reliable route for content that must be exact.
     func paste(_ text: String) throws
     func press(_ button: HardwareButton) throws
+
+    // MARK: App lifecycle. These are simctl, not private API — no HID needed.
+
+    @discardableResult
+    func launch(bundleId: String, arguments: [String], environment: [String: String]) throws -> Int32
+    func terminate(bundleId: String) throws
+    func openURL(_ url: String) throws
+    /// `action` is grant/revoke/reset, `service` one of simctl's privacy services.
+    func permission(action: String, service: String, bundleId: String?) throws
 }

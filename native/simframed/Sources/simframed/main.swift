@@ -215,6 +215,38 @@ case "run":
                     guard let text = request["text"] as? String else { return ["ok": false, "error": "paste needs text"] }
                     try platform.paste(text)
                     return done()
+                case "longPress":
+                    guard let p = point("x", "y") else { return ["ok": false, "error": "longPress needs x and y"] }
+                    try platform.longPress(at: p, durationMs: request["durationMs"] as? Double ?? 600)
+                    return done()
+                case "drag":
+                    guard let from = point("x1", "y1"), let to = point("x2", "y2") else {
+                        return ["ok": false, "error": "drag needs x1, y1, x2, y2"]
+                    }
+                    try platform.drag(from: from, to: to,
+                                      holdMs: request["holdMs"] as? Double ?? 500,
+                                      durationMs: request["durationMs"] as? Double ?? 400)
+                    return done()
+                case "launch":
+                    guard let bundleId = request["bundleId"] as? String else { return ["ok": false, "error": "launch needs bundleId"] }
+                    let pid = try platform.launch(bundleId: bundleId,
+                                                  arguments: request["arguments"] as? [String] ?? [],
+                                                  environment: request["environment"] as? [String: String] ?? [:])
+                    return done(["pid": Int(pid)])
+                case "terminate":
+                    guard let bundleId = request["bundleId"] as? String else { return ["ok": false, "error": "terminate needs bundleId"] }
+                    try platform.terminate(bundleId: bundleId)
+                    return done()
+                case "openUrl":
+                    guard let url = request["url"] as? String else { return ["ok": false, "error": "openUrl needs url"] }
+                    try platform.openURL(url)
+                    return done()
+                case "permission":
+                    guard let action = request["permissionAction"] as? String, let service = request["service"] as? String else {
+                        return ["ok": false, "error": "permission needs permissionAction and service"]
+                    }
+                    try platform.permission(action: action, service: service, bundleId: request["bundleId"] as? String)
+                    return done()
                 case "press":
                     guard let name = request["button"] as? String, let button = HardwareButton(rawValue: name) else {
                         return ["ok": false, "error": "press needs a known button name"]

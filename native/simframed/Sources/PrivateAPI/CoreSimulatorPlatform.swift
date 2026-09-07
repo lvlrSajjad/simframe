@@ -303,6 +303,30 @@ extension CoreSimulatorPlatform {
         hid.mouse(at: point, event: .up, screen: screen)
     }
 
+    public func longPress(at point: CGPoint, durationMs: Double = 600) throws {
+        try tap(at: point, durationMs: max(durationMs, 400))
+    }
+
+    public func drag(from: CGPoint, to: CGPoint, holdMs: Double = 500, durationMs: Double = 400) throws {
+        let (hid, screen) = try requireHID()
+        hid.mouse(at: from, event: .down, screen: screen)
+        // Hold still first: without it the UI reads a swipe, and a reorderable
+        // list never enters drag mode at all.
+        Thread.sleep(forTimeInterval: holdMs / 1000)
+        let steps = max(2, Int(durationMs / Timing.stepMs))
+        for i in 1...steps {
+            let t = Double(i) / Double(steps)
+            let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+            hid.mouse(at: CGPoint(x: from.x + (to.x - from.x) * eased,
+                                  y: from.y + (to.y - from.y) * eased),
+                      event: .dragged, screen: screen)
+            Thread.sleep(forTimeInterval: Timing.stepMs / 1000)
+        }
+        // Settle at the destination before lifting, so the drop lands there.
+        Thread.sleep(forTimeInterval: 0.08)
+        hid.mouse(at: to, event: .up, screen: screen)
+    }
+
     public func swipe(from: CGPoint, to: CGPoint, durationMs: Double = 300) throws {
         let (hid, screen) = try requireHID()
         let steps = max(2, Int(durationMs / Timing.stepMs))
@@ -361,6 +385,56 @@ extension CoreSimulatorPlatform {
         Thread.sleep(forTimeInterval: 0.04)
         hid.key(usage: HIDKeyboard.vKey, op: .up)
         hid.key(usage: HIDKeyboard.leftGUI, op: .up)
+    }
+
+    /// simctl, run against the attached device.
+    @discardableResult
+    private func simctl(_ arguments: [String]) throws -> (status: Int32, output: String) {
+        guard let udid = attached?.udid else { throw PrivateAPIError.noBootedDevice }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        p.arguments = ["simctl"] + [arguments[0]] + [udid] + Array(arguments.dropFirst())
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        try p.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        let out = String(data: data, encoding: .utf8) ?? ""
+        guard p.terminationStatus == 0 else {
+            throw PrivateAPIError.simctlFailed("\(arguments.joined(separator: " ")): \(out.trimmingCharacters(in: .whitespacesAndNewlines))")
+        }
+        return (p.terminationStatus, out)
+    }
+
+    @discardableResult
+    public func launch(bundleId: String, arguments: [String] = [], environment: [String: String] = [:]) throws -> Int32 {
+        var args = ["launch"]
+        for (key, value) in environment { args += ["--setenv", "\(key)=\(value)"] }
+        args.append(bundleId)
+        args += arguments
+        let result = try simctl(args)
+        // simctl prints "<bundle>: <pid>\n". Trimming with .whitespaces leaves
+        // the newline, so the parse silently yielded 0 — newlines need
+        // .whitespacesAndNewlines.
+        let pid = result.output
+            .split(separator: ":").last
+            .flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        return pid ?? 0
+    }
+
+    public func terminate(bundleId: String) throws {
+        try simctl(["terminate", bundleId])
+    }
+
+    public func openURL(_ url: String) throws {
+        try simctl(["openurl", url])
+    }
+
+    public func permission(action: String, service: String, bundleId: String?) throws {
+        var args = ["privacy", action, service]
+        if let bundleId { args.append(bundleId) }
+        try simctl(args)
     }
 
     public func press(_ button: HardwareButton) throws {

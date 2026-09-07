@@ -246,6 +246,26 @@ The one failed step was the ambiguity guard doing its job: "Invoices" is both
 the screen title and a tab, and it reported both with coordinates rather than
 picking one.
 
+### Remaining gestures
+
+`drag`, `longPress`, `launch`, `terminate`, `openURL` and `permission` round out
+the Platform surface. `drag` holds before moving — that hold is what separates a
+drag from a swipe, and without it a reorderable list never enters drag mode.
+
+| Action | Measured |
+| --- | --- |
+| `longPress` (600 ms) | 606 ms |
+| `drag` (500 ms hold + 400 ms move) | 1062 ms |
+| `launch` | 218 ms |
+| `terminate` | 179 ms |
+| `openUrl` | 847 ms |
+| `permission grant` | 167 ms |
+
+Still not implemented, with reasons rather than omissions: `pinch` needs
+multi-touch, a different Indigo message shape that is unverified; and every
+hardware button except `home`, because identifying the codes means sweeping them
+on a simulator you are willing to have crash or lock.
+
 `simframe doctor` now reports capture and input per device, so a machine part
 way through the transition reads honestly:
 

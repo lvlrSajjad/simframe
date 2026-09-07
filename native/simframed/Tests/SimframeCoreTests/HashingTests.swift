@@ -100,3 +100,63 @@ final class HashingTests: XCTestCase {
         XCTAssertGreaterThan(Hashing.signatureDiff(after, before), 0.004)
     }
 }
+
+/// The Platform surface, exercised through StubPlatform so gestures and app
+/// lifecycle can be tested with no simulator and no private frameworks.
+final class PlatformSurfaceTests: XCTestCase {
+    private func stub() throws -> StubPlatform {
+        let s = StubPlatform(width: 120, height: 260)
+        _ = try s.attach(udid: nil)
+        return s
+    }
+
+    func testGesturesReachThePlatform() throws {
+        let s = try stub()
+        try s.tap(at: CGPoint(x: 10, y: 20), durationMs: 70)
+        try s.longPress(at: CGPoint(x: 30, y: 40), durationMs: 600)
+        try s.drag(from: CGPoint(x: 1, y: 2), to: CGPoint(x: 3, y: 4), holdMs: 500, durationMs: 400)
+        try s.swipe(from: CGPoint(x: 5, y: 6), to: CGPoint(x: 7, y: 8), durationMs: 300)
+        XCTAssertEqual(s.recorded, [
+            "tap(10,20)",
+            "longPress(30,40,600)",
+            "drag(1,2->3,4,hold=500)",
+            "swipe(5,6->7,8)",
+        ])
+    }
+
+    func testAppLifecycleReachesThePlatform() throws {
+        let s = try stub()
+        _ = try s.launch(bundleId: "com.example.app", arguments: ["-a"], environment: ["K": "V"])
+        try s.terminate(bundleId: "com.example.app")
+        try s.openURL("myapp://x")
+        try s.permission(action: "grant", service: "photos", bundleId: "com.example.app")
+        XCTAssertEqual(s.recorded, [
+            "launch(com.example.app)",
+            "terminate(com.example.app)",
+            "openURL(myapp://x)",
+            "permission(grant,photos,com.example.app)",
+        ])
+    }
+
+    func testTextRoutesAreDistinct() throws {
+        let s = try stub()
+        try s.type("abc")
+        try s.paste("abc")
+        // Two different mechanisms: key events are layout-dependent, paste is not.
+        XCTAssertEqual(s.recorded, ["type(abc)", "paste(abc)"])
+    }
+
+    func testAsciiIsTypeableAndEmojiIsNot() {
+        XCTAssertTrue(HIDKeyboard.canType("Fryer 3!"))
+        XCTAssertFalse(HIDKeyboard.canType("Fryer 🍟"), "emoji has no usage code and must go via paste")
+    }
+
+    func testOnlyVerifiedButtonsHaveCodes() {
+        XCTAssertEqual(HIDKeyboard.buttonCode(.home), 2)
+        // Unverified codes must refuse rather than guess: a wrong Indigo button
+        // can crash backboardd or lock the device.
+        for button in [HardwareButton.lock, .siri, .volumeUp, .volumeDown] {
+            XCTAssertNil(HIDKeyboard.buttonCode(button), "\(button.rawValue) is not verified")
+        }
+    }
+}
