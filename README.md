@@ -47,6 +47,11 @@ npm install -g simframe
 simframe doctor
 ```
 
+The first `simframe start` builds a small Swift daemon from source — a few
+seconds, once. It needs the Xcode command line tools, which you already have if
+you have a simulator. Without them simframe falls back to the original
+`simctl` loop and says so.
+
 `doctor` checks each capability separately and tells you what you have:
 
 ```
@@ -224,38 +229,65 @@ iPhone 17 Pro, iOS 26.5, Apple Silicon, default settings.
 
 | | |
 | --- | --- |
+| Frame capture, whole pipeline | **6.6 ms** |
+| Frame grab alone | **0.13 ms** |
+| The `simctl` + `sips` path it replaces | ~210 ms |
 | Warm frame read (`sim_look`) | ~20 ms |
 | State check (`sim_state`) | ~2 ms |
-| Contact sheet (`sim_strip`, 5 frames) | ~30 ms |
-| Accessibility tree read (idb) | ~570 ms |
-| Text recognition, in-process off the framebuffer | **~174 ms** |
+| Input round trip (`ping`) | **0 ms** |
+| Tap (70 ms hold / 10 ms hold) | 76 ms / 13 ms |
+| Text recognition, in-process | **~174 ms** |
 | Text recognition, via PNG + helper (fallback) | ~555 ms |
+| Accessibility tree read (idb) | ~570 ms |
 | Screen map: first visit / remembered | ~305 ms / **~1 ms** |
-| Raw `simctl io screenshot`, for comparison | ~130 ms, every look |
-| Cold start, first frame | ~400 ms, once |
 | CPU | 1.1 % idle · 3.1 % active |
 | Frame memory | ~60 s of screen, ~2.7 MB |
+
+Reproduce all of it with `npm run bench`, which prints the same table against
+your machine. Full detail, including the measurement traps, is in
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ## How it works
 
 ```
-┌──────────────────── background, one loop per simulator ─────────────────────┐
-│   simctl screenshot ──► sips ──► decode ──► hash + diff ──► rename into      │
-│      ~130 ms            ~30 ms    ~6 ms                  ~/.simframe/<udid>/ │
+┌─── simframed — one Swift daemon per simulator ──────────────────────────────┐
+│                                                                             │
+│   display damage callback ──► read IOSurface ──► scale ──► hash             │
+│        the screen tells us          0.13 ms      6.6 ms total               │
+│                                          │                                  │
+│   Vision OCR reads the same surface ─────┤   no PNG, no file, no spawn      │
+│                                          │                                  │
+│   Indigo HID ◄── control socket ◄────────┤   0600, one JSON object per line │
+│   taps, swipes, text                     │                                  │
+│                                          ▼                                  │
+│                        ~/.simframe/<udid>/  frames · state.json · meta.json │
 └─────────────────────────────────────────────────────────────────────────────┘
                                      │  a rename is atomic
 ┌────────────────────────────────────▼────────────────────────────────────────┐
-│   MCP server / CLI: stat + read. No simctl anywhere in the request path.     │
-│   Screen memory: layout hash ──► label → point, built once per screen.       │
+│   MCP server / CLI: stat + read, or one socket round trip for input.        │
+│   Screen memory: layout hash ──► label → point, built once per screen.      │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Files are the IPC.** The loop renames completed frames into place; readers
-  just read them. A rename is atomic, so a reader can never see a half-written
-  frame, and there is no socket or protocol to get wrong.
-- **Almost no dependencies.** Resizing uses `sips`; PNG codec, hashing and frame
-  comparison are plain JavaScript over `node:zlib`. The only runtime dependency
-  is the MCP SDK. OCR is a ~60-line Swift file compiled on first use.
+The daemon links CoreSimulator and SimulatorKit, which are private frameworks
+with no documentation and no stability promise. Everything it calls is recorded
+in [`docs/PRIVATE_API.md`](docs/PRIVATE_API.md) with the evidence behind it, so
+an Xcode upgrade that moves something is a bounded fix rather than an
+archaeology project. If a layer breaks, simframe degrades to the layer below
+and `doctor` says which.
+
+Run `simframe start --engine=simctl` to use the original loop instead.
+
+- **Files are the IPC for reads.** The daemon renames completed frames into
+  place; readers just read them. A rename is atomic, so a reader can never see a
+  half-written frame. Input is the one thing that needs a reply, and it goes
+  over a `0600` Unix socket — the file system is the whole permission model.
+- **Almost no dependencies.** The only runtime npm dependency is the MCP SDK.
+  The daemon is Swift built from source against frameworks already on the
+  machine.
+- **The screen says when it changed.** The capture loop is driven by the
+  display's damage callback rather than a timer, so an idle screen costs
+  nothing and a moving one is picked up at once.
 - **It backs off when nothing happens.** 4 fps while the screen moves, 1.5 fps
   once still, snapping back instantly on change.
 - **One writer per device.** Ownership lives in `meta.json`; `stop` refuses to
@@ -284,9 +316,18 @@ simframe status / stop [--force] / devices / doctor
 
 ## Limitations
 
-- Simulators only — `simctl` cannot capture a physical device.
-- Capture tops out near 6 fps, because `simctl io screenshot` costs ~130 ms. Fast
-  animations are sampled, not recorded.
+- Simulators only. Neither the framebuffer nor `simctl` can reach a physical
+  device.
+- The daemon depends on private frameworks. They are stable enough to build on —
+  capture and accessibility survived the iOS 26 transition — but an Xcode
+  upgrade can move a symbol. `doctor` reports each layer separately so a break
+  is visible rather than mysterious, and `--engine=simctl` still works.
+- Hardware buttons: only `home` is implemented. The other Indigo codes are
+  unverified, and a wrong one can crash `backboardd` or lock the device, so they
+  return an error rather than a guess.
+- Typing sends key positions, which iOS maps through the device's active
+  keyboard layout. Text that must be exact goes through the pasteboard, which
+  `sim_do` does by default.
 - Region maps need a baseline inside the ~90 s history window. Older baselines
   still get a reliable changed / did-not-change, without a map of what moved.
 - Screen memory assumes a screen's layout is stable. A screen that reflows

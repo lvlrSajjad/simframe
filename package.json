@@ -43,13 +43,16 @@
     "native/ocr.swift",
     "native/simframed/Package.swift",
     "native/simframed/Sources",
+    "native/simframed/Tests",
+    "scripts/bench.sh",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "test": "node --test test/unit.test.mjs",
     "mcp": "node src/cli.js mcp",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "bench": "./scripts/bench.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"

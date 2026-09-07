@@ -35,7 +35,8 @@ Options
   --device=<udid|name>   simulator to target (default: the booted one)
   --out=<file>           output path for frame/strip
   --detail=low|normal|high|full   or --detail=<max pixels>
-  --fps=<n>              capture rate while the screen is moving (default ${DEFAULTS.fps})
+  --engine=simframed|simctl   capture engine (default simframed)
+  --fps=<n>              capture rate while the screen is moving (simctl engine only)
   --count=<n>            frames in a strip (default 5)
   --since=<hash|seq>     compare against this frame (see: simframe mark)
   --mode=settle|change|stable   what wait waits for (default settle)
@@ -86,6 +87,7 @@ async function main() {
   if (flags.fps) options.fps = num(flags.fps);
   if (flags.maxDim) options.maxDim = num(flags.maxDim);
   if (flags.ringSize) options.ringSize = num(flags.ringSize);
+  if (flags.engine) options.engine = String(flags.engine);
 
   switch (command) {
     case undefined:
@@ -117,8 +119,12 @@ async function main() {
 
     case 'start': {
       const { device: dev, state, started } = await api.ensureDaemon(device, options);
+      const engineModule = await import('./engine.js');
+      const running = engineModule.runningEngine(dev.udid) ?? 'simctl';
+      const note = api.engineFallbackReason ? ` (simframed unavailable: ${api.engineFallbackReason})` : '';
       console.log(
-        `${started ? 'started' : 'already running'} — ${dev.name} (${dev.runtime}) frame #${state.seq} ${state.width}x${state.height}`,
+        `${started ? 'started' : 'already running'} — ${dev.name} (${dev.runtime}) ` +
+          `engine=${running} frame #${state.seq} ${state.width}x${state.height}${note}`,
       );
       return;
     }

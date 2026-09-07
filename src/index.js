@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULTS, STATE_VERSION } from './daemon.js';
+import * as engine from './engine.js';
 import { decodePng, encodePng, scaleBitmap } from './png.js';
 import {
   REGION_COLS,
@@ -89,7 +90,7 @@ export async function ensureDaemon(deviceQuery, options = {}) {
   if (!existing.alive) {
     if (acquireSpawnLock(p.lock)) {
       try {
-        spawnDaemon(device.udid, options);
+        await startEngine(device.udid, options);
       } finally {
         // Hold the lock briefly so a burst of callers does not double-spawn.
         setTimeout(() => releaseSpawnLock(p.lock), 1500).unref?.();
@@ -97,7 +98,8 @@ export async function ensureDaemon(deviceQuery, options = {}) {
     }
   }
 
-  const deadline = Date.now() + (options.readyTimeoutMs ?? 8000);
+  // The daemon may need a first build, which is slower than a spawn.
+  const deadline = Date.now() + (options.readyTimeoutMs ?? 20_000);
   while (Date.now() < deadline) {
     const state = store.readJson(p.state);
     if (state && state.capturedAt >= minCapturedAt && Date.now() - state.capturedAt < 30_000) {
@@ -109,7 +111,32 @@ export async function ensureDaemon(deviceQuery, options = {}) {
   throw new Error(`simframe daemon did not produce a frame for ${device.name}${tail ? `\n${tail}` : ''}`);
 }
 
-function spawnDaemon(udid, options) {
+/** Why the daemon was not used, when it was not. Surfaced by doctor. */
+export let engineFallbackReason = null;
+
+/**
+ * Start whichever engine was asked for.
+ *
+ * simframed unless told otherwise: it reads the framebuffer directly and is
+ * roughly thirty times faster per frame. The simctl loop stays reachable with
+ * `engine: 'simctl'`, and is used automatically when the daemon cannot be
+ * built — a machine with no Swift toolchain still has to work.
+ */
+async function startEngine(udid, options) {
+  if ((options.engine ?? 'simframed') === 'simframed') {
+    const built = await engine.ensureBuilt();
+    if (built.ok) {
+      engineFallbackReason = null;
+      engine.spawnDaemon(udid, options);
+      return 'simframed';
+    }
+    engineFallbackReason = built.reason ?? 'simframed unavailable';
+  }
+  spawnNodeDaemon(udid, options);
+  return 'simctl';
+}
+
+function spawnNodeDaemon(udid, options) {
   const args = [CLI, 'daemon', udid];
   for (const key of ['fps', 'maxDim', 'ringSize', 'idleExitMs']) {
     if (options[key] != null) args.push(`--${key}=${options[key]}`);

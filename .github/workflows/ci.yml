@@ -39,6 +39,16 @@ jobs:
             }
           '
 
+      - name: The packaged tarball can actually build the daemon
+        # Shipping Sources without Tests leaves Package.swift declaring a test
+        # target with no directory, and SwiftPM then reports overlapping
+        # sources. Every install would silently fall back to the simctl engine.
+        run: |
+          npm pack --pack-destination /tmp >/dev/null
+          rm -rf /tmp/pkgcheck && mkdir -p /tmp/pkgcheck && cd /tmp/pkgcheck
+          tar -xzf /tmp/simframe-*.tgz
+          swift build -c release --package-path package/native/simframed 2>&1 | tail -3
+
       - name: Registry manifest agrees with package.json
         run: |
           node -e '

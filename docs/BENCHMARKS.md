@@ -311,3 +311,44 @@ now start before the tree read.
 | **Accessibility tree** | **idb — the only remaining dependency** |
 
 Phase 2b removes the last one.
+
+## Phase 3 — cutover
+
+`simframe start` builds the daemon if needed and runs it. `--engine=simctl`
+keeps the original loop, and it is chosen automatically when the daemon cannot
+be built, with the reason printed rather than swallowed.
+
+Reproduce everything above with `npm run bench`.
+
+### The four-tab flow, both engines
+
+Same flow, same app, memory cleared first:
+
+| Pass | simctl engine | simframed engine |
+| --- | --- | --- |
+| 1 | 7370 ms | **3925 ms** |
+| 2 | 5160 ms | **2741 ms** |
+| 3 | 3304 ms | **3159 ms** |
+
+Faster throughout, though less than the 30x on the capture primitive would
+suggest — by pass three most of the remaining time is the app's own animation
+and data load, which no engine change touches.
+
+### A packaging bug this phase's own verification caught
+
+Installing the tarball and starting it produced:
+
+```
+started — engine=simctl (simframed unavailable: building simframed failed:
+error: 'simframed': target 'SimframeCoreTests' has overlapping sources)
+```
+
+`Package.swift` declares a test target, but `files` shipped `Sources` without
+`Tests`, so SwiftPM assigned the whole source tree to the missing target and the
+build failed. **Every npm install would have silently used the simctl engine** —
+the fallback behaved correctly and said why, but nobody would have got the thing
+the rebuild is for.
+
+Shipping `Tests` fixes it, and CI now builds the daemon from an unpacked tarball
+so the packaged artefact is checked rather than the working tree. A clean install
+now builds and starts its own daemon in about 13 seconds, first time only.
