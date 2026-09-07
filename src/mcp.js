@@ -7,6 +7,8 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { REGION_COLS, REGION_ROWS, regionMap } from './analyze.js';
 import * as actions from './actions.js';
 import * as api from './index.js';
@@ -180,6 +182,16 @@ const TOOLS = [
 // frame-to-frame delta look broken in practice.
 const lastSeen = new Map();
 
+/** Report the real version: a hardcoded one silently drifts every release. */
+function packageVersion() {
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    return JSON.parse(fs.readFileSync(path.join(here, '..', 'package.json'), 'utf8')).version;
+  } catch {
+    return '0.0.0';
+  }
+}
+
 function remember(udid, state) {
   lastSeen.set(udid, { hash: state.hash, seq: state.seq, at: state.capturedAt });
 }
@@ -221,7 +233,7 @@ function sinceLine(since) {
 
 export async function serve({ device: defaultDevice, options = {} } = {}) {
   const server = new Server(
-    { name: 'simframe', version: '0.1.0' },
+    { name: 'simframe', version: packageVersion() },
     { capabilities: { tools: {} } },
   );
 

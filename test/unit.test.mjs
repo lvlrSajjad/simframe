@@ -326,3 +326,10 @@ test('layoutHash ignores the status bar but reacts to layout', () => {
   assert.equal(hashDistance(layoutHash(a), layoutHash(b)), 0, 'status bar must not matter');
   assert.ok(hashDistance(layoutHash(a), layoutHash(c)) > 20, 'layout must matter');
 });
+
+test('the MCP server reports the real package version', async () => {
+  const pkg = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')));
+  const source = await import('node:fs').then((fs) => fs.readFileSync(new URL('../src/mcp.js', import.meta.url), 'utf8'));
+  assert.ok(!/version: '\d+\.\d+\.\d+'/.test(source), 'version must not be hardcoded in mcp.js');
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
+});
