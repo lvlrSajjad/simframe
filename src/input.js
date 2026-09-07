@@ -15,8 +15,17 @@ let driverCache = null;
 export async function detectDriver({ refresh = false } = {}) {
   if (driverCache && !refresh) return driverCache;
   try {
-    const { stdout } = await run('idb', ['--version'], { timeout: 5000 });
-    driverCache = { name: 'idb', available: true, version: stdout.trim().split('\n')[0], reason: null };
+    // idb has no --version; `--help` is the cheapest proof the client runs.
+    await run('idb', ['--help'], { timeout: 8000 });
+    let version = 'installed';
+    try {
+      const { stdout } = await run('idb_companion', ['--version'], { timeout: 5000 });
+      const info = JSON.parse(stdout.trim());
+      version = `companion built ${info.build_date}`;
+    } catch {
+      /* the companion is spawned on demand; its absence surfaces at first use */
+    }
+    driverCache = { name: 'idb', available: true, version, reason: null };
   } catch (err) {
     driverCache = {
       name: 'idb',
@@ -57,21 +66,27 @@ export async function screenInfo(udid) {
     pixelWidth: dims.width ?? null,
     pixelHeight: dims.height ?? null,
     density,
-    pointWidth: dims.width ? Math.round(dims.width / density) : null,
-    pointHeight: dims.height ? Math.round(dims.height / density) : null,
+    pointWidth: dims.width_points ?? (dims.width ? Math.round(dims.width / density) : null),
+    pointHeight: dims.height_points ?? (dims.height ? Math.round(dims.height / density) : null),
   };
 }
 
 /** The accessibility tree, flattened. This is what makes tap-by-label possible. */
 export async function describeAll(udid) {
-  const out = await idb(['ui', 'describe-all', '--udid', udid, '--json']);
+  // Passing --json here yields empty output; the default already emits JSON.
+  const out = await idb(['ui', 'describe-all', '--udid', udid]);
   const nodes = [];
   for (const line of out.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
       const parsed = JSON.parse(trimmed);
-      for (const node of Array.isArray(parsed) ? parsed : [parsed]) nodes.push(normalizeNode(node));
+      const stack = Array.isArray(parsed) ? [...parsed] : [parsed];
+      while (stack.length) {
+        const node = stack.shift();
+        nodes.push(normalizeNode(node));
+        if (Array.isArray(node.children)) stack.unshift(...node.children);
+      }
     } catch {
       /* idb interleaves non-JSON status lines; skip them */
     }
@@ -79,10 +94,22 @@ export async function describeAll(udid) {
   return nodes.filter((n) => n.frame);
 }
 
+// Icon fonts put glyphs in the Unicode private use areas, so a label arrives as
+// "<glyph>, My Tools". Matching has to see through that to the readable text.
+const PRIVATE_USE = /[\u{E000}-\u{F8FF}\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu;
+
+export function cleanLabel(label) {
+  if (!label) return label ?? null;
+  const stripped = label.replace(PRIVATE_USE, '');
+  return stripped.replace(/\s*,\s*/g, ', ').replace(/^[,\s]+|[,\s]+$/g, '').trim() || null;
+}
+
 function normalizeNode(node) {
   const frame = node.frame || node.AXFrame || null;
+  const rawLabel = node.AXLabel ?? node.label ?? null;
   return {
-    label: node.AXLabel ?? node.label ?? null,
+    label: cleanLabel(rawLabel),
+    rawLabel,
     value: node.AXValue ?? node.value ?? null,
     type: node.type ?? node.AXType ?? null,
     identifier: node.AXUniqueId ?? node.identifier ?? null,
