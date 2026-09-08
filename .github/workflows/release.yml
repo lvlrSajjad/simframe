@@ -33,12 +33,21 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 22, not 20, and this is load-bearing. Trusted Publishing needs npm
+          # 11.5.1 or newer to recognise the OIDC environment, so the step below
+          # upgrades npm — and npm 12 requires Node >= 22. On Node 20 that
+          # upgrade fails with EBADENGINE *before* the publish step runs, which
+          # is how v0.5.1 came to be tagged, released on GitHub, and never
+          # published to npm. v0.5.0 worked only because npm@latest was still
+          # 11.x that afternoon. Nothing warned; the tag simply went nowhere.
+          #
+          # This is only the Node that does the publishing. `engines` still says
+          # >=18.17 and CI still tests 18, 20 and 22, so it changes nothing
+          # about who can install simframe.
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      # Trusted Publishing needs npm 11.5.1 or newer to recognise the OIDC
-      # environment; Node 20 ships npm 10, which falls back to looking for a
-      # token and fails. setup-node cannot pin an npm version, so upgrade it.
+      # setup-node cannot pin an npm version, so upgrade it here.
       - name: Upgrade npm for Trusted Publishing
         run: |
           npm install -g npm@latest

@@ -219,8 +219,26 @@ Which of the four tabs produced the extra node has not been isolated.
 
 ## Product
 
+### 0.5.1 was tagged and never published, and nothing said so
+`v0.5.1` exists as a git tag and a GitHub release. npm's latest is **0.5.0**.
+The publish job failed at `npm install -g npm@latest`: Trusted Publishing needs
+npm 11.5.1+, the runner was pinned to Node 20, and npm 12 — which shipped some
+time after v0.5.0 went out — requires Node 22. `EBADENGINE`, before the publish
+step ran. v0.5.0 succeeded only because `npm@latest` was still 11.x that
+afternoon.
+
+Two things worth taking from it. A release pipeline that installs `@latest`
+anything has a clock in it, and this one went off between two releases a day
+apart. And the failure was completely silent from the outside: the tag existed,
+the GitHub release existed, and this file asserted for a week that 0.5.1 was on
+npm. Nobody checked `npm view`.
+
+Fixed by pinning the publish runner to Node 22. Still open: nothing verifies
+after a release that the version actually landed. `npm view simframe version`
+against the tag would have caught this the day it happened.
+
 ### 0.5.x is published, but only single commands have been run from it
-`simframe@0.5.1` is on npm and in the MCP registry, published over GitHub OIDC
+`simframe@0.5.0` is on npm and in the MCP registry, published over GitHub OIDC
 with no token anywhere. An independent session installed it and exercised
 individual commands, which is how the state-version drift and the `tap <label>`
 crash were found. What has *not* been done from the published package is a
