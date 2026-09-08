@@ -412,6 +412,9 @@ async function main() {
           device: m.device.name,
           screen: { hash: m.identity.hash, name: m.name, exits: m.exits, keyboard: m.identity.keyboard },
           sources: m.identity.entry?.sources ?? [],
+          // Which layer is missing and why. A map built from one perception
+          // layer looks exactly like a map built from two until this says so.
+          degraded: m.identity.entry?.degraded ?? [],
           points: m.screen,
           elements: m.rows,
           truncated: m.truncated,

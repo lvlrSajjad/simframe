@@ -119,6 +119,16 @@ export async function build(udid, {
 } = {}) {
   const targets = [];
   const sources = [];
+  // Why a layer is missing, kept rather than swallowed.
+  //
+  // A partial map used to be indistinguishable from a whole one: `sources` said
+  // ["ax"] and nothing said why OCR was not there. On CI this produced a map
+  // with zero elements reported as a successful read, and the only way to find
+  // out what had happened was to guess. Before the tree came in-process the
+  // same failure was loud, because with no idb the ax layer failed too and an
+  // empty `sources` rethrew — so making a layer work turned a loud failure into
+  // a quiet one.
+  const degraded = [];
   // One round trip for both, because the daemon runs the tree read and the
   // recognition pass concurrently against the same instant of the screen. Asked
   // separately they would queue: the control socket serves one request at a
@@ -175,8 +185,9 @@ export async function build(udid, {
           source: 'ax',
         });
       }
-    } catch {
+    } catch (err) {
       /* no idb, or the tree read failed; OCR alone is still useful */
+      degraded.push(`accessibility: ${err.message}`);
     }
   }
 
@@ -243,6 +254,7 @@ export async function build(udid, {
         });
       }
     } catch (err) {
+      degraded.push(`text recognition: ${err.message}`);
       if (!sources.length) throw err;
     }
   }
@@ -272,6 +284,10 @@ export async function build(udid, {
       sources,
       targets,
     };
+    // A truncated tree is nodes without authority; the daemon says so and the
+    // map has to carry it, because this is what gets written into memory.
+    if (daemonScreen?.axTruncated) degraded.push(`accessibility tree cut short: ${daemonScreen.axTruncated}`);
+    if (degraded.length) entry.degraded = degraded;
     // Only a map of a settled screen is worth keeping; remembering a transition
     // fills the store with layouts that will never be seen again.
     return persist ? remember(udid, entry) : entry;

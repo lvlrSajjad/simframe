@@ -223,25 +223,52 @@ public final class AccessibilityBridge {
         }
     }
 
+    /// Everything scalar about a node, asked for in one go.
+    private static let batched = ["AXRole", "AXSubrole", "AXDescription", "AXValue",
+                                  "AXIdentifier", "AXEnabled", "AXSelected", "AXFocused"]
+
     private func node(from element: NSObject, depth: Int) -> AXNode {
-        let role = attribute(element, "AXRole") as? String ?? "AXUnknown"
+        // One bridge round trip for eight attributes, not eight.
+        //
+        // Each `accessibilityAttributeValue:` is a synchronous hop into the
+        // guest, so a per-attribute walk costs eleven of them per node. That is
+        // 25 ms for fourteen nodes on this machine and invisible — and on a
+        // slow one it is the whole read. A CI runner took 28 s over it and
+        // returned nothing. `accessibilityMultipleAttributes:` answers the same
+        // eight in a single hop: 10 ms for the same fourteen nodes here, and
+        // one eighth of the round trips wherever a round trip is what costs.
+        let bag = multiple(element, Self.batched)
+        func value(_ name: String) -> Any? { bag?[name] ?? attribute(element, name) }
+
+        let role = value("AXRole") as? String ?? "AXUnknown"
         // The label is the app's own name for the control. AXDescription is
         // where UIKit puts an accessibility label that has no visible title,
         // so it is the fallback rather than a separate field.
         let label = string(element.responds(to: NSSelectorFromString("accessibilityLabel"))
             ? element.value(forKey: "accessibilityLabel") : nil)
-            ?? string(attribute(element, "AXDescription"))
+            ?? string(value("AXDescription"))
         return AXNode(
             role: Self.shortRole(role),
-            subrole: Self.shortRole(attribute(element, "AXSubrole") as? String),
+            subrole: Self.shortRole(value("AXSubrole") as? String),
             label: label,
-            value: string(attribute(element, "AXValue")),
-            identifier: string(attribute(element, "AXIdentifier")),
-            enabled: (attribute(element, "AXEnabled") as? NSNumber)?.boolValue,
-            selected: (attribute(element, "AXSelected") as? NSNumber)?.boolValue,
-            focused: (attribute(element, "AXFocused") as? NSNumber)?.boolValue,
+            value: string(value("AXValue")),
+            identifier: string(value("AXIdentifier")),
+            enabled: (value("AXEnabled") as? NSNumber)?.boolValue,
+            selected: (value("AXSelected") as? NSNumber)?.boolValue,
+            focused: (value("AXFocused") as? NSNumber)?.boolValue,
             frame: frame(of: element),
             depth: depth)
+    }
+
+    /// Several attributes in one call, or nil if this element will not batch —
+    /// in which case the caller falls back to asking one at a time, because a
+    /// slower correct answer beats a missing one.
+    private func multiple(_ element: NSObject, _ names: [String]) -> [String: Any]? {
+        let sel = NSSelectorFromString("accessibilityMultipleAttributes:")
+        guard element.responds(to: sel) else { return nil }
+        let answer = element.perform(sel, with: names as NSArray)?.takeUnretainedValue()
+        guard let dictionary = answer as? [String: Any] else { return nil }
+        return dictionary
     }
 
     private func attribute(_ element: NSObject, _ name: String) -> Any? {

@@ -211,34 +211,70 @@ case "run":
                     // OCR pass. Both run off the capture loop.
                     let wantAx = request["ax"] as? Bool ?? true
                     let wantOcr = request["ocr"] as? Bool ?? true
-                    var axTree = AXTree(nodes: [])
-                    var axError: String?
-                    var axMs = 0.0
-                    var ocrElements: [Element] = []
-                    var ocrError: String?
-                    var ocrMs = 0.0
+                    // Shared with two background blocks, and a bounded wait
+                    // means they can still be running when this reads them —
+                    // so every touch goes through the lock. Timing out and
+                    // reading racing variables would trade a slow answer for a
+                    // wrong one.
+                    final class Reads {
+                        let lock = NSLock()
+                        var axTree = AXTree(nodes: [])
+                        var axError: String?
+                        var axMs = 0.0
+                        var ocrElements: [Element] = []
+                        var ocrError: String?
+                        var ocrMs = 0.0
+                        func set(_ body: (Reads) -> Void) { lock.lock(); body(self); lock.unlock() }
+                        func snapshot() -> (AXTree, String?, Double, [Element], String?, Double) {
+                            lock.lock(); defer { lock.unlock() }
+                            return (axTree, axError, axMs, ocrElements, ocrError, ocrMs)
+                        }
+                    }
+                    let reads = Reads()
 
                     let group = DispatchGroup()
                     if wantAx {
                         DispatchQueue.global(qos: .userInitiated).async(group: group) {
                             let t = DispatchTime.now().uptimeNanoseconds
-                            do { axTree = try platform.accessibilityTree() }
-                            catch { axError = "\(error)" }
-                            axMs = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6
+                            var tree = AXTree(nodes: [])
+                            var failure: String?
+                            do { tree = try platform.accessibilityTree() }
+                            catch { failure = "\(error)" }
+                            let ms = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6
+                            reads.set { $0.axTree = tree; $0.axError = failure; $0.axMs = ms }
                         }
                     }
                     if wantOcr {
                         DispatchQueue.global(qos: .userInitiated).async(group: group) {
                             let t = DispatchTime.now().uptimeNanoseconds
+                            var found: [Element] = []
+                            var failure: String?
                             do {
-                                ocrElements = try platform.withFrame { frame in
+                                found = try platform.withFrame { frame in
                                     try VisionOCR.recognise(frame: frame, scale: device.scale)
                                 }
-                            } catch { ocrError = "\(error)" }
-                            ocrMs = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6
+                            } catch { failure = "\(error)" }
+                            let ms = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6
+                            reads.set { $0.ocrElements = found; $0.ocrError = failure; $0.ocrMs = ms }
                         }
                     }
-                    group.wait()
+                    // Bounded, because this blocks the control socket and the
+                    // socket is serial: a read that runs long does not just
+                    // return late, it holds up every command behind it. A CI
+                    // runner spent 28 s inside one of these. Whatever has not
+                    // arrived by the deadline is reported as missing rather
+                    // than waited for — the layer that did answer is still
+                    // worth having.
+                    let timedOut = group.wait(timeout: .now() + .seconds(12)) == .timedOut
+                    var (axTree, axError, axMs, ocrElements, ocrError, ocrMs) = reads.snapshot()
+                    if timedOut {
+                        if wantAx, axTree.nodes.isEmpty, axError == nil {
+                            axError = "the accessibility read did not finish within 12s"
+                        }
+                        if wantOcr, ocrElements.isEmpty, ocrError == nil {
+                            ocrError = "text recognition did not finish within 12s"
+                        }
+                    }
                     // OCR failing is fatal to a screen read in a way a missing
                     // tree is not: without pixels there is nothing to report.
                     if wantOcr, let ocrError, axTree.nodes.isEmpty { return ["ok": false, "error": ocrError] }

@@ -172,9 +172,13 @@ const map = await jsonRetry(['ui']);
 // This line used to read "with no accessibility tree available" unconditionally,
 // which is true on a hosted runner and a lie on a developer's machine.
 const sources = map.sources ?? [];
+// If this fails, the next question is always "which layer was missing, and
+// why" — so answer it here rather than sending someone to the daemon log.
+const degraded = map.degraded ?? [];
 check(Array.isArray(map.elements) && map.elements.length > 0,
   'the screen map has elements',
-  `${map.elements?.length ?? 0} element(s)${sources.length ? ` from ${sources.join('+')}` : ''}`);
+  `${map.elements?.length ?? 0} element(s)${sources.length ? ` from ${sources.join('+')}` : ''}`
+  + (degraded.length ? ` — degraded: ${degraded.join('; ')}` : ''));
 check(/^[0-9a-f]{32}$/.test(map.screen?.hash ?? ''),
   'the screen has a structural identity', map.screen?.hash?.slice(0, 12));
 check(Number.isFinite(map.points?.width) && Number.isFinite(map.points?.height),
