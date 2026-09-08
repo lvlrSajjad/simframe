@@ -8,6 +8,42 @@ Ordered by how much it would hurt to keep ignoring.
 
 ## Correctness
 
+### Region bands are positional, and that is now three bugs
+
+`src/regions.js` decides what is chrome by fraction of screen height. The
+tab-bar band starts at 0.92 with 0.06 of slack, so anything short whose top sits
+past y = 0.86 × height is a tab item. On an 874-point screen that is everything
+below y = 751 — which on a list screen is the last two rows.
+
+Because chrome labels are the only text that enters a fingerprint, every
+misclassification lands directly in a screen's identity. Three phases have paid
+for it:
+
+- **6b** — a nav button read as a title, and a date banner in the tab band.
+- **6d** — a screen whose identity contained `"sep 08, 2026"`. It would have
+  become a different screen at midnight, breaking every stored map, node and
+  route touching it overnight, and nothing would have flagged it: the
+  fingerprint was perfectly stable, just stable on something that expires.
+- **7** — dumping the structural tokens of all twenty learned screens found
+  three still carrying content: a store address, a phone number, and a nav title
+  reading `"tuesday, september 8"`.
+
+Each was patched with another rule — a nav-slot token, a tab-label width limit,
+and now a volatile-label test (a date, a time, a price or a bare count is a
+value, not a name). The rules are individually defensible and collectively a
+smell. One case from Phase 7 survives all three: a stable-looking store address
+in a misfiled list row, wrong for a reason no text pattern can see.
+
+The fix is to derive the bands from the elements' own geometry — a nav bar is a
+short row of things at the top with a gap under it, not a fraction — per screen
+rather than per HIG.
+
+What makes it non-trivial: the bands feed the fingerprint, so changing them
+invalidates every learned graph and re-opens the same-screen / different-screen
+distributions 6b measured at 0/62/74/85. It needs the fingerprint eval harness
+re-run either side of the change, not a hand check.
+
+
 ### Verify-after-tap
 A tap can move the screen without doing what was meant — a swipe that animates
 but does not navigate still reports `changed`. Phase 6 covers this properly with
@@ -117,21 +153,6 @@ so `goto` works, but it is not a name anybody would type. A better fallback
 would be the label of the *selected* tab, which needs a selected-state signal
 the fused element list does not currently carry.
 
-### The region bands are positional, so content falls into chrome
-A date banner sitting just above the real tabs was classified `tab-bar`,
-and — because chrome labels go into the fingerprint — the screen's identity
-contained `"sep 08, 2026"`. It would have become a different screen at midnight,
-breaking every stored map, node and route touching it overnight. Nothing would
-have flagged it: the fingerprint was perfectly stable, just stable on something
-that expires.
-
-The immediate fix is in: a `tab-bar` label is only kept when the element is
-narrow enough to be a tab label. But the underlying cause is that `regionFor` is
-a positional band, so anything low enough on the screen is "tab bar" whatever it
-actually is. A tighter rule would cluster the actual tab items and take the band
-from them, rather than assuming a fraction of screen height. Worth doing before
-trusting chrome labels on an unfamiliar app.
-
 ### A screen can legitimately have more than one structure
 This is the real cause of the narrow same-screen margin, and Phase 6c's settle
 gate does not fix it. One screen reads 8, 17 and 6 tokens on three cold visits
@@ -168,8 +189,10 @@ Which of the four tabs produced the extra node has not been isolated.
 
 ## Product
 
-### The published npm package is behind
-`simframe@0.4.2` on npm predates the entire Swift rebuild. Everything from
-Phase 0 onwards is GitHub-only. Publishing should wait until the daemon has been
-run by someone other than its author, but the gap should not be forgotten — the
-README on npm describes a tool the package does not contain.
+### 0.5.x is published, but only single commands have been run from it
+`simframe@0.5.1` is on npm and in the MCP registry, published over GitHub OIDC
+with no token anywhere. An independent session installed it and exercised
+individual commands, which is how the state-version drift and the `tap <label>`
+crash were found. What has *not* been done from the published package is a
+multi-step verified flow on a machine that is not the author's — so the numbers
+in `docs/BENCHMARKS.md` are all from this working copy.

@@ -17,6 +17,7 @@ import * as input from './input.js';
 import * as fingerprint from './fingerprint.js';
 import * as graph from './graph.js';
 import * as matching from './matching.js';
+import * as refs from './refs.js';
 import * as screenmap from './screenmap.js';
 import { resolveDevice, resize, screenshot } from './simctl.js';
 import * as store from './store.js';
@@ -25,7 +26,24 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(HERE, 'cli.js');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export const DETAIL_LEVELS = { low: 420, normal: 700, high: 1100, full: 0 };
+export const DETAIL_LEVELS = { low: 420, normal: 700, high: 1024, full: 0 };
+
+/**
+ * The ceiling on any image handed to a model.
+ *
+ * An image costs ~1,600 tokens when Claude Code handles it as a native image
+ * block, and 15,000–25,000 when the base64 is treated as text (claude-code
+ * issue #31208) — enough to trip the 25,000-token tool-result limit on its own.
+ * A native-resolution frame buys nothing at either price: 1024 px on the long
+ * edge is already more than a 393-point screen has to say. Only the CLI, which
+ * writes to a file rather than into a context window, may exceed it.
+ */
+export const MODEL_MAX_IMAGE_DIM = 1024;
+
+export function modelDetail(detail) {
+  const dim = resolveMaxDim(detail);
+  return dim === 0 || dim > MODEL_MAX_IMAGE_DIM ? MODEL_MAX_IMAGE_DIM : dim;
+}
 
 export function resolveMaxDim(detail) {
   if (typeof detail === 'number') return detail;
@@ -713,6 +731,32 @@ export async function locate(
 ) {
   const { device, state: firstState } = await ensureDaemon(deviceQuery, options);
   const udid = device.udid;
+
+  // Selectors resolve before any perception happens: `#3` is already an answer
+  // somebody numbered, and `@x,y` was never a question about the screen.
+  const selector = refs.parseSelector(query);
+  if (selector.kind === 'point') {
+    return {
+      device,
+      state: firstState,
+      target: { label: `(${selector.x},${selector.y})`, x: selector.x, y: selector.y, source: 'coordinates' },
+      from: 'selector',
+      distance: 0,
+      settled: true,
+    };
+  }
+  if (selector.kind === 'ref') {
+    const hit = refs.resolveRef(udid, selector.ref, { layoutHash: firstState.layoutHash });
+    return {
+      device,
+      state: firstState,
+      target: { ...hit, label: hit.label ?? `#${hit.ref}`, source: hit.source ?? 'ref' },
+      from: 'ref',
+      distance: 0,
+      settled: true,
+    };
+  }
+  if (selector.exact) query = selector.label;
   // Key memory off a settled frame, never off whichever frame happened to be
   // newest, so the capture rate cannot change what gets remembered.
   const { state, settled } = await settledState(udid, { settleMs });
@@ -839,7 +883,7 @@ const STRUCTURAL_SETTLE_SAMPLES = 3;
  * to. Novel fingerprints, and only those, are re-sampled until two consecutive
  * readings agree.
  */
-export async function screenIdentity(deviceQuery, { options, confirmNovel = true, settleMs, timeoutMs } = {}) {
+export async function screenIdentity(deviceQuery, { options, confirmNovel = true, settleMs, timeoutMs, fresh = false } = {}) {
   const { device, state } = await ensureDaemon(deviceQuery, options);
   const udid = device.udid;
 
@@ -855,8 +899,8 @@ export async function screenIdentity(deviceQuery, { options, confirmNovel = true
     });
     const current = settledFrame ?? state;
     let entry = fresh ? null : screenmap.recallNearest(udid, current.layoutHash)?.entry;
+    const geo = await deviceGeometry(udid, current);
     if (!entry) {
-      const geo = await deviceGeometry(udid, current);
       entry = await screenmap.build(udid, {
         hash: current.hash,
         layoutHash: current.layoutHash,
@@ -872,10 +916,16 @@ export async function screenIdentity(deviceQuery, { options, confirmNovel = true
       keyboard: Boolean(entry.keyboard),
       layoutHash: current.layoutHash,
       settled,
+      // Carried out so callers that want the elements as well as the identity
+      // do not pay for a second perception pass to get them. The compact
+      // screen map needs both, and reading twice was the whole cost of it.
+      entry,
+      state: current,
+      points: { width: geo.pointWidth, height: geo.pointHeight },
     };
   };
 
-  let identity = await read();
+  let identity = await read({ fresh });
   if (!confirmNovel) return { ...identity, confirmed: identity.settled };
   // Being recognised is stronger evidence than the pixel settle flag: a
   // fingerprint that matches a screen already trusted has nothing left to

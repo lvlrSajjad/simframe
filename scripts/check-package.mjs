@@ -66,6 +66,14 @@ function requiredFiles() {
   // one catches anybody narrowing that later.
   for (const f of walk(path.join(ROOT, 'src'), (p) => p.endsWith('.js'))) required.add(rel(f));
 
+  // The Claude Code skill. It is the low-token path this tool is designed
+  // around, and an installed copy without it is an installation of half the
+  // idea — silently, which is the failure mode this whole check exists for.
+  for (const f of walk(path.join(ROOT, 'skills'), (p) => p.endsWith('.md'))) required.add(rel(f));
+  if (!walk(path.join(ROOT, 'skills'), (p) => p.endsWith('.md')).length) {
+    throw new Error('no skill found under skills/ — has the layout moved? This check would silently pass.');
+  }
+
   // Anything package.json points at to run.
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   for (const target of Object.values(pkg.bin ?? {})) required.add(target.replace(/^\.\//, ''));

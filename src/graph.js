@@ -205,8 +205,10 @@ export function describe(node) {
   // that happens to sit in the nav bar is not a name for anything.
   const title = labels(/:nav-bar:@title:/);
   if (title.length) return title.join(' ');
+  // Three at most. A screen named after seven tab-bar fragments — several of
+  // them OCR reading a divider — is not a name anybody can type into `goto`.
   const tabs = labels(/:tab-bar:/);
-  if (tabs.length) return tabs.join(' / ');
+  if (tabs.length) return tabs.slice(0, 3).join(' / ');
   const anyChrome = labels(/:(nav-bar|tab-bar):/);
   if (anyChrome.length) return anyChrome.slice(0, 3).join(' ');
   return node.hash.slice(0, 8);

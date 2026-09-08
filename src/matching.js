@@ -161,11 +161,50 @@ export const AMBIGUITY_MARGIN = 0.08;
 export const MINIMUM_SCORE = 0.45;
 
 /**
+ * How close two tap points have to be to mean the same control.
+ *
+ * Deliberately small. Two genuinely different controls are not twelve points
+ * apart centre to centre on any screen iOS lays out; two *readings* of one
+ * control are one or two points apart, because the accessibility tree and OCR
+ * are describing the same rectangle. Measured on a real filter row: the tree
+ * published "Location (All)" at (201,181) and OCR read "Location (AII)" at
+ * (200,182), and the caller was asked which of the two it meant.
+ */
+export const SAME_CONTROL_POINTS = 12;
+
+/**
+ * Two candidates in the same place are one control read twice.
+ *
+ * Asking which one was meant is not caution here, it is a question with no
+ * answer — either tap lands on the same pixel. So the readings are collapsed,
+ * and the accessibility one wins, because it is the actual hit target and its
+ * label has not been through OCR.
+ */
+function collapseSamePlace(ranked) {
+  const kept = [];
+  for (const c of ranked) {
+    const twin = kept.find(
+      (k) =>
+        Math.abs(k.target.x - c.target.x) <= SAME_CONTROL_POINTS &&
+        Math.abs(k.target.y - c.target.y) <= SAME_CONTROL_POINTS,
+    );
+    if (!twin) {
+      kept.push(c);
+      continue;
+    }
+    if (twin.target.source !== 'ax' && c.target.source === 'ax') {
+      kept[kept.indexOf(twin)] = { ...c, reasons: [...c.reasons, 'accessibility element, not the OCR reading of it'] };
+    }
+  }
+  return kept;
+}
+
+/**
  * Resolve an intent to one element, or say why not.
  * @returns {{status: 'ok'|'ambiguous'|'none', target?, score?, reasons?, alternatives?}}
  */
 export function resolve(targets, intent, options = {}) {
-  const ranked = rank(targets, intent, options).filter((c) => c.score >= MINIMUM_SCORE);
+  const ranked = collapseSamePlace(rank(targets, intent, options).filter((c) => c.score >= MINIMUM_SCORE));
   if (!ranked.length) return { status: 'none', alternatives: [] };
   const [best, second] = ranked;
   if (second && best.score - second.score < AMBIGUITY_MARGIN) {

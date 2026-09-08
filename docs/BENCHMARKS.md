@@ -962,3 +962,130 @@ The age check now applies only to the fixed-rate engine.
 This is the same mistake as two earlier versions of the CI flow assertion —
 expecting frames from a screen that is deliberately not producing any. Three
 instances of one wrong assumption, in three different places.
+
+---
+
+## Phase 7 — what Claude sees
+
+Machine: M-series Mac, Xcode 26, iOS 26.5, iPhone 17 Pro simulator, capture
+engine `simframed`, input driver `simframed`, OCR on, accessibility via idb.
+App under test: a real production React Native app with a five-tab bar, live
+dashboard tiles and two long list screens. Ten steps, driven through the MCP
+server over stdio by a harness that counts blocks, images and characters —
+because "how many images does this return" is not a question to answer by
+reading the code.
+
+### The headline
+
+A ten-step flow, five consecutive runs after the graph had learned the route:
+
+| | Steps | Tool calls | Images | Text chars | Est. tokens | Wall clock |
+| --- | --- | --- | --- | --- | --- | --- |
+| run 1 | 10/10 ok | 1 | 0 | 1700 | ~490 | 5.5 s |
+| run 2 | 10/10 ok | 1 | 0 | 1621 | ~463 | 5.6 s |
+| run 3 | 10/10 ok | 1 | 0 | 1685 | ~481 | 5.0 s |
+| run 4 | 10/10 ok | 1 | 0 | 1621 | ~463 | 5.9 s |
+| run 5 | 10/10 ok | 1 | 0 | 1620 | ~463 | 5.1 s |
+
+The phase asked for ≤3 model turns and 0 images for a flow whose screens are in
+memory. It is **1 turn and 0 images**, because a flow is one tool call and
+nothing in it returns a frame any more.
+
+Token estimates divide characters by 3.5. That is an estimate, not a
+measurement — there is no tokenizer in this repo, and the character counts are
+the measured figures.
+
+### What an image actually cost
+
+Measured on the same screen, `--detail=normal` (700 px long edge):
+
+| | Size | Est. tokens |
+| --- | --- | --- |
+| PNG | 107,248 bytes | — |
+| base64 of it | 143,000 chars | ~41,000 if handled as text |
+| as a native image block | — | ~1,600 (published figure) |
+| the compact text map of that screen | 1,159 chars, 29 lines | ~330 |
+
+So the map is roughly **5× cheaper than an image handled correctly, and 120×
+cheaper than one handled the way claude-code issue #31208 describes** — where
+41,000 tokens would also blow through the 25,000-token tool-result ceiling and
+be truncated. And unlike the image it carries tap points, so nothing has to be
+measured by eye.
+
+Every model-facing image is now capped at 1024 px on the long edge.
+`detail: 'full'` no longer reaches a model at all; the CLI can still write a
+native-resolution frame to a file, where it costs nothing.
+
+### Folding the map down
+
+The first version of the map, run against a real screen, was 36 rows for 25
+controls. The accessibility tree and OCR each describe the same control, and
+the screen map keeps both on purpose — identity is computed from that list, so
+dropping a target would change what a screen *is*.
+
+So the folding happens in the presentation and the fingerprint never sees it:
+
+| | Rows |
+| --- | --- |
+| raw targets | 36 |
+| after folding OCR text into the control it is printed on | 30 |
+| after dropping containers (a tab bar is not a thing you tap) | 26 |
+| after dropping punctuation-only OCR and redundant aliases | 25 |
+
+The rule that separates a dashboard tile from a tab bar is not size — they are
+the same few thousand square points — it is how much text a candidate would
+absorb. A control's visible text is a fragment or three; a container swallows
+five, and a tab bar that ate its own tabs would leave nothing to tap.
+
+### Two bugs the measurement found
+
+**A fingerprint that expires at midnight, again.** Phase 6d removed a date
+banner from one screen's identity. Dumping the structural tokens of all 20
+learned screens found it back through a different door: three screens carried
+content in their identity because the positional region bands had called it
+chrome — a store address, a phone number, and a nav title reading *"Tuesday,
+September 8"*. That last screen's identity had until midnight to live.
+
+The band misclassification is the root cause and is still deferred. What is
+fixed is the narrower question: a chrome label that is a date, a time, a phone
+number, a price or a bare count is a *value*, not a name, and values change
+while the screen stays the same screen. Two of the three cases are gone; the
+third (a stable-looking store address in a misfiled list row) is not, and no
+text pattern can see why it is wrong. After the fix, 0 of the rebuilt screens
+carry a date-like label.
+
+**A flow that halted reported success.** `ok` on a script result meant only
+"nothing threw". A flow stopped dead at step 0 by an `unexpected-screen`
+verdict came back saying *"flow completed"* with `isError: false` — the exact
+shape of silent failure the verdict exists to prevent. Found because the CLI
+now prints verdicts in `do`, which it never used to. Fixed, and the decision is
+now a pure function with a test rather than a condition inside a loop.
+
+### One inconsistency worth naming
+
+The map folds two readings of one control into one row. `locate` did not, so a
+map showing a single row `Location (All) ~ Location (AII)` was followed by a tap
+refusing as ambiguous between them — two candidates one point apart. Asking
+which was meant is not caution there, it is a question with no answer: either
+tap lands on the same pixel. Candidates within 12 points of each other are now
+collapsed before ambiguity is declared, and the accessibility element wins
+because it is the real hit target. Two controls genuinely far apart — "Work
+Orders" as both a nav title and a tab, 746 points apart — still ask.
+
+### Cost of the tool surface
+
+20 MCP tools, 15,996 characters of schema, ~4,570 estimated tokens, paid once
+per session. Eight of the twenty are single-action tools the phase asked for
+(`sim_tap`, `sim_type_into`, `sim_scroll_to`, `sim_wait_for`, `sim_assert`,
+`sim_launch`, `sim_open_url`, `sim_permission`). Each is one `sim_do` step
+under the hood, so they verify identically, and every description points back
+at `sim_do` for anything longer than one step — a per-step tool costs a round
+trip that a batch does not.
+
+### What is not measured here
+
+Turn count for a flow whose screens are **not** in memory. A first pass through
+new screens is mostly `unverified` verdicts and costs a map read per novel
+screen; the five runs above are all warm. The cold number belongs with the
+Phase 6 tour numbers, and the honest version of it is still the 10.2 s figure
+recorded there.

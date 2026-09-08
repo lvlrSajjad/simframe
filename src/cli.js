@@ -8,6 +8,7 @@ import * as api from './index.js';
 import * as input from './input.js';
 import * as navigate from './navigate.js';
 import * as store from './store.js';
+import * as view from './view.js';
 
 const USAGE = `simframe — always-warm iOS Simulator frames
 
@@ -21,27 +22,34 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe wait    [device]          wait for the screen to react (see --mode)
   simframe strip   [device]          write a contact sheet of recent frames
   simframe recall  [device]          what happened in the last minute (--ago=<ms> for a frame)
-  simframe tapAt   <x> <y>           tap at a point, in points
-  simframe swipe   <x1> <y1> <x2> <y2>   swipe between two points
-  simframe type    <text>            enter text (exact; uses the pasteboard)
-  simframe keys    <text>            send key events instead (layout-dependent)
-  simframe press   <button>          a hardware button, e.g. home
-  simframe ui      [device]          read the screen as an accessibility tree
-  simframe tap     <label>            tap an element by its accessibility label
-  simframe do      <script.json>      run a scripted flow (see below)
+  simframe ui      [device]          the screen as a numbered element map
+  simframe find    "<intent>"        resolve an intent to one control
+  simframe tap     <selector>        tap #3, "Save", or @120,400
+  simframe do      <script.json>     run a scripted flow (see below)
   simframe screens [device]          list screens this device has learned
   simframe goto    <screen>          walk to a known screen through known steps
   simframe flow    save <name> <script.json>   run a flow and save it if every step verifies
   simframe flow    run  <name>       replay a saved flow
   simframe flow    list              list saved flows
+  simframe tapAt   <x> <y>           tap at a point, in points
+  simframe swipe   <x1> <y1> <x2> <y2>   swipe between two points
+  simframe type    <text>            enter text (exact; uses the pasteboard)
+  simframe keys    <text>            send key events instead (layout-dependent)
+  simframe press   <button>          a hardware button, e.g. home
   simframe devices                   list simulators
-  simframe doctor [--json]           check that this machine can capture
+  simframe doctor                    check that this machine can capture
                                      (--strict, or SIMFRAME_STRICT=1, makes any
                                       degraded layer a non-zero exit)
 
+Selectors — anywhere a control is named
+  #3            the number \`simframe ui\` gave it. Cheapest, unambiguous.
+  "Save"        a label or a phrase, resolved by intent (verbs, typos, synonyms)
+  @120,400      raw point coordinates
+
 Options
   --device=<udid|name>   simulator to target (default: the booted one)
-  --out=<file>           output path for frame/strip
+  --json                 machine-readable output — on every command
+  --out=<file>           output path for frame/strip/recall
   --detail=low|normal|high|full   or --detail=<max pixels>
   --engine=simframed|simctl   capture engine (default simframed)
   --fps=<n>              capture rate while the screen is moving (simctl engine only)
@@ -50,18 +58,25 @@ Options
   --mode=settle|change|stable   what wait waits for (default settle)
   --stable-ms=<n>        settle window for wait (default 600)
   --timeout-ms=<n>       give up after this long (default 8000)
-  --force                let stop kill a loop another client is using
-  --json                 machine-readable output
+  --filter=<text>        ui: only elements whose text contains this
+  --interactive          ui: only elements that look tappable
+  --all                  ui: include the status bar and collapsed regions
+  --refresh              ui: re-read this screen instead of using memory
+  --save=<name>          do: save the flow if every step verifies
+  --force                let stop kill a loop another client is using;
+                         let flow save keep an unverified flow
 
 A script is a JSON array of steps, run in one go with a settle between each:
 
   [{"tap":"Assets"},{"tap":"Add Asset"},
    {"type":{"into":"Name","text":"Fryer 3"}},
-   {"tap":"Save"},{"waitText":"Saved","timeoutMs":5000}]
+   {"scrollTo":"Save"},{"tap":"Save"},
+   {"waitFor":{"value":"Saved","timeoutMs":5000}},
+   {"assert":{"value":"Saved","is":"visible"}}]
 
 Input comes from the daemon. idb is needed only for the accessibility tree
 (brew tap facebook/fb && brew install idb-companion,
-then pipx install fb-idb). Observation works without it.
+then pipx install fb-idb). Reading and OCR work without it.
 
 The reliable pattern around an action is:
 
@@ -87,6 +102,39 @@ function parseArgs(argv) {
 }
 
 const num = (v, fallback) => (v == null ? fallback : Number(v));
+
+/**
+ * Print one thing, two ways.
+ *
+ * `--json` is on every command rather than most of them, because a skill or a
+ * script that has to parse one command's prose and another's JSON will parse
+ * the prose wrong exactly once and then be trusted anyway.
+ */
+function emit(flags, json, lines) {
+  if (flags.json) {
+    console.log(JSON.stringify(json, null, 2));
+    return;
+  }
+  const body = typeof lines === 'function' ? lines() : lines;
+  if (body != null) console.log(Array.isArray(body) ? body.filter((l) => l != null).join('\n') : body);
+}
+
+/** The end-state screen map, rendered from a reading the flow already took. */
+async function mapText(device, options, identity) {
+  try {
+    const m = await view.screenMap(device, { options, identity: identity?.entry ? identity : undefined });
+    return m.text;
+  } catch (err) {
+    return `(could not read the screen: ${err.message})`;
+  }
+}
+
+/** A step result, the same shape in every command that runs steps. */
+const stepLine = (r) => {
+  const settle = r.settled ? (r.settled.ok ? ` (settled ${r.settled.waitedMs}ms)` : ' (never settled)') : '';
+  const verdict = r.verification && r.verification.verdict !== 'ok' ? ` [${r.verification.verdict}]` : '';
+  return `${r.ok ? 'ok  ' : 'FAIL'} [${r.index}] ${r.action}: ${r.ok ? r.detail : r.error}${settle}${verdict}`;
+};
 
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
@@ -209,13 +257,17 @@ async function main() {
       const res = await api.getFrame(device, { detail: flags.detail ?? 'normal', options });
       const out = flags.out || path.join(process.cwd(), 'simframe.png');
       fs.writeFileSync(out, res.png);
-      console.log(`${out} — ${res.width}x${res.height}, ${res.ageMs}ms old, frame #${res.state.seq}`);
+      emit(
+        flags,
+        { file: out, width: res.width, height: res.height, ageMs: res.ageMs, seq: res.state.seq, hash: res.state.hash },
+        `${out} — ${res.width}x${res.height}, ${res.ageMs}ms old, frame #${res.state.seq}`,
+      );
       return;
     }
 
     case 'mark': {
       const res = await api.getState(device, { options });
-      console.log(res.state.hash);
+      emit(flags, { hash: res.state.hash, seq: res.state.seq }, res.state.hash);
       return;
     }
 
@@ -261,23 +313,32 @@ async function main() {
         timeoutMs: num(flags.timeoutMs, 8000),
         options,
       });
-      if (res.satisfied) {
-        console.log(
-          `${res.mode === 'change' ? 'changed' : 'settled'} after ${res.waitedMs}ms — frame #${res.state.seq}` +
-            (res.changedBeforeWait ? ' (change had already happened before the call)' : ''),
-        );
-      } else if (res.noVisibleChange) {
-        console.log(
-          `no visible change after ${res.waitedMs}ms — screen stable, nothing moved (the action may have had no visible effect)`,
-        );
-      } else if (res.stalled) {
-        console.log(`capture stalled after ${res.waitedMs}ms — ${res.live.note}`);
-      } else {
-        console.log(
-          `timed out after ${res.waitedMs}ms — no ${res.mode === 'change' ? 'change' : 'settle'}` +
-            (res.sawChange ? '' : '; if the change happened before this call, pass `--since` from `simframe mark`'),
-        );
-      }
+      emit(
+        flags,
+        {
+          satisfied: res.satisfied,
+          mode: res.mode,
+          waitedMs: res.waitedMs,
+          sawChange: res.sawChange,
+          changedBeforeWait: Boolean(res.changedBeforeWait),
+          noVisibleChange: Boolean(res.noVisibleChange),
+          stalled: Boolean(res.stalled),
+          hash: res.state?.hash,
+          seq: res.state?.seq,
+        },
+        () => {
+          if (res.satisfied) {
+            return `${res.mode === 'change' ? 'changed' : 'settled'} after ${res.waitedMs}ms — frame #${res.state.seq}` +
+              (res.changedBeforeWait ? ' (change had already happened before the call)' : '');
+          }
+          if (res.noVisibleChange) {
+            return `no visible change after ${res.waitedMs}ms — screen stable, nothing moved (the action may have had no visible effect)`;
+          }
+          if (res.stalled) return `capture stalled after ${res.waitedMs}ms — ${res.live.note}`;
+          return `timed out after ${res.waitedMs}ms — no ${res.mode === 'change' ? 'change' : 'settle'}` +
+            (res.sawChange ? '' : '; if the change happened before this call, pass `--since` from `simframe mark`');
+        },
+      );
       process.exitCode = res.satisfied ? 0 : 1;
       return;
     }
@@ -290,7 +351,9 @@ async function main() {
       });
       const out = flags.out || path.join(process.cwd(), 'simframe-strip.png');
       fs.writeFileSync(out, res.png);
-      console.log(
+      emit(
+        flags,
+        { file: out, frames: res.frames.length, spanMs: res.spanMs, width: res.width, height: res.height },
         `${out} — ${res.frames.length} frames over ${res.spanMs}ms (${res.width}x${res.height})`,
       );
       return;
@@ -301,7 +364,9 @@ async function main() {
         const res = await api.getFrameAt(device, { msAgo: num(flags.ago), options });
         const out = flags.out || path.join(process.cwd(), 'simframe-recall.png');
         fs.writeFileSync(out, res.png);
-        console.log(
+        emit(
+          flags,
+          { file: out, seq: res.seq, actualMsAgo: res.actualMsAgo, requestedMsAgo: res.requestedMsAgo, oldestMsAgo: res.oldestMsAgo },
           `${out} — frame #${res.seq} from ${Math.round(res.actualMsAgo)}ms ago ` +
             `(memory reaches back ${Math.round(res.oldestMsAgo / 1000)}s)`,
         );
@@ -330,29 +395,28 @@ async function main() {
     }
 
     case 'ui': {
-      const { device: dev } = await api.ensureDaemon(device, options);
-      const driver = await input.detectDriver();
-      if (!driver.available) {
-        process.stderr.write(`${driver.reason}\n`);
-        process.exitCode = 1;
-        return;
-      }
-      let nodes = await input.describeAll(dev.udid);
-      if (flags.filter) {
-        const q = String(flags.filter).toLowerCase();
-        nodes = nodes.filter((n) => [n.label, n.value, n.identifier].filter(Boolean).join(' ').toLowerCase().includes(q));
-      }
-      if (flags.json) {
-        console.log(JSON.stringify(nodes.map(({ raw, ...n }) => n), null, 2));
-        return;
-      }
-      for (const n of nodes) {
-        const c = input.centerOf(n);
-        console.log(
-          `${(n.type || '?').padEnd(14)} ${String(`${c.x},${c.y}`).padEnd(10)} ` +
-            `${[n.label, n.value && `= ${n.value}`, n.identifier && `#${n.identifier}`].filter(Boolean).join(' ') || '(unlabelled)'}`,
-        );
-      }
+      // The compact map, not a raw tree dump: region, a ref number, type, tap
+      // point, label. And no idb gate — OCR reads most screens on its own, and
+      // refusing to describe a screen because idb is missing was the surest way
+      // to make the fallback look broken.
+      const m = await view.screenMap(device, {
+        options,
+        filter: flags.filter,
+        interactive: Boolean(flags.interactive),
+        all: Boolean(flags.all),
+        refresh: Boolean(flags.refresh),
+      });
+      emit(
+        flags,
+        {
+          device: m.device.name,
+          screen: { hash: m.identity.hash, name: m.name, exits: m.exits, keyboard: m.identity.keyboard },
+          points: m.screen,
+          elements: m.rows,
+          truncated: m.truncated,
+        },
+        m.text,
+      );
       return;
     }
 
@@ -364,8 +428,19 @@ async function main() {
         options,
       });
       const step = res.results[0];
-      if (!step.ok) throw new Error(step.error);
-      console.log(`${step.detail}${step.settled?.ok ? `, settled in ${step.settled.waitedMs}ms` : ''}`);
+      if (!step.ok) {
+        if (flags.json) {
+          console.log(JSON.stringify({ ok: false, error: step.error }, null, 2));
+          process.exitCode = 1;
+          return;
+        }
+        throw new Error(step.error);
+      }
+      emit(
+        flags,
+        { ok: true, ...step },
+        `${step.detail}${step.settled?.ok ? `, settled in ${step.settled.waitedMs}ms` : ''}`,
+      );
       return;
     }
 
@@ -381,11 +456,29 @@ async function main() {
         continueOnError: Boolean(flags.continueOnError),
         options,
       });
-      for (const r of res.results) {
-        const settle = r.settled ? (r.settled.ok ? ` (settled ${r.settled.waitedMs}ms)` : ' (never settled)') : '';
-        console.log(`${r.ok ? 'ok  ' : 'FAIL'} [${r.index}] ${r.action}: ${r.ok ? r.detail : r.error}${settle}`);
-      }
-      console.log(`${res.ok ? 'flow completed' : 'FLOW FAILED'} — ${res.ranSteps}/${res.totalSteps} steps in ${res.totalMs}ms`);
+      const saved = flags.save
+        ? navigate.saveFlow(res.device.udid, String(flags.save), res, { force: Boolean(flags.force) })
+        : null;
+      // `--map=false` arrives as the string "false"; `--no-map` as true.
+      const wantMap = !flags.json && flags.noMap !== true && String(flags.map ?? 'true') !== 'false';
+      const map = wantMap ? await mapText(flags.device, options, res.endScreen) : null;
+      emit(
+        flags,
+        {
+          ok: res.ok,
+          ranSteps: res.ranSteps,
+          totalSteps: res.totalSteps,
+          totalMs: res.totalMs,
+          results: res.results,
+          saved,
+        },
+        [
+          ...res.results.map(stepLine),
+          `${res.ok ? 'flow completed' : 'FLOW FAILED'} — ${res.ranSteps}/${res.totalSteps} steps in ${res.totalMs}ms`,
+          saved && (saved.ok ? `saved flow "${saved.name}" — ${saved.steps} steps` : `not saved: ${saved.reason}`),
+          map && `\n${map}`,
+        ],
+      );
       process.exitCode = res.ok ? 0 : 1;
       return;
     }
@@ -398,31 +491,33 @@ async function main() {
         timeoutMs: num(flags.timeoutMs, 8000),
         options,
       });
-      if (!res.ok && res.reason === 'unknown-screen') {
-        console.log(`no screen matching "${target}". known screens:`);
-        for (const s of res.known) console.log(`  ${s.name}  (${s.hash}, ${s.edges} edges)`);
-        process.exitCode = 1;
-        return;
-      }
-      if (!res.ok && res.reason === 'ambiguous') {
-        console.log(`"${target}" matches more than one screen:`);
-        for (const c of res.candidates) console.log(`  ${c.name}  (${c.hash.slice(0, 8)})`);
-        process.exitCode = 1;
-        return;
-      }
+      const refusal = {
+        'unknown-screen': () => [
+          `no screen matching "${target}". known screens:`,
+          ...(res.known ?? []).map((k) => `  ${k.name}  (${k.hash}, ${k.edges} edges)`),
+        ],
+        ambiguous: () => [
+          `"${target}" matches more than one screen:`,
+          ...(res.candidates ?? []).map((c) => `  ${c.name}  (${c.hash.slice(0, 8)})`),
+        ],
+      };
       if (!res.ok && res.reason) {
-        console.log(`${res.reason}: cannot reach "${res.to ?? target}" from here`);
+        emit(flags, res, refusal[res.reason] ?? `${res.reason}: cannot reach "${res.to ?? target}" from here`);
         process.exitCode = 1;
         return;
       }
-      if (res.already) {
-        console.log(`already on ${res.screen}`);
-        return;
-      }
-      for (const r of res.results ?? []) {
-        console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.action}: ${r.verification?.verdict ?? (r.ok ? r.detail : r.error)}`);
-      }
-      console.log(res.ok ? `arrived at ${res.screen} in ${res.ranSteps} step(s)` : `ended at ${res.arrived}, wanted ${res.screen}`);
+      emit(
+        flags,
+        res,
+        res.already
+          ? `already on ${res.screen}`
+          : [
+              ...(res.results ?? []).map(stepLine),
+              res.ok
+                ? `arrived at ${res.screen} in ${res.ranSteps} step(s)`
+                : `ended at ${res.arrived}, wanted ${res.screen}`,
+            ],
+      );
       process.exitCode = res.ok ? 0 : 1;
       return;
     }
@@ -430,11 +525,13 @@ async function main() {
     case 'screens': {
       const { device } = await api.ensureDaemon(flags.device, options);
       const known = navigate.knownScreens(device.udid);
-      if (!known.length) {
-        console.log('no screens known yet — run a flow first');
-        return;
-      }
-      for (const s of known) console.log(`${s.hash}  ${s.edges} edges  ${s.name}`);
+      emit(
+        flags,
+        known,
+        known.length
+          ? known.map((k) => `${k.hash}  ${k.edges} edges  ${k.name}`)
+          : 'no screens known yet — run a flow first',
+      );
       return;
     }
 
@@ -443,8 +540,7 @@ async function main() {
       const { device } = await api.ensureDaemon(flags.device, options);
       if (sub === 'list') {
         const flows = navigate.listFlows(device.udid);
-        if (!flows.length) console.log('no saved flows');
-        for (const f of flows) console.log(`${f.name}  ${f.steps} steps`);
+        emit(flags, flows, flows.length ? flows.map((f) => `${f.name}  ${f.steps} steps`) : 'no saved flows');
         return;
       }
       if (sub === 'save') {
@@ -459,11 +555,11 @@ async function main() {
         });
         const saved = navigate.saveFlow(device.udid, name, res, { force: Boolean(flags.force) });
         if (!saved.ok) {
-          console.log(`not saved: ${saved.reason} (${saved.verdicts.join(', ')}) — re-run, or pass --force`);
+          emit(flags, saved, `not saved: ${saved.reason} (${(saved.verdicts ?? []).join(', ')}) — re-run, or pass --force`);
           process.exitCode = 1;
           return;
         }
-        console.log(`saved ${saved.name} — ${saved.steps} steps`);
+        emit(flags, saved, `saved ${saved.name} — ${saved.steps} steps`);
         return;
       }
       if (sub === 'run') {
@@ -474,14 +570,14 @@ async function main() {
           options,
         });
         if (res.reason === 'unknown-flow') {
-          console.log(`no flow "${name}". known: ${res.known.join(', ') || '(none)'}`);
+          emit(flags, res, `no flow "${name}". known: ${res.known.join(', ') || '(none)'}`);
           process.exitCode = 1;
           return;
         }
-        for (const r of res.results ?? []) {
-          console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.action}: ${r.verification?.verdict ?? (r.ok ? r.detail : r.error)}`);
-        }
-        console.log(`${res.ok ? 'flow completed' : 'FLOW FAILED'} — ${res.ranSteps}/${res.totalSteps} steps`);
+        emit(flags, res, [
+          ...(res.results ?? []).map(stepLine),
+          `${res.ok ? 'flow completed' : 'FLOW FAILED'} — ${res.ranSteps}/${res.totalSteps} steps`,
+        ]);
         process.exitCode = res.ok ? 0 : 1;
         return;
       }
@@ -525,7 +621,11 @@ async function main() {
           await input.pressButton(dev.udid, positional[0]);
       }
       const driver = await input.driverFor(dev.udid);
-      console.log(`${command} in ${Date.now() - t0}ms via ${driver.name}`);
+      emit(
+        flags,
+        { ok: true, command, ms: Date.now() - t0, driver: driver.name },
+        `${command} in ${Date.now() - t0}ms via ${driver.name}`,
+      );
       return;
     }
 
@@ -534,14 +634,18 @@ async function main() {
       if (!intent) throw new Error('usage: simframe find "<intent>"');
       try {
         const r = await api.locate(flags.device, intent, { options });
-        console.log(
-          `${r.target.label ?? '(icon-only)'}  @(${r.target.x},${r.target.y})  ` +
-            `${r.target.region ?? 'content'}  ${r.target.type ?? '?'}/${r.target.source}  score ${r.score ?? '-'}`,
+        emit(
+          flags,
+          { ok: true, target: r.target, score: r.score, from: r.from, reasons: r.reasons, alternatives: r.alternatives },
+          [
+            `${r.target.label ?? '(icon-only)'}  @(${r.target.x},${r.target.y})  ` +
+              `${r.target.region ?? 'content'}  ${r.target.type ?? '?'}/${r.target.source}  score ${r.score ?? '-'}`,
+            r.reasons?.length ? `  because: ${r.reasons.join(', ')}` : null,
+            ...(r.alternatives ?? []).map((a) => `  also considered: "${a.label}" ${a.score}`),
+          ],
         );
-        if (r.reasons?.length) console.log(`  because: ${r.reasons.join(', ')}`);
-        for (const a of r.alternatives ?? []) console.log(`  also considered: "${a.label}" ${a.score}`);
       } catch (err) {
-        console.log(err.message);
+        emit(flags, { ok: false, error: err.message }, err.message);
         process.exitCode = 1;
       }
       return;

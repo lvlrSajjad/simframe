@@ -44,6 +44,7 @@
     "native/simframed/Package.swift",
     "native/simframed/Sources",
     "native/simframed/Tests",
+    "skills",
     "scripts",
     "README.md",
     "LICENSE"

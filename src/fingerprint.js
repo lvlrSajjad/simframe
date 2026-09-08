@@ -65,6 +65,38 @@ function bucket(n) {
 const normLabel = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 40);
 
 /**
+ * A value, not a name.
+ *
+ * Phase 6d removed a date banner from one screen's identity after that
+ * fingerprint would have expired at midnight. It came back through a different
+ * door: measured across twenty screens of a real app, three carried content in
+ * their identity because the positional region bands had called it chrome — a
+ * store address, a phone number, and a nav title reading "Tuesday, September 8".
+ * That last one is a screen whose identity has until midnight to live.
+ *
+ * The band misclassification is the root cause and is fixed by clustering, not
+ * by another threshold (docs/DEFERRED.md). What can be fixed here without
+ * guessing at geometry is the narrower question: is this text a name for the
+ * screen, or is it today's value? A name is words. A date, a phone number, a
+ * price and a bare count are not, and every one of them changes while the
+ * screen stays the same screen.
+ */
+const MONTHS = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i;
+const WEEKDAYS = /\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*day?\b/i;
+const DATE_LIKE = /\d{1,4}[/.-]\d{1,2}([/.-]\d{1,4})?|\b\d{1,2}:\d{2}\b/;
+
+export function isVolatileLabel(label) {
+  const text = String(label ?? '').trim();
+  if (!text) return true;
+  if (MONTHS.test(text) || WEEKDAYS.test(text) || DATE_LIKE.test(text)) return true;
+  const letters = (text.match(/\p{L}/gu) ?? []).length;
+  const digits = (text.match(/\p{N}/gu) ?? []).length;
+  // Mostly digits: a count, a price, a phone number, an ID. "1020" and
+  // "+1 (111) 111-1111" are both this; "Assets" is not.
+  return digits > 0 && digits >= letters;
+}
+
+/**
  * The canonical tokens this screen is made of.
  *
  * Deliberately excluded: the status bar (a clock is not identity), everything
@@ -100,6 +132,7 @@ export function tokens(targets, screen) {
     // tab label is narrow; content that merely fell into the band is not a name.
     const labelWorthKeeping = CHROME.has(region)
       && t.label
+      && !isVolatileLabel(t.label)
       && (region !== 'tab-bar' || (frame.width ?? 0) <= screen.width * TAB_LABEL_MAX_WIDTH_FRACTION);
     if (labelWorthKeeping) parts.push(`"${normLabel(t.label)}"`);
     const key = parts.join(':');

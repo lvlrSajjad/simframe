@@ -197,7 +197,7 @@ test('spreadEvenly returns everything when asked for more than it has', () => {
 });
 
 // --- batch scripting: shorthand parsing and element matching ---
-import { normalizeStep } from '../src/actions.js';
+import { haltDecision, normalizeStep } from '../src/actions.js';
 import { centerOf, matchElement } from '../src/input.js';
 
 test('step shorthand keeps sibling options', () => {
@@ -565,4 +565,143 @@ test('an action signature says what the action was, not just its value', () => {
   // `index: undefined`, which crashed the signature builder before any tap was
   // sent — the headline command, broken on every screen the graph recognised.
   assert.equal(sig({ tap: 'Contacts', index: undefined }), 'tap:contacts');
+});
+
+import { isVolatileLabel } from '../src/fingerprint.js';
+import { resolve as resolveIntent, SAME_CONTROL_POINTS } from '../src/matching.js';
+import { parseSelector, resolveRef, writeRefs } from '../src/refs.js';
+import { rowsFor, render } from '../src/view.js';
+
+test('a screen is not named after a value that will have changed by tomorrow', () => {
+  // Phase 6d removed a date banner from one screen's identity. It came back
+  // through a different door: measured across twenty screens of a real app,
+  // three carried content in their identity, and one was a nav title reading
+  // "Tuesday, September 8" — a fingerprint with until-midnight to live.
+  for (const expiring of ['Tuesday, September 8', 'Sep 08, 2026', '09/08/2026', '21:38', '+1 (111) 111-1111', '$501.00', '1910']) {
+    assert.equal(isVolatileLabel(expiring), true, `${expiring} should not be part of a screen's identity`);
+  }
+  // Words are names, and a name is what a screen is called.
+  for (const name of ['Assets', 'Work Orders', 'My Dashboard', 'Settings', 'iPhone 17 Pro']) {
+    assert.equal(isVolatileLabel(name), false, `${name} is a name, not a value`);
+  }
+  // What this rule deliberately does NOT do: rescue content that the
+  // positional region bands misfiled as chrome. "Anahaim | Stnra #1020" is a
+  // list row read as a tab item — wrong for a reason no text pattern can see,
+  // and fixed by clustering the bands rather than by another word list.
+  assert.equal(isVolatileLabel('Anahaim | Stnra #1020'), false);
+});
+
+test('two readings of one control are not an ambiguity', () => {
+  // The tree published "Location (All)" and OCR read the same rectangle as
+  // "Location (AII)" one point away, and the caller was asked which of the two
+  // it meant. Either tap lands on the same pixel: there is no answer to give.
+  const targets = [
+    { label: 'Location (All)', x: 201, y: 181, type: 'Button', source: 'ax', frame: { x: 100, y: 170, width: 200, height: 24 } },
+    { label: 'Location (AII)', x: 200, y: 182, type: 'Text', source: 'ocr', frame: { x: 100, y: 171, width: 200, height: 22 } },
+  ];
+  const out = resolveIntent(targets, 'Location', { screen: { width: 402, height: 874 } });
+  assert.equal(out.status, 'ok');
+  // And the accessibility element wins, because it is the real hit target.
+  assert.equal(out.target.source, 'ax');
+
+  // Two controls genuinely far apart stay a question worth asking: on the Work
+  // Orders screen the label is both the nav title and the tab.
+  const apart = [
+    { label: 'Work Orders', x: 201, y: 90, type: 'Text', source: 'ocr', region: 'nav-bar', frame: { x: 150, y: 80, width: 100, height: 20 } },
+    { label: 'Work Orders', x: 200, y: 836, type: 'Text', source: 'ocr', region: 'tab-bar', frame: { x: 150, y: 826, width: 100, height: 20 } },
+  ];
+  assert.ok(Math.abs(apart[0].y - apart[1].y) > SAME_CONTROL_POINTS);
+  assert.equal(resolveIntent(apart, 'Work Orders', { screen: { width: 402, height: 874 } }).status, 'ambiguous');
+});
+
+test('a selector is a ref, a point, or an intent', () => {
+  assert.deepEqual(parseSelector('#3'), { kind: 'ref', ref: 3 });
+  assert.deepEqual(parseSelector('@120,400'), { kind: 'point', x: 120, y: 400 });
+  assert.deepEqual(parseSelector('@ 120 , 400 '), { kind: 'point', x: 120, y: 400 });
+  assert.deepEqual(parseSelector('"Save"'), { kind: 'label', label: 'Save', exact: true });
+  assert.deepEqual(parseSelector('the save button'), { kind: 'label', label: 'the save button', exact: false });
+  // A label that merely starts with a hash is not a ref.
+  assert.equal(parseSelector('#hashtag').kind, 'label');
+});
+
+test('a ref numbered on one screen refuses to resolve on another', () => {
+  // store.ROOT is read once at import time, and `npm test` runs with
+  // SIMFRAME_HOME pointed at a fresh temp dir — so this writes into that, not
+  // into the developer's real ~/.simframe. An earlier version of these tests
+  // did not, and left TEST-* directories in it.
+  const udid = 'TEST-REFS';
+  const layoutHash = 'f'.repeat(72);
+  writeRefs(udid, {
+    structuralHash: 'aaaa1111',
+    layoutHash,
+    rows: [{ ref: 1, label: 'Save', x: 10, y: 20, type: 'Button', region: 'nav-bar', source: 'ax' }],
+  });
+  // On the screen it was numbered on, a ref is a tap point.
+  assert.equal(resolveRef(udid, 1, { structuralHash: 'aaaa1111' }).label, 'Save');
+  assert.equal(resolveRef(udid, 1, { layoutHash }).x, 10);
+  // On a different screen it is an error, not a tap at coordinates that now
+  // belong to something else.
+  assert.throws(() => resolveRef(udid, 1, { structuralHash: 'bbbb2222' }), /different screen/);
+  assert.throws(() => resolveRef(udid, 9, { structuralHash: 'aaaa1111' }), /not on this screen/);
+});
+
+test('the screen map folds read text into the control it is printed on', () => {
+  const screen = { width: 402, height: 874 };
+  const entry = {
+    targets: [
+      // A button and OCR's reading of the text printed on it: one row, not two.
+      { label: 'TRACK TIME', x: 201, y: 288, type: 'Button', source: 'ax', region: 'content', frame: { x: 100, y: 270, width: 200, height: 40 } },
+      { label: 'Ỡ TRACK TIME', x: 202, y: 289, type: 'Text', source: 'ocr', region: 'content', frame: { x: 110, y: 280, width: 180, height: 20 } },
+      // A tab bar encloses its five tabs and must not absorb them, or there is
+      // nothing left to tap.
+      { label: 'Tab Bar', x: 201, y: 833, type: 'Group', source: 'ax', region: 'content', frame: { x: 0, y: 810, width: 402, height: 60 } },
+      ...['Home', 'Assets', 'Work Orders', 'Invoices', 'More'].map((label, i) => ({
+        label, x: 40 + i * 75, y: 836, type: 'Text', source: 'ocr', region: 'tab-bar',
+        frame: { x: 20 + i * 75, y: 826, width: 60, height: 18 },
+      })),
+      // A clock is not identity and not a control.
+      { label: '9:41', x: 40, y: 20, type: 'Text', source: 'ocr', region: 'status-bar', frame: { x: 20, y: 12, width: 40, height: 16 } },
+      // OCR reading the furniture: an ellipsis menu with no letters in it.
+      { label: '•..', x: 340, y: 500, type: 'Text', source: 'ocr', region: 'content', frame: { x: 335, y: 495, width: 12, height: 10 } },
+    ],
+  };
+  const { rows } = rowsFor(entry, { screen });
+  const labels = rows.map((r) => r.label);
+  assert.ok(labels.includes('TRACK TIME'));
+  assert.ok(!labels.includes('Ỡ TRACK TIME'), 'the OCR reading of a button is that button');
+  assert.ok(!labels.includes('Tab Bar'), 'a container is not a control');
+  assert.ok(!labels.includes('9:41'), 'the status bar is never what anybody wants to tap');
+  assert.ok(!labels.includes('•..'), 'text with no letters in it cannot be tapped by name');
+  for (const tab of ['Home', 'Assets', 'Work Orders', 'Invoices', 'More']) {
+    assert.ok(labels.includes(tab), `${tab} must survive: the tab bar must not swallow its tabs`);
+  }
+  // Numbered in reading order, chrome first, and every ref unique.
+  assert.deepEqual(rows.map((r) => r.ref), rows.map((_, i) => i + 1));
+
+  // And the rendered map says what screen it is before it says what is on it.
+  const text = render({
+    device: { name: 'iPhone 17 Pro' }, identity: { hash: 'abcd1234ef' }, rows,
+    collapsed: new Map(), screen, name: 'Home', exits: 3, truncated: 0,
+  });
+  assert.match(text.split('\n')[0], /iPhone 17 Pro · 402x874pt · screen abcd1234 "Home" \(known, 3 known exits\)/);
+  assert.ok(!text.includes('~ Ỡ TRACK TIME') || text.includes('TRACK TIME'));
+});
+
+test('a flow that halts on a wrong turn does not report success', () => {
+  // `ok` used to mean only "nothing threw", so a flow stopped dead at step 0
+  // by an unexpected-screen verdict came back saying "flow completed" with
+  // isError false. A verdict nobody is told about is not a verdict.
+  const wrong = { verdict: 'unexpected-screen', detail: 'landed somewhere else' };
+  const halted = haltDecision({ verification: wrong });
+  assert.equal(halted.halt, true);
+  assert.equal(halted.failRun, true, 'the run failed, not merely the step');
+  assert.match(halted.error, /unexpected-screen/);
+
+  // A noisy transition kind is reported inside `ok` and stops nothing.
+  for (const verdict of ['ok', 'no-visible-change', 'unverified']) {
+    assert.equal(haltDecision({ verification: { verdict, detail: '' } }).halt, false, verdict);
+  }
+  // And a caller who asked to keep going is not overruled.
+  assert.equal(haltDecision({ verification: wrong, continueOnError: true }).halt, false);
+  assert.equal(haltDecision({ verification: wrong, stopOnUnexpected: false }).halt, false);
 });

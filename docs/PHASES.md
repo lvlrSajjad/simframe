@@ -30,18 +30,23 @@ open work is in `docs/DEFERRED.md`.
 | 6d — variants, and the date that expired | done. A screen may hold several accepted fingerprints; a date banner had been entering one screen's identity |
 | 6e — verdicts on the reliable signal | done. Transition kind is reported, not judged; `verdict` compares nodes rather than raw hashes |
 | CI — packaging + integration gates | done. `integration` boots a simulator on `macos-15` and asserts every layer under `--strict`; required on `main` with an admin bypass |
-| 7 — compact agent state, skill | not started |
+| 7 — compact agent state, skill | done. A ten-step flow is **1 tool call, 0 images, ~1,650 characters**. Every action returns the numbered text screen map; `sim_look` is the only image path and is capped at 1024 px |
 | 8 — Android | not started |
 
-**Pick up here.** Phase 7 — a compact state for the agent, and the skill. It is
-cheap, it is where the token savings actually land, and the flow baseline it
-needs now exists and is trustworthy: 10.2 s cold, then 3.6 s and 3.7 s with
-every step verified and every control resolved from memory.
+**Pick up here.** Phase 2a (`AXPTranslator`), which removes the last idb
+dependency and has the highest variance of anything left — better attempted now
+that everything above it is shipped and stable. Most of the hard part is already
+isolated: the host-side bridge works and the frontmost application resolves;
+only the attribute read returns nil. Four leads are listed in
+`docs/PRIVATE_API.md`, cheapest first.
 
-Then Phase 2a (`AXPTranslator`), which removes the last idb dependency and has
-the highest variance of anything left — better attempted with the rest shipped
-and stable underneath it. Region-bands-from-clustering slots in after that, or
-whenever a bug forces it.
+**Region-bands-from-clustering has earned its way up the list.** Phase 7 found
+it for the third time: dumping the structural tokens of twenty learned screens
+showed three of them carrying content in their identity because the positional
+bands had called it chrome, one of which was a nav title reading "Tuesday,
+September 8" — an identity with until midnight to live. That specific class is
+patched (a date is a value, not a name) but the cause is not, and it has now
+produced three bugs in three phases.
 
 **One habit this project earned the hard way.** Three separate times, a first
 measurement agreed with the hypothesis and was wrong — capture, the layout-hash

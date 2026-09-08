@@ -114,9 +114,31 @@ export async function resize(inFile, outFile, maxDim) {
   await run('sips', ['-Z', String(maxDim), inFile, '--out', outFile], { timeout: 10_000 });
 }
 
-export async function launchApp(udid, bundleId) {
+/**
+ * Launch, optionally with arguments and environment.
+ *
+ * simctl passes launch arguments after the bundle id and environment through
+ * `SIMCTL_CHILD_`-prefixed variables of its own process — which is why env has
+ * to be set on the child rather than passed as flags.
+ */
+export async function launchApp(udid, bundleId, { args = [], env = {}, terminateFirst = false } = {}) {
+  if (terminateFirst) {
+    // A launch against an already-running app is a no-op that reports success,
+    // which is how a flow "relaunched" an app and tested the screen it was
+    // already on.
+    try {
+      await terminateApp(udid, bundleId);
+    } catch {
+      /* not running; that is the state we wanted */
+    }
+  }
+  const childEnv = { ...process.env };
+  for (const [k, v] of Object.entries(env)) childEnv[`SIMCTL_CHILD_${k}`] = String(v);
   try {
-    await run('xcrun', ['simctl', 'launch', udid, bundleId], { timeout: 20_000 });
+    await run('xcrun', ['simctl', 'launch', udid, bundleId, ...args.map(String)], {
+      timeout: 20_000,
+      env: childEnv,
+    });
   } catch (err) {
     // execFile's message is just "Command failed: ..." with simctl's actual
     // complaint left in stderr. A CI run failed here and said nothing about
@@ -132,6 +154,37 @@ export async function terminateApp(udid, bundleId) {
 
 export async function openUrl(udid, url) {
   await run('xcrun', ['simctl', 'openurl', udid, url], { timeout: 20_000 });
+}
+
+export const PERMISSION_SERVICES = [
+  'all', 'calendar', 'contacts-limited', 'contacts', 'location', 'location-always',
+  'photos-add', 'photos', 'media-library', 'microphone', 'motion', 'reminders', 'siri',
+];
+
+/**
+ * Grant, revoke or reset a privacy permission.
+ *
+ * The point of doing this from a test harness is that the alternative is
+ * tapping a system alert, and a system alert is not part of the app under test:
+ * its buttons move between iOS versions and its appearance is a race.
+ */
+export async function setPermission(udid, action, service, bundleId) {
+  const verb = String(action).toLowerCase();
+  if (!['grant', 'revoke', 'reset'].includes(verb)) {
+    throw new Error(`permission action must be grant, revoke or reset (got "${action}")`);
+  }
+  if (!PERMISSION_SERVICES.includes(service)) {
+    throw new Error(`unknown permission "${service}" — one of: ${PERMISSION_SERVICES.join(', ')}`);
+  }
+  const args = ['simctl', 'privacy', udid, verb, service];
+  if (bundleId) args.push(bundleId);
+  try {
+    await run('xcrun', args, { timeout: 20_000 });
+  } catch (err) {
+    const detail = (err.stderr || '').trim().split('\n').filter(Boolean).pop();
+    throw new Error(`could not ${verb} ${service}: ${detail || err.message}`);
+  }
+  return `${verb === 'reset' ? 'reset' : verb + 'ed'} ${service}${bundleId ? ` for ${bundleId}` : ''}`;
 }
 
 /** Put text on the device pasteboard — far faster than typing a long string. */

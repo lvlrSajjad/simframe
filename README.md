@@ -20,9 +20,15 @@ one is obvious:
 3. **Nothing is remembered.** The same screen gets re-read and re-reasoned about
    every single time it appears.
 
-simframe attacks all three: a background loop keeps the newest frame warm, whole
-flows run in one call, and screens the agent has seen before are answered from
-memory.
+And there is a fourth that is pure waste: **an image is the most expensive way
+to ask what is on screen.** A screenshot costs ~1,600 tokens when it is handled
+as a native image block and 15,000–25,000 when it is not, and it does not tell
+you what is tappable or where — you have to measure that by eye.
+
+simframe attacks all four: a background loop keeps the newest frame warm, whole
+flows run in one call, screens the agent has seen before are answered from
+memory, and every answer is text with tap points in it. Nothing returns an
+image unless you ask for one.
 
 ## What changed, measured
 
@@ -35,6 +41,8 @@ Same four-tab navigation flow, on a real production app:
 | Finding a control | read tree (~570 ms) + reason | **~1 ms** from memory |
 | A 4-step flow, verified | 4+ model round trips | **1 call**, 3.6 s |
 | Same flow, 3rd run | no improvement — every run is the first | **3.7 s, 4/4 from memory, 4/4 verified** |
+| A 10-step flow | 10 turns, 10 images (~16,000 tokens at best) | **1 turn, 0 images, ~1,650 characters** |
+| Reading a screen | an image: ~1,600 tokens, no tap points | **~330 tokens** of text, with tap points |
 
 The four-tab tour, three times back to back from a cleared memory:
 
@@ -120,16 +128,54 @@ human, and the narrow form is `brew trust --formula facebook/fb/idb-companion`.
 
 ## The tools
 
+Read first, act in batches, and look at pixels only when the question is about
+pixels. Every tool description says so, because a tool surface that does not
+steer the model is a tool surface the model uses wrong.
+
 | Tool | What it does |
 | --- | --- |
-| `sim_look` | Newest frame as an image, no capture wait. |
-| `sim_state` | Text only: screen hash, what changed **since your last look**, region movement map. |
+| `sim_ui` | **Start here.** The screen as a numbered text map: region, type, label, state, tap point, source. A tenth the cost of a screenshot and strictly more useful. |
+| `sim_do` | **The main tool.** A whole flow in one call — tap, type, scroll, wait, assert — each step settling before the next and verified against what it did last time. |
+| `sim_state` | The cheapest question there is: has anything changed **since your last look**, and which regions moved. |
+| `sim_goto` | Walk to a screen simframe has been to before, planning the route through remembered transitions. |
+| `sim_flow_run` | Replay a flow that verified end to end. |
+| `sim_find` | Resolve an intent to one control, without acting on it. |
+| `sim_tap` · `sim_type_into` · `sim_scroll_to` · `sim_wait_for` · `sim_assert` | Single actions, for when you genuinely only have one step. Each is one `sim_do` step underneath. |
+| `sim_launch` · `sim_open_url` · `sim_permission` | Launch with arguments and environment; open a deep link; grant a privacy permission instead of tapping a system alert. |
 | `sim_wait` | Waits for the screen to change *and then* settle. |
-| `sim_do` | A whole flow in one call — tap, type, scroll, assert — each step settling before the next. |
-| `sim_ui` | The screen as labels + tap coordinates, from accessibility **and** OCR. |
-| `sim_recall` | Look backwards: a timeline of what happened, or the frame from N seconds ago. |
-| `sim_strip` | Recent frames tiled into one image. |
-| `sim_capture` / `sim_devices` | Manage capture loops; list simulators. |
+| `sim_look` | **The only tool that returns an image**, capped at 1024 px. For layout, colour, spacing — questions text cannot answer. |
+| `sim_recall` · `sim_strip` | Look backwards: a text timeline of what happened, or recent frames tiled into one image. |
+| `sim_capture` · `sim_devices` | Manage capture loops; list simulators. |
+
+### What the screen looks like as text
+
+```
+iPhone 17 Pro · 402x874pt · screen a1b2c3d4 "Inbox" (known, 3 known exits)
+last action: [2] tap — ok: matches the outcome seen 5x before
+nav-bar:
+  #1 button    24,64      Back
+  #2 text      201,64     Inbox
+content:
+  #3 cell      201,140    Weekly digest
+  #4 cell      201,196    Payment received
+tab-bar:
+  #5 text      62,835     Inbox
+  #6 text      201,835    Settings
+```
+
+Region first, because "Inbox" the title and "Inbox" the tab differ only by where
+they are. A tap point, because that is what an action needs. And a number, which
+is a selector: whatever this calls `#3`, the next call can tap as `#3` without
+describing it. A ref is valid only while that screen is showing — used on a
+different screen it refuses rather than tapping whatever now sits there.
+
+Three ways to name a control, anywhere one is named:
+
+| | |
+| --- | --- |
+| `#3` | the number the map gave it. Cheapest, unambiguous. |
+| `"Save"` · `the Assets tab` · `back` | resolved by intent — verbs, typos, synonyms, icon-only controls by their common name |
+| `@120,400` | raw point coordinates. Last resort: it cannot tell you it missed. |
 
 ## Baselines: the thing to understand
 
@@ -372,22 +418,47 @@ Run `simframe start --engine=simctl` to use the original loop instead.
 
 ## CLI
 
+The CLI is the low-token path, and it is a first-class one: `--json` is on every
+command, so nothing has to be parsed out of prose.
+
 ```bash
-simframe start                 # start the capture loop
-simframe mark                  # hash of the current frame, for --since
-simframe state --since=$H      # what changed, as text
-simframe frame --out=now.png   # newest frame
-simframe wait --since=$H       # change, then settle
-simframe ui                    # labels + tap points (ax and ocr)
-simframe recall                # what happened in the last minute
-simframe recall --ago=15000    # the frame from 15s ago
-simframe strip --count=6       # contact sheet
+simframe ui                    # the numbered screen map — start here
+simframe ui --json | jq '.elements[] | select(.type=="button") | .label'
+simframe do flow.json          # a whole flow, verified, then the end-state map
+simframe do flow.json --save=checkout   # save it if every step verified
+simframe flow run checkout     # replay it
+simframe tap "#3"              # or "Save", or "@120,400"
+simframe find "the save button"   # resolve an intent without acting
 simframe screens               # screens this device has learned
 simframe goto invoices         # walk to a known screen over known steps
-simframe flow save|run|list    # record a verified flow, replay it
-simframe doctor --json         machine-readable; --strict fails on any downgrade
-simframe status / stop [--force] / devices / doctor
+simframe state --since=$H      # what changed, as text
+simframe mark                  # hash of the current frame, for --since
+simframe wait --since=$H       # change, then settle
+simframe recall                # what happened in the last minute, as text
+simframe recall --ago=15000    # the frame from 15s ago
+simframe frame --out=now.png   # newest frame, native resolution, to a file
+simframe strip --count=6       # contact sheet, for an animation
+simframe doctor --strict       # any degraded layer is a non-zero exit
+simframe start / status / stop [--force] / devices
 ```
+
+### The Claude Code skill
+
+[`skills/simframe/SKILL.md`](skills/simframe/SKILL.md) teaches the CLI path
+directly: the cheap-to-expensive order, the selector grammar, what each verdict
+means and what to do about it. It ships with the package, so an installed copy
+has it.
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s "$(npm root -g)/simframe/skills/simframe" ~/.claude/skills/simframe
+```
+
+A skill and an MCP server are not redundant. The MCP server is discoverable —
+it appears in the tool list without anybody setting it up. The skill is cheaper:
+Claude reads 3–5 lines of CLI output instead of a tool result, and none of the
+MCP schema is in context until a tool is actually used. Ship both, use whichever
+the client makes easy.
 
 ## Degrading is allowed. Degrading quietly is not
 
@@ -460,13 +531,12 @@ said a word — the exact failure shape, found by the thing built to catch it.
 - **The accessibility tree without idb.** `AXPTranslator` would remove the last
   heavyweight install. Capture, input and geometry already come from the daemon;
   the tree is all that is left.
-- **A compact state for the agent.** The element list, regions, what changed and
-  the last verdict, shaped so a model spends tokens on deciding rather than on
-  reading. This is where the token savings actually land.
 - **Region bands from where elements cluster**, rather than fractions of screen
-  height. A date banner sitting above the tab bar was classified as a tab label
-  and its text entered a screen's identity, which would have expired at
-  midnight. Fixed for that case by a width rule; the underlying cause remains.
+  height. This has now caused three bugs in three phases, each patched with
+  another rule: a nav button read as a title, a screen identity containing
+  `"sep 08, 2026"` that would have expired at midnight, and three of twenty
+  learned screens still carrying a store address, a phone number and a nav title
+  reading `"tuesday, september 8"`. The patches hold; the cause does not move.
 - **Reduce the input dependency.** idb is the one heavyweight requirement. Its
   simulator input is a reimplementation of the Indigo HID transport rather than a
   public API, so replacing it is real work, not a wrapper — but it is the last

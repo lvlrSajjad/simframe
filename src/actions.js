@@ -6,14 +6,25 @@ import * as api from './index.js';
 import * as graph from './graph.js';
 import * as input from './input.js';
 import * as intent from './intent.js';
-import { launchApp, openUrl, setPasteboard, terminateApp } from './simctl.js';
+import { launchApp, openUrl, setPasteboard, setPermission, terminateApp } from './simctl.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MAX_PAUSE_MS = 5000;
+/** How long a text field needs after being tapped before it holds the keyboard focus. */
+const FOCUS_SETTLE_MS = 150;
+const POLL_MS = 250;
+/** A list that has not produced the target in this many screens does not contain it. */
+const MAX_SCROLLS = 20;
 
+/**
+ * Steps that change the device. Only these get a settle wait and a verified
+ * edge in the graph — asserting something is on screen does not move it.
+ * `scrollTo` is here because it scrolls; `permission` because a granted
+ * permission can change what the app shows.
+ */
 const ACTION_STEPS = new Set([
-  'tap', 'tapAt', 'type', 'paste', 'swipe', 'scroll', 'button', 'key',
-  'launch', 'terminate', 'openUrl', 'confirm', 'chooseAny',
+  'tap', 'tapAt', 'type', 'paste', 'swipe', 'scroll', 'scrollTo', 'button', 'key',
+  'launch', 'terminate', 'openUrl', 'confirm', 'chooseAny', 'permission',
 ]);
 
 /** Accept both `{tap: "Save"}` shorthand and `{action: "tap", target: "Save"}`. */
@@ -31,6 +42,34 @@ export function normalizeStep(raw) {
   // builder before the tap was ever sent.
   for (const k of Object.keys(step)) if (step[k] === undefined) delete step[k];
   return step;
+}
+
+/**
+ * Does this verdict mean the flow went somewhere nobody intended?
+ *
+ * Only an unexpected *screen* does. `unexpected-transition` is not a verdict at
+ * all any more — a noisy classifier disagreeing about whether a tab switch was
+ * a push or a pop is not a reason to call a correct navigation wrong, and a
+ * verdict that cries wolf trains you to ignore verdicts.
+ */
+export function wrongTurnFrom(verification) {
+  return verification?.verdict === 'unexpected-screen';
+}
+
+/**
+ * What a halted step does to the run as a whole.
+ *
+ * Both halves matter, and only one of them used to happen: the step is marked
+ * failed, AND so is the run. Without the second, `ok` meant no more than
+ * "nothing threw", so a flow stopped dead at step 0 by a wrong turn reported
+ * "flow completed" with no error — the exact shape of failure the verdict
+ * exists to make loud.
+ */
+export function haltDecision({ verification, stopOnUnexpected = true, continueOnError = false } = {}) {
+  if (!wrongTurnFrom(verification) || !stopOnUnexpected || continueOnError) {
+    return { halt: false, failRun: false, error: null };
+  }
+  return { halt: true, failRun: true, error: `${verification.verdict}: ${verification.detail}` };
 }
 
 export async function runScript(
@@ -74,6 +113,10 @@ export async function runScript(
   const frames = [];
   let failed = false;
   let carriedScreen = null;
+  // The last reading of where we ended up, confirmed or not. The compact map
+  // the caller returns to Claude is rendered from this, so describing the end
+  // state costs nothing beyond the verification pass the flow already ran.
+  let endScreen = null;
 
   for (const [i, raw] of steps.entries()) {
     const step = normalizeStep(raw);
@@ -130,17 +173,14 @@ export async function runScript(
         // independent readings, which is the thing `settled` was standing in
         // for. Requiring both meant a screen that settled slowly recorded
         // nothing at all.
+        endScreen = afterScreen;
         if (afterScreen.confirmed && afterScreen.hash) {
           graph.record(udid, { from: beforeScreen, action: step, to: afterScreen, kind });
           carriedScreen = afterScreen;
         }
       }
 
-      // Only an unexpected *screen* stops a flow. `unexpected-transition` is no
-      // longer a verdict at all — a noisy classifier disagreeing about whether
-      // a tab switch was a push or a pop is not a reason to call a correct
-      // navigation wrong.
-      const wrongTurn = verification?.verdict === 'unexpected-screen';
+      const wrongTurn = wrongTurnFrom(verification);
       const note = settled?.noVisibleChange ? ' [no visible change]' : '';
       results.push({
         index: i,
@@ -151,9 +191,11 @@ export async function runScript(
         detail: `${detail}${note}${wrongTurn ? ` [${verification.verdict}: ${verification.detail}]` : ''}`,
         settled,
       });
-      if (wrongTurn && stopOnUnexpected && !continueOnError) {
+      const halt = haltDecision({ verification, stopOnUnexpected, continueOnError });
+      if (halt.halt) {
         results[results.length - 1].ok = false;
-        results[results.length - 1].error = `${verification.verdict}: ${verification.detail}`;
+        results[results.length - 1].error = halt.error;
+        failed = halt.failRun;
         break;
       }
     } catch (err) {
@@ -168,6 +210,7 @@ export async function runScript(
     // Returned so a run that verified end to end can be handed straight to
     // navigate.saveFlow without the caller reassembling what it just ran.
     steps,
+    endScreen,
     results,
     ok: !failed,
     totalMs: Date.now() - startedAt,
@@ -203,10 +246,14 @@ async function runStep(deviceQuery, udid, step, ctx) {
     }
     case 'type': {
       if (step.into) {
-        const { node } = await input.tapLabel(udid, step.into, { index: step.index });
-        await sleep(150);
+        // locate, not tapLabel: tapLabel asks the accessibility tree directly,
+        // so a field that only OCR can see was untypeable, and a selector
+        // (`#4`, `@x,y`) meant nothing here.
+        const found = await api.locate(deviceQuery, step.into, { index: step.index, refresh: step.refresh });
+        await input.tapPoint(udid, found.target.x, found.target.y);
+        await sleep(FOCUS_SETTLE_MS);
         await input.typeText(udid, step.text ?? step.value);
-        return `typed into "${node.label ?? step.into}"`;
+        return `typed into "${found.target.label}" at ${found.target.x},${found.target.y}`;
       }
       await input.typeText(udid, step.text ?? step.value);
       return 'typed text';
@@ -245,9 +292,15 @@ async function runStep(deviceQuery, udid, step, ctx) {
     case 'key':
       await input.pressKey(udid, step.value ?? step.code);
       return `pressed key ${step.value ?? step.code}`;
-    case 'launch':
-      await launchApp(udid, step.value ?? step.bundleId);
-      return `launched ${step.value ?? step.bundleId}`;
+    case 'launch': {
+      const bundleId = step.value ?? step.bundleId;
+      await launchApp(udid, bundleId, {
+        args: step.args ?? [],
+        env: step.env ?? {},
+        terminateFirst: step.relaunch === true,
+      });
+      return `launched ${bundleId}${step.relaunch ? ' (relaunched)' : ''}`;
+    }
     case 'terminate':
       await terminateApp(udid, step.value ?? step.bundleId);
       return `terminated ${step.value ?? step.bundleId}`;
@@ -305,6 +358,91 @@ async function runStep(deviceQuery, udid, step, ctx) {
       }
       throw new Error(`"${target}" is still on screen`);
     }
+    // Bring something into view. A control that scrolled off the bottom of a
+    // list is not missing, and "not on this screen" is the wrong answer to give
+    // about it.
+    case 'scrollTo': {
+      const query = step.value ?? step.target ?? step.label;
+      const dir = String(step.direction ?? 'down').toLowerCase();
+      const max = Math.min(MAX_SCROLLS, step.maxScrolls ?? 6);
+      for (let i = 0; i <= max; i += 1) {
+        try {
+          const found = await api.locate(deviceQuery, query, { index: step.index, refresh: i > 0 });
+          return `"${found.target.label}" is in view at ${found.target.x},${found.target.y}` +
+            (i ? ` after ${i} scroll${i === 1 ? '' : 's'}` : ' already');
+        } catch (err) {
+          if (i === max) throw new Error(`scrolled ${dir} ${max}x without finding ${query}: ${err.message}`);
+        }
+        await runStep(deviceQuery, udid, { action: 'scroll', value: dir }, ctx);
+        await api.waitFor(deviceQuery, { mode: 'stable', stableMs: 250, timeoutMs: 2500, options: ctx.options });
+      }
+      throw new Error(`could not bring ${query} into view`);
+    }
+
+    // Wait for a selector rather than a label, so it works on screens the
+    // accessibility tree never described.
+    case 'waitFor': {
+      const query = step.value ?? step.target ?? step.text;
+      const limit = Date.now() + (step.timeoutMs ?? 8000);
+      let lastError = 'never appeared';
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          const found = await api.locate(deviceQuery, query, { index: step.index, refresh: attempt > 0 });
+          return `"${found.target.label}" appeared at ${found.target.x},${found.target.y}`;
+        } catch (err) {
+          lastError = err.message;
+        }
+        if (Date.now() >= limit) break;
+        await sleep(POLL_MS);
+      }
+      throw new Error(`waited ${step.timeoutMs ?? 8000}ms for ${query}: ${lastError}`);
+    }
+
+    // One assert step for every condition, because `assertText` could only ask
+    // one question and the interesting ones are about state: is Save enabled
+    // yet, does the field hold what was typed into it.
+    case 'assert': {
+      const query = step.value ?? step.target ?? step.text;
+      const want = String(step.is ?? (step.gone ? 'gone' : 'visible')).toLowerCase();
+      let found = null;
+      try {
+        found = await api.locate(deviceQuery, query, { index: step.index, refresh: step.refresh });
+      } catch (err) {
+        if (want === 'gone') return `${query} is gone`;
+        throw new Error(`${query}: ${err.message}`);
+      }
+      const t = found.target;
+      switch (want) {
+        case 'visible':
+          return `${query} is on screen at ${t.x},${t.y}`;
+        case 'gone':
+          throw new Error(`${query} is still on screen at ${t.x},${t.y}`);
+        case 'enabled':
+          if (t.enabled === false) throw new Error(`"${t.label}" is disabled`);
+          return `"${t.label}" is enabled`;
+        case 'disabled':
+          if (t.enabled !== false) throw new Error(`"${t.label}" is not disabled`);
+          return `"${t.label}" is disabled`;
+        case 'value': {
+          const expected = String(step.equals ?? step.text ?? '');
+          const actual = [t.label, t.value, ...(t.aliases ?? [])].filter(Boolean).join(' ');
+          if (!actual.toLowerCase().includes(expected.toLowerCase())) {
+            throw new Error(`expected "${expected}" but read "${actual}"`);
+          }
+          return `"${expected}" is what ${query} reads`;
+        }
+        default:
+          throw new Error(`unknown assert condition "${want}" — visible, gone, enabled, disabled or value`);
+      }
+    }
+
+    // Answering a system permission alert is not a test of the app. Setting the
+    // permission is.
+    case 'permission': {
+      const service = step.value ?? step.service;
+      return await setPermission(udid, step.grant ?? step.action ?? 'grant', service, step.bundleId);
+    }
+
     case 'look': {
       const frame = await api.getFrame(deviceQuery, { detail: step.detail ?? 'normal', options: ctx.options });
       ctx.frames.push({ label: step.label ?? `step frame`, png: frame.png });
