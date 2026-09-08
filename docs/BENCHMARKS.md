@@ -945,3 +945,20 @@ surface that stderr, for the same reason a silent fallback is unacceptable.
 `fullFrameFor` now falls back to the newest frame in the daemon's own `full/`
 directory before considering simctl. Verified by deleting the exact frame the
 state pointer named and confirming the flow still completes.
+
+### A still screen looked like a dead capture loop
+
+`liveness()` reported `capture loop is stalled: newest frame is 2984ms old`
+whenever the newest frame was older than the threshold. That was correct for the
+`simctl` engine, which captures at a fixed rate, and wrong for `simframed`,
+which captures on damage: a genuinely still screen produces **no frames at
+all**, which is exactly the state `settle` exists to detect.
+
+So a flow that settled on a static page failed immediately after a step had
+succeeded. The pid check is the honest liveness signal for a damage-driven loop;
+the heartbeat file cannot substitute, because clients write it, not the daemon.
+The age check now applies only to the fixed-rate engine.
+
+This is the same mistake as two earlier versions of the CI flow assertion —
+expecting frames from a screen that is deliberately not producing any. Three
+instances of one wrong assumption, in three different places.

@@ -277,7 +277,17 @@ export function liveness(udid, state) {
   if (!running) {
     return { ok: false, ageMs, note: 'the capture loop has died; the frame you are looking at is the last one it wrote' };
   }
-  if (ageMs > STALE_FRAME_MS) {
+  // Frame age means "stalled" only for a fixed-rate loop.
+  //
+  // simframed captures on damage, so a screen that is genuinely still produces
+  // no frames at all — which is precisely the state `settle` exists to detect.
+  // Treating that as a stall made a flow fail on a static page with "capture
+  // loop is stalled: newest frame is 2984ms old" immediately after a step had
+  // succeeded. The pid check above is the honest liveness signal for this
+  // engine; the heartbeat file cannot help, because clients write it, not the
+  // daemon.
+  const damageDriven = engine.runningEngine(udid) === 'simframed';
+  if (!damageDriven && ageMs > STALE_FRAME_MS) {
     return { ok: false, ageMs, note: `capture loop is stalled: newest frame is ${ageMs}ms old` };
   }
   return { ok: true, ageMs, note: null };
