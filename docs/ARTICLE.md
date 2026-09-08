@@ -150,7 +150,9 @@ End to end, a ten-step flow through the MCP server, five consecutive runs once t
 | | Steps | Model turns | Images | Text |
 | --- | --- | --- | --- | --- |
 | before | 10 | 10 | 10 | ~16,000 tokens at best |
-| after | 10/10 verified | **1** | **0** | ~1,650 characters, ~5 s |
+| after | 10/10 verified | **1** | **0** | ~1,650 characters |
+
+Across eleven runs on two different afternoons the turn count, the image count and the character count never moved. The wall clock did — 5.0 to 7.4 seconds — and it belongs to the app's own loading as much as to the tool, which is why it is not in the table.
 
 One turn, because a flow is one call. Zero images, because nothing returns a frame as a side effect any more — there is exactly one tool that hands back pixels, and it is the one whose name is `look`.
 

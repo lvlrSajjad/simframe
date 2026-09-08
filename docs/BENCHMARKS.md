@@ -991,6 +991,8 @@ The phase asked for ≤3 model turns and 0 images for a flow whose screens are i
 memory. It is **1 turn and 0 images**, because a flow is one tool call and
 nothing in it returns a frame any more.
 
+The wall-clock column here did not survive a re-run — see below.
+
 Token estimates divide characters by 3.5. That is an estimate, not a
 measurement — there is no tokenizer in this repo, and the character counts are
 the measured figures.
@@ -1089,3 +1091,72 @@ new screens is mostly `unverified` verdicts and costs a map read per novel
 screen; the five runs above are all warm. The cold number belongs with the
 Phase 6 tour numbers, and the honest version of it is still the 10.2 s figure
 recorded there.
+
+### Re-run: the wall clock was not ~5 s
+
+Six more warm runs of the same ten-step flow, later the same day, on the same
+machine and the same app:
+
+| Batch | Runs | Wall clock | Model turns | Images | Text chars |
+| --- | --- | --- | --- | --- | --- |
+| first | 5 | 5.0–5.9 s | 1 | 0 | 1620–1700 |
+| second | 6 | 6.6–7.4 s | 1 | 0 | 1621–1661 |
+
+Eleven runs, and the honest figure for wall clock is **5.0–7.4 s**, not ~5 s.
+Nothing about simframe changed between the batches; the app's own loading did.
+What did not move across any of the eleven runs is everything the phase was
+actually about: **1 turn, 0 images, 1,620–1,700 characters.** Those are the
+numbers to quote. The wall clock belongs to the app under test as much as to the
+tool, and quoting the first batch alone would have been the fourth time in this
+project that a measurement agreeing with the hypothesis went unrepeated.
+
+---
+
+## Phase 2a baseline — what the last idb dependency actually costs
+
+Taken before starting Phase 2a, to answer "would removing idb change any
+published number?" rather than assume it. Same machine and app as Phase 7.
+
+### The accessibility read against the OCR it runs beside
+
+Both warmed first, then twelve alternating reads of the same screen (33
+accessibility targets, 34 OCR elements):
+
+| Path | N | Median | Range |
+| --- | --- | --- | --- |
+| accessibility tree via `idb ui describe-all` | 12 | **255 ms** | 249–352 ms |
+| OCR in-process, off the framebuffer | 12 | **123 ms** | 114–138 ms |
+
+They run concurrently, so a screen-map build costs the slower of the two: the
+**~305 ms first visit is accessibility-bound, and idb is twice OCR's cost.** At
+Phase 2a's 60 ms target the build becomes OCR-bound at roughly 130 ms.
+
+### How often a flow reads the tree
+
+Counted, not reasoned about, with a logging shim ahead of the real `idb` on
+`PATH`:
+
+| Ten-step flow | `ui describe-all` calls | Wall clock |
+| --- | --- | --- |
+| warm — screens and graph in memory | **0** | 6.6–7.4 s |
+| cold — `screens/` and `graph/` cleared | **14** | 17.0 s |
+
+Zero, warm. Screen memory answers from a file and the tree is never asked, so
+**every warm number simframe publishes is already independent of idb** — which
+is a stronger result than the "idb is only needed for the accessibility tree"
+claim, and the opposite of what the CI work assumed twice.
+
+Cold, 14 reads at 255 ms is ~3.8 s, about 22% of a cold run. At the 60 ms target
+that is 0.8 s, so Phase 2a should take a cold ten-step flow from ~17.0 s to
+roughly **14.0 s** — a real gain, entirely on the first pass through unfamiliar
+screens.
+
+### What this does not do
+
+Phase 2a changes *who reads* the accessibility tree, not *what the app
+publishes*. The custom tab bar with no children, the icon buttons carrying
+private-use glyphs, the React Native text inputs absent from the tree — those
+are the app's, and OCR will still be what carries those screens afterwards. The
+case for 2a is the install story (idb is the last heavyweight requirement), plus
+the cold path. It is not a perception-quality improvement, and nothing in the
+warm path moves at all.

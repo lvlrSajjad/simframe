@@ -687,13 +687,14 @@ tab-bar:
           <thead><tr><th></th><th>Steps</th><th>Model turns</th><th>Images</th><th>Text</th></tr></thead>
           <tbody>
             <tr><td>before</td><td>10</td><td>10</td><td>10</td><td>~16,000 tokens at best</td></tr>
-            <tr><td>after</td><td class="win">10 / 10 verified</td><td class="win">1</td><td class="win">0</td><td>~1,650 chars, ~5 s</td></tr>
+            <tr><td>after</td><td class="win">10 / 10 verified</td><td class="win">1</td><td class="win">0</td><td>~1,650 chars</td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
     <div class="track">
+      <p>Across eleven runs on two different afternoons the turn count, the image count and the character count never moved. The wall clock did &mdash; 5.0 to 7.4 seconds &mdash; and it belongs to the app&rsquo;s own loading as much as to the tool, which is why it is not in the table.</p>
       <p>One turn, because a flow is one call. Zero images, because nothing returns a frame as a side effect any more &mdash; there is exactly one tool that hands back pixels, and it is the one whose name is <code>look</code>.</p>
       <p>This is the part I think transfers furthest. Every agent framework has an implicit answer to &ldquo;when does the agent need to think versus just act?&rdquo; Almost none of them write it down. Writing it down is what makes the sensor and the reasoner separable.</p>
     </div>
