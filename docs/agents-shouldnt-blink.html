@@ -581,8 +581,14 @@
     </div>
 
     <div class="track">
-      <p>Zero. Not &ldquo;cheap&rdquo;, not &ldquo;cached&rdquo; &mdash; the accessibility tree is never asked. A remembered screen is answered from a file, so the perception layer sits idle, and the one heavyweight dependency the tool still installs for that tree is on none of the paths a warm flow takes. That is the difference between a cache, which makes a thing faster, and a memory, which makes it unnecessary.</p>
-      <p>Cold, those 14 reads are about 3.8 seconds of a 17-second run &mdash; the single largest cost of a first pass, and 255&nbsp;ms each against the 123&nbsp;ms on-device OCR takes to read the same screen. Which is worth knowing before optimising anything: the first visit is bound by the accessibility tree, not by the pixels.</p>
+      <p>Zero. Not &ldquo;cheap&rdquo;, not &ldquo;cached&rdquo; &mdash; the accessibility tree is never asked. A remembered screen is answered from a file, so the perception layer sits idle, and the one heavyweight dependency the tool installed for that tree was on none of the paths a warm flow takes. That is the difference between a cache, which makes a thing faster, and a memory, which makes it unnecessary.</p>
+      <p>Cold, those 14 reads were about 3.8 seconds of a 17-second run &mdash; the single largest cost of a first pass, and 255&nbsp;ms each against the 123&nbsp;ms on-device OCR takes to read the same screen. Which was worth knowing before optimising anything: the first visit was bound by the accessibility tree, not by the pixels.</p>
+    </div>
+
+    <div class="amend">
+      <span class="amend-label">Since &mdash; the measurement told me what to build, and what not to</span>
+      <p>So that is what I optimised, and the past tense is the point. The tree is now read inside the daemon rather than by shelling out to that dependency &mdash; <strong>45&nbsp;ms against 203&nbsp;ms</strong> on the same screen, measured both ways in the same session &mdash; which takes a cold eleven-step flow from 20.0 seconds to 17.3, and flips which side is binding: the first visit is now bound by the pixels.</p>
+      <p>The warm numbers did not move at all, because zero reads times any latency is still zero. Knowing that in advance is what made this a job worth doing for the install story &mdash; nothing beyond Xcode is required now &mdash; rather than a week spent chasing a number that was never going to change.</p>
     </div>
 
     <div class="track">
@@ -645,6 +651,13 @@
       <span class="amend-label">Amended &mdash; an identity with until midnight to live</span>
       <p>Chrome labels are the only text in a fingerprint, which makes them the only thing available to name a screen by. It also means anything misclassified as chrome lands directly in a screen&rsquo;s identity. One screen&rsquo;s identity contained the string <code>"sep 08, 2026"</code>.</p>
       <p>It was perfectly stable &mdash; stable on something that expires. At midnight it would have become a different screen, and every stored map, route and remembered tap point touching it would have broken overnight, with nothing to flag it. I found it twice, in two different phases, and the second time only by dumping the tokens of all twenty learned screens and reading them.</p>
+    </div>
+
+    <div class="amend">
+      <span class="amend-label">Since &mdash; three defensible patches for one bug is a smell</span>
+      <p>The interesting part is what I did about it, because the first three attempts were all the wrong shape. A nav-slot rule, then a tab-label width limit, then a test for values that are not names &mdash; a date, a time, a price, a bare count. Each patch was defensible and each one held.</p>
+      <p>Three defensible patches for one recurring bug is a smell, and the smell was that &ldquo;chrome&rdquo; was being decided by fractions of screen height: anything below 86% of the way down was a tab item, which on a long list is the last two rows of content. The fix was to stop asking where the screen ends and start asking where the elements are &mdash; a nav bar is a short row of things at the top with a gap under it, and that gap is an outlier relative to <em>that screen&rsquo;s</em> own row spacing, not a number from a design guideline. Chrome labels entering screen identities fell from <strong>fourteen to six</strong>, and the two screens most likely to collide &mdash; two Settings sub-pages with near-identical structure, told apart only by their titles &mdash; still separate cleanly.</p>
+      <p>Patching a symptom three times is how you find out you were measuring the wrong thing.</p>
     </div>
   </section>
 
