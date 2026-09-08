@@ -116,40 +116,39 @@ const LOOP = writeFlow('simframe-ci-loop.json', [
 ]);
 // Leaving whatever screen the map was read on.
 //
-// There is no single action that always does it, and assuming one is how the
-// first two versions of this test proved nothing: `home` does not leave the
-// home screen, and opening Safari does not leave Safari. Worse, the loop above
-// can halt partway on a wrong turn, so where we are standing is not knowable in
-// advance. So: try both, and take whichever moves the screen.
-// Several genuinely different destinations, tried in turn until one of them
-// moves the screen.
+// Four versions of this proved nothing, each for the same reason: the harness
+// guessed where the device was standing and guessed wrong.
 //
-// Two was not enough, and the reason is worth keeping: the second leaver
-// navigated to example.com, which is exactly where the first one had already
-// left the device on an earlier run. Start a run there with `home` not being
-// delivered — the long-running-simulator device state in DEFERRED — and neither
-// leaver changes anything, so the stale-ref precondition fails and takes the
-// check that depends on it down with it. That is a harness that cannot tell
-// "the ref guard is broken" from "the device did not move", which is the one
-// distinction this check exists to make.
-const LEAVERS = [
-  writeFlow('simframe-ci-leave-home.json', [{ button: 'home' }, { settle: true }]),
-  writeFlow('simframe-ci-leave-settings.json',
-    [{ launch: { value: 'com.apple.Preferences', relaunch: true } }, { settle: true }]),
-  writeFlow('simframe-ci-leave-reminders.json',
-    [{ launch: { value: 'com.apple.reminders', relaunch: true } }, { settle: true }]),
-  writeFlow('simframe-ci-leave-safari.json', [{ openUrl: 'https://example.com' }, { settle: true }]),
-];
+//  1. `home` does not leave the home screen.
+//  2. Opening Safari does not leave Safari.
+//  3. Adding a Settings leaver does not leave Settings — it walks straight back
+//     to the screen the refs were numbered on, and the guard then *correctly*
+//     resolves the ref, which reads as the guard being broken.
+//  4. Two pixel hashes are not evidence of anything when both are degenerate. A
+//     run here went `0000000000 -> 10ffffffff` — black, then uniform — and the
+//     precondition "the screen changed" passed on two hashes that cannot tell
+//     any screen from any other. This project has learned that lesson twice
+//     before, in the fingerprint and in the ref guard itself.
+//
+// So this no longer guesses. It puts the device on a named screen, reads the
+// refs there, then puts it on a different named screen — two different apps, so
+// they cannot be the same screen — and the pixel hash is used only as a
+// corroborating signal, and only when it is informative.
+//
+// The pause is not padding. `settle` waits for a change and then for stillness,
+// and called before the launch animation has begun it returns at once — so the
+// map was read on a screen still arriving, the refs were numbered on that, and
+// by the time the very next command ran simframe did not recognise where it
+// was. The guard was right; the harness had numbered a ghost.
+const AT_HOME_SCREEN = writeFlow('simframe-ci-at-reminders.json',
+  [{ launch: { value: 'com.apple.reminders', relaunch: true } }, { pause: 1600 }, { settle: true }]);
+const AT_OTHER_SCREEN = writeFlow('simframe-ci-at-contacts.json',
+  [{ launch: { value: 'com.apple.MobileAddressBook', relaunch: true } }, { pause: 1600 }, { settle: true }]);
 
-async function leaveThisScreen() {
-  const before = await markHash();
-  for (const flow of LEAVERS) {
-    await jsonRetry(['do', flow], { allowFail: true });
-    const after = await markHash();
-    if (after !== before) return { before, after };
-  }
-  return { before, after: before };
-}
+// A hash of one repeated character carries no information: an all-black screen
+// and an all-white one are each a perfectly stable nothing, and two of them are
+// within any tolerance of each other.
+const informativeHash = (h) => typeof h === 'string' && h.length > 1 && !/^(.)\1*$/.test(h);
 
 // Before anything else: is the device actually alive? A blank or wedged
 // simulator produces "the display surface could not be read" on every call, and
@@ -192,7 +191,12 @@ check(!(map.elements ?? []).some((e) => e.region === 'status-bar'),
   'the status bar is not offered as something to tap');
 
 console.log('\n--- element refs ---');
-const first = map.elements?.[0];
+// Re-read on a screen we chose, rather than on whatever the device happened to
+// be showing when this script started. `map` above is still the map of the
+// as-found screen, and everything asserted about its shape holds either way.
+await jsonRetry(['do', AT_HOME_SCREEN], { allowFail: true });
+const refMap = await jsonRetry(['ui']);
+const first = refMap.elements?.[0];
 if (first) {
   // A ref must resolve to exactly the point the map published, or the number in
   // front of a row means nothing.
@@ -203,10 +207,16 @@ if (first) {
 
   // Now leave that screen WITHOUT re-reading it: `--json` skips the end-state
   // map, so the ref table still describes the screen we have left.
-  const { before, after } = await leaveThisScreen();
-  const moved = before !== after;
+  const before = await markHash();
+  await jsonRetry(['do', AT_OTHER_SCREEN], { allowFail: true });
+  const after = await markHash();
+  // Two different apps are two different screens by construction. The pixel
+  // hashes only have to agree with that, and they only get a say when they are
+  // informative enough to have one.
+  const moved = !informativeHash(before) || !informativeHash(after) || before !== after;
   check(moved, 'the screen actually changed before testing the stale ref',
-    `${before.slice(0, 10)} -> ${after.slice(0, 10)}`);
+    `${before.slice(0, 10)} -> ${after.slice(0, 10)}`
+    + (informativeHash(before) && informativeHash(after) ? '' : ' (degenerate hash: not evidence either way)'));
   // Only assert the guard if the precondition actually held. Running it anyway
   // reports "the stale-ref guard failed" for a device that never left the
   // screen, which is a false accusation against the one layer this file exists
@@ -265,16 +275,39 @@ for (let pass = 1; pass <= CONVERGE_PASSES; pass += 1) {
 // above only works on a virgin graph, which a developer's machine is not after
 // the first run — so ask with an action that is novel by construction: a URL
 // nobody has opened before.
+//
+// Two things have to be true for this to mean anything, and getting either
+// wrong makes the check lie rather than fail.
+//
+// The device must not already be on example.com. The URL is novel only in its
+// query string, and that page renders identically whatever you put there, so
+// from there the verdict is `no-visible-change` — the honest answer to what
+// happened, and not the question being asked.
+//
+// And the positioning must happen in a *separate* run. Folding a launch into
+// this flow made the check pass whenever the launch was unverified, whether or
+// not the novel action was — a check that passes for the wrong reason is worse
+// than one that fails, because nothing ever tells you.
+await jsonRetry(['do', AT_HOME_SCREEN], { allowFail: true });
 const NOVEL = writeFlow('simframe-ci-novel.json', [
   { openUrl: `https://example.com/?simframe-ci=${Date.now()}` },
 ]);
 const novel = await jsonRetry(['do', NOVEL], { allowFail: true });
-const novelVerdicts = Array.isArray(novel?.results)
-  ? novel.results.map((r) => r.verification?.verdict ?? (r.ok ? 'none' : `error: ${r.error}`))
+const novelSteps = Array.isArray(novel?.results) ? novel.results : [];
+const novelVerdicts = novelSteps.length
+  ? novelSteps.map((r) => r.verification?.verdict ?? (r.ok ? 'none' : `error: ${r.error}`))
   : [`did not run: ${novel?.error ?? 'no results'}`];
-check(Array.isArray(novel?.results) && novel.results.some((r) => r.verification?.verdict === 'unverified'),
-  'an action never taken here before is reported as unverified, not as verified',
-  `[${novelVerdicts.join(', ')}]`);
+// "Could this be tested" is a different question from "was the claim broken",
+// and reporting the first as the second is how this file has spent the day
+// accusing the layer underneath it. A device that crashed SpringBoard mid-run
+// has not told us anything about the graph.
+const novelRan = novelSteps.length > 0 && novelSteps.every((r) => r.ok !== false);
+check(novelRan, 'the novel action ran at all', `[${novelVerdicts.join(', ')}]`);
+if (novelRan) {
+  check(novelSteps.some((r) => r.verification?.verdict === 'unverified'),
+    'an action never taken here before is reported as unverified, not as verified',
+    `[${novelVerdicts.join(', ')}]`);
+}
 check(passes.some((p) => p.verdicts.includes('ok')),
   'and once the graph has seen it, the outcome is predicted',
   `pass ${passes.findIndex((p) => p.verdicts.includes('ok')) + 1}`);

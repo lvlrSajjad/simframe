@@ -248,10 +248,44 @@ flow that fails outright has no `results` — `--json` reports `{ok:false, error
 whose own failure mode is a stack trace is one more thing to debug at the moment
 you can least afford it.
 
-**Still open:** a green end-to-end run of the hardened harness. The device it
-was being re-run on went dark mid-run ("the display surface could not be read"),
-which is the device-state entry above. The stale-ref check itself passed on that
-run — `10ffff1c18 -> 0000000000`, with the guard correctly refusing on
-structural identity (`4d90b515 → 94e56cda`) rather than on the degenerate
-all-zeros pixel hash, which is the design working exactly as intended. What has
-not been observed since the fix is all 33 checks passing in one run.
+Then four more versions of the same check, each defeated by a different
+assumption about where the device was standing:
+
+- A Settings leaver walked *back* to the screen the refs were numbered on, and
+  the guard then correctly resolved the ref — which read as the guard failing.
+- The precondition passed on `0000000000 -> 10ffffffff`: black, then uniform.
+  Two degenerate hashes accepted as proof that the screen changed, in the
+  harness whose whole job is testing the guard that exists because pixel hashes
+  cannot identify a screen. This project has now learned that lesson three
+  times.
+- A launch placed immediately before the map read let `settle` return before the
+  animation began, so the refs were numbered on a screen still arriving and the
+  next command did not recognise where it was. The guard was right; the harness
+  had numbered a ghost.
+- Folding the positioning launch into the novel-action flow made that check pass
+  whenever *the launch* was unverified, whether or not the novel action was. A
+  check that passes for the wrong reason is worse than one that fails, because
+  nothing ever tells you. It was found by reading, not by a run.
+
+It now pins both ends by name — refs read in one app, then a different app, so
+they cannot be the same screen — treats a degenerate hash as evidence of
+nothing, and separates "could this be tested" from "was the claim broken".
+
+**Still open: a green end-to-end run.** Every attempt since the fixes has been
+cut short by the device rather than by a check failing on its merits — two
+blackouts, a SpringBoard crash, and finally capture stopping altogether
+("the display surface could not be read", the re-resolve firing and the port
+dying again immediately). Best runs so far: **32/33 on iOS 18.0** and **32/33 on
+iOS 26.5**, with the single failure in each case a device fault the harness
+correctly reported as a device fault.
+
+That last part is the one thing here that is verified: on the final run the new
+precondition check said `FAIL the novel action ran at all — [did not run:
+simframe daemon did not produce a frame]` instead of accusing the transition
+graph. That is what all of this was for.
+
+Worth stating plainly, because it is a claim about this file's own value: the
+stale-ref check has caught **zero** defects in the ref guard and **five** in
+itself. Every failure it has produced has been its own assumption or the
+device's health. It is not yet earning its place, and the next person to touch
+it should weigh deleting it against fixing it a sixth time.
