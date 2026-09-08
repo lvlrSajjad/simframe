@@ -180,20 +180,52 @@ export const SAME_CONTROL_POINTS = 12;
  * and the accessibility one wins, because it is the actual hit target and its
  * label has not been through OCR.
  */
+const INTERACTIVE_ROLE = /button|field|cell|row|link|switch|slider|tab|menu|segment|checkbox/i;
+
+const contains = (frame, target) =>
+  Boolean(frame)
+  && target.x >= frame.x && target.x <= frame.x + (frame.width ?? 0)
+  && target.y >= frame.y && target.y <= frame.y + (frame.height ?? 0);
+
+/**
+ * Are these two candidates the same control?
+ *
+ * Two ways, and the second one cost a measurement. Centres a couple of points
+ * apart are one rectangle read twice. But a full-width list cell and the
+ * left-aligned text printed inside it have centres a hundred points apart and
+ * are still one tap target — measured on a Settings list, where "General" came
+ * back as the cell at (201,326) and the OCR text at (102,327) and the caller
+ * was asked which of the two it meant. The screen map already folds that pair
+ * into one row; this is `locate` catching up with it.
+ */
+function sameControl(a, b) {
+  if (Math.abs(a.x - b.x) <= SAME_CONTROL_POINTS && Math.abs(a.y - b.y) <= SAME_CONTROL_POINTS) return true;
+  // Containment only counts when the container is a hit target. A group that
+  // merely encloses things is not the thing inside it, which is what stops a
+  // tab bar from absorbing its own tabs.
+  if (INTERACTIVE_ROLE.test(a.type ?? '') && contains(a.frame, b)) return true;
+  if (INTERACTIVE_ROLE.test(b.type ?? '') && contains(b.frame, a)) return true;
+  return false;
+}
+
 function collapseSamePlace(ranked) {
   const kept = [];
   for (const c of ranked) {
-    const twin = kept.find(
-      (k) =>
-        Math.abs(k.target.x - c.target.x) <= SAME_CONTROL_POINTS &&
-        Math.abs(k.target.y - c.target.y) <= SAME_CONTROL_POINTS,
-    );
+    const twin = kept.find((k) => sameControl(k.target, c.target));
     if (!twin) {
       kept.push(c);
       continue;
     }
-    if (twin.target.source !== 'ax' && c.target.source === 'ax') {
-      kept[kept.indexOf(twin)] = { ...c, reasons: [...c.reasons, 'accessibility element, not the OCR reading of it'] };
+    // Prefer the real hit target: an accessibility element over OCR's reading of
+    // it, and an interactive role over a caption sitting inside it.
+    const better = (candidate, incumbent) => {
+      if (candidate.target.source === 'ax' && incumbent.target.source !== 'ax') return true;
+      if (candidate.target.source !== 'ax' && incumbent.target.source === 'ax') return false;
+      return INTERACTIVE_ROLE.test(candidate.target.type ?? '')
+        && !INTERACTIVE_ROLE.test(incumbent.target.type ?? '');
+    };
+    if (better(c, twin)) {
+      kept[kept.indexOf(twin)] = { ...c, reasons: [...c.reasons, 'the hit target, not the text printed on it'] };
     }
   }
   return kept;

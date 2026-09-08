@@ -30,6 +30,12 @@ const arg = (name, fallback) => {
 
 const tourFile = arg('tour');
 const rounds = Number(arg('rounds', 3));
+/**
+ * Above this, two consecutive tour screens are the same screen and the
+ * navigation between them failed. Deliberately well above the identity
+ * threshold: this is not "might be the same screen", it is "obviously is".
+ */
+const ARRIVAL_SUSPICION = 0.7;
 const outFile = arg('out');
 const device = arg('device');
 const label = arg('label', 'unnamed');
@@ -77,8 +83,18 @@ for (let round = 1; round <= rounds; round += 1) {
     // than the fingerprint. The first version of this harness did exactly that
     // and reported that the distributions overlapped completely.
     const previous = readings[readings.length - 1];
-    if (previous && previous.name !== screen.name && previous.hash === id.hash) {
-      arrivalFailures.push(`${previous.name} -> ${screen.name} (both ${String(id.hash).slice(0, 10)})`);
+    if (previous && previous.name !== screen.name) {
+      // Not just an identical hash. Two readings of the same screen can differ
+      // by a token and still obviously be the same screen — measured: a
+      // "springboard" reading that was actually Settings shared 11 of its 12
+      // tokens with the Settings reading beside it, and the harness passed it
+      // because the hashes differed. Anything this similar across a navigation
+      // means the navigation did not happen.
+      const s = fingerprint.similarity(previous.tokens, id.tokens ?? []);
+      if (s >= ARRIVAL_SUSPICION) {
+        arrivalFailures.push(
+          `${previous.name} -> ${screen.name}: similarity ${s.toFixed(2)} — the screen did not change`);
+      }
     }
     readings.push({
       name: screen.name,

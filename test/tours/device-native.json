@@ -1,17 +1,101 @@
 [
   {
-    "name": "springboard",
-    "note": "Carries a live weather widget and a clock, so it is the hardest screen on the device to fingerprint stably — which is why it is first.",
-    "steps": [{ "button": "home" }, { "pause": 700 }]
+    "name": "settings",
+    "note": "A long list under a nav bar \u2014 the shape most likely to have content misfiled as chrome.",
+    "steps": [
+      {
+        "launch": {
+          "value": "com.apple.Preferences",
+          "relaunch": true
+        }
+      },
+      {
+        "pause": 1400
+      }
+    ]
   },
   {
     "name": "browser",
     "note": "A static page, so its structure should be identical on every visit.",
-    "steps": [{ "openUrl": "https://example.com" }, { "pause": 900 }]
+    "steps": [
+      {
+        "openUrl": "https://example.com"
+      },
+      {
+        "pause": 1400
+      }
+    ]
   },
   {
-    "name": "settings",
-    "note": "A long list under a nav bar — the shape most likely to have content misfiled as chrome.",
-    "steps": [{ "launch": { "value": "com.apple.Preferences", "relaunch": true } }, { "pause": 1200 }]
+    "name": "reminders",
+    "note": "A near-empty list. Structurally sparse, which is where two screens are most likely to look alike.",
+    "steps": [
+      {
+        "launch": {
+          "value": "com.apple.reminders",
+          "relaunch": true
+        }
+      },
+      {
+        "pause": 1600
+      }
+    ]
+  },
+  {
+    "name": "contacts",
+    "note": "An indexed list with a search field \u2014 a nav bar with two rows in it.",
+    "steps": [
+      {
+        "launch": {
+          "value": "com.apple.MobileAddressBook",
+          "relaunch": true
+        }
+      },
+      {
+        "pause": 1600
+      }
+    ]
+  },
+  {
+    "name": "settings-general",
+    "note": "With the next screen, the case chrome labels exist for: two lists under a nav bar with near-identical structure, told apart by their title and nothing else. Without a nav title in the fingerprint these collide.",
+    "steps": [
+      {
+        "launch": {
+          "value": "com.apple.Preferences",
+          "relaunch": true
+        }
+      },
+      {
+        "pause": 1400
+      },
+      {
+        "tap": "General"
+      },
+      {
+        "pause": 1500
+      }
+    ]
+  },
+  {
+    "name": "settings-accessibility",
+    "note": "The other half of that pair.",
+    "steps": [
+      {
+        "launch": {
+          "value": "com.apple.Preferences",
+          "relaunch": true
+        }
+      },
+      {
+        "pause": 1400
+      },
+      {
+        "tap": "Accessibility"
+      },
+      {
+        "pause": 1500
+      }
+    ]
   }
 ]

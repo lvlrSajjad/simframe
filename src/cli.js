@@ -411,6 +411,7 @@ async function main() {
         {
           device: m.device.name,
           screen: { hash: m.identity.hash, name: m.name, exits: m.exits, keyboard: m.identity.keyboard },
+          sources: m.identity.entry?.sources ?? [],
           points: m.screen,
           elements: m.rows,
           truncated: m.truncated,

@@ -154,8 +154,13 @@ console.log('\n--- the screen map ---');
 await jsonRetry(['do', LOOP], { allowFail: true });
 const map = await jsonRetry(['ui']);
 
+// Report what actually answered rather than asserting the runner's situation.
+// This line used to read "with no accessibility tree available" unconditionally,
+// which is true on a hosted runner and a lie on a developer's machine.
+const sources = map.sources ?? [];
 check(Array.isArray(map.elements) && map.elements.length > 0,
-  'the screen map has elements', `${map.elements?.length ?? 0} read with no accessibility tree available`);
+  'the screen map has elements',
+  `${map.elements?.length ?? 0} element(s)${sources.length ? ` from ${sources.join('+')}` : ''}`);
 check(/^[0-9a-f]{32}$/.test(map.screen?.hash ?? ''),
   'the screen has a structural identity', map.screen?.hash?.slice(0, 12));
 check(Number.isFinite(map.points?.width) && Number.isFinite(map.points?.height),

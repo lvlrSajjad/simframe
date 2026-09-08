@@ -753,3 +753,112 @@ test('a --json call reports failure as JSON, not as prose', async () => {
   assert.match(handler, /JSON\.stringify/);
   assert.match(handler, /ok: false/);
 });
+
+import { bands, rowsOf } from '../src/regions.js';
+
+/** A row of elements at one height, evenly spaced across the width. */
+const row = (y, count, { height = 20, width = 60, from = 20, to = 380 } = {}) =>
+  Array.from({ length: count }, (_, i) => ({
+    frame: {
+      x: count === 1 ? (402 - width) / 2 : from + (i * (to - from - width)) / Math.max(1, count - 1),
+      y, width, height,
+    },
+  }));
+
+test('a nav bar is a short row above a gap, not a fraction of the screen', () => {
+  const screen = [
+    ...row(20, 2, { height: 14, width: 40 }),          // status bar, excluded from clustering
+    ...row(70, 1, { height: 24, width: 120 }),         // nav title
+    // A dense list starting well below it. Two elements per row — a label and
+    // its chevron — because a real list has them and clustering needs enough
+    // elements to have a distribution at all.
+    ...row(140, 2, { height: 44, width: 100 }),
+    ...row(186, 2, { height: 44, width: 100 }),
+    ...row(232, 2, { height: 44, width: 100 }),
+    ...row(278, 2, { height: 44, width: 100 }),
+  ];
+  const b = bands(screen, SCREEN);
+  assert.equal(b.clustered, true);
+  assert.ok(b.navBarBottom >= 90 && b.navBarBottom < 140,
+    `nav bar should end at the title row, got ${b.navBarBottom}`);
+  assert.equal(b.tabBarTop, Infinity, 'this screen has no tab bar');
+});
+
+test('a screen of evenly spaced rows has no chrome at all', () => {
+  // The springboard: icon and widget rows from top to bottom with no
+  // distinguished gap anywhere. The positional rule called its top row a nav
+  // bar, which is how one screen's identity became the name of the city in its
+  // weather widget.
+  const screen = [];
+  for (let y = 110; y < 800; y += 96) screen.push(...row(y, 4, { height: 60, width: 60 }));
+  const b = bands(screen, SCREEN);
+  assert.equal(b.clustered, true);
+  assert.equal(b.navBarBottom, 0, 'no gap means no nav bar');
+  assert.equal(b.tabBarTop, Infinity, 'and no tab bar');
+  // So nothing up there is chrome, and no widget label can enter identity.
+  assert.equal(regionFor(screen[0].frame, SCREEN, b), 'content');
+});
+
+test('a tab bar is several spread items below a gap; a list row is not', () => {
+  // Rows 10pt apart, then a 22pt separation before the bar. The separation is
+  // what identifies it — a bar butted straight against the content it floats
+  // over is not something geometry can pick out, and guessing from position
+  // alone is the bug this replaced.
+  const list = [];
+  for (let y = 140; y <= 740; y += 60) list.push(...row(y, 1, { height: 50, width: 360 }));
+  const withTabs = [...list, ...row(812, 5, { height: 22, width: 44 })];
+  const b = bands(withTabs, SCREEN);
+  assert.ok(b.tabBarTop <= 812 && b.tabBarTop > 790, `tab bar should start at the tab row, got ${b.tabBarTop}`);
+  assert.equal(regionFor({ x: 20, y: 812, width: 44, height: 22 }, SCREEN, b), 'tab-bar');
+
+  // The original bug: a list that simply continues to the bottom of the screen.
+  // Its last row sits inside the old positional tab-bar band and must not be
+  // called a tab item, or a seven-row list is a different screen from a
+  // three-row one.
+  const longList = [];
+  for (let y = 140; y <= 820; y += 60) longList.push(...row(y, 1, { height: 50, width: 360 }));
+  const b2 = bands(longList, SCREEN);
+  assert.equal(b2.tabBarTop, Infinity, 'an unbroken list has no tab bar');
+  assert.equal(regionFor({ x: 20, y: 820, width: 360, height: 50 }, SCREEN, b2), 'content');
+});
+
+test('too few elements to cluster falls back rather than guessing', () => {
+  const b = bands(row(70, 2), SCREEN);
+  assert.equal(b.clustered, false);
+  assert.ok(b.navBarBottom > 0, 'the HIG fractions are a better guess than none');
+  assert.ok(Number.isFinite(b.tabBarTop));
+});
+
+test('rows are grouped by vertical overlap, not by exact y', () => {
+  const items = [
+    { frame: { x: 10, y: 100, width: 40, height: 20 } },
+    { frame: { x: 80, y: 104, width: 40, height: 20 } },   // same row, 4pt lower
+    { frame: { x: 10, y: 200, width: 40, height: 20 } },   // next row
+  ];
+  const rows = rowsOf(items);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].items.length, 2);
+});
+
+test('a list cell and the text printed inside it are one control', () => {
+  // Measured on a Settings list: the accessibility cell spans the row so its
+  // centre is (201,326), and the OCR text is left-aligned at (102,327). A
+  // hundred points apart, one tap target — and the caller was asked which of
+  // the two it meant, which stopped a flow dead.
+  const targets = [
+    { label: 'General', x: 201, y: 326, type: 'Cell', source: 'ax', frame: { x: 20, y: 304, width: 362, height: 44 } },
+    { label: 'General', x: 102, y: 327, type: 'Text', source: 'ocr', frame: { x: 74, y: 318, width: 56, height: 18 } },
+  ];
+  const out = resolveIntent(targets, 'General', { screen: { width: 402, height: 874 } });
+  assert.equal(out.status, 'ok');
+  assert.equal(out.target.type, 'Cell', 'the cell is the hit target, not the text on it');
+
+  // But a container that merely encloses things must not absorb them, or a tab
+  // bar swallows its own tabs and there is nothing left to tap.
+  const group = [
+    { label: 'Tab Bar', x: 201, y: 833, type: 'Group', source: 'ax', frame: { x: 0, y: 810, width: 402, height: 60 } },
+    { label: 'Home', x: 40, y: 836, type: 'Text', source: 'ocr', frame: { x: 20, y: 826, width: 40, height: 18 } },
+  ];
+  const kept = rankIntent(group, 'Home', { screen: { width: 402, height: 874 } });
+  assert.ok(kept.some((c) => c.target.label === 'Home'), 'the tab survives');
+});

@@ -1271,3 +1271,108 @@ half that still worked.
 capture loop is inline in `main.swift` rather than factored into something a
 stub can drive. `StubPlatform` counts `reattachDisplay()` calls so the loop
 could be tested once it is extracted; that is in `docs/DEFERRED.md`.
+
+---
+
+## Region bands from clustering
+
+The bands decided what counted as chrome by fraction of screen height, and
+because chrome labels are the only text that enters a structural fingerprint,
+every misclassification landed in a screen's identity. Three phases paid for
+that. The fix derives the bands from where the elements themselves sit: chrome
+is separated from content by a gap that is an **outlier relative to that
+screen's own row spacing**, which is also how a detector concludes a springboard
+has no nav bar at all.
+
+### Measured either side, with `scripts/eval-fingerprint.mjs`
+
+Four device-native screens (Settings, a static web page, Reminders, Contacts),
+three rounds, every reading cold. Jaccard over structural token sets.
+
+| | positional bands | clustered bands |
+| --- | --- | --- |
+| same screen, revisited (min) | 1.00 | 1.00 |
+| different screens (max) | 0.04 | 0.05 |
+| gap | 0.96 | 0.95 |
+| threshold 0.36 inside the gap | yes | yes |
+| **chrome labels entering identity** | **14** | **6** |
+
+No regression in either distribution, and the point of the change lands in the
+last row. What stopped entering identity: `dictate`, `screen time`, `settings`,
+`continue`, `q search`, `a`, `+` — controls and content that the positional
+bands had filed as chrome. What survived is a browser's actual toolbar.
+
+### The case chrome labels exist for
+
+A gap-based rule could have thrown out real nav titles along with the noise, and
+the four screens above are too structurally distinct to notice. So the tour
+gained the adversarial pair: **Settings → General and Settings →
+Accessibility**, two lists under a nav bar with near-identical structure, told
+apart by their title and nothing else.
+
+| six screens, clustered bands | min | median | max |
+| --- | --- | --- | --- |
+| same screen, revisited (n=18) | 0.67 | 1.00 | 1.00 |
+| different screens (n=135) | 0.00 | 0.00 | 0.05 |
+
+Gap **0.62**, threshold inside it, and the adversarial pair sits at **0.05** —
+they stay separable because `general`, `accessibility` and the `settings` back
+label all still enter identity. Nine chrome labels survive across the whole
+tour and every one of them is a real piece of chrome.
+
+The weakest same-screen pair is `settings-general` against itself at 0.67: a
+sub-page whose fingerprint varies by a token or two between visits. Comfortably
+above 0.36, and worth watching.
+
+### Five measurements that were measuring something else
+
+This section is longer than the result, and it is the more useful half.
+
+**1. The harness's own tour.** The first version used a `settle` step between
+screens. `settle` defaults to mode `stable`, which is documented to return
+instantly in the moment before an animation begins — so readings were taken on
+the previous screen, two different screens produced the same fingerprint, and
+the harness reported that the distributions overlapped completely and identity
+was impossible. Action steps already settle against a baseline captured before
+them; the explicit step was not just redundant but harmful.
+
+**2. The arrival check that passed a failure.** After fixing the tour, the
+harness compared consecutive screens by *hash* and let anything through that
+differed. A "springboard" reading that was really Settings shared **11 of its 12
+tokens** with the Settings reading beside it and differed in one, so the hashes
+differed and the check passed. It now compares by similarity and refuses to
+report any distribution when two consecutive tour screens exceed 0.7.
+
+**3. The 0.88 different-screen ceiling.** Measured before those two fixes and
+genuinely alarming: two unrelated screens 0.88 similar against a threshold of
+0.36 would mean identity could not tell them apart. It was entirely the artifact
+above. On a valid tour the ceiling is 0.04.
+
+**4. `press home` reports success and does nothing.** The reason those readings
+were of the wrong screen. On a long-running daemon the Indigo HOME press returns
+`press in 64ms via simframed` and the screen never moves; on a freshly started
+daemon the same press works. Recorded separately below.
+
+**5. A cell and the text printed on it, called ambiguous.** Blocking the
+adversarial pair entirely: `tap "General"` refused because the accessibility
+cell spans the row (centre 201,326) and the OCR text is left-aligned inside it
+(centre 102,327). A hundred points apart, one tap target. The 12-point collapse
+from Phase 7 could not see it; containment can, and the screen map had been
+folding that pair correctly all along — `locate` has now caught up with it.
+
+## `press home` succeeds and does nothing
+
+| | |
+| --- | --- |
+| freshly started daemon | HOME works — full transition out of the app |
+| long-running daemon | `press in 64ms via simframed`, frame hash unchanged |
+
+Input has no feedback channel, so the socket call succeeding is all the Node
+side hears. The HID session goes stale independently of the display port — in
+this case capture was healthy throughout — and `resetHIDSession` exists on the
+client but is never called.
+
+The mechanism is not isolated, so nothing is claimed about the cause. What is
+certain is that this is a silent failure of the exact kind this project's
+policy forbids, and that it was visible all along as `no-visible-change`
+verdicts in the CI memory check, which I read as screen noise.
