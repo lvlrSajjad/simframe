@@ -5,6 +5,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+/**
+ * A directory under ROOT is a device only if it is named like a UDID.
+ *
+ * `simframe status` listed five phantom `? ` rows once, which were test
+ * fixtures. Anything that is not a UDID is not a device, whoever wrote it.
+ */
+export const isUdid = (name) => /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i.test(name);
+
 export const ROOT = process.env.SIMFRAME_HOME || path.join(os.homedir(), '.simframe');
 
 export function deviceDir(udid) {

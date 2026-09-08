@@ -92,8 +92,16 @@ jobs:
           set -o pipefail
           DEVICE=$(xcrun simctl list devices available -j | node -e '
             const j = JSON.parse(require("fs").readFileSync(0, "utf8"));
-            const rows = Object.entries(j.devices).flatMap(([rt, ds]) =>
-              ds.filter((d) => d.isAvailable).map((d) => ({ udid: d.udid, name: d.name, rt })));
+            // Filter to iOS iPhones, do not merely prefer them. Ranking alone
+            // picked an Apple Vision Pro: runtime ids sort as strings, and
+            // "xrOS-26-2" sorts after "iOS-26-5", so the newest runtime was
+            // xrOS and every device in it is a Vision Pro.
+            const rows = Object.entries(j.devices)
+              .filter(([rt]) => /SimRuntime\.iOS-/.test(rt))
+              .flatMap(([rt, ds]) => ds
+                .filter((d) => d.isAvailable && /^iPhone/.test(d.name))
+                .map((d) => ({ udid: d.udid, name: d.name, rt })));
+            if (!rows.length) { console.error("no available iPhone simulator on this runner"); process.exit(1); }
             const runtime = [...new Set(rows.map((d) => d.rt))]
               .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop();
             const here = rows.filter((d) => d.rt === runtime);
@@ -101,7 +109,6 @@ jobs:
               /^iPhone \d+ Pro$/.test(n) ? 0 : /^iPhone \d+$/.test(n) ? 1 : /^iPhone \d/.test(n) ? 2 : 3;
             here.sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, undefined, { numeric: true }));
             const pick = here[0];
-            if (!pick) { console.error("no available iPhone simulator on this runner"); process.exit(1); }
             process.stderr.write(`using ${pick.name} on ${runtime.split(".").pop()}\n`);
             process.stdout.write(pick.udid);
           ')

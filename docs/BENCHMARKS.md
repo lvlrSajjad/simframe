@@ -802,3 +802,78 @@ Worth recording because both wrong versions would have passed by luck:
 The working version normalises first: press home, take the baseline there, then
 launch. The before state is always the home screen and the after state always an
 app, whatever the runner was showing.
+
+## What an independent run found
+
+A peer session installed the packed tarball from GitHub HEAD on its own clone
+and ran the four steps. `doctor --json --strict` came back clean — exit 0,
+`capture.engine=simframed`, `input.driver=simframed`, `ocr.available=true` — and
+then it found five things that were broken *while reporting success*, which is
+the category this project cares about most.
+
+Two confounds it flagged correctly and I have to own: it was testing against a
+simulator **I was driving at the same time**, so some screen changes and graph
+edges in its notes are mine, and the state directory already held screens from
+earlier sessions. Its observations still stand; only the attribution of a few
+screen changes was affected.
+
+### The state version had drifted, and every command respawned the daemon
+
+`daemon.js` declared `STATE_VERSION = 5`; the Swift daemon wrote `6`. So
+`daemonStatus` judged the live daemon stale on **every CLI call**, `stopDaemon`
+declined to kill it (its heartbeat was fresh), and `ensureDaemon` started
+another. One log held **993** "superseded by another capture loop" lines.
+
+Capture kept working throughout, and `doctor` stayed green, which is why this
+survived so long. What it broke, silently:
+
+| | Symptom |
+| --- | --- |
+| `recall` | "1 frames buffered" — the memory it reported was created by the `recall` call itself |
+| `state --since=<mark>` | the baseline "is not in the buffered history" — the documented mark/wait pattern could not work |
+| `wait --since` | reported settling against a baseline the new daemon had never seen |
+| `start` | printed "started" while replacing a working daemon |
+| every flow timing | measured across daemon restarts |
+
+Fixed by aligning the constant, and a unit test now reads `stateVersion` out of
+`FrameStore.swift` and asserts the two match, because nothing else would have
+noticed. After the fix: four consecutive commands, one daemon, zero new
+"superseded" lines.
+
+### `simframe tap <label>` crashed on any screen the graph recognised
+
+`simframe tap X` built its step as `{tap: X, index: undefined}`. The undefined
+key survived normalization, and `actionSignature` fell through to a generic tail
+that did `JSON.stringify(step[key]).slice(...)` — `JSON.stringify(undefined)` is
+`undefined`, so it threw `Cannot read properties of undefined (reading
+'slice')`. It threw inside `graph.predict`, before the tap was sent, so the
+headline command failed on exactly those screens where memory should have made
+it fastest. Invisible in this session because a mid-transition screen has no
+identity, so `predict` was skipped.
+
+### A tap and a type on the same text shared one graph edge
+
+Underneath that: `actionSignature` looked for `{tap: ...}`, but every step
+reaching the graph has been normalized to `{action, value}`. So no shorthand
+branch ever matched and everything fell to the generic tail — signatures read
+`value:"Contacts"`, losing the action type entirely. `tap "Contacts"` and
+`type "Contacts"` produced the same signature and therefore the same edge. Every
+prediction in Phases 6 through 6d was keyed this way. It was self-consistent, so
+it worked, but it could not tell two different actions apart.
+
+### Three smaller ones
+
+- The unit tests wrote `TEST-*` directories into the real `~/.simframe`, where
+  `simframe status` showed them as five phantom devices. Tests now run against a
+  temp `SIMFRAME_HOME`, and `status` ignores any directory not named like a UDID.
+- `doctor` compiled the daemon mid-run and printed "present, not yet built" in
+  output that was already false, and it left a detached daemon behind. It now
+  builds before reporting, and stops any daemon it had to start.
+- The help text still said "Input needs idb".
+
+### The timings in Phases 6c and 6d are now doubly suspect
+
+Those tours ran with input silently on idb *and* with the daemon being replaced
+on every command. Neither figure measures the tool as it now stands. They are
+left in place as an honest record of what was measured, and they should not be
+quoted.

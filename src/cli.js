@@ -59,7 +59,8 @@ A script is a JSON array of steps, run in one go with a settle between each:
    {"type":{"into":"Name","text":"Fryer 3"}},
    {"tap":"Save"},{"waitText":"Saved","timeoutMs":5000}]
 
-Input needs idb (brew tap facebook/fb && brew install idb-companion,
+Input comes from the daemon. idb is needed only for the accessibility tree
+(brew tap facebook/fb && brew install idb-companion,
 then pipx install fb-idb). Observation works without it.
 
 The reliable pattern around an action is:
@@ -152,7 +153,7 @@ async function main() {
     case 'stop': {
       const targets = flags.all
         ? fs.existsSync(store.ROOT)
-          ? fs.readdirSync(store.ROOT)
+          ? fs.readdirSync(store.ROOT).filter(store.isUdid)
           : []
         : [(await resolveDevice(device)).udid];
       let stopped = 0;
@@ -173,7 +174,7 @@ async function main() {
       const udids = device
         ? [(await resolveDevice(device)).udid]
         : fs.existsSync(store.ROOT)
-          ? fs.readdirSync(store.ROOT)
+          ? fs.readdirSync(store.ROOT).filter(store.isUdid)
           : [];
       const rows = udids.map((udid) => {
         const { meta, pid, alive, stale } = api.daemonStatus(udid);
@@ -359,7 +360,7 @@ async function main() {
       const label = positional[0];
       if (!label) throw new Error('usage: simframe tap <label>');
       const res = await actions.runScript(flags.device, {
-        steps: [{ tap: label, index: flags.index != null ? num(flags.index) : undefined }],
+        steps: [flags.index != null ? { tap: label, index: num(flags.index) } : { tap: label }],
         options,
       });
       const step = res.results[0];
@@ -599,6 +600,7 @@ async function doctor({ json = false, strict = false, device } = {}) {
   // `level` is 'ok' | 'warn' | 'fail'. A warn means it works but not the way it
   // should — the exact state that used to be invisible.
   const add = (name, level, detail, extra = {}) => checks.push({ name, level, detail, ...extra });
+  const startedHere = [];
 
   add('node', 'ok', process.version);
   const { execFileSync } = await import('node:child_process');
@@ -615,6 +617,10 @@ async function doctor({ json = false, strict = false, device } = {}) {
   }
 
   const engineModule = await import('./engine.js');
+  // Build first, then report. doctor compiles the daemon on demand, so
+  // reporting the state beforehand printed "present, not yet built" in output
+  // that was already false by the time it reached the terminal.
+  await engineModule.ensureBuilt().catch(() => {});
   const build = engineModule.status();
   if (!build.haveSource) {
     add('simframed sources', 'fail', 'not present in this install — the daemon cannot be built', {
@@ -657,7 +663,9 @@ async function doctor({ json = false, strict = false, device } = {}) {
       // reports `simctl` on any machine where nothing happens to be running
       // yet — a warning about a downgrade that has not occurred, and one that
       // would have made the CI assertion fail for the wrong reason.
+      const wasRunning = Boolean(engineModule.runningEngine(d.udid));
       await api.ensureDaemon(d.udid).catch(() => {});
+      if (!wasRunning) startedHere.push(d.udid);
       // ensureDaemon waits for a frame; the control socket comes up a moment
       // later. Asking immediately reports `idb` for a device whose own input
       // path is seconds from ready — a race that would read as CI flake.
@@ -696,6 +704,13 @@ async function doctor({ json = false, strict = false, device } = {}) {
     }
   } catch (err) {
     add('capture', 'fail', err.message);
+  }
+
+  // doctor is a diagnostic, not a way to start things. If it had to start a
+  // daemon to answer "which engine is in use", it stops it again rather than
+  // leaving a detached process behind.
+  for (const udid of startedHere) {
+    try { await api.stopDaemon(udid); } catch { /* best effort */ }
   }
 
   const failed = checks.filter((c) => c.level === 'fail');

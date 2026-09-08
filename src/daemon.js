@@ -16,7 +16,14 @@ import { isBootedSync, resize, screenshot } from './simctl.js';
 
 // Bump whenever the shape of state.json changes, so an upgraded client retires
 // a capture loop left running by an older install instead of misreading it.
-export const STATE_VERSION = 5;
+// MUST equal SimframeCore.FrameStore.stateVersion in the Swift daemon. When
+// these drifted — Node on 5, Swift writing 6 — every single CLI command judged
+// the live daemon stale and spawned a replacement: 993 "superseded by another
+// capture loop" lines in one log. Capture still worked, so nothing looked
+// wrong, but each command lost the previous daemon's history, which silently
+// broke `recall`, `state --since`, `wait --since` and every timing measured
+// through a flow. A unit test asserts these two constants match.
+export const STATE_VERSION = 6;
 
 export const DEFAULTS = {
   fps: 4,

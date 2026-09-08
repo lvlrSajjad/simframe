@@ -56,6 +56,25 @@ function graphDir(udid) {
 /** A stable name for an action, so the same step matches its own history. */
 export function actionSignature(step) {
   if (!step || typeof step !== 'object') return String(step ?? '');
+  // Normalized steps carry `{action, value}`, not `{tap: "..."}`, and every
+  // step reaching the graph has been normalized. Without this the shorthand
+  // branches below never matched and everything fell to the generic tail, so a
+  // tap on "Contacts" and a type of "Contacts" produced the SAME signature —
+  // two different actions sharing one edge — and a stray `index: undefined`
+  // key made the tail throw outright.
+  if (step.action) {
+    // Bookkeeping is not part of what the action IS: the same tap with a longer
+    // timeout is the same edge.
+    const { action, timeoutMs, stableMs, autoSettle, ...rest } = step;
+    const value = rest.value ?? rest.target ?? rest.label;
+    if (value != null && typeof value !== 'object') return `${action}:${String(value).toLowerCase()}`;
+    // Shapes like tapAt and swipe are spread inline, so they have no `value` —
+    // their coordinates ARE their identity and must stay in the signature, or
+    // two taps at different points share one edge.
+    const keys = Object.keys(rest).filter((k) => rest[k] !== undefined).sort();
+    if (!keys.length) return String(action);
+    return `${action}:${stableValue(Object.fromEntries(keys.map((k) => [k, rest[k]])))}`;
+  }
   if (step.tap != null) return `tap:${String(step.tap).toLowerCase()}`;
   if (step.tapAt) return `tapAt:${Math.round(step.tapAt.x)},${Math.round(step.tapAt.y)}`;
   if (step.swipe) {
@@ -66,8 +85,16 @@ export function actionSignature(step) {
   if (step.button) return `button:${step.button}`;
   if (step.launch) return `launch:${step.launch}`;
   if (step.openUrl) return `openUrl:${step.openUrl}`;
-  const [key] = Object.keys(step);
-  return `${key}:${JSON.stringify(step[key]).slice(0, 40)}`;
+  // Last resort. Skip keys whose value is undefined: JSON.stringify(undefined)
+  // is undefined, and calling .slice on it threw before any action was sent.
+  const key = Object.keys(step).find((k) => step[k] !== undefined);
+  if (!key) return '';
+  return `${key}:${stableValue(step[key])}`;
+}
+
+/** JSON, but never undefined, and always short enough to use as a key. */
+function stableValue(value) {
+  return String(JSON.stringify(value) ?? '').slice(0, 40);
 }
 
 /** Every fingerprint a node answers to: its canonical one, plus its variants. */

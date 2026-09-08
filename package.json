@@ -49,7 +49,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test test/unit.test.mjs",
+    "test": "SIMFRAME_HOME=\"$(mktemp -d)\" node --test test/unit.test.mjs",
     "mcp": "node src/cli.js mcp",
     "smoke": "node scripts/smoke.mjs",
     "bench": "./scripts/bench.sh",

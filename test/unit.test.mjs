@@ -344,6 +344,8 @@ import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as graphmod from '../src/graph.js';
+import { STATE_VERSION } from '../src/daemon.js';
+import { actionSignature } from '../src/graph.js';
 
 const SCREEN = { width: 402, height: 874 };
 const el = (label, x, y, type = 'Text', extra = {}) => ({
@@ -457,8 +459,10 @@ test('a flow with an unverified step is not saved', () => {
 // --- variant fingerprints -------------------------------------------------
 
 const tok = (n, tag) => Array.from({ length: n }, (_, i) => `${tag}:cell:content:w16:h4:x0:y${i}#1`);
-// store.ROOT is read once at import, so a per-test SIMFRAME_HOME cannot isolate
-// these. A per-test device id can: each gets its own graph directory.
+// store.ROOT is read once at import, so setting SIMFRAME_HOME here would be too
+// late — `npm test` sets it to a temp dir for the whole process instead. These
+// tests used to write TEST-* directories into the real ~/.simframe, where they
+// showed up as phantom devices in `simframe status`.
 const freshDevice = (name) => {
   const udid = `TEST-${name}`;
   graphmod.forget(udid);
@@ -528,4 +532,37 @@ test('content that merely falls into the tab bar band is not a screen name', () 
   // And tomorrow's date is the same screen as today's.
   const tomorrow = fingerprint([...tabs, { ...banner, label: 'Sep 09, 2026' }], SCREEN);
   assert.equal(withBanner.hash, tomorrow.hash);
+});
+
+// --- the two halves must agree --------------------------------------------
+
+test('the Node and Swift state versions match', () => {
+  // These drifted once — Node on 5, Swift writing 6 — and the effect was
+  // invisible: every CLI command judged the live daemon stale and spawned a
+  // replacement, 993 times in one log. Capture kept working, so nothing looked
+  // wrong, while `recall`, `state --since` and `wait --since` all silently lost
+  // their history and every flow timing was measured across daemon restarts.
+  const swift = fs.readFileSync(
+    new URL('../native/simframed/Sources/SimframeCore/FrameStore.swift', import.meta.url), 'utf8');
+  const match = swift.match(/stateVersion\s*=\s*(\d+)/);
+  assert.ok(match, 'could not find stateVersion in FrameStore.swift — has it moved?');
+  assert.equal(Number(match[1]), STATE_VERSION,
+    `Swift writes state version ${match[1]}, Node expects ${STATE_VERSION}`);
+});
+
+test('an action signature says what the action was, not just its value', () => {
+  const sig = (raw) => actionSignature(normalizeStep(raw));
+  // A tap and a type on the same text are different edges. They collided,
+  // because normalized steps carry {action, value} and the shorthand branches
+  // only looked for {tap: ...}, so everything fell to a generic tail.
+  assert.notEqual(sig({ tap: 'Contacts' }), sig({ type: 'Contacts' }));
+  assert.equal(sig({ tap: 'Contacts' }), 'tap:contacts');
+  // Coordinates are the identity of a coordinate tap.
+  assert.notEqual(sig({ tapAt: { x: 10, y: 20 } }), sig({ tapAt: { x: 99, y: 20 } }));
+  // Bookkeeping is not: the same tap with a longer timeout is the same edge.
+  assert.equal(sig({ tap: 'Save', timeoutMs: 9000 }), sig({ tap: 'Save' }));
+  // And a stray undefined key must not throw. `simframe tap X` passed
+  // `index: undefined`, which crashed the signature builder before any tap was
+  // sent — the headline command, broken on every screen the graph recognised.
+  assert.equal(sig({ tap: 'Contacts', index: undefined }), 'tap:contacts');
 });

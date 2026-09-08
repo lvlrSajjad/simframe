@@ -25,7 +25,12 @@ export function normalizeStep(raw) {
   // Siblings like timeoutMs sit alongside the shorthand key and must survive.
   const { [key]: value, ...rest } = raw;
   const inline = value && typeof value === 'object' && !Array.isArray(value) ? value : { value };
-  return { ...rest, ...inline, action: key };
+  const step = { ...rest, ...inline, action: key };
+  // Drop keys that are present but undefined. `simframe tap X` used to pass
+  // `index: undefined`, which survived here and then crashed the signature
+  // builder before the tap was ever sent.
+  for (const k of Object.keys(step)) if (step[k] === undefined) delete step[k];
+  return step;
 }
 
 export async function runScript(
