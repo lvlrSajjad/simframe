@@ -322,6 +322,35 @@ populates — then settles back. An app still launching genuinely has no tree ye
 and returns the application node alone; that is worth reporting rather than
 retrying until it looks populated.
 
+### Reading it safely
+
+Four things can cut a walk short, and every one of them produces something that
+looks exactly like a small screen: the depth cap, the node cap, the time budget,
+and a guest request that misses its deadline and is answered with
+`AXPTranslatorResponse.emptyResponse` — which makes that subtree look genuinely
+childless. Return `emptyResponse` rather than nil there, because nil crashes the
+translator.
+
+None of that is visible in the nodes, so the shortfall has to travel with them.
+`accessibilityTree()` returns whether the tree is all of one, the daemon reports
+it as `axTruncated`, and a partial tree is deliberately **not** claimed as an
+`ax` source — the layer above treats accessibility elements as the real hit
+targets and then writes them into screen memory, and half a screen remembered as
+a whole one is worse than a screen read again from pixels.
+
+Two more, learned by getting them wrong:
+
+- **Constructing the bridge proves nothing.** The classes and selectors existing
+  is exactly the state a bridge is in when it reads nil. Any "is accessibility
+  available" answer has to come from an actual attribute read.
+- **The translator is a process singleton** and the delegate captures one
+  device's token, so a bridge belongs to the device it was built for. Rebinding
+  to another device must discard it.
+
+Everything here is version-coupled and re-verified per Xcode. `SIMFRAME_AX_DRIVER=idb`
+exists as the escape hatch for the day this stops working, and `simframe doctor`
+treats a driver that was asked for as chosen rather than degraded.
+
 ### Constants (from idb's AXPAttributes.h)
 
 Unused by the path above, kept for the in-guest request form.

@@ -130,8 +130,9 @@ would be worth adding:
   common names; embeddings would handle paraphrase ("go back" vs "return").
   Needs the NaturalLanguage framework, so it belongs in the daemon.
 - **The eval harness** over fifteen screens from three apps, which is what would
-  turn "it works on the screens I tried" into a recall number — and which
-  Phase 2b's scheduling is supposed to depend on.
+  turn "it works on the screens I tried" into a recall number. Phase 2a was
+  supposed to wait on it and did not; the harness is still the thing that would
+  say what OCR-only misses on accessibility-poor screens.
 
 ### Confirm vocabulary is English
 `APPLY`, `OK`, `SAVE`, `DONE` and friends are hardcoded. A localised UI needs
