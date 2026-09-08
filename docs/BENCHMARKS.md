@@ -720,3 +720,49 @@ own data loading and by whether screens report settled, not by the changes being
 tested. Single-run timings at this granularity are not evidence of anything and
 are no longer quoted as such; the per-operation numbers earlier in this file are
 the ones that mean something.
+
+## CI, strict mode, and the socket bug it found
+
+### What the two checks cost
+
+| Check | Runner | Needs a simulator | Time |
+| --- | --- | --- | --- |
+| Packaging — every build input ships | any | no | ~2 s |
+| Integration — tarball on a booted simulator, `--strict` | `macos-15` | yes | ~5-10 min |
+
+The packaging check derives its required list from the build's own inputs: the
+SwiftPM manifest, every `.swift` under `Sources` and `Tests`, the standalone OCR
+helper, and every runtime module. Verified against both historical regressions
+by removing each from `files` in turn — each exits 1.
+
+### Two bugs found while writing the checks
+
+**The existing packaging check could not fail.** It ran
+`swift build … 2>&1 | tail -3`, and a pipeline's exit status is the last
+command's, so `tail` succeeding masked any build failure. The one check meant to
+catch a broken package was itself broken for its entire life. Now `set -o
+pipefail` and no `tail`.
+
+**A daemon shutting down deleted its successor's control socket.**
+`ControlSocket.stop()` called `unlink(path)` unconditionally. Restarting the
+daemon meant: old process killed → new process binds and creates the socket →
+old process's cleanup unlinks the same path. Capture is file-based so it kept
+working; only *input* degraded, to idb.
+
+This had been happening on the development machine for an unknown period. It was
+invisible because nothing reported which input driver was in use, and it is the
+exact failure shape the strict checks exist for — found by the loud-degradation
+work on the day it was written, on the author's own machine, not by a test.
+
+`stop()` now records the socket file's inode at bind time and removes it only if
+the file still has that inode.
+
+### A caveat this puts on the Phase 6c and 6d timings
+
+Because input was silently on idb, every tap in those tours paid ~285 ms through
+the idb client instead of going over the daemon socket. The wall-clock figures in
+those two sections were measured on the fallback input path and are pessimistic
+by roughly that much per tap. They are left as recorded — they were honest
+measurements of what the tool actually did at the time — but they are not a
+measurement of the daemon's input path, and the tours should be re-run now that
+`--strict` can prove which path is in use.

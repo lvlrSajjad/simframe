@@ -23,31 +23,23 @@ jobs:
       - run: npm test
       - name: CLI loads
         run: node src/cli.js --help
-      - name: The package ships everything the code needs at runtime
-        # A file missing from "files" does not fail a build or a test — it fails
-        # silently for whoever installs it. OCR shipped disabled exactly this way.
-        run: |
-          npm pack --dry-run --json > /tmp/pack.json
-          node -e '
-            const files = require("/tmp/pack.json")[0].files.map((f) => f.path);
-            const required = ["native/ocr.swift", "src/ocr.js", "src/cli.js", "src/mcp.js"];
-            const missing = required.filter((r) => !files.includes(r));
-            for (const f of required) console.log(`${missing.includes(f) ? "MISSING" : "ok     "} ${f}`);
-            if (missing.length) {
-              console.error(`\n${missing.length} runtime file(s) absent from the published package`);
-              process.exit(1);
-            }
-          '
+
+      # Seconds, no simulator, and it would have caught both regressions this
+      # project has shipped. The required list is derived from the build's own
+      # inputs, so it cannot rot the way a hand-written list did.
+      - name: The package ships every build input
+        run: node scripts/check-package.mjs
 
       - name: The packaged tarball can actually build the daemon
-        # Shipping Sources without Tests leaves Package.swift declaring a test
-        # target with no directory, and SwiftPM then reports overlapping
-        # sources. Every install would silently fall back to the simctl engine.
+        # No pipe to `tail` here. `swift build | tail -3` reports tail's exit
+        # code, so the previous version of this step could not fail — the one
+        # check meant to catch a broken package was itself broken.
         run: |
+          set -o pipefail
           npm pack --pack-destination /tmp >/dev/null
           rm -rf /tmp/pkgcheck && mkdir -p /tmp/pkgcheck && cd /tmp/pkgcheck
           tar -xzf /tmp/simframe-*.tgz
-          swift build -c release --package-path package/native/simframed 2>&1 | tail -3
+          swift build -c release --package-path package/native/simframed
 
       - name: Registry manifest agrees with package.json
         run: |
@@ -68,15 +60,112 @@ jobs:
             process.exit(failed ? 1 : 0);
           '
 
-  doctor:
-    # A hosted runner has simctl but no guarantee of a booted simulator, so this
-    # checks that doctor runs and reports rather than that capture succeeds.
-    runs-on: macos-latest
+  # The job that would have caught what the unit tests could not: install the
+  # tarball the way a user does, on a real simulator, and refuse to pass if any
+  # layer has quietly degraded.
+  integration:
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      SIMFRAME_STRICT: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
       - run: npm ci
-      - run: node src/cli.js doctor || true
-      - run: node src/cli.js devices --all
+
+      - name: Install from the packed tarball, as a user would
+        run: |
+          set -o pipefail
+          npm pack --pack-destination /tmp
+          npm install -g /tmp/simframe-*.tgz
+          simframe --version
+
+      - name: Boot a simulator
+        run: |
+          set -o pipefail
+          xcrun simctl list devicetypes | grep -i 'iPhone' | tail -5
+          DEVICE=$(xcrun simctl create ci-iphone \
+            "$(xcrun simctl list devicetypes -j | node -e '
+              const d = JSON.parse(require("fs").readFileSync(0, "utf8")).devicetypes
+                .filter((t) => /iPhone/.test(t.name)).pop();
+              process.stdout.write(d.identifier);
+            ')")
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+
+      - name: Start capture
+        run: simframe start --device="$DEVICE"
+
+      # SIMFRAME_STRICT=1 is set for the whole job, so any degraded layer — a
+      # daemon that would not build, OCR unavailable, input falling back to idb
+      # — exits non-zero here instead of passing quietly.
+      - name: Every layer is the good one, or this fails
+        run: |
+          set -o pipefail
+          simframe doctor --json --device="$DEVICE" | tee /tmp/doctor.json
+          node -e '
+            const d = JSON.parse(require("fs").readFileSync("/tmp/doctor.json", "utf8"));
+            const want = { "capture.engine": "simframed", "ocr.available": true };
+            let failed = false;
+            for (const [k, v] of Object.entries(want)) {
+              const ok = d[k] === v;
+              console.log(`${ok ? "ok  " : "FAIL"} ${k} = ${JSON.stringify(d[k])} (want ${JSON.stringify(v)})`);
+              if (!ok) failed = true;
+            }
+            // The input driver must be the daemon, not idb. idb is not installed
+            // on a hosted runner, so a fallback here shows up as unavailable —
+            // either way it is not simframed and it is not acceptable.
+            const input = d["input.driver"];
+            const inputOk = input === "simframed";
+            console.log(`${inputOk ? "ok  " : "FAIL"} input.driver = ${JSON.stringify(input)} (want "simframed")`);
+            if (!inputOk) failed = true;
+            if (d.warnings > 0) {
+              console.log(`\n${d.warnings} degraded layer(s):`);
+              for (const c of d.checks.filter((c) => c.level !== "ok")) console.log(`  ${c.level} ${c.name}: ${c.detail}`);
+            }
+            process.exit(failed ? 1 : 0);
+          '
+
+      - name: A step runs, and capture notices the screen change
+        # `press` is not a step type — the step key is `button`. And the frame
+        # counter cannot advance on an idle screen, because the daemon captures
+        # on damage: the first version of this asserted a counter would move
+        # while nothing was moving. So drive a real change (launching a built-in
+        # app needs no network and no third-party bundle) and assert the frame
+        # HASH changed. `seq` resets when the daemon restarts, so it is reported
+        # but not asserted on.
+        run: |
+          set -o pipefail
+          read_state() {
+            simframe state --device="$DEVICE" --json \
+              | node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(s.hash+" "+s.seq)'
+          }
+          BEFORE=$(read_state)
+          printf '[{"launch":"com.apple.Preferences"},{"settle":true}]\n' > /tmp/flow.json
+          simframe do /tmp/flow.json --device="$DEVICE"
+          AFTER=$(read_state)
+          node -e '
+            const [bh, bs] = process.argv[1].split(" ");
+            const [ah, as] = process.argv[2].split(" ");
+            const moved = bh !== ah;
+            console.log(`${moved ? "ok  " : "FAIL"} frame hash changed: ${bh.slice(0, 10)} -> ${ah.slice(0, 10)}`);
+            console.log(`     seq ${bs} -> ${as}`);
+            if (!moved) console.error("capture did not see the screen change; the pipeline is not live");
+            process.exit(moved ? 0 : 1);
+          ' "$BEFORE" "$AFTER"
+
+      - name: Daemon log, on failure
+        if: failure()
+        run: |
+          simframe status --device="$DEVICE" || true
+          cat ~/.simframe/*/simframed.log 2>/dev/null | tail -40 || true
+
+      - name: Tear down
+        if: always()
+        run: |
+          simframe stop --all || true
+          xcrun simctl shutdown "$DEVICE" || true
+          xcrun simctl delete "$DEVICE" || true

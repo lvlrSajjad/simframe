@@ -16,6 +16,10 @@ public final class ControlSocket {
     // Requests run off the capture loop: a swipe sleeps for its whole duration
     // and must not stall frame capture.
     private let workQueue = DispatchQueue(label: "simframe.control", qos: .userInitiated)
+    /// Identity of the socket file this instance created, so shutdown can tell
+    /// its own socket from one a successor has since bound at the same path.
+    private var boundIno: ino_t = 0
+    private var boundDev: dev_t = 0
 
     public init(path: String, handler: @escaping Handler) {
         self.path = path
@@ -43,6 +47,11 @@ public final class ControlSocket {
         guard bound == 0 else { close(listenFD); throw SocketError.failed("bind(): \(errno)") }
         // Only this user may drive the device.
         chmod(path, 0o600)
+        var bornStat = stat()
+        if stat(path, &bornStat) == 0 {
+            boundIno = bornStat.st_ino
+            boundDev = bornStat.st_dev
+        }
         guard listen(listenFD, 8) == 0 else { close(listenFD); throw SocketError.failed("listen(): \(errno)") }
 
         let source = DispatchSource.makeReadSource(fileDescriptor: listenFD, queue: workQueue)
@@ -88,7 +97,20 @@ public final class ControlSocket {
         acceptSource = nil
         if listenFD >= 0 { close(listenFD) }
         listenFD = -1
-        unlink(path)
+        // Only remove the socket if it is still the one we created.
+        //
+        // A restart binds a fresh socket at the same path, and a dying daemon
+        // that unlinks blindly deletes its *successor's* socket. Capture keeps
+        // working — that is file-based — so the only symptom is input quietly
+        // dropping to idb, which is slower and has different semantics. That is
+        // exactly the kind of invisible downgrade this tool is supposed to
+        // refuse to have.
+        var current = stat()
+        if stat(path, &current) == 0, current.st_ino == boundIno, current.st_dev == boundDev {
+            unlink(path)
+        }
+        boundIno = 0
+        boundDev = 0
     }
 
     public enum SocketError: Error, CustomStringConvertible {

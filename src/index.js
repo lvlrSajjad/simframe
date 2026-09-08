@@ -118,6 +118,35 @@ export async function ensureDaemon(deviceQuery, options = {}) {
 export let engineFallbackReason = null;
 
 /**
+ * Degrading has to announce itself.
+ *
+ * "Degrade rather than fail" is the right policy and it nearly sank the tool
+ * twice: a file missing from the published package made every install fall back
+ * to the simctl engine, and OCR ship disabled, both **silently**. Tests passed,
+ * CI passed, nothing printed. The failure was not the missing file; it was that
+ * the degradation was invisible.
+ *
+ * So the reason is written next to the device's state, not just held in this
+ * process's memory — otherwise a later `doctor` or `start` sees `engine=simctl`
+ * with no explanation, because the process that chose it has exited.
+ */
+function recordFallback(udid, reason) {
+  const file = path.join(store.deviceDir(udid), 'engine-fallback.json');
+  try {
+    if (reason) store.writeAtomic(file, JSON.stringify({ reason, at: Date.now() }));
+    else fs.rmSync(file, { force: true });
+  } catch {
+    // Never let bookkeeping stop capture from starting.
+  }
+}
+
+/** Why the running engine is not simframed, if it is not. Survives the process that chose it. */
+export function fallbackReason(udid) {
+  if (engineFallbackReason) return engineFallbackReason;
+  return store.readJson(path.join(store.deviceDir(udid), 'engine-fallback.json'))?.reason ?? null;
+}
+
+/**
  * Start whichever engine was asked for.
  *
  * simframed unless told otherwise: it reads the framebuffer directly and is
@@ -130,10 +159,12 @@ async function startEngine(udid, options) {
     const built = await engine.ensureBuilt();
     if (built.ok) {
       engineFallbackReason = null;
+      recordFallback(udid, null);
       engine.spawnDaemon(udid, options);
       return 'simframed';
     }
     engineFallbackReason = built.reason ?? 'simframed unavailable';
+    recordFallback(udid, engineFallbackReason);
   }
   spawnNodeDaemon(udid, options);
   return 'simctl';

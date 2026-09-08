@@ -35,7 +35,9 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe flow    run  <name>       replay a saved flow
   simframe flow    list              list saved flows
   simframe devices                   list simulators
-  simframe doctor                    check that this machine can capture
+  simframe doctor [--json]           check that this machine can capture
+                                     (--strict, or SIMFRAME_STRICT=1, makes any
+                                      degraded layer a non-zero exit)
 
 Options
   --device=<udid|name>   simulator to target (default: the booted one)
@@ -127,11 +129,23 @@ async function main() {
       const { device: dev, state, started } = await api.ensureDaemon(device, options);
       const engineModule = await import('./engine.js');
       const running = engineModule.runningEngine(dev.udid) ?? 'simctl';
-      const note = api.engineFallbackReason ? ` (simframed unavailable: ${api.engineFallbackReason})` : '';
       console.log(
         `${started ? 'started' : 'already running'} — ${dev.name} (${dev.runtime}) ` +
-          `engine=${running} frame #${state.seq} ${state.width}x${state.height}${note}`,
+          `engine=${running} frame #${state.seq} ${state.width}x${state.height}`,
       );
+      // Say which engine, and if it is the slow one, say why. A downgrade that
+      // prints nothing is how this shipped broken twice.
+      if (running !== 'simframed') {
+        const why = api.fallbackReason(dev.udid);
+        console.log(
+          `WARN engine=simctl — roughly 30x slower per frame. ` +
+            (why ? `simframed unavailable: ${why}` : 'reason unrecorded; run simframe doctor'),
+        );
+        if (Boolean(flags.strict) || process.env.SIMFRAME_STRICT === '1') {
+          console.error('--strict: refusing to run on a degraded engine');
+          process.exitCode = 1;
+        }
+      }
       return;
     }
 
@@ -546,7 +560,10 @@ async function main() {
     }
 
     case 'doctor': {
-      await doctor();
+      await doctor({
+        json: Boolean(flags.json),
+        strict: Boolean(flags.strict) || process.env.SIMFRAME_STRICT === '1',
+      });
       return;
     }
 
@@ -556,73 +573,140 @@ async function main() {
   }
 }
 
-async function doctor() {
+/**
+ * Report every layer, and treat a silent downgrade as a problem.
+ *
+ * The tool's policy is to degrade rather than fail, which is right — a machine
+ * without a Swift toolchain should still capture frames. What was wrong was
+ * that degrading looked identical to working: a published package missing one
+ * file made every install fall back to the simctl engine, and another shipped
+ * OCR disabled. Both passed CI, and nothing printed a word.
+ *
+ * So a fallback is a `warn`, not an `ok`, and `--strict` (or SIMFRAME_STRICT=1)
+ * makes any warn a non-zero exit. CI runs strict; users see the warning.
+ */
+async function doctor({ json = false, strict = false } = {}) {
   const checks = [];
-  const add = (name, ok, detail) => checks.push({ name, ok, detail });
+  // `level` is 'ok' | 'warn' | 'fail'. A warn means it works but not the way it
+  // should — the exact state that used to be invisible.
+  const add = (name, level, detail, extra = {}) => checks.push({ name, level, detail, ...extra });
 
-  add('node', true, process.version);
+  add('node', 'ok', process.version);
+  const { execFileSync } = await import('node:child_process');
   try {
-    const { execFileSync } = await import('node:child_process');
-    add('xcrun', true, execFileSync('xcrun', ['--version'], { encoding: 'utf8' }).trim().split('\n')[0]);
+    add('xcrun', 'ok', execFileSync('xcrun', ['--version'], { encoding: 'utf8' }).trim().split('\n')[0]);
   } catch (err) {
-    add('xcrun', false, err.message);
+    add('xcrun', 'fail', err.message);
   }
   try {
-    const { execFileSync } = await import('node:child_process');
     execFileSync('sips', ['--version'], { encoding: 'utf8', stdio: 'pipe' });
-    add('sips', true, 'available');
+    add('sips', 'ok', 'available');
   } catch (err) {
-    add('sips', false, err.message);
+    add('sips', 'fail', err.message);
   }
+
+  const engineModule = await import('./engine.js');
+  const build = engineModule.status();
+  if (!build.haveSource) {
+    add('simframed sources', 'fail', 'not present in this install — the daemon cannot be built', {
+      key: 'daemon.sources',
+    });
+  } else {
+    add('simframed sources', 'ok', build.haveBinary ? (build.stale ? 'present, binary stale' : 'present, built') : 'present, not yet built', {
+      key: 'daemon.sources',
+    });
+  }
+
+  let ocrAvailable = false;
   try {
     const ocr = await import('./ocr.js');
     const built = await ocr.ensureBinary();
-    add('on-device OCR', built.available, built.available ? 'available' : built.reason);
+    ocrAvailable = Boolean(built.available);
+    add('on-device OCR', ocrAvailable ? 'ok' : 'warn', ocrAvailable ? 'available' : built.reason, {
+      key: 'ocr.available',
+      value: ocrAvailable,
+    });
   } catch (err) {
-    add('on-device OCR', false, err.message);
+    add('on-device OCR', 'warn', err.message, { key: 'ocr.available', value: false });
   }
+
   try {
     const booted = await bootedDevices();
-    add('booted simulator', booted.length > 0, booted.map((d) => `${d.name} (${d.runtime})`).join(', ') || 'none');
-    if (booted.length) {
+    add('booted simulator', booted.length ? 'ok' : 'warn',
+      booted.map((d) => `${d.name} (${d.runtime})`).join(', ') || 'none');
+    for (const d of booted) {
       const input = await import('./input.js');
       const control = await import('./control.js');
-      for (const d of booted) {
-        const driver = await input.driverFor(d.udid);
-        const daemon = control.available(d.udid);
-        add(`capture engine (${d.name})`, true, daemon ? 'simframed' : 'simctl');
-        add(`input driver (${d.name})`, driver.available, driver.available ? `${driver.name}: ${driver.version}` : driver.reason);
-        add(
-          `text recognition (${d.name})`,
-          true,
-          daemon ? 'simframed (in-process, off the framebuffer)' : 'sips + helper binary',
-        );
-        // idb's only remaining job. Say so, so nobody assumes it is load-bearing
-        // for capture or input, which it no longer is.
-        const ax = await input.detectDriver();
-        add(
-          `accessibility tree (${d.name})`,
-          ax.available,
-          ax.available ? 'idb — the only thing idb is still required for' : `unavailable: ${ax.reason}`,
-        );
+      // Start the engine before asking which engine is in use. Reading it first
+      // reports `simctl` on any machine where nothing happens to be running
+      // yet — a warning about a downgrade that has not occurred, and one that
+      // would have made the CI assertion fail for the wrong reason.
+      await api.ensureDaemon(d.udid).catch(() => {});
+      // ensureDaemon waits for a frame; the control socket comes up a moment
+      // later. Asking immediately reports `idb` for a device whose own input
+      // path is seconds from ready — a race that would read as CI flake.
+      for (let i = 0; i < 40 && !control.available(d.udid); i += 1) {
+        await new Promise((r) => setTimeout(r, 50));
       }
+      const driver = await input.driverFor(d.udid, { refresh: true });
+      // Which engine is actually capturing, from the daemon's own record.
+      // `control.available` answers a different question — whether the input
+      // socket is up — and using it here reported simctl on a machine that was
+      // capturing with simframed perfectly well.
+      const captureEngine = engineModule.runningEngine(d.udid) ?? 'simctl';
+      const daemon = captureEngine === 'simframed';
+      const why = captureEngine === 'simctl' ? api.fallbackReason(d.udid) : null;
+      add(`capture engine (${d.name})`, captureEngine === 'simframed' ? 'ok' : 'warn',
+        captureEngine === 'simframed'
+          ? 'simframed'
+          : `simctl — roughly 30x slower per frame${why ? `; simframed unavailable: ${why}` : '. Run simframe start to see why'}`,
+        { key: 'capture.engine', value: captureEngine });
+      add(`input driver (${d.name})`, driver.available ? (driver.name === 'simframed' ? 'ok' : 'warn') : 'warn',
+        driver.available ? `${driver.name}: ${driver.version}` : driver.reason,
+        { key: 'input.driver', value: driver.available ? driver.name : null });
+      add(`text recognition (${d.name})`, 'ok',
+        daemon ? 'simframed (in-process, off the framebuffer)' : 'sips + helper binary');
+      const ax = await input.detectDriver();
+      add(`accessibility tree (${d.name})`, ax.available ? 'ok' : 'warn',
+        ax.available ? 'idb — the only thing idb is still required for' : `unavailable: ${ax.reason}`,
+        { key: 'ax.driver', value: ax.available ? 'idb' : null });
     }
     if (booted.length) {
       const t0 = Date.now();
       const res = await api.getFrame(booted[0].udid);
-      add('capture', true, `frame #${res.state.seq} ${res.width}x${res.height} in ${Date.now() - t0}ms (age ${res.ageMs}ms)`);
+      add('capture', 'ok',
+        `frame #${res.state.seq} ${res.width}x${res.height} in ${Date.now() - t0}ms (age ${res.ageMs}ms)`,
+        { key: 'capture.frames', value: res.state.seq });
     }
   } catch (err) {
-    add('capture', false, err.message);
+    add('capture', 'fail', err.message);
   }
 
-  for (const c of checks) {
-    const mark = c.ok ? 'ok  ' : c.name.startsWith('input driver') ? 'none' : 'FAIL';
-    console.log(`${mark} ${c.name.padEnd(18)} ${c.detail}`);
+  const failed = checks.filter((c) => c.level === 'fail');
+  const warned = checks.filter((c) => c.level === 'warn');
+
+  if (json) {
+    const flat = {};
+    for (const c of checks) if (c.key) flat[c.key] = c.value;
+    console.log(JSON.stringify({
+      ok: failed.length === 0 && (!strict || warned.length === 0),
+      strict,
+      failures: failed.length,
+      warnings: warned.length,
+      ...flat,
+      checks: checks.map(({ name, level, detail }) => ({ name, level, detail })),
+    }, null, 2));
+  } else {
+    const mark = { ok: 'ok  ', warn: 'WARN', fail: 'FAIL' };
+    for (const c of checks) console.log(`${mark[c.level]} ${c.name.padEnd(24)} ${c.detail}`);
+    if (warned.length) {
+      console.log(`\n${warned.length} layer(s) degraded. simframe still works, but not at full speed or coverage:`);
+      for (const c of warned) console.log(`  - ${c.name}: ${c.detail}`);
+      if (!strict) console.log('Use --strict to make this an error (CI does).');
+    }
   }
-  // Input is optional: simframe is still useful as a pure observer.
-  const required = checks.filter((c) => !c.name.startsWith('input driver'));
-  process.exitCode = required.every((c) => c.ok) ? 0 : 1;
+
+  process.exitCode = failed.length || (strict && warned.length) ? 1 : 0;
 }
 
 main().catch((err) => {

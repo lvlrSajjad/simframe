@@ -44,7 +44,7 @@
     "native/simframed/Package.swift",
     "native/simframed/Sources",
     "native/simframed/Tests",
-    "scripts/bench.sh",
+    "scripts",
     "README.md",
     "LICENSE"
   ],
@@ -52,7 +52,8 @@
     "test": "node --test test/unit.test.mjs",
     "mcp": "node src/cli.js mcp",
     "smoke": "node scripts/smoke.mjs",
-    "bench": "./scripts/bench.sh"
+    "bench": "./scripts/bench.sh",
+    "check:package": "node scripts/check-package.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"

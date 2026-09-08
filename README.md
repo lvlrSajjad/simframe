@@ -370,8 +370,49 @@ simframe strip --count=6       # contact sheet
 simframe screens               # screens this device has learned
 simframe goto invoices         # walk to a known screen over known steps
 simframe flow save|run|list    # record a verified flow, replay it
+simframe doctor --json         machine-readable; --strict fails on any downgrade
 simframe status / stop [--force] / devices / doctor
 ```
+
+## Degrading is allowed. Degrading quietly is not
+
+simframe is built to degrade rather than fail: no Swift toolchain still gives
+you frames through `simctl`, no accessibility tree still gives you OCR. That
+policy is right, and it nearly sank the tool twice — because a downgrade looked
+exactly like everything working.
+
+Once, one file was missing from the published package, so `Package.swift`
+declared a test target with no directory, SwiftPM reported overlapping sources,
+and **every install silently fell back to the slow engine**. Another time OCR
+shipped disabled the same way. Both passed the tests. Both printed nothing. The
+bug was never the missing file; it was the silence.
+
+So every downgrade now announces itself:
+
+- `simframe start` prints the engine it chose, and if it is the slow one, why —
+  build error, missing sources, or "reason unrecorded" if the daemon was started
+  by an earlier process.
+- `simframe doctor` marks a degraded layer `WARN`, not `ok`, and summarises what
+  is degraded and what that costs.
+- `--strict`, or `SIMFRAME_STRICT=1`, turns any downgrade into a non-zero exit.
+  CI runs strict, so a release cannot ship in the state that shipped twice.
+
+```
+$ simframe doctor
+ok   capture engine        simframed
+WARN input driver          idb — the daemon's control socket is not up
+```
+
+Two checks enforce it. A packaging check derives the required file list from the
+build's own inputs — a hand-written list is what rotted last time — and runs in
+seconds without a simulator. An integration job installs the packed tarball on a
+real simulator and asserts `capture.engine`, `input.driver` and `ocr.available`
+are all the good values, under `--strict`.
+
+That last check found a real bug the day it was written: a daemon shutting down
+unlinked the control socket unconditionally, so restarting deleted the *new*
+daemon's socket. Capture kept working, input quietly dropped to idb, and nothing
+said a word — the exact failure shape, found by the thing built to catch it.
 
 ## Limitations
 
