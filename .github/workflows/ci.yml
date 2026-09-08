@@ -150,16 +150,26 @@ jobs:
           '
 
       - name: A step runs, and capture notices the screen change
-        # Uses only the daemon's own input path and no app at all. Earlier
-        # versions asserted a frame counter would advance on an idle screen (it
-        # cannot — capture is damage-driven), then that launching an app would
-        # change the screen (it does not if that app is already in front), then
-        # launched com.apple.Preferences, which simply failed on the runner. The
-        # point of this step is to prove OUR input reaches the device and OUR
-        # capture notices, so depending on Apple's app catalogue was wrong.
+        # This step has been wrong three times, and every wrong version failed
+        # for a reason outside the thing being tested:
         #
-        # A swipe down from the top edge opens Notification Center, which exists
-        # on every iOS simulator regardless of what is installed.
+        #   1. Assert a frame counter advances — it cannot on an idle screen,
+        #      because capture is damage-driven.
+        #   2. Launch an app and assert the screen changed — it does not, if
+        #      that app is already in front.
+        #   3. Swipe from the top edge and assert Notification Center opens —
+        #      the swipe was delivered correctly (the log says so) and the
+        #      screen simply did not change on a bare springboard. That test was
+        #      measuring iOS, not simframe.
+        #
+        # What this step needs to prove is narrow: a step runs without error,
+        # and capture notices the resulting change. Whether the daemon owns the
+        # input path is a stronger claim, and `doctor` already asserts it
+        # (input.driver == "simframed"). Opening a URL launches Safari, which
+        # every iOS simulator has, so the screen change is guaranteed.
+        #
+        # The frame HASH is the assertion; `seq` resets when the daemon
+        # restarts, so it is reported only.
         run: |
           set -o pipefail
           read_state() {
@@ -169,7 +179,7 @@ jobs:
           printf '[{"button":"home"},{"settle":true}]\n' > /tmp/reset.json
           simframe do /tmp/reset.json --device="$DEVICE"
           BEFORE=$(read_state)
-          printf '[{"swipe":{"from":[100,2],"to":[100,500]}},{"settle":true}]\n' > /tmp/flow.json
+          printf '[{"openUrl":"https://example.com"},{"settle":true}]\n' > /tmp/flow.json
           simframe do /tmp/flow.json --device="$DEVICE"
           AFTER=$(read_state)
           node -e '
@@ -178,7 +188,7 @@ jobs:
             const moved = bh !== ah;
             console.log(`${moved ? "ok  " : "FAIL"} frame hash changed: ${bh.slice(0, 10)} -> ${ah.slice(0, 10)}`);
             console.log(`     seq ${bs} -> ${as}`);
-            if (!moved) console.error("a real HID swipe reached the device but capture saw no change");
+            if (!moved) console.error("a step ran cleanly but capture saw no change; the pipeline is not live");
             process.exit(moved ? 0 : 1);
           ' "$BEFORE" "$AFTER"
 
