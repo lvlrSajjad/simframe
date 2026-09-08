@@ -41,6 +41,22 @@ export function resolveMaxDim(detail) {
 async function fullFrameFor(udid, state) {
   if (state.fullFile && fs.existsSync(state.fullFile)) return state.fullFile;
   const p = store.paths(udid);
+  // The pointer in state.json can name a frame retention has already thinned
+  // away, and it does so routinely — state named full/2475.png while the
+  // directory held 2470, 2869 and 2870. Falling straight through to simctl
+  // meant OCR quietly shelled out for a screenshot on a machine whose daemon
+  // was capturing full frames the whole time: slower, and it made the whole
+  // step fail on a runner where that shell-out did not work.
+  try {
+    const newest = fs.readdirSync(p.full)
+      .filter((f) => f.endsWith('.png'))
+      .map((f) => ({ f, seq: Number.parseInt(f, 10) }))
+      .filter((x) => Number.isFinite(x.seq))
+      .sort((a, b) => b.seq - a.seq)[0];
+    if (newest) return path.join(p.full, newest.f);
+  } catch {
+    /* no full directory yet; fall through */
+  }
   const file = path.join(p.dir, 'ocr-source.png');
   await screenshot(udid, file, { mask: 'ignored' });
   return file;

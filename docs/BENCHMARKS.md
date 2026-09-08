@@ -927,3 +927,21 @@ exactly one fingerprint; once a node answers to several it is wrong by
 construction. The verdict now asks the graph whether both fingerprints resolve
 to the same node. The feature had worked and the check around it had not been
 updated to match.
+
+### OCR was shelling out to simctl on a machine whose daemon had the frame
+
+`fullFrameFor` trusted `state.json`'s `fullFile` pointer and fell straight
+through to `simctl io screenshot` when that file was missing. The pointer names
+a frame that **retention routinely thins away** — observed locally naming
+`full/2475.png` while the directory held 2470, 2869 and 2870 — so a share of
+every machine's screen-map builds paid a shell-out for a screenshot the daemon
+had already written.
+
+On CI it was fatal rather than merely slow: the shell-out failed and took the
+whole step with it, reporting only "Command failed: xcrun simctl io …" with
+simctl's reason left in an unread stderr. Both `screenshot` and `launchApp` now
+surface that stderr, for the same reason a silent fallback is unacceptable.
+
+`fullFrameFor` now falls back to the newest frame in the daemon's own `full/`
+directory before considering simctl. Verified by deleting the exact frame the
+state pointer named and confirming the flow still completes.

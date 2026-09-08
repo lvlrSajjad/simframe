@@ -96,9 +96,17 @@ export function isBootedSync(udid) {
 }
 
 export async function screenshot(udid, outFile, { mask = 'ignored' } = {}) {
-  await run('xcrun', ['simctl', 'io', udid, 'screenshot', '--type=png', `--mask=${mask}`, outFile], {
-    timeout: 10_000,
-  });
+  try {
+    await run('xcrun', ['simctl', 'io', udid, 'screenshot', '--type=png', `--mask=${mask}`, outFile], {
+      timeout: 10_000,
+    });
+  } catch (err) {
+    // Same reason as launchApp: execFile's message is "Command failed: <the
+    // whole command>" and simctl's actual complaint is in stderr. A CI failure
+    // here reported the command and nothing about why it did not work.
+    const detail = (err.stderr || '').trim().split('\n').filter(Boolean).pop();
+    throw new Error(detail ? `simctl screenshot failed: ${detail}` : `simctl screenshot failed: ${err.message}`);
+  }
 }
 
 /** Resample with sips, which ships with macOS, so simframe needs no image deps. */
