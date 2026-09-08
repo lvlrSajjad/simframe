@@ -489,7 +489,15 @@ check — which is the one thing that check is for.
 
 The `release` workflow verifies tag/`package.json`/`server.json` agree, validates
 `server.json` against the live registry, and publishes to npm and the MCP
-Registry. It needs `NPM_TOKEN`; the registry uses GitHub OIDC and needs no secret.
+Registry. It holds **no secrets** — both halves authenticate with the workflow's
+GitHub OIDC identity.
+
+That needs one setup step on npmjs.com, not in this repo: the package must have a
+Trusted Publisher pointing at this repository and `release.yml` (Package →
+Settings → Trusted Publisher → GitHub Actions). Without it npm has nothing to
+trust and fails with `ENEEDAUTH`. npm is ending token publishing in January 2027,
+and the tokens that work in CI need 2FA bypass, which npm's own UI warns against —
+so OIDC is the durable path, not merely the tidier one.
 
 ## License
 

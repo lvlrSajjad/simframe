@@ -2,9 +2,18 @@ name: release
 
 # Publishes to npm and to the official MCP Registry when a v* tag is pushed.
 #
-# One-time setup: add an npm automation token as the NPM_TOKEN repository
-# secret. The MCP Registry needs no secret — it trusts this workflow's GitHub
-# OIDC identity, which is why `id-token: write` is granted below.
+# No secrets. Both halves authenticate with this workflow's GitHub OIDC
+# identity, which is why `id-token: write` is granted below.
+#
+# npm side that requires a one-time setup on npmjs.com, not here: the simframe
+# package needs a Trusted Publisher pointing at this repository and this
+# workflow file (Package → Settings → Trusted Publisher → GitHub Actions).
+# Without that entry npm has nothing to trust and the publish fails with
+# ENEEDAUTH, exactly as it did when NPM_TOKEN was absent.
+#
+# This replaced a token because npm is ending token publishing in January 2027,
+# and the token that worked needed 2FA bypass — which npm's own UI warns
+# against for CI. An OIDC identity cannot leak, expire, or be copied.
 
 on:
   push:
@@ -26,6 +35,14 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted Publishing needs npm 11.5.1 or newer to recognise the OIDC
+      # environment; Node 20 ships npm 10, which falls back to looking for a
+      # token and fails. setup-node cannot pin an npm version, so upgrade it.
+      - name: Upgrade npm for Trusted Publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - run: npm ci
       - run: npm test
@@ -77,8 +94,6 @@ jobs:
           else
             npm publish --provenance --access public
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish to the MCP Registry
         run: |
