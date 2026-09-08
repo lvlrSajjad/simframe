@@ -140,6 +140,57 @@ them extended, and the same applies to the synonym table Phase 5 introduces.
 
 ## Known and unresolved
 
+### A screen has two identities: one with the tree, one without
+
+Measured on one screen, alternating reads on a live daemon:
+
+```
+useAx=true   sources=ax,ocr  targets=27  structural=5b72c1535c66
+useAx=false  sources=ocr     targets=17  structural=15521f646255
+```
+
+The same screen, a second apart, with two structural fingerprints. Identity is
+built from the elements, and the accessibility layer contributes ten of the
+twenty-seven, so a read taken without the tree is a different screen as far as
+memory is concerned.
+
+This was always true in principle and never mattered, because the tree was
+either always there (a machine with idb) or never there (CI, which had none).
+Phase 2a made it matter: the tree is now present by default and *absent
+intermittently* — an app mid-launch genuinely has no tree, a slow guest can blow
+the read's time budget, and either produces an OCR-only map of a screen whose
+other reads are ax+OCR.
+
+The visible symptom is a graph that will not converge. On a hosted runner the
+loop went `[unverified, unexpected-screen]`, `[unexpected-screen]`,
+`[no-visible-change, unexpected-screen]` over three passes of two steps, never
+predicting an outcome it had already seen, because it was not seeing the same
+screen twice.
+
+Three ways out, none of them obviously right:
+
+1. **Do not remember a degraded read.** `build` already records which layer is
+   missing and why; the same logic that says only a settled screen is worth
+   keeping says only a whole read is worth keeping. The map is still returned
+   and still usable — it just does not become an identity. Closest to the
+   existing philosophy and the smallest change.
+2. **Let it be a variant.** A screen may already hold several accepted
+   fingerprints, which is exactly the machinery for "the same screen looked
+   different this time". Costs nothing to build and makes convergence slower,
+   which is what a convergence assertion would then have to allow for.
+3. **Make identity layer-independent** by fingerprinting only what both layers
+   can see. Loses the tree's structure, which is the most reliable part of the
+   identity, to protect against its absence. Probably wrong, listed because it
+   is the obvious idea.
+
+Not decided, and deliberately not decided in a hurry: this is what a screen's
+identity *means*, and getting it wrong invalidates every learned graph. The CI
+check that caught it is asserting convergence, which is something this project
+elsewhere says it does not claim — so that check needs revisiting whichever way
+this goes.
+
+
+
 ### The layout hash fingerprints pixels, and content is pixels
 **This was the "unexplained variance", and it is now measured.** Across four
 visits to each of five screens: a revisit is usually identical (median 0 bits)
