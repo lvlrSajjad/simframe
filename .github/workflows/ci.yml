@@ -150,16 +150,16 @@ jobs:
           '
 
       - name: A step runs, and capture notices the screen change
-        # Deterministic, not lucky. Earlier versions of this step asserted a
-        # frame counter would advance on an idle screen (it cannot — the daemon
-        # captures on damage), and then that launching an app would change the
-        # screen (it does not, if that app is already in front). So: go to the
-        # home screen first, take the baseline there, then launch. Now the
-        # before state is always the home screen and the after state is always
-        # an app, whatever the runner happened to be showing.
+        # Uses only the daemon's own input path and no app at all. Earlier
+        # versions asserted a frame counter would advance on an idle screen (it
+        # cannot — capture is damage-driven), then that launching an app would
+        # change the screen (it does not if that app is already in front), then
+        # launched com.apple.Preferences, which simply failed on the runner. The
+        # point of this step is to prove OUR input reaches the device and OUR
+        # capture notices, so depending on Apple's app catalogue was wrong.
         #
-        # The frame HASH is the assertion; `seq` resets when the daemon
-        # restarts, so it is only reported.
+        # A swipe down from the top edge opens Notification Center, which exists
+        # on every iOS simulator regardless of what is installed.
         run: |
           set -o pipefail
           read_state() {
@@ -169,7 +169,7 @@ jobs:
           printf '[{"button":"home"},{"settle":true}]\n' > /tmp/reset.json
           simframe do /tmp/reset.json --device="$DEVICE"
           BEFORE=$(read_state)
-          printf '[{"launch":"com.apple.Preferences"},{"settle":true}]\n' > /tmp/flow.json
+          printf '[{"swipe":{"from":[100,2],"to":[100,500]}},{"settle":true}]\n' > /tmp/flow.json
           simframe do /tmp/flow.json --device="$DEVICE"
           AFTER=$(read_state)
           node -e '
@@ -178,7 +178,7 @@ jobs:
             const moved = bh !== ah;
             console.log(`${moved ? "ok  " : "FAIL"} frame hash changed: ${bh.slice(0, 10)} -> ${ah.slice(0, 10)}`);
             console.log(`     seq ${bs} -> ${as}`);
-            if (!moved) console.error("capture did not see the screen change; the pipeline is not live");
+            if (!moved) console.error("a real HID swipe reached the device but capture saw no change");
             process.exit(moved ? 0 : 1);
           ' "$BEFORE" "$AFTER"
 

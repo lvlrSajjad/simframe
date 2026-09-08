@@ -107,7 +107,15 @@ export async function resize(inFile, outFile, maxDim) {
 }
 
 export async function launchApp(udid, bundleId) {
-  await run('xcrun', ['simctl', 'launch', udid, bundleId], { timeout: 20_000 });
+  try {
+    await run('xcrun', ['simctl', 'launch', udid, bundleId], { timeout: 20_000 });
+  } catch (err) {
+    // execFile's message is just "Command failed: ..." with simctl's actual
+    // complaint left in stderr. A CI run failed here and said nothing about
+    // why, which is the same sin as a silent fallback.
+    const detail = (err.stderr || '').trim().split('\n').filter(Boolean).pop();
+    throw new Error(detail ? `could not launch ${bundleId}: ${detail}` : `could not launch ${bundleId}: ${err.message}`);
+  }
 }
 
 export async function terminateApp(udid, bundleId) {

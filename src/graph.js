@@ -343,7 +343,10 @@ export function route(udid, fromHash, toHash, { maxDepth = 8 } = {}) {
 }
 
 /** Verdicts a verified step can produce. */
-export const VERDICTS = ['ok', 'no-visible-change', 'unexpected-screen', 'unexpected-transition', 'unverified'];
+// `unexpected-transition` was removed: see verdict(). The transition kind is
+// reported inside an `ok` verdict now, because the classifier is not reliable
+// enough for a correct navigation to be called wrong by it.
+export const VERDICTS = ['ok', 'no-visible-change', 'unexpected-screen', 'unverified'];
 
 /**
  * Compare what happened against what was expected.
@@ -351,25 +354,56 @@ export const VERDICTS = ['ok', 'no-visible-change', 'unexpected-screen', 'unexpe
  * With no prediction the outcome is `unverified` rather than `ok`: not knowing
  * what should have happened is not evidence that the right thing did.
  */
-export function verdict({ prediction, before, after, kind }) {
+/**
+ * Do these two fingerprints mean the same screen?
+ *
+ * String equality was right when a screen had exactly one fingerprint. Now that
+ * a node can answer to several — a list with an alert over it is the same
+ * screen — comparing hashes directly reports a wrong turn every time the
+ * variant is the one on screen. The variant mechanism fired correctly on a real
+ * app and the verdict still said `unexpected-screen`, because the verdict never
+ * asked the graph.
+ */
+function sameScreen(udid, a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (!udid) return false;
+  const nodeA = nearestScreen(udid, a)?.node;
+  const nodeB = nearestScreen(udid, b)?.node;
+  return Boolean(nodeA && nodeB && nodeA.hash === nodeB.hash);
+}
+
+export function verdict({ udid, prediction, before, after, kind }) {
   if (!before || !after) return { verdict: 'unverified', detail: 'no state to compare' };
   const moved = before !== after;
   if (!prediction) {
     if (!moved) return { verdict: 'no-visible-change', detail: 'the screen did not change, and nothing predicted it would' };
     return { verdict: 'unverified', detail: 'this action has not been seen on this screen before' };
   }
-  const expectedMove = prediction.to !== before;
+  const expectedMove = !sameScreen(udid, prediction.to, before);
   if (!moved && expectedMove) {
     return { verdict: 'no-visible-change', detail: `expected to reach a different screen (seen ${prediction.count}x)` };
   }
-  if (prediction.to !== after) {
+  if (!sameScreen(udid, prediction.to, after)) {
     return {
       verdict: 'unexpected-screen',
       detail: `expected the screen this action reached ${prediction.count}x before, and landed somewhere else`,
     };
   }
-  if (prediction.kind && kind && prediction.kind !== kind && kind !== 'none') {
-    return { verdict: 'unexpected-transition', detail: `expected ${prediction.kind}, saw ${kind}` };
-  }
-  return { verdict: 'ok', detail: `matches the outcome seen ${prediction.count}x before` };
+  // The screen is where it was predicted to be. That is the reliable signal and
+  // it is what the verdict rests on.
+  //
+  // The transition *kind* is not reliable: Phase 4's classifier calls the same
+  // tab switch `replace` on one run and `pop` on the next, and measured against
+  // a real app it was the only thing producing non-ok verdicts on navigation
+  // that had gone exactly where predicted. A verdict that says something is
+  // wrong when nothing is wrong trains you to ignore verdicts, so a kind
+  // mismatch is reported alongside `ok` rather than overriding it.
+  const kindDiffers = Boolean(prediction.kind && kind && prediction.kind !== kind && kind !== 'none');
+  return {
+    verdict: 'ok',
+    detail: `matches the outcome seen ${prediction.count}x before`
+      + (kindDiffers ? ` (transition looked like ${kind}, not ${prediction.kind} — the classifier is noisy)` : ''),
+    ...(kindDiffers ? { kindDiffers: { predicted: prediction.kind, observed: kind } } : {}),
+  };
 }

@@ -877,3 +877,53 @@ Those tours ran with input silently on idb *and* with the daemon being replaced
 on every command. Neither figure measures the tool as it now stands. They are
 left in place as an honest record of what was measured, and they should not be
 quoted.
+
+## The first tour numbers worth quoting
+
+Everything before this was measured on a broken stack: input silently going
+through idb at ~285 ms a tap, and the daemon being killed and respawned by every
+CLI command. Both are fixed, and this run records its own preconditions — input
+driver, daemon pid at both ends, and the count of "superseded" lines — so a
+regression in any of them shows up in the measurement instead of hiding inside
+it.
+
+Four-tab tour, iPhone 17 Pro (iOS 26.5), M4 Pro, graph and screen maps cleared
+first. One daemon throughout, zero new "superseded" lines, input over the
+control socket.
+
+| Pass | Wall clock | Steps verified `ok` | Controls from memory | Verdicts |
+| --- | --- | --- | --- | --- |
+| 1 | 10.2 s | 0/4 | **4/4** | all `unverified` — correct, nothing is known yet |
+| 2 | **3.6 s** | **4/4** | **4/4** | all `ok` |
+| 3 | **3.7 s** | **4/4** | **4/4** | all `ok` |
+
+For scale, the same tour measured 30-58 s per pass on the broken stack. That is
+not a 10x improvement in the tool; it is the difference between measuring the
+tool and measuring two bugs.
+
+### The transition kind stopped being a verdict
+
+Identity and transition kind are not equally reliable, and the verdict now rests
+only on the reliable one. Measured on the passes above, the Phase 4 classifier
+disagreed with its own earlier answer on **1, 3 and 2 of 4** steps — calling the
+same tab switch `replace` on one run and `pop` on the next — while the screen
+landed exactly where predicted every time.
+
+Had kind stayed part of the verdict, that is 25-75% of correct steps reported as
+failures. A verdict that says something is wrong when nothing is wrong trains
+you to ignore verdicts. The mismatch is still reported, as `kindDiffers` inside
+an `ok` verdict, and a `kind-noise` column is now measured alongside `ok` so
+that trading this signal away would be visible rather than assumed.
+
+### Variants fired on a real app, and the checker did not know
+
+While the app was reconnecting to its bundler it put an alert over one screen,
+giving that screen a second genuine structure. The variant mechanism admitted it
+correctly — one node with `variants=1` instead of a fifth screen appearing.
+
+`verdict()` still reported `unexpected-screen`, because it compared the observed
+fingerprint to the predicted one as strings. That was right when a screen had
+exactly one fingerprint; once a node answers to several it is wrong by
+construction. The verdict now asks the graph whether both fingerprints resolve
+to the same node. The feature had worked and the check around it had not been
+updated to match.

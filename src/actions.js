@@ -120,7 +120,7 @@ export async function runScript(
         const kind = afterState.transition?.kind;
         const afterScreen = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, confirmNovel });
         verification = {
-          ...graph.verdict({ prediction, before: beforeScreen.hash, after: afterScreen.hash, kind }),
+          ...graph.verdict({ udid, prediction, before: beforeScreen.hash, after: afterScreen.hash, kind }),
           predicted: prediction ? { to: prediction.to.slice(0, 10), kind: prediction.kind, seen: prediction.count } : null,
           observed: { to: afterScreen.hash?.slice(0, 10), kind },
         };
@@ -136,10 +136,10 @@ export async function runScript(
         }
       }
 
-      // Only an unexpected *screen* stops a flow. Identity is reliable now
-      // that it is structural; the transition kind is not — Phase 4's
-      // classifier reports `replace` for a scroll that rubber-bands, and
-      // halting a correct flow on that is worse than noting it.
+      // Only an unexpected *screen* stops a flow. `unexpected-transition` is no
+      // longer a verdict at all — a noisy classifier disagreeing about whether
+      // a tab switch was a push or a pop is not a reason to call a correct
+      // navigation wrong.
       const wrongTurn = verification?.verdict === 'unexpected-screen';
       const note = settled?.noVisibleChange ? ' [no visible change]' : '';
       results.push({
