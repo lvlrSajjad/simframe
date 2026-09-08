@@ -563,6 +563,7 @@ async function main() {
       await doctor({
         json: Boolean(flags.json),
         strict: Boolean(flags.strict) || process.env.SIMFRAME_STRICT === '1',
+        device: flags.device,
       });
       return;
     }
@@ -584,8 +585,16 @@ async function main() {
  *
  * So a fallback is a `warn`, not an `ok`, and `--strict` (or SIMFRAME_STRICT=1)
  * makes any warn a non-zero exit. CI runs strict; users see the warning.
+ *
+ * `optional` is a fourth level and a deliberate distinction, not a softer warn.
+ * A `warn` means this machine could be doing better and silently is not — the
+ * failure this whole mechanism exists to catch. `optional` means a dependency
+ * documented as optional is simply not installed, which doctor says plainly
+ * with install instructions. idb is the only one: it is optional, it is being
+ * removed, and a fresh machine without it has not degraded from anything.
+ * Strict fails on warn and fail, never on optional.
  */
-async function doctor({ json = false, strict = false } = {}) {
+async function doctor({ json = false, strict = false, device } = {}) {
   const checks = [];
   // `level` is 'ok' | 'warn' | 'fail'. A warn means it works but not the way it
   // should — the exact state that used to be invisible.
@@ -631,7 +640,14 @@ async function doctor({ json = false, strict = false } = {}) {
   }
 
   try {
-    const booted = await bootedDevices();
+    let booted = await bootedDevices();
+    // Respect --device. Without this, doctor reports on every booted simulator,
+    // which on a CI runner meant checking an Apple Vision Pro nobody asked
+    // about and failing strict on its layers.
+    if (device) {
+      const wanted = await resolveDevice(device);
+      booted = booted.filter((d) => d.udid === wanted.udid);
+    }
     add('booted simulator', booted.length ? 'ok' : 'warn',
       booted.map((d) => `${d.name} (${d.runtime})`).join(', ') || 'none');
     for (const d of booted) {
@@ -667,8 +683,8 @@ async function doctor({ json = false, strict = false } = {}) {
       add(`text recognition (${d.name})`, 'ok',
         daemon ? 'simframed (in-process, off the framebuffer)' : 'sips + helper binary');
       const ax = await input.detectDriver();
-      add(`accessibility tree (${d.name})`, ax.available ? 'ok' : 'warn',
-        ax.available ? 'idb — the only thing idb is still required for' : `unavailable: ${ax.reason}`,
+      add(`accessibility tree (${d.name})`, ax.available ? 'ok' : 'optional',
+        ax.available ? 'idb — the only thing idb is still required for' : `not installed: ${ax.reason}`,
         { key: 'ax.driver', value: ax.available ? 'idb' : null });
     }
     if (booted.length) {
@@ -684,6 +700,7 @@ async function doctor({ json = false, strict = false } = {}) {
 
   const failed = checks.filter((c) => c.level === 'fail');
   const warned = checks.filter((c) => c.level === 'warn');
+  const optional = checks.filter((c) => c.level === 'optional');
 
   if (json) {
     const flat = {};
@@ -693,16 +710,21 @@ async function doctor({ json = false, strict = false } = {}) {
       strict,
       failures: failed.length,
       warnings: warned.length,
+      optional: optional.length,
       ...flat,
       checks: checks.map(({ name, level, detail }) => ({ name, level, detail })),
     }, null, 2));
   } else {
-    const mark = { ok: 'ok  ', warn: 'WARN', fail: 'FAIL' };
+    const mark = { ok: 'ok  ', warn: 'WARN', fail: 'FAIL', optional: '--  ' };
     for (const c of checks) console.log(`${mark[c.level]} ${c.name.padEnd(24)} ${c.detail}`);
     if (warned.length) {
       console.log(`\n${warned.length} layer(s) degraded. simframe still works, but not at full speed or coverage:`);
       for (const c of warned) console.log(`  - ${c.name}: ${c.detail}`);
       if (!strict) console.log('Use --strict to make this an error (CI does).');
+    }
+    if (optional.length) {
+      console.log(`\n${optional.length} optional layer(s) not installed (not a downgrade):`);
+      for (const c of optional) console.log(`  - ${c.name}: ${c.detail}`);
     }
   }
 
