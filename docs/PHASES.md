@@ -27,8 +27,15 @@ open work is in `docs/DEFERRED.md`.
 | 6 — transition graph, verify-after-tap | done |
 | 6b — structural fingerprint | done. This is how screens are identified; the pixel hash kept change and settle |
 | 6c — structural settle gate | done, **and it missed both its goals** — read the BENCHMARKS entry before trusting the gate to have fixed anything |
+| CI — packaging + integration gates | done. `integration` boots a simulator on `macos-15` and asserts every layer under `--strict`; required on `main` with an admin bypass |
 | 7 — compact agent state, skill | not started |
 | 8 — Android | not started |
+
+**Measure on the daemon's input path.** The Phase 6c and 6d wall-clock figures
+were taken while input silently ran through idb (~285 ms per tap) because a
+restarting daemon deleted its own control socket. That is fixed, and `--strict`
+can now prove which path is in use, but those tours have not been re-run. Do
+that before quoting any flow timing, and before Phase 7 needs a baseline.
 
 **Pick up here.** The highest-value open item is not a phase: a screen whose
 sections load from different sources has more than one genuine settled

@@ -394,6 +394,10 @@ So every downgrade now announces itself:
   by an earlier process.
 - `simframe doctor` marks a degraded layer `WARN`, not `ok`, and summarises what
   is degraded and what that costs.
+- A dependency that is simply not installed is `--`, not `WARN`. The distinction
+  is deliberate: `WARN` means this machine could be doing better and silently is
+  not, which is the failure worth shouting about. idb missing on a fresh machine
+  has not degraded from anything, and `--strict` ignores it.
 - `--strict`, or `SIMFRAME_STRICT=1`, turns any downgrade into a non-zero exit.
   CI runs strict, so a release cannot ship in the state that shipped twice.
 
@@ -401,6 +405,7 @@ So every downgrade now announces itself:
 $ simframe doctor
 ok   capture engine        simframed
 WARN input driver          idb — the daemon's control socket is not up
+--   accessibility tree    not installed: idb is not installed
 ```
 
 Two checks enforce it. A packaging check derives the required file list from the

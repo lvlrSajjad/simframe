@@ -23,11 +23,17 @@ the end of a list reads as `replace`, because after the bounce the frames
 genuinely are not a translation. A harness would say whether that is rare enough
 to leave alone. `docs/BENCHMARKS.md` "Phase 4" has the shape of the test.
 
-### No integration coverage in CI
-All 22 Swift and 34 Node tests are pure functions. Nothing exercises the daemon,
-the control socket, OCR or input, because hosted runners have no booted
-simulator. Everything involving a device has been verified by hand, once, on one
-machine. A self-hosted runner or a scripted boot would change that.
+### Integration coverage exists now, and the assumption behind this entry was wrong
+This used to say hosted runners have no booted simulator, so nothing could
+exercise the daemon. That was never tested. A `macos-15` runner boots
+simulators fine, and the daemon works there in full: `simframed` capture,
+`simframed` input over Indigo HID, in-process OCR, frames at 177 ms.
+
+The `integration` job now installs the packed tarball, boots a simulator, and
+asserts every layer is the good one under `--strict`. What is still uncovered:
+the graph, screen memory, intent matching and the fingerprint are exercised only
+by unit tests and by hand on one machine. A flow that taps real controls in a
+real app cannot run on a hosted runner, because there is no app to tap.
 
 ## Completeness
 
