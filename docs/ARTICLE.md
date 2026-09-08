@@ -2,6 +2,8 @@
 
 *Perception as a daemon, not a function — and what happened when I built one for the iOS Simulator.*
 
+> Also published as a page: [`agents-shouldnt-blink.html`](agents-shouldnt-blink.html). This Markdown is the source of record; edit both together.
+>
 > Every number here is measured, on an M-series Mac with Xcode 26 and an iPhone 17 Pro simulator running iOS 26.5, against a real production React Native app. The full tables — N, median, p95, and the mistakes made getting to them — are in [`docs/BENCHMARKS.md`](BENCHMARKS.md). Where a number is an estimate rather than a measurement, it says so.
 
 ---

@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Perception for an agent should be an always-on daemon, not a function the model calls. Measured on the iOS Simulator: 210ms per screenshot down to 6.74ms, and a ten-step flow from ten model turns and ten images to one turn and none.">
+<meta property="og:title" content="Agents Shouldn't Blink">
+<meta property="og:description" content="Perception as a daemon, not a function — and what happened when I built one.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://lvlrsajjad.github.io/simframe/agents-shouldnt-blink.html">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128065;</text></svg>">
+<style>
+  html { color-scheme: light dark; }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<title>Agents Shouldn't Blink</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #f3f4f6;
+    --surface: #fbfbfc;
+    --sunk: #eaecf0;
+    --ink: #15181d;
+    --ink-soft: #3c434e;
+    --muted: #5f6877;
+    --rule: #d7dbe2;
+    --rule-soft: #e5e8ed;
+    --trace: #0f4c81;
+    --trace-soft: #e2ebf3;
+    --amend: #a8501e;
+    --amend-soft: #f6ece5;
+    --serif: "Newsreader", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --measure: 66ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0e1116;
+      --surface: #151a21;
+      --sunk: #10141a;
+      --ink: #e6e9ee;
+      --ink-soft: #c3cad4;
+      --muted: #8b95a5;
+      --rule: #262e3a;
+      --rule-soft: #1d242d;
+      --trace: #6fadde;
+      --trace-soft: #14222f;
+      --amend: #dd9159;
+      --amend-soft: #241a13;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e1116;
+    --surface: #151a21;
+    --sunk: #10141a;
+    --ink: #e6e9ee;
+    --ink-soft: #c3cad4;
+    --muted: #8b95a5;
+    --rule: #262e3a;
+    --rule-soft: #1d242d;
+    --trace: #6fadde;
+    --trace-soft: #14222f;
+    --amend: #dd9159;
+    --amend-soft: #241a13;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 19px;
+    line-height: 1.62;
+    font-optical-sizing: auto;
+  }
+  ::selection { background: var(--trace-soft); }
+  a { color: var(--trace); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--trace);
+    outline-offset: 3px;
+  }
+  code {
+    font-family: var(--mono);
+    font-size: 0.82em;
+    background: var(--sunk);
+    border: 1px solid var(--rule-soft);
+    padding: 0.08em 0.34em;
+    white-space: nowrap;
+  }
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+
+  /* ---- shell: a single reading track with a rule down its left edge ---- */
+  .page { max-width: 1080px; margin: 0 auto; padding: 0 24px 120px; }
+  .track {
+    max-width: var(--measure);
+    margin-left: 0;
+    border-left: 1px solid var(--rule);
+    padding-left: clamp(18px, 4vw, 38px);
+  }
+  .track > * { margin: 0 0 1.05em; }
+  .track > *:last-child { margin-bottom: 0; }
+
+  /* ---- masthead ---- */
+  header { padding: clamp(56px, 9vw, 104px) 0 0; }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 22px;
+  }
+  .kicker b { color: var(--trace); font-weight: 600; }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(42px, 9.5vw, 84px);
+    line-height: 0.98;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+    margin: 0 0 20px;
+    max-width: 22ch;
+  }
+  .deck {
+    font-style: italic;
+    font-size: clamp(20px, 2.6vw, 25px);
+    line-height: 1.42;
+    color: var(--ink-soft);
+    max-width: 46ch;
+    margin: 0 0 40px;
+    text-wrap: pretty;
+  }
+
+  /* ---- the hero figure: continuous trace vs discrete samples ---- */
+  figure.instrument {
+    margin: 0 0 44px;
+    background: var(--surface);
+    border-top: 2px solid var(--ink);
+    border-bottom: 1px solid var(--rule);
+    padding: 22px 22px 16px;
+  }
+  figure.instrument svg { display: block; width: 100%; height: auto; }
+  /* The figure is styled here, not with presentation attributes: var() inside
+     an SVG attribute is not reliably resolved, and a chart whose labels vanish
+     in one theme is worse than no chart. */
+  .grid { stroke: var(--rule-soft); stroke-width: 1; fill: none; }
+  .lbl { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 1.4px; }
+  .lbl-trace { fill: var(--trace); }
+  .lbl-sample { fill: var(--ink-soft); }
+  .note { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+  .axis { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
+  .damage { stroke: var(--trace); stroke-width: 1.5; opacity: 0.55; fill: none; }
+  .baseline { stroke: var(--trace); stroke-width: 2; fill: none; }
+  .sample { fill: var(--amend); opacity: 0.85; stroke: none; }
+  .gap { stroke: var(--ink-soft); stroke-width: 1.5; stroke-dasharray: 3 5; opacity: 0.6; fill: none; }
+  figcaption {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--rule-soft);
+    max-width: 78ch;
+  }
+
+  /* ---- provenance note ---- */
+  .provenance {
+    max-width: var(--measure);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--muted);
+    background: var(--sunk);
+    border-left: 2px solid var(--trace);
+    padding: 16px 20px;
+    margin: 0 0 clamp(48px, 7vw, 80px);
+  }
+
+  /* ---- sections ---- */
+  section { margin-top: clamp(52px, 7vw, 84px); }
+  .sec-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--trace);
+    margin: 0 0 10px;
+  }
+  h2 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(28px, 4.2vw, 39px);
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0 0 26px;
+    max-width: 30ch;
+  }
+  h3 {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--ink);
+    margin: 2.1em 0 0.7em;
+  }
+  .lede { font-size: 1.06em; color: var(--ink-soft); }
+
+  /* ---- the three faculties ---- */
+  .faculty {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--trace);
+    background: var(--trace-soft);
+    padding: 0.2em 0.5em;
+    margin-right: 0.45em;
+    white-space: nowrap;
+  }
+
+  /* ---- measurement panels: they break the measure, because they interrupt ---- */
+  .panel {
+    max-width: 820px;
+    background: var(--surface);
+    border-top: 2px solid var(--ink);
+    border-bottom: 1px solid var(--rule);
+    padding: 20px 22px 22px;
+    margin: 2em 0;
+  }
+  .panel-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 14px;
+  }
+  .panel-note {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 14px 0 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--rule-soft);
+  }
+  .scroller { overflow-x: auto; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 380px;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  caption { text-align: left; }
+  th, td {
+    text-align: right;
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--rule-soft);
+    white-space: nowrap;
+  }
+  th:first-child, td:first-child {
+    text-align: left;
+    white-space: normal;
+    min-width: 15ch;
+    color: var(--ink-soft);
+    font-weight: 400;
+  }
+  thead th {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--rule);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td b { font-weight: 600; color: var(--trace); }
+  .win { color: var(--trace); font-weight: 600; }
+
+  /* ---- amendments: the spine of this piece is being wrong and catching it ---- */
+  .amend {
+    max-width: 820px;
+    background: var(--amend-soft);
+    border-left: 3px solid var(--amend);
+    padding: 18px 22px;
+    margin: 2em 0;
+    font-size: 17.5px;
+    line-height: 1.6;
+  }
+  .amend > .amend-label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--amend);
+    margin-bottom: 8px;
+  }
+  .amend p { margin: 0 0 0.8em; }
+  .amend p:last-child { margin-bottom: 0; }
+  .amend code { background: transparent; border-color: var(--amend); }
+
+  /* ---- terminal readout ---- */
+  pre {
+    max-width: 820px;
+    overflow-x: auto;
+    background: var(--sunk);
+    border: 1px solid var(--rule);
+    border-left: 2px solid var(--trace);
+    padding: 16px 18px;
+    margin: 2em 0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.62;
+    color: var(--ink-soft);
+  }
+  pre code { background: transparent; border: 0; padding: 0; white-space: pre; font-size: inherit; }
+
+  /* ---- lists ---- */
+  ol.contract, ul.asks {
+    margin: 1.4em 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 14px;
+  }
+  ol.contract { counter-reset: cond; }
+  ol.contract li {
+    counter-increment: cond;
+    display: grid;
+    grid-template-columns: 2.4em 1fr;
+    gap: 4px;
+    align-items: baseline;
+  }
+  ol.contract li::before {
+    content: counter(cond, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--trace);
+    letter-spacing: 0.04em;
+  }
+  ul.asks li {
+    display: grid;
+    grid-template-columns: 1.6em 1fr;
+    gap: 4px;
+    align-items: baseline;
+  }
+  ul.asks li::before {
+    content: "?";
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--trace);
+  }
+
+  /* ---- close ---- */
+  .colophon {
+    max-width: var(--measure);
+    margin-top: clamp(56px, 8vw, 92px);
+    padding-top: 26px;
+    border-top: 2px solid var(--ink);
+    font-size: 17px;
+    font-style: italic;
+    color: var(--ink-soft);
+    line-height: 1.6;
+  }
+  .colophon .amend-label {
+    display: block;
+    font-family: var(--mono);
+    font-style: normal;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 18px; }
+    .track { padding-left: 16px; }
+    .panel, .amend, pre, figure.instrument { padding-left: 14px; padding-right: 14px; }
+    figure.instrument { margin-left: -14px; margin-right: -14px; }
+  }
+</style>
+
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <p class="kicker">Field notes · <b>simframe</b> · iOS Simulator</p>
+    <h1>Agents Shouldn&rsquo;t Blink</h1>
+    <p class="deck">Perception as a daemon, not a function &mdash; and what happened when I built one.</p>
+
+    <figure class="instrument">
+      <svg viewBox="0 0 900 250" role="img" aria-label="Two traces compared. The top trace shows a continuous framebuffer damage signal firing about fifty-two times per second while the screen moves, and flat when it is still. The bottom trace shows discrete screenshots, one every two hundred and ten milliseconds, with nothing observed between them.">
+        <!-- graph ground -->
+        <g class="grid">
+          <line x1="120" y1="30" x2="870" y2="30"/>
+          <line x1="120" y1="215" x2="870" y2="215"/>
+        </g>
+        <!-- vertical time gridlines every 100 ms of a 1000 ms window -->
+        <g class="grid">
+          <line x1="195" y1="30" x2="195" y2="215"/>
+          <line x1="270" y1="30" x2="270" y2="215"/>
+          <line x1="345" y1="30" x2="345" y2="215"/>
+          <line x1="420" y1="30" x2="420" y2="215"/>
+          <line x1="495" y1="30" x2="495" y2="215"/>
+          <line x1="570" y1="30" x2="570" y2="215"/>
+          <line x1="645" y1="30" x2="645" y2="215"/>
+          <line x1="720" y1="30" x2="720" y2="215"/>
+          <line x1="795" y1="30" x2="795" y2="215"/>
+        </g>
+
+        <!-- TRACE A: continuous damage signal -->
+        <text x="120" y="22" class="lbl lbl-trace">DAEMON &mdash; FRAMEBUFFER DAMAGE</text>
+        <!-- dense ticks while the screen moves (0-700ms), then flat -->
+        <g class="damage">
+          <line x1="128" y1="52" x2="128" y2="86"/><line x1="142" y1="58" x2="142" y2="86"/>
+          <line x1="156" y1="48" x2="156" y2="86"/><line x1="170" y1="60" x2="170" y2="86"/>
+          <line x1="184" y1="50" x2="184" y2="86"/><line x1="198" y1="56" x2="198" y2="86"/>
+          <line x1="212" y1="46" x2="212" y2="86"/><line x1="226" y1="62" x2="226" y2="86"/>
+          <line x1="240" y1="52" x2="240" y2="86"/><line x1="254" y1="49" x2="254" y2="86"/>
+          <line x1="268" y1="58" x2="268" y2="86"/><line x1="282" y1="45" x2="282" y2="86"/>
+          <line x1="296" y1="55" x2="296" y2="86"/><line x1="310" y1="51" x2="310" y2="86"/>
+          <line x1="324" y1="60" x2="324" y2="86"/><line x1="338" y1="47" x2="338" y2="86"/>
+          <line x1="352" y1="54" x2="352" y2="86"/><line x1="366" y1="50" x2="366" y2="86"/>
+          <line x1="380" y1="59" x2="380" y2="86"/><line x1="394" y1="46" x2="394" y2="86"/>
+          <line x1="408" y1="56" x2="408" y2="86"/><line x1="422" y1="52" x2="422" y2="86"/>
+          <line x1="436" y1="48" x2="436" y2="86"/><line x1="450" y1="61" x2="450" y2="86"/>
+          <line x1="464" y1="53" x2="464" y2="86"/><line x1="478" y1="49" x2="478" y2="86"/>
+          <line x1="492" y1="57" x2="492" y2="86"/><line x1="506" y1="51" x2="506" y2="86"/>
+          <line x1="520" y1="55" x2="520" y2="86"/><line x1="534" y1="47" x2="534" y2="86"/>
+          <line x1="548" y1="60" x2="548" y2="86"/><line x1="562" y1="52" x2="562" y2="86"/>
+          <line x1="576" y1="46" x2="576" y2="86"/><line x1="590" y1="58" x2="590" y2="86"/>
+          <line x1="604" y1="54" x2="604" y2="86"/><line x1="618" y1="50" x2="618" y2="86"/>
+        </g>
+        <path class="baseline" d="M120 86 H870"/>
+        <text x="128" y="106" class="note">~52 events/s while the screen moves</text>
+        <text x="636" y="106" class="note">still &rarr; no frames at all</text>
+
+        <!-- TRACE B: discrete screenshots -->
+        <text x="120" y="152" class="lbl lbl-sample">SCREENSHOT LOOP &mdash; 210 ms EACH</text>
+        <g class="sample">
+          <rect x="120" y="168" width="9" height="32"/>
+          <rect x="277" y="168" width="9" height="32"/>
+          <rect x="434" y="168" width="9" height="32"/>
+          <rect x="591" y="168" width="9" height="32"/>
+          <rect x="748" y="168" width="9" height="32"/>
+        </g>
+        <path class="gap" d="M120 200 H870"/>
+        <text x="140" y="192" class="note">nothing observed between samples</text>
+
+        <!-- axis -->
+        <g class="axis">
+          <text x="120" y="235" text-anchor="middle">0</text>
+          <text x="345" y="235" text-anchor="middle">300</text>
+          <text x="570" y="235" text-anchor="middle">600</text>
+          <text x="795" y="235" text-anchor="middle">900</text>
+          <text x="866" y="248" text-anchor="end">milliseconds &mdash; one UI transition is over in about 700</text>
+        </g>
+      </svg>
+      <figcaption>The whole argument in one figure. A UI transition finishes inside 700&nbsp;ms; a loop that samples every 210&nbsp;ms is blind between samples and busy when there is nothing to see. The daemon is the inverse: dense while the screen moves, silent when it is still.</figcaption>
+    </figure>
+
+    <p class="provenance">Every number here is measured &mdash; M-series Mac, Xcode&nbsp;26, iPhone&nbsp;17&nbsp;Pro simulator on iOS&nbsp;26.5, against a real production React&nbsp;Native app. Full tables, with N, median, p95 and the mistakes made getting to each one, are in the repository. Where a figure is an estimate rather than a measurement, it says so.</p>
+  </header>
+
+  <section>
+    <p class="sec-label">The observation</p>
+    <h2>What I noticed watching Claude test my app</h2>
+    <div class="track">
+      <p class="lede">I had asked Claude Code to check a fix on the iOS Simulator. It could do it &mdash; open the app, navigate, confirm the change &mdash; but it was painfully slow, and watching it work I realised the slowness had nothing to do with intelligence. It was slow the way a person would be slow if they had to close their eyes between every action.</p>
+      <p>Here is what Claude did for each step: take a screenshot, wait for it, send the image to itself, reason about what was on it, decide where to tap, tap, and then start again from the screenshot. Every step was a blink. Every blink cost a network round trip and a few thousand tokens.</p>
+      <p>Here is what I do when I test the same flow. I already see the screen &mdash; there is no moment where I decide to look. I know how I got here, so I know what screen this is without reading it. I know where the Settings tab is because I tapped it thirty seconds ago; my hand goes there without my eyes checking. When the screen slides, I know it slid, and I know whether it slid the way I expected, before anything has finished animating. And when something surprising happens &mdash; an alert I didn&rsquo;t expect, a screen I&rsquo;ve never seen &mdash; <em>that</em> is when I actually think.</p>
+      <p>The difference isn&rsquo;t that I&rsquo;m smarter than the model. It is that I have eyes that never close, a hand that has memory, and a very cheap sense of whether the world just did what I meant it to. The model was being asked to do all of that with a single expensive tool: reason about a still image.</p>
+      <p>I am not as precise as the model. It never mis-taps a control it can see; I do. But I am much faster, and after a while I realised the speed came from architecture, not ability. So I built the architecture.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">The claim</p>
+    <h2>Perception should be a process, not a function call</h2>
+    <div class="track">
+      <p class="lede"><strong>Perception for an agent should be a continuously running process with observer-relative memory &mdash; a daemon &mdash; and the boundary between perceiving and reasoning should be a specified contract, not an ad-hoc loop.</strong></p>
+      <p>Almost every agent framework today, including the computer-use loops the model labs ship, treats seeing as a function the model calls: <code>screenshot()</code> &rarr; reason &rarr; act &rarr; <code>screenshot()</code>. That design makes the most expensive component in the system, the language model, responsible for the cheapest job: noticing that a spinner is still spinning, that the screen hasn&rsquo;t finished sliding, that this is the same tab bar it saw a minute ago.</p>
+      <p>It also has a compounding cost. The OSWorld-Human study (Abhyankar, Qi &amp; Zhang, MLSys 2026) measured where agent time actually goes and found that model calls for planning and reflection consume roughly 75&ndash;94% of total task time, that each step carries the whole observation history so later steps run up to 3&times; slower than early ones, and that leading agents take 1.4&ndash;2.7&times; more steps than a human needs. Every unnecessary look is not one wasted call; it is one more image dragged through every subsequent call.</p>
+      <p>The alternative is to give the agent senses that work the way mine do.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">The architecture</p>
+    <h2>Eyes, hand, memory</h2>
+    <div class="track">
+      <p>I ended up with three parts, and I think the vocabulary is more reusable than the code.</p>
+      <p><span class="faculty">Eyes</span>a process that always holds the current frame. Nothing is captured on request. The screen is watched continuously, the newest frame is always available, and &ldquo;look&rdquo; is a read, not a wait.</p>
+      <p>The first version did this by calling <code>simctl io screenshot</code> on a loop, which turned a ~130&nbsp;ms blocking screenshot into a ~20&nbsp;ms file read. The rebuilt daemon reads the simulator&rsquo;s framebuffer directly, and the difference is larger than I expected.</p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-label">Capture &mdash; same work, two paths</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Path</th><th>Median</th></tr></thead>
+          <tbody>
+            <tr><td><code>simctl io screenshot</code> + downscale</td><td>210 ms</td></tr>
+            <tr><td>framebuffer grab + downscale + both hashes</td><td><b>6.74 ms</b></td></tr>
+            <tr><td>the framebuffer grab alone</td><td><b>0.13 ms</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="track">
+      <p>Thirty-one times faster for the same work, and the capture primitive itself is about a thousand times faster than a screenshot. Almost all of the remaining 6.7&nbsp;ms is the downscale, not the capture.</p>
+    </div>
+
+    <div class="amend">
+      <span class="amend-label">Amended &mdash; the unit was wrong</span>
+      <p>The daemon has no frame rate. It captures when the simulator says its screen changed &mdash; a damage signal, about 52 per second while something is moving, and <em>nothing at all</em> while the screen is still. &ldquo;60&nbsp;fps&rdquo; was the wrong thing to aim at.</p>
+      <p>A still screen should produce no frames, and reasoning about it as a rate is how I ended up with a CI check that asserted a frame counter had advanced on an idle screen. It failed three times before I understood why.</p>
+    </div>
+
+    <div class="track">
+      <p><span class="faculty">Hand</span>whatever performs actions, but with the property a human hand has: it can act on an intent &mdash; &ldquo;the Settings tab&rdquo; &mdash; without the eyes re-reading the screen, because it remembers where that control was. In simframe this is the screen memory: every screen the agent has seen is keyed by a layout hash, and the map from label to tap coordinate is stored. First visit ~305&nbsp;ms to build &mdash; accessibility tree and on-device OCR, run concurrently &mdash; and every visit after that about 1&nbsp;ms.</p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-label">A four-tab flow, three times back to back, memory cleared first</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Pass</th><th>Wall clock</th><th>Steps verified</th><th>From memory</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>10.2 s</td><td>0 / 4 &mdash; nothing known yet</td><td class="win">4 / 4</td></tr>
+            <tr><td>2</td><td class="win">3.6 s</td><td class="win">4 / 4</td><td class="win">4 / 4</td></tr>
+            <tr><td>3</td><td class="win">3.7 s</td><td class="win">4 / 4</td><td class="win">4 / 4</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="amend">
+      <span class="amend-label">Amended &mdash; the earlier table measured two bugs</span>
+      <p>An earlier draft of this piece quoted 7370 &rarr; 5160 &rarr; 3304&nbsp;ms for the same flow. Those were real measurements of the wrong thing: input was silently falling back to a slower path, and the capture daemon was being replaced by every single command because a version constant had drifted between the Swift and JavaScript halves.</p>
+      <p>Nine hundred and ninety-three daemon respawns in one session, and every timing in the project quietly wrong. It took someone else running the tool to find it.</p>
+    </div>
+
+    <div class="track">
+      <p><span class="faculty">Memory</span>the part I found most people miss, and it splits in two.</p>
+      <p><em>Visual memory</em> is the recent frames. Not one frame &mdash; the last minute of them. It is what lets the daemon answer &ldquo;did anything change?&rdquo; and &ldquo;what moved?&rdquo; as text, in about 2&nbsp;ms, and it is what lets a transition be understood as motion rather than inferred from two stills.</p>
+      <p><em>Procedural memory</em> &mdash; muscle memory, if you like &mdash; is the record of how screens connect: I was on screen A, I tapped this, I arrived at screen B. Once that graph exists, a flow the agent has completed once can be replayed with zero model calls, and an action&rsquo;s outcome can be <em>predicted</em> before it happens, which is what makes verification cheap.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">The smallest idea, and the one I&rsquo;d defend hardest</p>
+    <h2>&ldquo;Changed since when?&rdquo;</h2>
+    <div class="track">
+      <p>Every change question is really &ldquo;changed <em>since when</em>?&rdquo;, and the natural answer &mdash; since the previous frame &mdash; is wrong for an agent. A UI transition is over in about 700&nbsp;ms. An agent that acts and then polls a second later, comparing consecutive frames, sees a still screen and concludes nothing happened, even though the screen is completely different from when it last looked.</p>
+      <p>The baseline for &ldquo;changed&rdquo; has to be <strong>the last frame the observer actually saw</strong>. The daemon records what the agent looked at, and every subsequent state query is relative to that. Over MCP this is automatic; from the CLI you take a mark before acting. This is observer-relative perception, and it is the property that makes a continuously running sensor useful to an intermittently attending reasoner. Without it, a faster camera just gives you more frames to be confused by.</p>
+    </div>
+
+    <div class="amend">
+      <span class="amend-label">Amended &mdash; a better sensor made the memory worse</span>
+      <p>When the new daemon started capturing on every damage event instead of four times a second, screen-memory hit rates got <em>worse</em> &mdash; 1&ndash;2 of 4 instead of 4 of 4 &mdash; with byte-identical hashing. More frames meant more mid-transition frames, more distinct layouts, more rebuilds. Correctness held, because a missed match rebuilds the map and never mis-taps; only the speed regressed.</p>
+      <p>The fix was not to slow the camera down. It was to key memory off a <em>settled</em> frame rather than whichever frame happened to be newest, which restored 4/4 and is why the table above is flat after the first pass. The lesson generalises: <strong>memory must be keyed off settled observations, never arbitrary frames.</strong> Frame rate and memory keying have to be decoupled, or a better sensor degrades the memory built on it.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">Motion</p>
+    <h2>Understanding motion instead of comparing stills</h2>
+    <div class="track">
+      <p>Once you hold a stream rather than a snapshot, the frame history becomes a signal in its own right.</p>
+      <p>Settled-state detection replaces <code>sleep()</code>: the daemon waits for a change and <em>then</em> for stillness, because a bare &ldquo;wait until stable&rdquo; called just before an animation begins returns immediately and uselessly. A small region changing every frame while the rest is still is a spinner, not a settled screen.</p>
+      <p>Transitions can be classified rather than guessed. A horizontal shift of the content with a nav-bar title crossfade is a push; the reverse is a pop; a vertical shift with stable chrome is a scroll, and phase correlation gives the exact offset. A region rising from the bottom with dimming behind it is a sheet; a centred rectangle with dimming is an alert; a change confined to the bottom 40% is the keyboard. These are region-diff and shift-search operations on a 48&times;96 grayscale grid, and the whole analysis costs under about 2&nbsp;ms per frame &mdash; inside the noise of the capture pipeline it runs in.</p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-label">Classifier against a real app, settled state to settled state</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Action</th><th>Classified</th><th>Offset</th></tr></thead>
+          <tbody>
+            <tr><td>Swipe up on a list</td><td><code>scroll</code></td><td>(0, 146) pt</td></tr>
+            <tr><td>Swipe down on a list</td><td><code>scroll</code></td><td>(0, &minus;164) pt</td></tr>
+            <tr><td>Tab switch</td><td><code>replace</code></td><td>&mdash;</td></tr>
+            <tr><td>Nothing</td><td><code>none</code></td><td>&mdash;</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="track">
+      <p>Getting there needed two mistakes worth keeping. Searching the whole frame for a translation found <code>dy=0</code> for a scroll that had visibly moved &mdash; a nav bar, search field and filter row that stay put are a quarter of the screen and pixel-identical, so no shift beats no shift. And the shift score subsampled columns while the baseline it was compared against did not, so the ratio deciding &ldquo;is this a translation&rdquo; was comparing two different quantities.</p>
+      <p>It is still imperfect. A scroll that hits the top of a list and rubber-bands reads as <code>replace</code>, because after the bounce the frames genuinely are not a translation of each other. That matters less than it sounds, and here is why.</p>
+
+      <h3>Verifying an action without a model</h3>
+      <p>Before acting, if the transition graph has an edge for this screen and this action, the daemon predicts the destination. After settling, it compares. The outcomes are a small closed set: <code>ok</code>, <code>no-visible-change</code>, <code>unexpected-screen</code>, <code>unverified</code>. A radio button that moves 0.1% of the screen used to burn a full timeout; now it returns in a second marked <code>no-visible-change</code>, and the agent knows to check rather than wait.</p>
+      <p>That list used to have a fifth entry, <code>unexpected-transition</code>, and removing it is the most useful thing I did to the verification layer. The motion classifier is noisy &mdash; the same tab switch reads <code>replace</code> on one run and <code>pop</code> on the next &mdash; and it was the <em>only</em> thing producing failures on navigation that had gone exactly where predicted. A verdict that says something is wrong when nothing is wrong teaches you to ignore verdicts. So the transition kind is now reported alongside <code>ok</code> rather than overriding it, and the verdict rests on the one signal that proved reliable: which screen you ended up on.</p>
+      <p>Knowing <em>which screen</em> turns out to be the hard part, and it is not a pixel question. Two hashes do two jobs. A perceptual hash of the pixels answers &ldquo;did anything change&rdquo; and &ldquo;has it settled&rdquo;, because that is a question about pixels. Screen <em>identity</em> is structural &mdash; roles, quantised sizes, region, roughly how many siblings, and the chrome labels &mdash; because a list with new rows in it is the same screen, and no pixel hash can say so.</p>
+    </div>
+
+    <div class="amend">
+      <span class="amend-label">Amended &mdash; an identity with until midnight to live</span>
+      <p>Chrome labels are the only text in a fingerprint, which makes them the only thing available to name a screen by. It also means anything misclassified as chrome lands directly in a screen&rsquo;s identity. One screen&rsquo;s identity contained the string <code>"sep 08, 2026"</code>.</p>
+      <p>It was perfectly stable &mdash; stable on something that expires. At midnight it would have become a different screen, and every stored map, route and remembered tap point touching it would have broken overnight, with nothing to flag it. I found it twice, in two different phases, and the second time only by dumping the tokens of all twenty learned screens and reading them.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">The seam</p>
+    <h2>Where the model belongs</h2>
+    <div class="track">
+      <p class="lede">None of this removes the model. It moves it.</p>
+      <p>The daemon&rsquo;s job is to answer, locally and fast, everything that has a local, fast answer: what&rsquo;s on screen, which element matches this intent, has the screen settled, did that action do what was predicted, have I been here before. Its job is <em>also</em> to know exactly when it cannot answer, and the rebuild formalises that as an escalation contract. The reasoner is consulted when:</p>
+      <ol class="contract">
+        <li>the screen fingerprint has never been seen;</li>
+        <li>an intent matches no element confidently, or two elements too closely &mdash; ambiguity is reported, never guessed, because silently tapping the wrong one looks exactly like nothing happening;</li>
+        <li>a verified action did not produce its predicted outcome;</li>
+        <li>an unfamiliar modal, alert or system dialog appears;</li>
+        <li>the goal spans multiple steps and no compiled flow or graph path covers it.</li>
+      </ol>
+      <p>Everything else is acted on without a round trip. What the model receives when it <em>is</em> consulted is compact text &mdash; regions, numbered elements with role, label, state and source, the last action&rsquo;s verdict, any ambiguity &mdash; not an image. It can ask for the image; it rarely needs to.</p>
+      <p>That last sentence is the whole point, so it is worth being concrete about the price of an image.</p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-label">One screen, 700 px on the long edge</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>How it reaches the model</th><th>Size</th><th>Tokens</th></tr></thead>
+          <tbody>
+            <tr><td>the PNG</td><td>107 KB</td><td>&mdash;</td></tr>
+            <tr><td>as a native image block</td><td>&mdash;</td><td>~1,600</td></tr>
+            <tr><td>its base64, if the client mishandles it as text</td><td>143,000 chars</td><td>~41,000</td></tr>
+            <tr><td>the compact text map of the same screen</td><td>1,159 chars</td><td><b>~330</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="panel-note">Token figures divide characters by 3.5 &mdash; an estimate. The character counts are the measurements.</p>
+    </div>
+
+    <div class="track">
+      <p>The text is roughly five times cheaper than an image handled correctly, and over a hundred times cheaper than one handled the way an open Claude Code bug describes &mdash; where 41,000 tokens would also blow straight through the 25,000-token tool-result ceiling and be truncated. And unlike the image, it carries a tap point for every element, so nothing has to be measured by eye.</p>
+      <p>Here is what the model actually gets:</p>
+    </div>
+
+<pre><code>iPhone 17 Pro · 402x874pt · screen a1b2c3d4 "Inbox" (known, 3 known exits)
+last action: [2] tap — ok: matches the outcome seen 5x before
+nav-bar:
+  #1 button    24,64      Back
+  #2 text      201,64     Inbox
+content:
+  #3 cell      201,140    Weekly digest
+  #4 cell      201,196    Payment received
+tab-bar:
+  #5 text      62,835     Inbox
+  #6 text      201,835    Settings</code></pre>
+
+    <div class="track">
+      <p>Region first, because &ldquo;Inbox&rdquo; the title and &ldquo;Inbox&rdquo; the tab differ only by where they are. A number, which is a selector &mdash; whatever this calls <code>#3</code>, the next call taps as <code>#3</code> without describing it. And a verdict, so the model learns what its last action did without asking.</p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-label">A ten-step flow through the MCP server &mdash; five consecutive warm runs</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th></th><th>Steps</th><th>Model turns</th><th>Images</th><th>Text</th></tr></thead>
+          <tbody>
+            <tr><td>before</td><td>10</td><td>10</td><td>10</td><td>~16,000 tokens at best</td></tr>
+            <tr><td>after</td><td class="win">10 / 10 verified</td><td class="win">1</td><td class="win">0</td><td>~1,650 chars, ~5 s</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="track">
+      <p>One turn, because a flow is one call. Zero images, because nothing returns a frame as a side effect any more &mdash; there is exactly one tool that hands back pixels, and it is the one whose name is <code>look</code>.</p>
+      <p>This is the part I think transfers furthest. Every agent framework has an implicit answer to &ldquo;when does the agent need to think versus just act?&rdquo; Almost none of them write it down. Writing it down is what makes the sensor and the reasoner separable.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">Credit where it is due</p>
+    <h2>What&rsquo;s borrowed</h2>
+    <div class="track">
+      <p>A lot, and it&rsquo;s worth being precise. Reading the simulator&rsquo;s framebuffer through Apple&rsquo;s private <code>SimulatorKit</code> surface and injecting touches through its HID path is work that <code>baguette</code> and <code>testa</code> did first and documented; I followed them and hit different walls.</p>
+    </div>
+
+    <div class="amend">
+      <span class="amend-label">Amended &mdash; six times, by the binary itself</span>
+      <p>The frame callback everyone cites fires when the surface is <em>reallocated</em>, which is rare: registering it and waiting produced zero callbacks in five seconds of heavy screen activity. The real per-redraw signal is a different selector. The unregister selector has an extra <code>s</code> in it. Several IO ports conform to the renderable protocol and only the one with a non-zero display size vends a surface, so picking the first match gives you a permanently nil framebuffer that looks exactly like the API being broken. And the HID message constructor documented as taking nine arguments takes six on this Xcode.</p>
+      <p>That last one needed no guessing at all, because the binary states its own prototype as a string. Which is the reusable point: when you are working against private frameworks, <strong>the binary is the documentation</strong>. Every hour I spent reasoning about what a signature <em>should</em> be was worse spent than the minute it took to ask.</p>
+    </div>
+
+    <div class="track">
+      <p>On-device OCR is Apple&rsquo;s Vision framework. The accessibility tree is Apple&rsquo;s. The UI transition graph, and the idea of compiling explored flows into scripts that run without a model, come from AutoDroid (MobiCom&nbsp;&rsquo;24) and AutoDroid-V2 (MobiSys&nbsp;&rsquo;25), which reported prompt-length reductions near 50% and end-to-end latency reductions above 90% from exactly that pattern. Set-of-mark prompting comes from OmniParser and the papers before it.</p>
+      <p>What I&rsquo;d claim as mine is the framing and the seams: perception as an always-on daemon rather than a callable; baselines relative to the observer&rsquo;s last look; memory gated on settled frames; motion understood from the stream; and a written contract for when the daemon must stop and ask. None of those sentences mention iOS.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">The proving ground</p>
+    <h2>Why the simulator was the right place to prove it</h2>
+    <div class="track">
+      <p>It is the hardest sandbox. There is no public input API, the capture path runs through private frameworks that change between Xcode versions, and the accessibility tree is a promise apps don&rsquo;t always keep &mdash; in a real production app the custom tab bar published no children, icon buttons carried private-use glyphs, and React Native text inputs were absent from the tree entirely. If observer-relative perception with local memory works here, it works on a browser, a desktop, an Android emulator, or a game.</p>
+      <p>The daemon is built behind a platform boundary for that reason. Frames in, accessibility tree out, gestures in; everything above that line &mdash; history, settle, transitions, memory, graph, escalation &mdash; has never heard of <code>simctl</code>. An Android backend is the next proof, and it will be easier: every primitive it needs is a public API.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">The takeaway</p>
+    <h2>Three questions to ask your own architecture</h2>
+    <div class="track">
+      <p>If you are building an agent that acts on a screen:</p>
+      <ul class="asks">
+        <li><strong>Do the eyes ever close?</strong> If perception is a function the model calls, they do &mdash; and you are paying the model to notice things a diff could notice.</li>
+        <li><strong>Is &ldquo;changed&rdquo; relative to the observer&rsquo;s last look, or to the previous frame?</strong> If the latter, your agent is blind to every transition that finishes before it polls.</li>
+        <li><strong>Can you write down, in a numbered list, the exact conditions under which the model must be consulted?</strong> If not, the model is being consulted by default, and OSWorld-Human&rsquo;s numbers are your bill.</li>
+      </ul>
+      <p>I built simframe to test a fix faster. What I ended up with was a small argument about what an agent&rsquo;s senses should be. The code is at <a href="https://github.com/lvlrSajjad/simframe">github.com/lvlrSajjad/simframe</a>; the phases, benchmarks and the private-API corrections are in <code>docs/</code>.</p>
+    </div>
+
+    <div class="colophon">
+      <span class="amend-label">On the numbers</span>
+      Every measurement in this piece &mdash; with N, median, p95, the machine, and the mistakes made getting to each one &mdash; is in the repository&rsquo;s benchmarks. Three separate times in this project a first measurement agreed with my hypothesis and was wrong: the capture rate, the fingerprint tolerance, and a settle gate I was sure had fixed something. Each was caught only by running it again. If you take one habit from this rather than one idea &mdash; treat a measurement that confirms what you expected as unfinished.
+    </div>
+  </section>
+
+</div>
+
+</body>
+</html>
