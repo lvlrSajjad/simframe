@@ -60,6 +60,17 @@ On a four-tab flow, run three times back to back from a cleared memory:
 
 An earlier draft of this article quoted 7370 → 5160 → 3304 ms for the same flow. Those numbers were real measurements of the wrong thing: input was silently falling back to a slower path, and the capture daemon was being replaced by every single command because a version constant had drifted between the Swift and JavaScript halves. Nine hundred and ninety-three daemon respawns in one session, and every timing in the project was quietly wrong. It took someone else running the tool to find it.
 
+There is a stronger version of that "about 1 ms", and I only found it by counting rather than reasoning. I put a logging shim in front of the accessibility client and ran a ten-step flow twice — once with the screens already in memory, once with memory cleared:
+
+| Ten-step flow | Accessibility reads | Wall clock |
+| --- | --- | --- |
+| warm — screens remembered | **0** | 6.6–7.4 s |
+| cold — memory cleared | 14 | 17.0 s |
+
+Zero. Not "cheap", not "cached" — the accessibility tree is never asked. A remembered screen is answered from a file, so the perception layer sits idle and the one heavyweight dependency the tool still installs for that tree is on none of the paths a warm flow takes. That is the difference between a cache, which makes a thing faster, and a memory, which makes it unnecessary.
+
+Cold, those 14 reads are about 3.8 seconds of a 17-second run — the single largest cost of a first pass, and 255 ms each against the 123 ms that on-device OCR takes to read the same screen. Which is a useful thing to know before optimising: the first visit is bound by the accessibility tree, not by the pixels.
+
 **Memory** is the part I found most people miss, and it splits in two.
 
 *Visual memory* is the recent frames. Not one frame — the last minute of them. It is what lets the daemon answer "did anything change?" and "what moved?" as text, in about 2 ms, and it is what lets a transition be understood as motion rather than inferred from two stills.

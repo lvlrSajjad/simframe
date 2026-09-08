@@ -564,6 +564,28 @@
     </div>
 
     <div class="track">
+      <p>There is a stronger version of that &ldquo;about 1&nbsp;ms&rdquo;, and I only found it by counting rather than reasoning. I put a logging shim in front of the accessibility client and ran a ten-step flow twice &mdash; once with the screens already in memory, once with memory cleared.</p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-label">Accessibility reads per ten-step flow, counted</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Ten-step flow</th><th>Accessibility reads</th><th>Wall clock</th></tr></thead>
+          <tbody>
+            <tr><td>warm &mdash; screens remembered</td><td class="win">0</td><td>6.6&ndash;7.4 s</td></tr>
+            <tr><td>cold &mdash; memory cleared</td><td>14</td><td>17.0 s</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="track">
+      <p>Zero. Not &ldquo;cheap&rdquo;, not &ldquo;cached&rdquo; &mdash; the accessibility tree is never asked. A remembered screen is answered from a file, so the perception layer sits idle, and the one heavyweight dependency the tool still installs for that tree is on none of the paths a warm flow takes. That is the difference between a cache, which makes a thing faster, and a memory, which makes it unnecessary.</p>
+      <p>Cold, those 14 reads are about 3.8 seconds of a 17-second run &mdash; the single largest cost of a first pass, and 255&nbsp;ms each against the 123&nbsp;ms on-device OCR takes to read the same screen. Which is worth knowing before optimising anything: the first visit is bound by the accessibility tree, not by the pixels.</p>
+    </div>
+
+    <div class="track">
       <p><span class="faculty">Memory</span>the part I found most people miss, and it splits in two.</p>
       <p><em>Visual memory</em> is the recent frames. Not one frame &mdash; the last minute of them. It is what lets the daemon answer &ldquo;did anything change?&rdquo; and &ldquo;what moved?&rdquo; as text, in about 2&nbsp;ms, and it is what lets a transition be understood as motion rather than inferred from two stills.</p>
       <p><em>Procedural memory</em> &mdash; muscle memory, if you like &mdash; is the record of how screens connect: I was on screen A, I tapped this, I arrived at screen B. Once that graph exists, a flow the agent has completed once can be replayed with zero model calls, and an action&rsquo;s outcome can be <em>predicted</em> before it happens, which is what makes verification cheap.</p>
