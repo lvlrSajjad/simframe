@@ -453,6 +453,18 @@ extension CoreSimulatorPlatform {
         try simctl(args)
     }
 
+    /// Reset the HID session, and rebuild the client if the reset does not take.
+    ///
+    /// `resetHIDSession` is the framework's own selector; recreating the client
+    /// is the bigger hammer for the case where the client itself is the stale
+    /// thing. Cheap either way — constructing one has no effect on the device.
+    public func resetInput() throws {
+        guard let device else { throw PrivateAPIError.hidUnavailable("not attached to a device") }
+        hid?.resetSession()
+        hid = try? IndigoHID(device: device, simulatorKit: Self.simulatorKitHandles)
+        guard hid != nil else { throw PrivateAPIError.hidUnavailable("could not rebuild the HID client") }
+    }
+
     public func press(_ button: HardwareButton) throws {
         let (hid, _) = try requireHID()
         guard let code = HIDKeyboard.buttonCode(button) else {

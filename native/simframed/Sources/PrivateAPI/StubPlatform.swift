@@ -32,6 +32,10 @@ public final class StubPlatform: SimulatorPlatform {
     public private(set) var reattachCount = 0
     private var attachedUdid: String?
 
+    /// Counted, so a test can assert that a dead input path is actually retried.
+    public private(set) var resetInputCount = 0
+    public func resetInput() throws { resetInputCount += 1 }
+
     public func reattachDisplay() throws -> DeviceInfo {
         reattachCount += 1
         return DeviceInfo(udid: attachedUdid ?? "STUB-0000", name: "Stub Device", runtime: "iOS 26.0")

@@ -88,6 +88,9 @@ export async function runScript(
     // Stop when a verified step lands somewhere it should not have. A flow
     // continuing past a wrong turn taps controls on a screen nobody intended.
     stopOnUnexpected = true,
+    // Rebuild the HID session and retry once when a hardware button provably
+    // did nothing. Off only for a caller deliberately testing that path.
+    recoverInput = true,
     options,
   } = {},
 ) {
@@ -117,6 +120,10 @@ export async function runScript(
   // the caller returns to Claude is rendered from this, so describing the end
   // state costs nothing beyond the verification pass the flow already ran.
   let endScreen = null;
+  // At most one recovery per run. Pressing home while already on the springboard
+  // moves nothing and is not a failure, so an unbounded retry would rebuild the
+  // session and press again on every such step for no reason.
+  let inputRecovered = false;
 
   for (const [i, raw] of steps.entries()) {
     const step = normalizeStep(raw);
@@ -136,9 +143,9 @@ export async function runScript(
     // What this action did last time it was taken here, if ever.
     const prediction = verify && beforeScreen?.hash ? graph.predict(udid, beforeScreen, step) : null;
     try {
-      const detail = await runStep(deviceQuery, udid, step, { screen, options, frames });
-      let settled = null;
-      if (autoSettle && ACTION_STEPS.has(step.action)) {
+      let detail = await runStep(deviceQuery, udid, step, { screen, options, frames });
+      const settleFor = async () => {
+        if (!autoSettle || !ACTION_STEPS.has(step.action)) return null;
         const w = await api.waitFor(deviceQuery, {
           mode: 'settle',
           since: before,
@@ -146,13 +153,37 @@ export async function runScript(
           timeoutMs: step.timeoutMs ?? timeoutMs,
           options,
         });
-        settled = {
+        return {
           ok: w.satisfied,
           waitedMs: w.waitedMs,
           sawChange: w.sawChange,
           stalled: Boolean(w.stalled),
           noVisibleChange: Boolean(w.noVisibleChange),
         };
+      };
+      let settled = await settleFor();
+
+      // A hardware button that moved nothing did not arrive.
+      //
+      // Input is the one path with no feedback, so a dispatched Indigo message
+      // reports success whether or not the device acted on it — measured, a
+      // long-running daemon returned `press in 66ms` with the screen frozen,
+      // and the same press worked on a fresh daemon. The frames are the only
+      // witness, and by here we have them.
+      //
+      // Only buttons, and only on no visible change. Home and lock always move
+      // the screen, so nothing moving is unambiguous; a tap that changes
+      // nothing is ordinary, and retrying one could act twice. Retrying an
+      // action that provably did nothing is not a repeat — it is the first
+      // attempt that counts.
+      if (recoverInput && !inputRecovered && step.action === 'button' && settled?.noVisibleChange) {
+        inputRecovered = true;
+        const reset = await input.resetSession(udid);
+        if (reset) {
+          detail += ' [input was not being delivered; HID session reset and retried]';
+          await runStep(deviceQuery, udid, step, { screen, options, frames });
+          settled = await settleFor();
+        }
       }
       // Verify against what was predicted, and remember what actually
       // happened. Without this a step that moved the screen the wrong way

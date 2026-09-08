@@ -73,6 +73,23 @@ real app cannot run on a hosted runner, because there is no app to tap.
 
 ## Completeness
 
+### A long-running simulator stops accepting hardware button presses
+Measured: on a device under heavy automation for hours, `press home` reports
+success and the screen never moves. A daemon restart does not help; a device
+restart does. Not reproducible on a fresh device of either iOS 18.0 or iOS 26.5
+(8/8 presses), so it is device state rather than anything simframe holds, and
+the mechanism is unknown.
+
+simframe now reports it rather than claiming success, and rebuilds the HID
+session and retries once inside a flow. Neither recovers the device-state case.
+What would settle it is a way to ask the device whether a button is currently
+held — nothing in the private surface studied so far offers one, and without it
+input remains the only path with no feedback channel.
+
+Worth revisiting if it starts happening inside a single test session rather than
+after hours, because then it stops being an operational annoyance and starts
+being a correctness problem for long flows.
+
 ### The capture loop's recovery path has no test
 A display port torn down under a live daemon left capture dead for six minutes
 until the process was restarted (see `docs/BENCHMARKS.md`). The fix re-resolves

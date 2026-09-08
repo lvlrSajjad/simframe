@@ -599,6 +599,14 @@ async function main() {
       const input = await import('./input.js');
       const dev = await resolveDevice(flags.device);
       const nums = positional.map(Number);
+      // Only meaningful when frames are being captured; without them there is
+      // nothing to compare against and the command says only what it sent.
+      let before = null;
+      try {
+        before = (await api.getState(flags.device, { options })).state.hash;
+      } catch {
+        /* capture not running: fall through and report the send alone */
+      }
       const t0 = Date.now();
       switch (command) {
         case 'tapAt': {
@@ -628,10 +636,32 @@ async function main() {
           await input.pressButton(dev.udid, positional[0]);
       }
       const driver = await input.driverFor(dev.udid);
+      const ms = Date.now() - t0;
+      // Did the device act on it? Input has no feedback channel — a dispatched
+      // Indigo message reports success whether or not the device did anything,
+      // and this command once reported `press in 66ms` while the screen sat
+      // frozen. The frames are the only witness there is, so ask them.
+      let changed = null;
+      if (before) {
+        try {
+          await new Promise((r) => setTimeout(r, 400));
+          changed = (await api.getState(flags.device, { options })).state.hash !== before;
+        } catch {
+          /* no daemon, or capture is down: report the send and say nothing more */
+        }
+      }
+      // Deliberately not an accusation. Pressing home while already on the
+      // springboard legitimately changes nothing, and a warning that cries wolf
+      // is how a real one gets ignored.
+      const note = changed === false
+        ? ' — the screen did not change. That is expected if the press had nothing to do here;'
+          + ' if you expected a change, input may not be reaching the device —'
+          + ' `simframe stop --force && simframe start` rebuilds the session.'
+        : '';
       emit(
         flags,
-        { ok: true, command, ms: Date.now() - t0, driver: driver.name },
-        `${command} in ${Date.now() - t0}ms via ${driver.name}`,
+        { ok: true, command, ms, driver: driver.name, screenChanged: changed },
+        `${command} in ${ms}ms via ${driver.name}${changed === true ? ' — screen changed' : ''}${note}`,
       );
       return;
     }

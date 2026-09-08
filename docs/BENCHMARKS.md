@@ -1362,17 +1362,52 @@ folding that pair correctly all along — `locate` has now caught up with it.
 
 ## `press home` succeeds and does nothing
 
-| | |
-| --- | --- |
-| freshly started daemon | HOME works — full transition out of the app |
-| long-running daemon | `press in 64ms via simframed`, frame hash unchanged |
+Input is the one path with no feedback. A dispatched Indigo message reports
+success when the *send* succeeds, and nothing asks the device whether it acted —
+so `simframe press home` returned `press in 66ms via simframed` while the screen
+sat frozen, and a flow using it silently drove the wrong screens. It had been
+visible all along as `no-visible-change` verdicts in the CI memory check, which
+I read as screen noise.
 
-Input has no feedback channel, so the socket call succeeding is all the Node
-side hears. The HID session goes stale independently of the display port — in
-this case capture was healthy throughout — and `resetHIDSession` exists on the
-client but is never called.
+### Chasing the cause, and three wrong theories
 
-The mechanism is not isolated, so nothing is claimed about the cause. What is
-certain is that this is a silent failure of the exact kind this project's
-policy forbids, and that it was visible all along as `no-visible-change`
-verdicts in the CI memory check, which I read as screen noise.
+| Theory | Test | Result |
+| --- | --- | --- |
+| The HID session goes stale with daemon age | tap and press on a 16-minute-old daemon | both worked — not age |
+| `resetHIDSession` will recover it | reset, then press, on a failing device | still dead — not the client |
+| The `up` op is wrong, so HOME sticks down | fresh iOS 18.0 device, then fresh iOS 26.5 device, 4 presses each | **8/8 worked** — a wrong release would fail on the second press anywhere |
+
+The last one had me telling the user that simframe was probably wedging their
+simulator into the black screens they had been restarting through. It was not:
+two clean devices took eight consecutive presses without sticking, and their own
+device took three immediately after a restart. I said it before I had the
+evidence, and the evidence contradicted it.
+
+### What it actually is
+
+Device state, on a simulator that has been under heavy automation for hours. It
+survives a daemon restart and is cleared by a **device** restart. It is not
+reproducible on a fresh device of either iOS version, so there is nothing in
+simframe to fix at the source and no claim here about the mechanism.
+
+### What was simframe's to fix, and is fixed
+
+Reporting it. A failure that announces itself is the whole policy, and this one
+announced success.
+
+- `simframe press` now compares the frame hash either side and says whether the
+  screen moved — deliberately without accusing anything, because pressing home
+  while already on the springboard legitimately changes nothing and a warning
+  that cries wolf is how a real one gets ignored.
+- A `button` step inside a flow that produces no visible change rebuilds the HID
+  session and retries once, saying so in the step detail. Only buttons: home and
+  lock always move the screen, so nothing moving is unambiguous, whereas a tap
+  that changes nothing is ordinary and retrying one could act twice. Retrying an
+  action that provably did nothing is not a repeat — it is the first attempt
+  that counts. Bounded to one recovery per run.
+- `resetInput` is now a control-socket action, so the session can be rebuilt
+  without restarting the daemon.
+
+The retry does not fix the device-state case — the reset was measured not to
+help there. It fixes the case where the session, rather than the device, is the
+stale thing, and in every case it turns a silent failure into a visible one.

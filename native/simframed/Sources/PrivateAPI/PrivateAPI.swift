@@ -115,6 +115,16 @@ public protocol SimulatorPlatform: AnyObject {
     /// it is the only reliable route for content that must be exact.
     func paste(_ text: String) throws
     func press(_ button: HardwareButton) throws
+    /// Rebuild the HID session.
+    ///
+    /// Input has no feedback channel: a dispatched Indigo message reports
+    /// success when the send succeeds, and there is no way to ask the device
+    /// whether anything happened. Measured on a long-running daemon, a HOME
+    /// press returned in 66ms and the screen never moved, while the same press
+    /// on a freshly started daemon worked — so the session can stop delivering
+    /// while still accepting. This is the recovery for that, and the caller
+    /// that notices is the one with the frames.
+    func resetInput() throws
 
     // MARK: App lifecycle. These are simctl, not private API — no HID needed.
 

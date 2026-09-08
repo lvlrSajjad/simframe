@@ -263,6 +263,28 @@ export async function pressKey(udid, keycode) {
   await idb(['ui', 'key', '--udid', udid, String(keycode)]);
 }
 
+/**
+ * Rebuild the daemon's HID session.
+ *
+ * Input is the one path with no feedback: a dispatched Indigo message reports
+ * success when the send succeeds, and nothing asks the device whether anything
+ * happened. Measured on a long-running daemon, a HOME press returned in 66ms
+ * and the screen did not move; the same press on a freshly started daemon
+ * worked. Whoever holds the frames is the only one who can notice, which is why
+ * this is something callers invoke rather than something input does for itself.
+ *
+ * @returns {Promise<boolean>} whether a session was actually reset.
+ */
+export async function resetSession(udid) {
+  if (!control.available(udid)) return false;
+  try {
+    await control.resetInput(udid);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function pressButton(udid, name) {
   if (control.available(udid)) {
     try {

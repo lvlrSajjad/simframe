@@ -278,6 +278,10 @@ case "run":
                     }
                     try platform.press(button)
                     return done()
+                case "resetInput":
+                    try platform.resetInput()
+                    FileHandle.standardError.write("simframed: HID session reset on request\n".data(using: .utf8)!)
+                    return done()
                 default:
                     return ["ok": false, "error": "unknown action '\(action)'"]
                 }

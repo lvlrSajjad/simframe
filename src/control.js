@@ -66,6 +66,7 @@ export const type = (udid, text) => request(udid, { action: 'type', text });
 export const paste = (udid, text) => request(udid, { action: 'paste', text });
 export const press = (udid, button) => request(udid, { action: 'press', button });
 export const status = (udid) => request(udid, { action: 'status' });
+export const resetInput = (udid) => request(udid, { action: 'resetInput' });
 export const longPress = (udid, x, y, opts = {}) => request(udid, { action: 'longPress', x, y, ...opts });
 export const drag = (udid, from, to, opts = {}) =>
   request(udid, { action: 'drag', x1: from.x, y1: from.y, x2: to.x, y2: to.y, ...opts });
