@@ -40,6 +40,14 @@ The same four-tab tour, run three times back to back: **7370 ms → 5160 ms →
 3304 ms**, with 1, then 3, then 4 of the four controls resolved from memory and
 no mis-taps. What is left is mostly the app's own animation and data load.
 
+Those figures are with per-step verification **off**. It is now on by default,
+and it is not free: the same tour runs ~30 s, ~29 s, ~27 s, resolving 4/4
+controls from memory on every pass and verifying 4/4 steps from the second pass
+on. The trade is a flow that tells you when a step did not do what you meant
+against a flow that is faster and does not. Pass `verify: false` for the old
+behaviour; the reasoning, and the cost breakdown, are in
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+
 ## Install
 
 ```bash
@@ -154,7 +162,8 @@ So simframe reads the screen two ways and remembers the result:
 - **Accessibility** gives real hit targets, types and enabled state.
 - **On-device OCR** (Apple's Vision, ~290 ms, no model round trip) gives every
   label a person can actually see, with coordinates.
-- The merge is keyed by a **layout hash**, so the next visit is a file read.
+- The merge is keyed by a **structural fingerprint**, so the next visit is a
+  file read. What that fingerprint is, and why it is not a pixel hash, is below.
 
 ```
 first visit to a screen   ~1000 ms   read tree + OCR, store the map
@@ -174,34 +183,81 @@ Two details that matter:
   a tab returns an error listing both with coordinates, because silently tapping
   the title looks exactly like nothing happening.
 
-### Why a layout hash, not a frame hash
+### Two hashes, because there are two questions
 
+"Did this move?" and "is this the same screen?" look like one question and are
+not. simframe answers them separately, and getting that wrong was the single
+most expensive mistake in its development.
+
+**Change and settle** are questions about pixels, so a pixel hash answers them.
 The frame hash changes whenever any pixel group changes — a clock digit, one new
-row of data — which makes it useless as a key for "have I seen this screen
-before?". The layout hash crops the status bar and takes a difference hash over a
-12×24 grid.
+row — which is exactly right for "did anything happen?" and useless as a key for
+"have I been here before?". For change detection there is a layout hash: status
+bar cropped, difference hash over a 12×24 grid.
 
 A mean-threshold hash was tried first and was actively dangerous: low-contrast
-app screens collapsed onto identical values, so unrelated screens matched at
-distance 0 and taps landed on the wrong control. Measured on a real app:
+screens collapsed onto identical values, so unrelated screens matched at distance
+0 and taps landed on the wrong control. The difference hash fixed that.
 
-| | Hamming distance |
+**Identity is not a question about pixels**, and this is the part that took three
+attempts. Content *is* pixels: a list whose rows changed drifts as far as a
+different screen does. Measured on a real app, same-screen revisits reached 62
+bits against a different-screen floor of 74 — overlapping, with no threshold
+available to choose. An earlier calibration had suggested a comfortable margin
+(0–4 against 77–113), but it was measured on screens whose content happened to be
+stable and did not survive contact with a real list.
+
+So identity is **structural**. The fingerprint is built from element roles,
+frames quantised to a 24 px grid, the region each element sits in, and repeated
+siblings bucketed as "one" or "many" rather than counted. Deliberately included:
+the labels of chrome elements only — nav title, tab labels, toolbar buttons —
+because two list screens with identical structure are told apart by their title
+and nothing else. Deliberately excluded: all content text and values, the status
+bar, and the keyboard region when a keyboard is up.
+
+It does not depend on the accessibility tree. Fingerprinting from OCR boxes
+alone, with the tree discarded entirely, still separates screens — different
+screens ceiling 0.35 against the same threshold.
+
+| | Jaccard similarity |
 | --- | --- |
-| Same screen, revisited while settled | **0–4** |
-| Same screen, but loading vs loaded | 48–98 |
-| **Different screens** | **77–113** |
+| Same screen, revisited | 0.41–1.00 |
+| **Different screens** | **0.00–0.31** |
 
-Only one of those errors is dangerous. Matching the *wrong* screen would tap the
-wrong control, and that needs two different screens to land within 12 bits of
-each other — the closest pair ever measured was 77. Failing to recognise a screen
-you have seen is harmless: it rebuilds the map, costs ~600 ms, and taps correctly.
-So the tolerance is deliberately far below the collision floor rather than tuned
-to maximise hits.
+The threshold sits in that gap. It is a narrower margin than anyone would want,
+and one screen causes it: a screen whose sections load from different sources has
+more than one genuine settled structure. That is a known limitation with a known
+fix (several accepted fingerprints per screen, rather than a looser threshold),
+tracked in [`docs/DEFERRED.md`](docs/DEFERRED.md).
 
-That middle row is worth knowing about: a screen mid-load genuinely does not look
-like the same screen loaded, so the first visit after a cold launch usually
-rebuilds. Hit rates climb as an app warms up, which is exactly what the three-pass
-numbers above show.
+Failing to recognise a screen you have seen is harmless — it rebuilds the map and
+taps correctly. Matching the *wrong* screen taps the wrong control. The threshold
+is set to err toward the first.
+
+## Navigating by memory
+
+Once simframe knows which screens exist and which action leads from one to the
+next, getting somewhere is a search over known edges rather than a question for a
+model:
+
+```bash
+simframe screens              # what this device has learned
+simframe goto invoices        # walk there, verifying every step
+```
+
+Measured on a four-tab tour, `goto` plans and walks three-step routes with every
+step verified and no model call. It fails rather than guesses: an unknown
+destination, a query matching two screens equally, or no path of known edges all
+report themselves instead of tapping hopefully.
+
+Flows work the same way and refuse to save if any step went unverified —
+replaying a recording of something that may not have worked just reproduces the
+doubt.
+
+```bash
+simframe flow save checkout ./checkout.json
+simframe flow run checkout
+```
 
 ## Does this work on *your* app?
 
@@ -311,6 +367,9 @@ simframe ui                    # labels + tap points (ax and ocr)
 simframe recall                # what happened in the last minute
 simframe recall --ago=15000    # the frame from 15s ago
 simframe strip --count=6       # contact sheet
+simframe screens               # screens this device has learned
+simframe goto invoices         # walk to a known screen over known steps
+simframe flow save|run|list    # record a verified flow, replay it
 simframe status / stop [--force] / devices / doctor
 ```
 
@@ -337,9 +396,15 @@ simframe status / stop [--force] / devices / doctor
 
 ## Roadmap
 
-- **Verify-after-tap.** A tap can move the screen without doing what you meant —
-  a swipe that animates but does not navigate still reports `changed`. Comparing
-  against the expected destination would catch it.
+- **Several fingerprints per screen.** A screen whose sections load from
+  different sources has more than one genuine settled structure, and no single
+  threshold expresses that — the two structures are as far apart as two different
+  screens. Letting a screen hold a few accepted fingerprints keeps identity exact
+  instead of loosening it. This is the narrow-margin fix and the top open item.
+- **The cost of verifying.** Checking identity before and after every step is
+  what makes a flow trustworthy, and it roughly doubled per-step cost. Some of
+  that is recoverable; some is the price of not lying about whether a step
+  worked.
 - **Reduce the input dependency.** idb is the one heavyweight requirement. Its
   simulator input is a reimplementation of the Indigo HID transport rather than a
   public API, so replacing it is real work, not a wrapper — but it is the last
