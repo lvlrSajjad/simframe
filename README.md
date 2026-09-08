@@ -475,13 +475,17 @@ said a word — the exact failure shape, found by the thing built to catch it.
 
 ## Releasing
 
-`npm version` does not touch `server.json`, so bump both, then push the tag:
+`npm version` runs a `version` hook that rewrites `server.json` to match and
+stages it, so one command covers both files:
 
 ```bash
-npm version minor --no-git-tag-version
-$EDITOR server.json        # match "version" and packages[0].version
-git commit -am "Release vX.Y.Z" && git tag vX.Y.Z && git push && git push --tags
+npm version minor          # bumps package.json + server.json, commits, tags
+git push --follow-tags
 ```
+
+Before that hook existed, `server.json` had to be hand-edited between two
+commands, and the release that forgot failed at the workflow's own agreement
+check — which is the one thing that check is for.
 
 The `release` workflow verifies tag/`package.json`/`server.json` agree, validates
 `server.json` against the live registry, and publishes to npm and the MCP
