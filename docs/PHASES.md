@@ -27,21 +27,21 @@ open work is in `docs/DEFERRED.md`.
 | 6 — transition graph, verify-after-tap | done |
 | 6b — structural fingerprint | done. This is how screens are identified; the pixel hash kept change and settle |
 | 6c — structural settle gate | done, **and it missed both its goals** — read the BENCHMARKS entry before trusting the gate to have fixed anything |
+| 6d — variants, and the date that expired | done. A screen may hold several accepted fingerprints; a date banner had been entering one screen's identity |
+| 6e — verdicts on the reliable signal | done. Transition kind is reported, not judged; `verdict` compares nodes rather than raw hashes |
 | CI — packaging + integration gates | done. `integration` boots a simulator on `macos-15` and asserts every layer under `--strict`; required on `main` with an admin bypass |
 | 7 — compact agent state, skill | not started |
 | 8 — Android | not started |
 
-**Measure on the daemon's input path.** The Phase 6c and 6d wall-clock figures
-were taken while input silently ran through idb (~285 ms per tap) because a
-restarting daemon deleted its own control socket. That is fixed, and `--strict`
-can now prove which path is in use, but those tours have not been re-run. Do
-that before quoting any flow timing, and before Phase 7 needs a baseline.
+**Pick up here.** Phase 7 — a compact state for the agent, and the skill. It is
+cheap, it is where the token savings actually land, and the flow baseline it
+needs now exists and is trustworthy: 10.2 s cold, then 3.6 s and 3.7 s with
+every step verified and every control resolved from memory.
 
-**Pick up here.** The highest-value open item is not a phase: a screen whose
-sections load from different sources has more than one genuine settled
-structure, which is what keeps the same-screen margin at 0.05–0.11 instead of
-something comfortable. The fix is several accepted fingerprints per screen, not
-a looser threshold. After that, the per-step verification cost.
+Then Phase 2a (`AXPTranslator`), which removes the last idb dependency and has
+the highest variance of anything left — better attempted with the rest shipped
+and stable underneath it. Region-bands-from-clustering slots in after that, or
+whenever a bug forces it.
 
 **One habit this project earned the hard way.** Three separate times, a first
 measurement agreed with the hypothesis and was wrong — capture, the layout-hash

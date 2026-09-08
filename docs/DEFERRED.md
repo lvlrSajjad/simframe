@@ -104,8 +104,10 @@ than pixels — the research calls for "dHash of structure + role histogram", an
 the element map that would come from is already built. A fingerprint over
 element roles and positions is content-independent by construction, and would
 make both screen memory and the transition graph stable on exactly the screens
-where they are weakest today. This is the single highest-value item in this
-file.
+where they are weakest today. **Done** — Phase 6b replaced pixel identity with a
+structural fingerprint, and Phase 6d added variants for screens with more than
+one settled structure. Kept here because the reasoning is the record of why
+pixel identity failed.
 
 ### Screens without a nav title are named by their tab bar
 `simframe screens` lists one screen as `assets / home / more / •.. / $ /

@@ -32,21 +32,25 @@ Same four-tab navigation flow, on a real production app:
 | --- | --- | --- |
 | Look at the screen | ~130–400 ms, blocking | **~20 ms**, already captured |
 | "Did anything change?" | a full image | **~2 ms**, text only |
-| A 5-step flow | 5+ model round trips | **1 call**, ~7 s |
 | Finding a control | read tree (~570 ms) + reason | **~1 ms** from memory |
-| Same flow, 3rd run | no improvement — every run is the first | **3304 ms, 4/4 from memory** |
+| A 4-step flow, verified | 4+ model round trips | **1 call**, 3.6 s |
+| Same flow, 3rd run | no improvement — every run is the first | **3.7 s, 4/4 from memory, 4/4 verified** |
 
-The same four-tab tour, run three times back to back: **7370 ms → 5160 ms →
-3304 ms**, with 1, then 3, then 4 of the four controls resolved from memory and
-no mis-taps. What is left is mostly the app's own animation and data load.
+The four-tab tour, three times back to back from a cleared memory:
 
-Those figures are with per-step verification **off**. It is now on by default,
-and it is not free: the same tour runs ~30 s, ~29 s, ~27 s, resolving 4/4
-controls from memory on every pass and verifying 4/4 steps from the second pass
-on. The trade is a flow that tells you when a step did not do what you meant
-against a flow that is faster and does not. Pass `verify: false` for the old
-behaviour; the reasoning, and the cost breakdown, are in
-[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+| Pass | Wall clock | Steps verified | Controls from memory |
+| --- | --- | --- | --- |
+| 1 | 10.2 s | 0/4 — nothing is known yet | **4/4** |
+| 2 | **3.6 s** | **4/4** | **4/4** |
+| 3 | **3.7 s** | **4/4** | **4/4** |
+
+Every step is checked against what the same action did last time, and the run
+records its own preconditions — which input path, which daemon, whether the
+daemon was replaced mid-run — so a regression shows up in the measurement rather
+than hiding inside it. Earlier versions of this table quoted 7.4 s → 3.3 s with
+verification switched off; those numbers were measured while input was silently
+falling back to a slower path and the capture daemon was being replaced by every
+command, so they measured two bugs rather than the tool.
 
 ## Install
 
@@ -224,11 +228,22 @@ screens ceiling 0.35 against the same threshold.
 | Same screen, revisited | 0.41–1.00 |
 | **Different screens** | **0.00–0.31** |
 
-The threshold sits in that gap. It is a narrower margin than anyone would want,
+The threshold sits in that gap, but the gap is narrower than anyone would want,
 and one screen causes it: a screen whose sections load from different sources has
-more than one genuine settled structure. That is a known limitation with a known
-fix (several accepted fingerprints per screen, rather than a looser threshold),
-tracked in [`docs/DEFERRED.md`](docs/DEFERRED.md).
+more than one genuine settled structure, and two structures of one screen are as
+far apart as two different screens.
+
+No threshold can express that, so a screen may hold **several** accepted
+fingerprints instead. A new one is admitted only when a known edge lands
+somewhere its target does not recognise — the edge is the evidence that it is the
+same place — and only if no other stored screen claims that reading. Identity
+stays exact rather than being loosened, and the count is capped, so a
+non-deterministic action shows up as a node collecting variants rather than as
+screens silently merging.
+
+It earns its place on real apps: an app reconnecting to its bundler put an alert
+over one screen, and that screen gained a variant instead of a duplicate
+appearing.
 
 Failing to recognise a screen you have seen is harmless — it rebuilds the map and
 taps correctly. Matching the *wrong* screen taps the wrong control. The threshold
@@ -442,15 +457,16 @@ said a word — the exact failure shape, found by the thing built to catch it.
 
 ## Roadmap
 
-- **Several fingerprints per screen.** A screen whose sections load from
-  different sources has more than one genuine settled structure, and no single
-  threshold expresses that — the two structures are as far apart as two different
-  screens. Letting a screen hold a few accepted fingerprints keeps identity exact
-  instead of loosening it. This is the narrow-margin fix and the top open item.
-- **The cost of verifying.** Checking identity before and after every step is
-  what makes a flow trustworthy, and it roughly doubled per-step cost. Some of
-  that is recoverable; some is the price of not lying about whether a step
-  worked.
+- **The accessibility tree without idb.** `AXPTranslator` would remove the last
+  heavyweight install. Capture, input and geometry already come from the daemon;
+  the tree is all that is left.
+- **A compact state for the agent.** The element list, regions, what changed and
+  the last verdict, shaped so a model spends tokens on deciding rather than on
+  reading. This is where the token savings actually land.
+- **Region bands from where elements cluster**, rather than fractions of screen
+  height. A date banner sitting above the tab bar was classified as a tab label
+  and its text entered a screen's identity, which would have expired at
+  midnight. Fixed for that case by a width rule; the underlying cause remains.
 - **Reduce the input dependency.** idb is the one heavyweight requirement. Its
   simulator input is a reimplementation of the Indigo HID transport rather than a
   public API, so replacing it is real work, not a wrapper — but it is the last
