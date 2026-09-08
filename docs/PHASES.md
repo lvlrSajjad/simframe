@@ -30,12 +30,22 @@ open work is in `docs/DEFERRED.md`.
 | 6d — variants, and the date that expired | done. A screen may hold several accepted fingerprints; a date banner had been entering one screen's identity |
 | 6e — verdicts on the reliable signal | done. Transition kind is reported, not judged; `verdict` compares nodes rather than raw hashes |
 | CI — packaging + integration gates | done. `integration` boots a simulator on `macos-15` and asserts every layer under `--strict`; required on `main` with an admin bypass |
+| CI — the memory layer | done. `scripts/ci-memory.mjs` drives the real CLI over the screen map, refs, graph, verdicts, flows and `goto`, OCR-only. Four bugs found writing it, one of them a capture loop that could not recover a lost display port |
 | 7 — compact agent state, skill | done. A ten-step flow is **1 tool call, 0 images, ~1,650 characters**. Every action returns the numbered text screen map; `sim_look` is the only image path and is capped at 1024 px |
 | 8 — Android | not started |
 
 **Pick up here.** Phase 2a (`AXPTranslator`), which removes the last idb
 dependency and has the highest variance of anything left — better attempted now
-that everything above it is shipped and stable. Most of the hard part is already
+that everything above it is shipped, stable, and covered by CI.
+
+Measured before starting it, so the payoff is known rather than assumed: a warm
+ten-step flow makes **zero** accessibility reads, so no warm number moves at
+all. The tree read is 255 ms against in-process OCR's 123 ms on the same screen,
+which makes a first visit accessibility-bound; cold, 14 reads are ~3.8 s of a
+17 s run, so 2a should take that to roughly 14 s. The case for it is the install
+story — idb is the last heavyweight requirement — not speed, and it is not a
+perception-quality win: it changes who reads the tree, not what the app
+publishes. Most of the hard part is already
 isolated: the host-side bridge works and the frontmost application resolves;
 only the attribute read returns nil. Four leads are listed in
 `docs/PRIVATE_API.md`, cheapest first.
