@@ -91,6 +91,28 @@ export async function screenInfo(udid, { refresh = false } = {}) {
 }
 
 async function readScreenInfo(udid) {
+  // Ask the daemon first. It holds the device's own point size and scale, which
+  // makes it both authoritative and free — and it means geometry no longer
+  // needs idb at all. Going to idb first meant a machine without idb could
+  // capture and tap perfectly well but could not run a verified flow, because
+  // building a screen map needs the point size.
+  if (control.available(udid)) {
+    try {
+      const { device } = await control.status(udid);
+      if (device?.pointWidth && device?.pointHeight) {
+        const density = device.scale ?? 1;
+        return {
+          pixelWidth: Math.round(device.pointWidth * density),
+          pixelHeight: Math.round(device.pointHeight * density),
+          density,
+          pointWidth: device.pointWidth,
+          pointHeight: device.pointHeight,
+        };
+      }
+    } catch {
+      /* daemon went away mid-call; fall through to idb */
+    }
+  }
   const out = await idb(['describe', '--json', '--udid', udid]);
   const info = JSON.parse(out.trim().split('\n').filter(Boolean).pop());
   const dims = info.screen_dimensions || {};

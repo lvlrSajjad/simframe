@@ -54,7 +54,11 @@ export async function runScript(
 
   const needsInput = steps.some((s) => ACTION_STEPS.has(normalizeStep(s).action));
   if (needsInput) {
-    const driver = await input.detectDriver();
+    // driverFor, not detectDriver: detectDriver asks specifically whether idb
+    // is installed, so every batch flow demanded idb even on a machine where
+    // the daemon was doing the input perfectly well. Single-step `simframe tap`
+    // already went through driverFor, so `tap` worked and `do` did not.
+    const driver = await input.driverFor(udid);
     if (!driver.available) throw new Error(driver.reason);
   }
 

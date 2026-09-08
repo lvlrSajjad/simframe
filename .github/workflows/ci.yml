@@ -143,19 +143,24 @@ jobs:
           '
 
       - name: A step runs, and capture notices the screen change
-        # `press` is not a step type — the step key is `button`. And the frame
-        # counter cannot advance on an idle screen, because the daemon captures
-        # on damage: the first version of this asserted a counter would move
-        # while nothing was moving. So drive a real change (launching a built-in
-        # app needs no network and no third-party bundle) and assert the frame
-        # HASH changed. `seq` resets when the daemon restarts, so it is reported
-        # but not asserted on.
+        # Deterministic, not lucky. Earlier versions of this step asserted a
+        # frame counter would advance on an idle screen (it cannot — the daemon
+        # captures on damage), and then that launching an app would change the
+        # screen (it does not, if that app is already in front). So: go to the
+        # home screen first, take the baseline there, then launch. Now the
+        # before state is always the home screen and the after state is always
+        # an app, whatever the runner happened to be showing.
+        #
+        # The frame HASH is the assertion; `seq` resets when the daemon
+        # restarts, so it is only reported.
         run: |
           set -o pipefail
           read_state() {
             simframe state --device="$DEVICE" --json \
               | node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(s.hash+" "+s.seq)'
           }
+          printf '[{"button":"home"},{"settle":true}]\n' > /tmp/reset.json
+          simframe do /tmp/reset.json --device="$DEVICE"
           BEFORE=$(read_state)
           printf '[{"launch":"com.apple.Preferences"},{"settle":true}]\n' > /tmp/flow.json
           simframe do /tmp/flow.json --device="$DEVICE"

@@ -766,3 +766,39 @@ by roughly that much per tap. They are left as recorded — they were honest
 measurements of what the tool actually did at the time — but they are not a
 measurement of the daemon's input path, and the tours should be re-run now that
 `--strict` can prove which path is in use.
+
+### Two stale idb dependencies, found by running CI without idb
+
+A hosted runner has no idb, which turned out to be a better test of the "idb is
+only needed for the accessibility tree" claim than any assertion. It was false
+in two places:
+
+- **`runScript` demanded idb for every batch flow.** It called
+  `detectDriver()`, which asks specifically whether idb is installed, rather
+  than `driverFor(udid)`, which prefers the daemon's control socket. Single-step
+  `simframe tap` already used `driverFor`, so `tap` worked without idb and `do`
+  did not — the batch path, which is the one that matters for an agent.
+- **Device geometry came from `idb describe`.** The daemon already reports the
+  device's point size and scale in its status, so this was both an unnecessary
+  dependency and a slower one. The fallback when idb was missing was a hardcoded
+  402x874 at 3x — an iPhone 17 Pro — which is silently wrong on any other
+  device, an iPad especially, and every tap point derived from it lands in the
+  wrong place.
+
+Both now go through the daemon. The claim in `simframe doctor` that idb is "the
+only thing idb is still required for" is true as of this change; it was not true
+when it was written.
+
+### The CI flow assertion, wrong twice before it was right
+
+Worth recording because both wrong versions would have passed by luck:
+
+1. Assert a frame counter advances. It cannot on an idle screen — the daemon
+   captures on damage, so nothing moving means no new frames.
+2. Assert launching an app changes the screen. It does not, if that app is
+   already in front. This passed locally only because the simulator happened to
+   be showing something else.
+
+The working version normalises first: press home, take the baseline there, then
+launch. The before state is always the home screen and the after state always an
+app, whatever the runner was showing.

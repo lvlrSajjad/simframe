@@ -56,6 +56,7 @@ have crash or lock — a wrong Indigo button code can take `backboardd` down. Bo
 return errors rather than guesses today. See `docs/PRIVATE_API.md`.
 
 ### The accessibility tree still comes from idb
+(And until today, so did two other things. See below.)
 The last idb dependency. Most of the hard part is done and recorded: a host-side
 bridge that resolves the frontmost application works. See **Phase 2b** in
 `docs/PHASES.md`.

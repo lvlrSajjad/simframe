@@ -58,11 +58,16 @@ async function deviceGeometry(udid, state) {
   } catch {
     /* idb absent: fall through */
   }
+  // Last resort only. These numbers are an iPhone 17 Pro, so on anything else —
+  // an iPad especially — they are silently wrong, and every tap point derived
+  // from them lands in the wrong place. screenInfo asks the daemon first now,
+  // so reaching here means neither the daemon nor idb could answer.
   const density = 3;
   return {
     density,
     pointWidth: Math.round((state.width * (state.nativeScale ?? 1)) / 1) || 402,
     pointHeight: Math.round((state.height * (state.nativeScale ?? 1)) / 1) || 874,
+    guessed: true,
   };
 }
 
