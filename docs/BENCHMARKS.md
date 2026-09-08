@@ -1160,3 +1160,114 @@ are the app's, and OCR will still be what carries those screens afterwards. The
 case for 2a is the install story (idb is the last heavyweight requirement), plus
 the cold path. It is not a perception-quality improvement, and nothing in the
 warm path moves at all.
+
+---
+
+## CI for the memory layer, and the four bugs writing it found
+
+The integration job asserted capture, input and OCR. Everything above them —
+the screen map, element refs, the transition graph, verdicts, saved flows,
+`goto` — had no coverage at all, which is where every expensive bug in this
+project has lived: the state version that had drifted so every command
+respawned the daemon, `tap <label>` crashing on any screen the graph
+recognised, a tap and a type sharing one edge, a halted flow reporting success.
+Each was found by hand or by somebody else running the tool. None by CI.
+
+`scripts/ci-memory.mjs` is now a required step. It drives the real CLI, so it
+tests what an agent actually calls, and it runs OCR-only because idb is not
+installed on a hosted runner — which is the point: a warm flow makes zero
+accessibility reads, and this is what holds that claim up.
+
+### A stale ref resolved on the wrong screen
+
+The worst of the four, and it was in Phase 7's own work. A ref is only
+meaningful while the screen it was numbered on is showing, so `resolveRef`
+compared the current pixel layout hash against the one the numbers were
+assigned on, refusing beyond a Hamming distance of 20 in 288 bits.
+
+Measured: refs numbered on the springboard resolved happily on a completely
+different screen. **A dark or near-uniform screen hashes to almost all zeros,
+and two degenerate hashes sit within any sane tolerance of each other** — the
+guard was comparing two absences of evidence and finding them similar.
+
+The fix is not a tighter tolerance. Structural identity now decides, fetched
+from screen memory, which is a file read rather than a perception pass — so a
+ref still costs nothing. The pixel check survives as a backstop that only
+speaks when the hash carries at least 16 set bits, and a screen simframe does
+not recognise at all refuses outright.
+
+### Two commands that needed a live daemon and should not have
+
+`simframe screens` and `simframe flow list` are directory reads, and both went
+through `ensureDaemon`. So a device whose capture had stopped could not list the
+screens and flows already sitting on its disk: the tool went blind about things
+it already knew, at exactly the moment you would want to ask.
+
+### `--json` did not survive failure
+
+Phase 7 put `--json` on every command's success path and none of its failures.
+The top-level handler printed `simframe: <message>` to stderr, so a caller that
+asked for machine-readable output got a `SyntaxError` from `JSON.parse` and no
+way to tell "the daemon lost the display" from "simframe is broken". It now
+emits `{ok: false, error}` whenever `--json` was passed.
+
+### What the check deliberately does not assert
+
+That every pass converges to all-`ok`. The springboard is the worst screen on
+the device to demand that of — a live weather widget and a clock give it several
+genuine settled structures against a cap of four variants — and measured over
+four passes the `home` step read `[ok, unverified]`, `[ok, ok]`,
+`[ok, unexpected-screen]`, `[ok, unexpected-screen]`. That is the known
+multiple-structures problem in `docs/DEFERRED.md`, and a CI check demanding
+otherwise would be flaky about something simframe does not claim.
+
+What it asserts instead is exact: an action never taken here before reports
+`unverified` (asked with a URL nobody has opened, so it is novel by
+construction); once seen, the outcome is predicted; and **a run that reported a
+wrong turn never also reports success** — the Phase 7 silent-failure bug,
+pinned.
+
+### A note on the two blackouts
+
+The simulator wedged on a blank screen twice while this was being written, both
+times during the check, and had to be restarted. I cannot say the check caused
+it: the device had been under heavy use for hours by then, and the daemon's
+behaviour throughout was correct — it reported "the display surface could not be
+read" rather than serving a stale frame, which is exactly right. The check is
+now gentler (three convergence passes, not four, with a pause between them) and
+opens with a liveness assertion, so a wedged device produces one clear
+diagnosis instead of a dozen unrelated failures.
+
+### The bug that broke three runs of this check
+
+Capture stopped and never came back, three times in one session. Twice I read
+it as a wedged simulator and asked for a device restart; the third time the
+device was awake and visibly fine, which settled it:
+
+| | |
+| --- | --- |
+| old daemon, device untouched | `the display surface could not be read`, newest frame **353 s** stale, ~6 minutes, never recovered |
+| fresh daemon, same device, nothing else changed | frame #1 at **60 ms** |
+
+`attach(udid:)` resolves the display port once — several IO ports conform to
+`SimDisplayIOSurfaceRenderable` and only the one with a non-zero `displaySize`
+vends a surface — and caches that descriptor. The simulator can tear that port
+down and build a new one under a live daemon, and every `framebufferSurface`
+read on the cached object returns nil from then on. The capture loop logged the
+failure, slept half a second, and did it again forever.
+
+Reporting the failure loudly was right. Never recovering was not, and the only
+cure was a restart nobody would think to try, because the message points at the
+display rather than at the handle on it.
+
+Fixed: `reattachDisplay()` re-resolves the port on the device already attached,
+and the capture loop calls it after six consecutive failed reads (~3 s at the
+loop's back-off), re-arms the damage callback, and logs that it did. Input is
+deliberately left alone — the HID session is independent of the display port and
+survives it being replaced, so tearing it down to fix capture would break the
+half that still worked.
+
+**Not covered by a test.** A port teardown cannot be induced on demand, and the
+capture loop is inline in `main.swift` rather than factored into something a
+stub can drive. `StubPlatform` counts `reattachDisplay()` calls so the loop
+could be tested once it is extracted; that is in `docs/DEFERRED.md`.

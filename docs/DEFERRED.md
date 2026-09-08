@@ -73,6 +73,19 @@ real app cannot run on a hosted runner, because there is no app to tap.
 
 ## Completeness
 
+### The capture loop's recovery path has no test
+A display port torn down under a live daemon left capture dead for six minutes
+until the process was restarted (see `docs/BENCHMARKS.md`). The fix re-resolves
+the port after six consecutive failed reads, and it is unverified: a teardown
+cannot be induced on demand, and the loop is inline in `main.swift` rather than
+factored into a function a stub platform can drive.
+
+`StubPlatform` already counts `reattachDisplay()` calls, so the missing piece is
+extracting the loop body — a `captureOnce(platform:store:) -> Result` — and
+driving it with a stub whose `withFrame` throws on demand. Worth doing the next
+time that file is opened, because the recovery path only ever runs in the
+situation nobody is watching.
+
 ### Fixed sleeps in `actions.js`
 `sim_wait` and the settle gate defer to the daemon's real settle detector, but
 individual step types in `src/actions.js` still carry fixed sleeps. Removing them
@@ -170,6 +183,17 @@ async sections has a few variants, not unlimited ones.
 The alternative — excluding a region that changes between visits — was
 considered and is worse: it needs to know which region is async, which is the
 same problem again.
+
+Phase 7's CI work added a measurement of how bad this gets on the worst
+available case. The iOS springboard carries a live weather widget and a clock,
+and over four identical passes the same `home` action read `[ok, unverified]`,
+`[ok, ok]`, `[ok, unexpected-screen]`, `[ok, unexpected-screen]` — it never
+settles into one shape, and four variants are not enough to hold it. Twelve
+graph nodes existed for what is really about three screens.
+
+This is why the CI check asserts that verdicts are *reported honestly* rather
+than that they converge: convergence is not something simframe can currently
+promise on a screen with live content in it.
 
 ### A screen fingerprinted while still loading becomes its own screen
 The four-tab tour stores five graph nodes, not four. All five are genuinely

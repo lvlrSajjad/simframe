@@ -149,6 +149,20 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
             device = booted[0]
         }
 
+        return try resolveDisplay(on: device, warmInput: true)
+    }
+
+    /// Re-resolve the display port on the device we are already bound to.
+    ///
+    /// Input is deliberately left alone: the HID session is independent of the
+    /// display port, it survives the port being replaced, and tearing it down
+    /// to fix capture would break the half that still worked.
+    public func reattachDisplay() throws -> DeviceInfo {
+        guard let device else { throw PrivateAPIError.noDisplayPort }
+        return try resolveDisplay(on: device, warmInput: false)
+    }
+
+    private func resolveDisplay(on device: NSObject, warmInput: Bool) throws -> DeviceInfo {
         guard let io = device.value(forKey: "io") as? NSObject,
               let ports = io.value(forKey: "ioPorts") as? [NSObject] else {
             throw PrivateAPIError.noDisplayPort
@@ -174,10 +188,12 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
             self.device = device
             let resolved = info(for: device)
             attached = resolved
-            // Warm the HID session once, so the first gesture is not slower
-            // than the rest. Input being unavailable must not stop capture.
-            hid = try? IndigoHID(device: device, simulatorKit: Self.simulatorKitHandles)
-            cachedKeyboardWarning = nonEnglishKeyboards()
+            if warmInput {
+                // Warm the HID session once, so the first gesture is not slower
+                // than the rest. Input being unavailable must not stop capture.
+                hid = try? IndigoHID(device: device, simulatorKit: Self.simulatorKitHandles)
+                cachedKeyboardWarning = nonEnglishKeyboards()
+            }
             return resolved
         }
         throw PrivateAPIError.noDisplayPort

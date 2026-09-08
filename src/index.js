@@ -746,7 +746,15 @@ export async function locate(
     };
   }
   if (selector.kind === 'ref') {
-    const hit = refs.resolveRef(udid, selector.ref, { layoutHash: firstState.layoutHash });
+    // Screen memory answers "which screen is this?" from a file, so a ref can
+    // be checked against structural identity without paying for a perception
+    // pass — which is the whole reason a ref exists.
+    const near = screenmap.recallNearest(udid, firstState.layoutHash);
+    const hit = refs.resolveRef(udid, selector.ref, {
+      layoutHash: firstState.layoutHash,
+      structuralHash: near?.entry?.structuralHash ?? null,
+      screenKnown: Boolean(near),
+    });
     return {
       device,
       state: firstState,

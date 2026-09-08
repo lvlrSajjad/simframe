@@ -523,7 +523,11 @@ async function main() {
     }
 
     case 'screens': {
-      const { device } = await api.ensureDaemon(flags.device, options);
+      // Reading what this device has learned is a file read. It used to go
+      // through ensureDaemon, so a device whose capture had stopped could not
+      // even list the screens already on disk — the tool went blind about
+      // things it already knew.
+      const device = await resolveDevice(flags.device);
       const known = navigate.knownScreens(device.udid);
       emit(
         flags,
@@ -537,7 +541,9 @@ async function main() {
 
     case 'flow': {
       const [sub, name] = positional;
-      const { device } = await api.ensureDaemon(flags.device, options);
+      // `list` is a directory read; `save` and `run` genuinely need the device
+      // awake, and each starts the daemon on its own path.
+      const device = await resolveDevice(flags.device);
       if (sub === 'list') {
         const flows = navigate.listFlows(device.udid);
         emit(flags, flows, flows.length ? flows.map((f) => `${f.name}  ${f.steps} steps`) : 'no saved flows');
@@ -851,6 +857,14 @@ async function doctor({ json = false, strict = false, device } = {}) {
 }
 
 main().catch((err) => {
-  process.stderr.write(`simframe: ${err.message}\n`);
+  // A caller that asked for JSON gets JSON, failures included. Printing prose
+  // here handed `JSON.parse` a SyntaxError instead of a reason, so a script
+  // could not tell "the daemon lost the display" from "simframe is broken" —
+  // which is the whole point of a machine-readable interface.
+  if (process.argv.includes('--json')) {
+    process.stdout.write(`${JSON.stringify({ ok: false, error: err.message }, null, 2)}\n`);
+  } else {
+    process.stderr.write(`simframe: ${err.message}\n`);
+  }
   process.exitCode = 1;
 });

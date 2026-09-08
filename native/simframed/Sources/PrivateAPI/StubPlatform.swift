@@ -23,7 +23,18 @@ public final class StubPlatform: SimulatorPlatform {
     }
 
     public func attach(udid: String?) throws -> DeviceInfo {
-        DeviceInfo(udid: udid ?? "STUB-0000", name: "Stub Device", runtime: "iOS 26.0")
+        attachedUdid = udid
+        return DeviceInfo(udid: udid ?? "STUB-0000", name: "Stub Device", runtime: "iOS 26.0")
+    }
+
+    /// Counted so a test can assert the capture loop actually tries to recover
+    /// rather than logging the same failure forever.
+    public private(set) var reattachCount = 0
+    private var attachedUdid: String?
+
+    public func reattachDisplay() throws -> DeviceInfo {
+        reattachCount += 1
+        return DeviceInfo(udid: attachedUdid ?? "STUB-0000", name: "Stub Device", runtime: "iOS 26.0")
     }
 
     public func withFrame<T>(_ body: (RawFrame) throws -> T) throws -> T {

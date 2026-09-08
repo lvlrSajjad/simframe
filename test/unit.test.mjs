@@ -569,7 +569,7 @@ test('an action signature says what the action was, not just its value', () => {
 
 import { isVolatileLabel } from '../src/fingerprint.js';
 import { resolve as resolveIntent, SAME_CONTROL_POINTS } from '../src/matching.js';
-import { parseSelector, resolveRef, writeRefs } from '../src/refs.js';
+import { informative, parseSelector, resolveRef, writeRefs } from '../src/refs.js';
 import { rowsFor, render } from '../src/view.js';
 
 test('a screen is not named after a value that will have changed by tomorrow', () => {
@@ -643,6 +643,42 @@ test('a ref numbered on one screen refuses to resolve on another', () => {
   // belong to something else.
   assert.throws(() => resolveRef(udid, 1, { structuralHash: 'bbbb2222' }), /different screen/);
   assert.throws(() => resolveRef(udid, 9, { structuralHash: 'aaaa1111' }), /not on this screen/);
+
+  // A screen nothing recognises cannot vouch for the numbers either.
+  assert.throws(() => resolveRef(udid, 1, { screenKnown: false }), /does not recognise this screen/);
+});
+
+test('a degenerate layout hash is not evidence that the screen is the same', () => {
+  // Measured, and it defeated the guard: refs numbered on the springboard
+  // resolved happily on a completely different screen, because a dark or
+  // near-uniform screen hashes to almost all zeros and two such hashes sit
+  // within any sane Hamming tolerance of each other. The pixel check is now a
+  // backstop that only speaks when the hash carries signal; structural identity
+  // is what actually decides.
+  assert.equal(informative('0'.repeat(72)), false, 'a blank screen says nothing');
+  assert.equal(informative(`1${'0'.repeat(71)}`), false, 'nor does one set bit');
+  assert.equal(informative('7070117070f0f1f3ffffffffff780908'), true);
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'simframe-degen-'));
+  try {
+    const udid = 'TEST-DEGENERATE';
+    const blank = '0'.repeat(72);
+    writeRefs(udid, {
+      structuralHash: 'aaaa1111',
+      layoutHash: blank,
+      rows: [{ ref: 1, label: 'Maps', x: 108, y: 184, type: 'Button', region: 'content', source: 'ax' }],
+    });
+    // Two degenerate hashes are close by Hamming distance and mean nothing, so
+    // the structural answer has to be the one that decides — either way.
+    assert.equal(resolveRef(udid, 1, { layoutHash: blank, structuralHash: 'aaaa1111' }).label, 'Maps');
+    assert.throws(
+      () => resolveRef(udid, 1, { layoutHash: blank, structuralHash: 'ffff9999' }),
+      /different screen/,
+      'a degenerate pixel hash must not let a stale ref through',
+    );
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('the screen map folds read text into the control it is printed on', () => {
@@ -704,4 +740,16 @@ test('a flow that halts on a wrong turn does not report success', () => {
   // And a caller who asked to keep going is not overruled.
   assert.equal(haltDecision({ verification: wrong, continueOnError: true }).halt, false);
   assert.equal(haltDecision({ verification: wrong, stopOnUnexpected: false }).halt, false);
+});
+
+test('a --json call reports failure as JSON, not as prose', async () => {
+  // The --json plumbing covered every command's success path and none of its
+  // failures, so a caller that asked for machine-readable output and hit an
+  // error got `simframe: ...` on stderr and a SyntaxError from JSON.parse. It
+  // could not tell "the daemon lost the display" from "simframe is broken".
+  const src = await fs.promises.readFile(new URL('../src/cli.js', import.meta.url), 'utf8');
+  const handler = src.slice(src.indexOf('main().catch('));
+  assert.match(handler, /--json/, 'the top-level error handler must honour --json');
+  assert.match(handler, /JSON\.stringify/);
+  assert.match(handler, /ok: false/);
 });

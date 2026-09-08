@@ -158,6 +158,11 @@ case "run":
 
         let lock = NSLock()
         var dirty = true
+        var consecutiveFailures = 0
+        /// Roughly three seconds of failed reads at the loop's half-second
+        /// back-off. Long enough not to thrash on a momentary hiccup, short
+        /// enough that nobody watches a dead capture loop and wonders.
+        let reattachAfterFailures = 6
         var lastCapture = 0.0
         var frames = 0
         var lastReport = Date().timeIntervalSince1970
@@ -318,8 +323,35 @@ case "run":
                     latencies.append(Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6)
                     frames += 1
                     lastCapture = now
+                    consecutiveFailures = 0
                 } catch {
-                    FileHandle.standardError.write("simframed: capture failed: \(error)\n".data(using: .utf8)!)
+                    consecutiveFailures += 1
+                    FileHandle.standardError.write(
+                        "simframed: capture failed: \(error) (\(consecutiveFailures) in a row)\n".data(using: .utf8)!)
+                    // The display port can be torn down and rebuilt under a
+                    // running daemon, and every read on the old descriptor
+                    // returns nil from then on. Observed on a device that was
+                    // awake and visible the whole time: six minutes of
+                    // "the display surface could not be read", cured instantly
+                    // by restarting the daemon. Reporting a failure loudly is
+                    // right; never recovering from it is not, so re-resolve the
+                    // port and re-arm the damage callback.
+                    if consecutiveFailures >= reattachAfterFailures {
+                        do {
+                            _ = try platform.reattachDisplay()
+                            try platform.observeChanges {
+                                lock.lock(); dirty = true; lock.unlock()
+                            }
+                            lock.lock(); dirty = true; lock.unlock()
+                            FileHandle.standardError.write(
+                                "simframed: re-resolved the display port after \(consecutiveFailures) failed reads\n"
+                                    .data(using: .utf8)!)
+                            consecutiveFailures = 0
+                        } catch {
+                            FileHandle.standardError.write(
+                                "simframed: could not re-resolve the display port: \(error)\n".data(using: .utf8)!)
+                        }
+                    }
                     Thread.sleep(forTimeInterval: 0.5)
                 }
             }

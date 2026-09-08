@@ -192,6 +192,20 @@ jobs:
             process.exit(moved ? 0 : 1);
           ' "$BEFORE" "$AFTER"
 
+      - name: The memory layer — screen map, refs, graph, verdicts, flows
+        # Everything the integration job asserted until now was capture, input
+        # and OCR. The layer above them had no coverage at all, and it is where
+        # every expensive bug in this project has lived: a state version that
+        # had drifted so every command respawned the daemon, `tap <label>`
+        # crashing on any screen the graph recognised, a tap and a type sharing
+        # one edge, a halted flow reporting success. Each was found by hand or by
+        # somebody else running the tool. None by CI.
+        #
+        # idb is not installed on a hosted runner, so this runs OCR-only — which
+        # is the point: a warm flow makes zero accessibility reads, and this is
+        # what holds that claim up.
+        run: node scripts/ci-memory.mjs --device="$DEVICE"
+
       - name: Daemon log, on failure
         if: failure()
         run: |

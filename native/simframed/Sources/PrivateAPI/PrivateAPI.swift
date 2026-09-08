@@ -74,6 +74,16 @@ public protocol SimulatorPlatform: AnyObject {
     func bootedDevices() throws -> [DeviceInfo]
     /// Bind to a device's display. Must be called before `withFrame`.
     func attach(udid: String?) throws -> DeviceInfo
+    /// Re-resolve the display port on the device already attached.
+    ///
+    /// The descriptor handed out by `attach` can die under a live daemon: the
+    /// simulator tears its display port down and builds a new one, and every
+    /// `framebufferSurface` read on the old object returns nil from then on.
+    /// Measured on one long session — capture reported "the display surface
+    /// could not be read" for six minutes on a device that was awake and
+    /// perfectly visible, and a daemon restart fixed it instantly. Without a
+    /// way to re-resolve, a restart is the only cure.
+    func reattachDisplay() throws -> DeviceInfo
     /// Borrow the current framebuffer. The pointer is only valid inside `body`.
     func withFrame<T>(_ body: (RawFrame) throws -> T) throws -> T
     /// Called whenever the display reports damage — the per-redraw signal, so a

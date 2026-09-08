@@ -21,6 +21,26 @@ import * as store from './store.js';
  */
 export const REF_TOLERANCE = 20;
 
+/**
+ * Does this layout hash carry enough signal to compare?
+ *
+ * A blank, dark or near-uniform screen hashes to almost all zeros, and the
+ * Hamming distance between two such hashes is tiny however different the
+ * screens are. Below this many set bits the hash is not evidence.
+ */
+const MIN_SET_BITS = 16;
+
+export function informative(hex) {
+  let bits = 0;
+  for (const ch of String(hex ?? '')) {
+    const v = parseInt(ch, 16);
+    if (Number.isNaN(v)) continue;
+    bits += (v & 1) + ((v >> 1) & 1) + ((v >> 2) & 1) + ((v >> 3) & 1);
+    if (bits >= MIN_SET_BITS) return true;
+  }
+  return false;
+}
+
 const refsFile = (udid) => path.join(store.deviceDir(udid), 'refs.json');
 
 /**
@@ -84,19 +104,33 @@ export function parseSelector(query) {
  * numbering introduces that labels do not have, and a ref resolved against the
  * wrong screen taps whatever now happens to sit at those coordinates.
  */
-export function resolveRef(udid, n, { structuralHash, layoutHash, tolerance = REF_TOLERANCE } = {}) {
+export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, tolerance = REF_TOLERANCE } = {}) {
   const table = readRefs(udid);
   if (!table) throw new Error(`#${n} means nothing yet — read the screen first (sim_ui, or simframe ui)`);
-  const stale = (was, now) => `#${n} was numbered on a different screen (${was} → ${now}) — read the screen again before using refs`;
-  if (structuralHash && table.structuralHash && table.structuralHash !== structuralHash) {
+  const stale = (was, now) =>
+    `#${n} was numbered on a different screen (${was} → ${now}) — read the screen again before using refs`;
+
+  // Structural identity first, because it is the question actually being asked:
+  // is this the screen those numbers were assigned on? The caller gets it
+  // cheaply — screen memory is a file read, not a perception pass.
+  if (table.structuralHash && structuralHash && table.structuralHash !== structuralHash) {
     throw new Error(stale(table.structuralHash.slice(0, 8), structuralHash.slice(0, 8)));
   }
-  // The cheap check, and the one that is always available: the caller already
-  // holds the current frame's layout hash, so this costs nothing. Structural
-  // identity would be a better question but asking it means a perception pass,
-  // which is exactly what a ref exists to avoid.
-  if (layoutHash && table.layoutHash && hashDistance(table.layoutHash, layoutHash) > tolerance) {
-    throw new Error(stale(`${table.layoutHash.slice(0, 8)}`, `${layoutHash.slice(0, 8)}`));
+  // Nothing recognises the screen we are on, so nothing can vouch for the
+  // numbers. Refusing costs a re-read; guessing taps whatever is at those
+  // coordinates now.
+  if (screenKnown === false) {
+    throw new Error(`#${n} cannot be trusted here — simframe does not recognise this screen. Read it again (sim_ui) to renumber.`);
+  }
+  // The pixel check stays, but only as a backstop, and only where it means
+  // something. A dark or near-uniform screen produces a layout hash of almost
+  // all zeros, and two such screens sit within any sane tolerance of each
+  // other — measured: refs numbered on the springboard resolved happily on a
+  // different screen because both hashes were degenerate. A hash with almost
+  // no bits set is not evidence of anything.
+  if (layoutHash && table.layoutHash && informative(table.layoutHash) && informative(layoutHash)
+    && hashDistance(table.layoutHash, layoutHash) > tolerance) {
+    throw new Error(stale(table.layoutHash.slice(0, 8), layoutHash.slice(0, 8)));
   }
   const hit = table.refs.find((r) => r.ref === n);
   if (!hit) {
