@@ -11,7 +11,7 @@ import * as fingerprint from './fingerprint.js';
 import * as matching from './matching.js';
 import * as store from './store.js';
 
-const GRAPH_VERSION = 1;
+const GRAPH_VERSION = 2;
 /**
  * Screens are matched by structural hash, exactly, and then by how alike their
  * token sets are — which tolerates one optional element appearing (a badge, a
@@ -25,16 +25,27 @@ const GRAPH_VERSION = 1;
  * with the screen map forced cold, revisits score 0.41 to 1.00 against a
  * different-screen ceiling of 0.31. 0.36 is the middle of that gap.
  *
- * The gap is narrow because of one screen, and the cause is known: a screen
- * caught after its pixels settle but before its rows arrive fingerprints sparse
- * (17 tokens on one visit, 7 on the next). The fix is a structural settle gate
- * rather than a looser threshold — see docs/DEFERRED.md. Until then this errs
- * toward recording a duplicate screen, which costs a re-derivation, over
- * merging two, which costs a tap on the wrong element.
+ * The gap is narrow because of one screen, and a settle gate did not fix it
+ * (docs/BENCHMARKS.md, Phase 6c): that screen loads its sections from different
+ * sources and genuinely has more than one settled structure. Two structures of
+ * one screen are as far apart as two different screens, so no threshold can
+ * express the difference — which is why a screen may hold several accepted
+ * fingerprints instead. See `variants` below.
  *
- * Most revisits match on the hash outright and never reach this at all.
+ * This still errs toward recording a duplicate screen, which costs a
+ * re-derivation, over merging two, which costs a tap on the wrong element.
+ *
+ * Most revisits match on a hash outright and never reach this at all.
  */
 export const SIMILARITY_THRESHOLD = 0.36;
+/**
+ * A screen with three async sections has a few settled structures, not endless
+ * ones. Capping this keeps a genuinely wrong merge bounded: if a node starts
+ * collecting variants without limit, that is a signal the action is
+ * non-deterministic, not that the screen has many faces.
+ */
+export const MAX_VARIANTS = 4;
+
 /** Only for the legacy pixel path, kept so old graphs still load. */
 export const TOLERANCE = 20;
 
@@ -59,12 +70,19 @@ export function actionSignature(step) {
   return `${key}:${JSON.stringify(step[key]).slice(0, 40)}`;
 }
 
+/** Every fingerprint a node answers to: its canonical one, plus its variants. */
+function fingerprintsOf(node) {
+  return [{ hash: node.hash, tokens: node.tokens ?? [] }, ...(node.variants ?? [])];
+}
+
 function load(udid, screen) {
   const key = typeof screen === 'string' ? { hash: screen, tokens: [] } : screen;
   const entry = store.readJson(path.join(graphDir(udid), `${key.hash}.json`));
-  return entry?.version === GRAPH_VERSION
-    ? entry
-    : { version: GRAPH_VERSION, hash: key.hash, tokens: key.tokens ?? [], edges: [] };
+  if (entry?.version === GRAPH_VERSION) return entry;
+  // The hash may be a variant of a node filed under a different name.
+  const byVariant = allNodes(udid).find((n) => (n.variants ?? []).some((v) => v.hash === key.hash));
+  if (byVariant) return byVariant;
+  return { version: GRAPH_VERSION, hash: key.hash, tokens: key.tokens ?? [], variants: [], edges: [] };
 }
 
 function save(udid, node) {
@@ -97,20 +115,45 @@ export function nearestScreen(udid, screen, { threshold = SIMILARITY_THRESHOLD }
   const key = typeof screen === 'string' ? { hash: screen, tokens: null } : screen;
   if (!key?.hash) return null;
   const nodes = allNodes(udid);
-  const exact = nodes.find((n) => n.hash === key.hash);
+  // Any of a node's accepted fingerprints matching exactly is still an exact
+  // match: a screen with two settled structures is one screen.
+  const exact = nodes.find((n) => fingerprintsOf(n).some((f) => f.hash === key.hash));
   if (exact) return { node: exact, similarity: 1 };
   if (!key.tokens?.length) return null;
   let best = null;
   let bestSimilarity = 0;
   for (const node of nodes) {
-    if (!node.tokens?.length) continue;
-    const s = fingerprint.similarity(node.tokens, key.tokens);
-    if (s > bestSimilarity) {
-      bestSimilarity = s;
-      best = node;
+    for (const f of fingerprintsOf(node)) {
+      if (!f.tokens?.length) continue;
+      const s = fingerprint.similarity(f.tokens, key.tokens);
+      if (s > bestSimilarity) {
+        bestSimilarity = s;
+        best = node;
+      }
     }
   }
   return best && bestSimilarity >= threshold ? { node: best, similarity: bestSimilarity } : null;
+}
+
+/**
+ * Teach a node that it also looks like this.
+ *
+ * Called only when a known edge has landed somewhere its target does not
+ * recognise — the edge is the evidence. A screen whose sections arrive from
+ * different sources has several genuine settled structures, and this is how the
+ * second one stops being a screen of its own.
+ */
+function addVariant(node, reading) {
+  node.variants ??= [];
+  const existing = node.variants.find((v) => v.hash === reading.hash);
+  if (existing) {
+    existing.count += 1;
+    existing.lastSeen = Date.now();
+    return false;
+  }
+  if (node.variants.length >= MAX_VARIANTS) return false;
+  node.variants.push({ hash: reading.hash, tokens: reading.tokens ?? [], count: 1, lastSeen: Date.now() });
+  return true;
 }
 
 /** Only actions worth replaying — a launch or a URL open is a flow's start, not a step within it. */
@@ -167,7 +210,10 @@ export function record(udid, { from, action, to, kind }) {
   const toHash = typeof to === 'string' ? to : to?.hash;
   if (!fromKey?.hash || !toHash) return null;
   const node = nearestScreen(udid, fromKey)?.node ?? load(udid, fromKey);
-  if (fromKey.tokens?.length) node.tokens = fromKey.tokens;
+  // Never overwrite the canonical fingerprint with the one we happened to
+  // arrive as — that is what variants are for, and rewriting it here would let
+  // a node drift screen by screen into something it never was.
+  if (!node.tokens?.length && fromKey.tokens?.length) node.tokens = fromKey.tokens;
   const to_ = toHash;
   const signature = actionSignature(action);
   const existing = node.edges.find((e) => e.action === signature);
@@ -175,6 +221,24 @@ export function record(udid, { from, action, to, kind }) {
     // A different outcome from the same action is worth knowing about: it is
     // how a screen that looks the same but behaves differently shows up.
     if (existing.to !== to_) {
+      // A known edge has landed somewhere its target does not recognise. Either
+      // the action is genuinely non-deterministic, or this is the same screen
+      // wearing a different structure — and the edge is the only evidence that
+      // can tell them apart. If some *other* stored screen claims this reading,
+      // believe it: that is a real change of destination. If nothing claims it,
+      // the screen at the end of this edge has grown a second face.
+      const reading = typeof to === 'string' ? { hash: to, tokens: [] } : to;
+      const claimant = nearestScreen(udid, reading)?.node;
+      const target = load(udid, existing.to);
+      const unclaimed = !claimant || claimant.hash === target.hash;
+      if (unclaimed && target.hash !== to_ && reading.tokens?.length) {
+        addVariant(target, reading);
+        save(udid, target);
+        existing.count += 1;
+        existing.lastSeen = Date.now();
+        save(udid, node);
+        return node;
+      }
       existing.previousTo = existing.to;
       existing.changedOutcomes = (existing.changedOutcomes ?? 0) + 1;
     }

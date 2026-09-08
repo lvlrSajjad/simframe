@@ -659,3 +659,64 @@ diagnostic printed `settled` and `confirmed`:
 
 The lesson worth keeping is the first measurement. It showed exactly what the
 change was supposed to show, and it was wrong; only re-running it caught that.
+
+## Phase 6d — variants, and a fingerprint that expired daily
+
+### The bug worth the whole phase
+
+The Home screen's fingerprint contained `text:tab-bar:w6:h1:"sep 08, 2026"`.
+
+Chrome labels go into the structural hash on purpose — two list screens with
+identical structure are told apart by their title. But `regionFor` is a
+positional band, so a date banner sitting ~70 px above the real tabs was
+classified `tab-bar` and its text became part of the screen's identity. That
+screen would have become a **different screen at midnight**, invalidating every
+stored map, graph node and route touching it, overnight and silently.
+
+Nothing in the existing measurements could have caught it. The fingerprint was
+perfectly stable across visits — it was stable on something that expires. Same
+similarity, same gap, same hit rate, right up until the date rolled over.
+
+The discriminator is structural, not textual: a tab bar divides its width among
+its tabs, so a tab's label is a small fraction of the screen. Measured on this
+app, real tab labels ran 24–72 px against the banner's 144 px on a 402 px
+screen; `tab-bar` labels are now kept only below 30% of screen width. The
+element still contributes its shape — presence is structure — it just stops
+contributing text. Regression test asserts that today's and tomorrow's dates
+produce the same hash.
+
+| | Home screen's name |
+| --- | --- |
+| Before | `assets / home / more / •.. / $ / invoices / work orders / sep 08, 2026` |
+| After | `assets / home / more / •.. / $ / invoices / work orders` |
+
+### Variants: built, not yet exercised
+
+A node can now hold up to four accepted fingerprints. One is admitted only when
+a **known edge lands somewhere its target does not recognise** — the edge being
+the evidence that it is the same place — and only if no other stored screen
+claims that reading, which stays a genuine change of destination. Unit tests
+cover admission, the refusal, and the cap.
+
+On device it did not fire: **variants=0 on every node** across three passes. The
+tour recognised every screen, so nothing needed a second face. The mechanism is
+in place and tested, but its value on a real app is **unmeasured** — the screen
+that motivated it was not reproduced in these runs. It should not be described
+as having fixed the narrow margin until a run actually admits a variant.
+
+### The tour
+
+| Pass | Steps verified `ok` | Controls from memory |
+| --- | --- | --- |
+| 1 | 0/4 | **4/4** |
+| 2 | **4/4** | **4/4** |
+| 3 | **4/4** | **4/4** |
+
+Four screens, four edges, names free of content.
+
+**A note on wall clock.** Across the runs in this phase and 6c the same four-tab
+tour measured anywhere from 7 s to 58 s. That spread is dominated by the app's
+own data loading and by whether screens report settled, not by the changes being
+tested. Single-run timings at this granularity are not evidence of anything and
+are no longer quoted as such; the per-operation numbers earlier in this file are
+the ones that mean something.

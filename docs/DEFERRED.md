@@ -108,6 +108,21 @@ so `goto` works, but it is not a name anybody would type. A better fallback
 would be the label of the *selected* tab, which needs a selected-state signal
 the fused element list does not currently carry.
 
+### The region bands are positional, so content falls into chrome
+A date banner sitting just above the real tabs was classified `tab-bar`,
+and — because chrome labels go into the fingerprint — the screen's identity
+contained `"sep 08, 2026"`. It would have become a different screen at midnight,
+breaking every stored map, node and route touching it overnight. Nothing would
+have flagged it: the fingerprint was perfectly stable, just stable on something
+that expires.
+
+The immediate fix is in: a `tab-bar` label is only kept when the element is
+narrow enough to be a tab label. But the underlying cause is that `regionFor` is
+a positional band, so anything low enough on the screen is "tab bar" whatever it
+actually is. A tighter rule would cluster the actual tab items and take the band
+from them, rather than assuming a fraction of screen height. Worth doing before
+trusting chrome labels on an unfamiliar app.
+
 ### A screen can legitimately have more than one structure
 This is the real cause of the narrow same-screen margin, and Phase 6c's settle
 gate does not fix it. One screen reads 8, 17 and 6 tokens on three cold visits

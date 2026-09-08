@@ -340,6 +340,10 @@ import { detectKeyboardTop, navSlot, regionFor } from '../src/regions.js';
 import { fingerprint } from '../src/fingerprint.js';
 import { describe } from '../src/graph.js';
 import { stepFor, saveFlow } from '../src/navigate.js';
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
+import * as graphmod from '../src/graph.js';
 
 const SCREEN = { width: 402, height: 874 };
 const el = (label, x, y, type = 'Text', extra = {}) => ({
@@ -448,4 +452,80 @@ test('an edge keeps the step that made it, because the signature is lossy', () =
 test('a flow with an unverified step is not saved', () => {
   const script = { steps: [{ tap: 'A' }], results: [{ verification: { verdict: 'unverified' } }] };
   assert.equal(saveFlow('nonexistent-udid', 'x', script).ok, false);
+});
+
+// --- variant fingerprints -------------------------------------------------
+
+const tok = (n, tag) => Array.from({ length: n }, (_, i) => `${tag}:cell:content:w16:h4:x0:y${i}#1`);
+// store.ROOT is read once at import, so a per-test SIMFRAME_HOME cannot isolate
+// these. A per-test device id can: each gets its own graph directory.
+const freshDevice = (name) => {
+  const udid = `TEST-${name}`;
+  graphmod.forget(udid);
+  return udid;
+};
+
+test('a known edge landing on an unrecognised screen grows a variant, not a screen', () => {
+  const UDID = freshDevice('variant-grows');
+  const A = { hash: 'a'.repeat(32), tokens: tok(6, 'a') };
+  const B = { hash: 'b'.repeat(32), tokens: tok(6, 'b') };
+  graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: B, kind: 'push' });
+  // Same action from A, but B has arrived wearing a different structure.
+  const Bprime = { hash: 'c'.repeat(32), tokens: tok(6, 'c') };
+  graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: Bprime, kind: 'push' });
+
+  assert.equal(graphmod.stats(UDID).screens, 2, 'B prime must not become a third screen');
+  // Both structures now resolve to the same node.
+  assert.equal(graphmod.nearestScreen(UDID, B).node.hash, B.hash);
+  assert.equal(graphmod.nearestScreen(UDID, Bprime).node.hash, B.hash);
+});
+
+test('an edge that really goes somewhere else is not swallowed as a variant', () => {
+  const UDID = freshDevice('real-redirect');
+  const A = { hash: 'a'.repeat(32), tokens: tok(6, 'a') };
+  const B = { hash: 'b'.repeat(32), tokens: tok(6, 'b') };
+  const C = { hash: 'c'.repeat(32), tokens: tok(6, 'c') };
+  graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: B, kind: 'push' });
+  graphmod.record(UDID, { from: C, action: { tap: 'x' }, to: C, kind: 'none' });
+  // C is already a screen in its own right, so landing there is a real change
+  // of destination, not a second face of B.
+  graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: C, kind: 'push' });
+  const a = graphmod.nearestScreen(UDID, A).node;
+  const edge = a.edges.find((e) => e.action === 'tap:go');
+  assert.equal(edge.to, C.hash);
+  assert.equal(edge.changedOutcomes, 1);
+});
+
+test('variants are capped, so a non-deterministic action cannot grow forever', () => {
+  const UDID = freshDevice('variant-cap');
+  const A = { hash: 'a'.repeat(32), tokens: tok(6, 'a') };
+  graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: { hash: 'b'.repeat(32), tokens: tok(6, 'b') } });
+  for (let i = 0; i < graphmod.MAX_VARIANTS + 3; i += 1) {
+    graphmod.record(UDID, {
+      from: A,
+      action: { tap: 'go' },
+      to: { hash: String(i).padStart(32, 'd'), tokens: tok(6, `v${i}`) },
+    });
+  }
+  const b = graphmod.nearestScreen(UDID, { hash: 'b'.repeat(32), tokens: tok(6, 'b') }).node;
+  assert.ok(b.variants.length <= graphmod.MAX_VARIANTS, `got ${b.variants.length}`);
+});
+
+test('content that merely falls into the tab bar band is not a screen name', () => {
+  const tabs = ['Home', 'Work Orders', 'Invoices'].map((label, i) => ({
+    type: 'Button', label, region: 'tab-bar',
+    frame: { x: 20 + i * 120, y: 840, width: 60, height: 30 },
+  }));
+  // A date banner sitting just above the real tabs, wide enough to be content.
+  const banner = {
+    type: 'StaticText', label: 'Sep 08, 2026', region: 'tab-bar',
+    frame: { x: 24, y: 768, width: 144, height: 24 },
+  };
+  const withBanner = fingerprint([...tabs, banner], SCREEN);
+  assert.ok(!withBanner.tokens.some((t) => /2026/.test(t)), 'a date must not enter the fingerprint');
+  // Real tab labels still do.
+  assert.ok(withBanner.tokens.some((t) => t.includes('"work orders"')));
+  // And tomorrow's date is the same screen as today's.
+  const tomorrow = fingerprint([...tabs, { ...banner, label: 'Sep 09, 2026' }], SCREEN);
+  assert.equal(withBanner.hash, tomorrow.hash);
 });

@@ -17,6 +17,23 @@ export const GRID = 24;
 /** Regions whose labels identify the screen rather than describe its contents. */
 const CHROME = new Set(['nav-bar', 'tab-bar']);
 
+/**
+ * How wide a tab label can be before it is not a tab label.
+ *
+ * The region bands are positional, so anything low enough on the screen lands
+ * in `tab-bar` — including page content sitting just above the real tabs. One
+ * app put a date banner there, and because chrome labels go into the
+ * fingerprint, that screen's identity contained "sep 08, 2026" and would have
+ * become a different screen at midnight. Every stored map, node and route
+ * touching it would have broken overnight.
+ *
+ * A tab bar divides its width between its tabs, so a tab's label is a fraction
+ * of the screen: measured on that app, real tab labels ran 24-72 px against the
+ * banner's 144 px on a 402 px screen. The element still contributes its shape
+ * to the fingerprint — presence is structure — it just stops contributing text.
+ */
+const TAB_LABEL_MAX_WIDTH_FRACTION = 0.3;
+
 const quantise = (v) => Math.round((v ?? 0) / GRID);
 
 /** Coarse role, so "Button" and "AXButton" and an OCR-inferred button agree. */
@@ -78,8 +95,13 @@ export function tokens(targets, screen) {
     if (CHROME.has(region) && t.navSlot) parts.push(`@${t.navSlot}`);
     parts.push(`w${quantise(frame.width)}`, `h${quantise(frame.height)}`);
     // Chrome labels are the only text that survives: two list screens with
-    // identical structure differ by their title, and nothing else says so.
-    if (CHROME.has(region) && t.label) parts.push(`"${normLabel(t.label)}"`);
+    // identical structure differ by their title, and nothing else says so. But
+    // only where the element is plausibly chrome — a nav bar has slots, and a
+    // tab label is narrow; content that merely fell into the band is not a name.
+    const labelWorthKeeping = CHROME.has(region)
+      && t.label
+      && (region !== 'tab-bar' || (frame.width ?? 0) <= screen.width * TAB_LABEL_MAX_WIDTH_FRACTION);
+    if (labelWorthKeeping) parts.push(`"${normLabel(t.label)}"`);
     const key = parts.join(':');
     const group = groups.get(key) ?? { count: 0, x: quantise(frame.x), y: quantise(frame.y) };
     group.count += 1;

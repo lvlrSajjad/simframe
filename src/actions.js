@@ -122,7 +122,7 @@ export async function runScript(
         // for. Requiring both meant a screen that settled slowly recorded
         // nothing at all.
         if (afterScreen.confirmed && afterScreen.hash) {
-          graph.record(udid, { from: beforeScreen, action: step, to: afterScreen.hash, kind });
+          graph.record(udid, { from: beforeScreen, action: step, to: afterScreen, kind });
           carriedScreen = afterScreen;
         }
       }
