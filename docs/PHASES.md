@@ -11,6 +11,38 @@ what Claude sees. Phase 8 is the second platform.
 
 ---
 
+## Where this stands
+
+Updated 2026-09-08. Numbers for every claim here are in `docs/BENCHMARKS.md`;
+open work is in `docs/DEFERRED.md`.
+
+| Phase | State |
+| --- | --- |
+| 0 — Swift daemon, framebuffer capture | done |
+| 1 — Indigo HID input | done |
+| 2 — OCR half | done. **2a a11y (`AXPTranslator`) not started** — idb is still the accessibility path and the last heavyweight dependency |
+| 3 — replace idb/simctl | done for capture and input, not for a11y |
+| 4 — settle and transition classification | done. The classifier is noisy enough that transition *kind* is advisory, not a reason to halt a flow |
+| 5 — layout priors and intent matching | done |
+| 6 — transition graph, verify-after-tap | done |
+| 6b — structural fingerprint | done. This is how screens are identified; the pixel hash kept change and settle |
+| 6c — structural settle gate | done, **and it missed both its goals** — read the BENCHMARKS entry before trusting the gate to have fixed anything |
+| 7 — compact agent state, skill | not started |
+| 8 — Android | not started |
+
+**Pick up here.** The highest-value open item is not a phase: a screen whose
+sections load from different sources has more than one genuine settled
+structure, which is what keeps the same-screen margin at 0.05–0.11 instead of
+something comfortable. The fix is several accepted fingerprints per screen, not
+a looser threshold. After that, the per-step verification cost.
+
+**One habit this project earned the hard way.** Three separate times, a first
+measurement agreed with the hypothesis and was wrong — capture, the layout-hash
+tolerance, and the 6c settle gate. Each was caught only by re-running it. Treat
+a measurement that confirms what you expected as unfinished.
+
+---
+
 ## Phase 0 — Scaffold the Swift daemon, prove framebuffer capture
 
 **Why first:** capture is the most stable private-API surface and the biggest
