@@ -1435,8 +1435,15 @@ what makes the comparison hold regardless.
 | --- | --- | --- | --- |
 | Settings, root | 15 | 222 ms (214–230) | **47 ms** (45–51) |
 | Settings › General | 14 | 203 ms (194–212) | **45 ms** (44–46) |
+| Settings › Search, confirmed independently | 16 | 224 ms (201–310) | **55 ms** (47–62) |
 
-Phase 2b's target was 60 ms warm. In-process OCR on the same screens is 108–146
+The element count is whatever the screen was showing, and both paths always
+reported the same one. The third row is a separate reviewer reproducing this on
+their own; their idb median is higher and their host-side median is higher too,
+because both runs had idb subprocesses competing for the machine. Their quiet
+follow-up put the daemon's own `axMs` at 42–43 ms.
+
+The phase's target was 60 ms warm. In-process OCR on the same screens is 108–146
 ms, so **the first visit is now bound by the pixels, not by the tree** — the
 reverse of the baseline, which is exactly what the baseline predicted would
 happen at 60 ms.
@@ -1472,7 +1479,7 @@ built.
 
 ### Nothing idb finds is missing
 
-Phase 2b's verification, on the three screen kinds it named. Labelled nodes
+The phase's own verification, on the three screen kinds it named. Labelled nodes
 compared by label and by frame, at the same moment:
 
 | Screen | idb | host-side | Missing here | Extra here |
@@ -1494,3 +1501,64 @@ accessibility tree all run in one daemon built from source on first use, and
 `SIMFRAME_AX_DRIVER=idb` forces the tree back onto it — every private-framework
 path here is version-coupled, and an Xcode upgrade that breaks the host-side
 translator should not be the end of someone's day.
+
+### What an independent review found, and what it cost
+
+A separate reviewer was asked to confirm the above rather than accept it, with
+the instruction to re-derive the numbers. It reproduced claims 1, 2, 4, 5 and 6
+— including verifying the round-trip claim directly (combined `ui` 126 ms
+against ax-only 43 ms and OCR-only 126 ms, so the call costs the slower layer
+and not the sum) and verifying the idb removal by putting a shim that exits 127
+first on `PATH` and watching `simframe ui` render a full map without invoking
+it. It also found four defects, all mine, all now fixed:
+
+**A failed daemon read returned an empty screen map, silently, and cached it.**
+The worst of the four and the newest: it was introduced by this phase's own
+change. When the daemon was listening but the request failed, the rejection was
+flattened to null, and the guard that would have rethrown it was skipped —
+`build` returned `{sources: [], targets: []}` with no error, and `persist`
+defaults true, so that emptiness was written into screen memory under the
+current layout hash for the next warm visit to read back. A loud failure turned
+into a poisoned cache entry. Before this phase the same situation threw. There
+is now a test that stands a socket where the daemon's would be, answers every
+request with a failure, and asserts the daemon's own reason reaches the caller.
+
+**A truncated tree was reported as a complete one.** The walk has three ways to
+stop early — depth, node cap, time budget — and the bridge has a fourth, a guest
+request that misses its deadline and is answered with `emptyResponse`, which
+makes that subtree look genuinely childless. All four produced something
+indistinguishable from a small screen, and `sources` claimed `ax` regardless.
+Since accessibility elements are treated as the real hit targets and then
+persisted, half a screen could be remembered as a whole one. The tree now
+carries whether it is all of one; a partial tree is returned as nodes with a
+reason, and is not claimed as a source, so the caller falls back rather than
+trusting it. Verified by dropping the node cap to 3 and rebuilding:
+`sources ["ocr"], axCount 3, truncated: the tree has more than 3 nodes, which is
+a cycle rather than a screen`.
+
+**The documented escape hatch failed `doctor --strict`.** `SIMFRAME_AX_DRIVER=idb`
+graded as a degraded layer, so the thing offered as the answer to "an Xcode
+upgrade broke the host-side path" turned CI red on exactly the day you reached
+for it. A driver someone selected deliberately is not a silent downgrade, and
+`doctor` now says so: `ok idb: … — selected by SIMFRAME_AX_DRIVER`, exit 0
+under `--strict`.
+
+**`accessibilityStatus()` reported `ok` without ever reading anything.** It
+returned available as soon as the bridge constructed, and constructing only
+proves the classes and selectors exist. That is *precisely* the state the first
+attempt at this phase was in for a week — bridge fine, transport fine, reads
+nothing — and `doctor` would have called it healthy. It now performs a one-attribute
+read against the frontmost application before claiming the layer works.
+
+A fifth finding is latent rather than live: the translator is a process
+singleton and the bridge caches one device's token, so re-attaching to a
+different UDID would have kept reading the first device's tree. Unreachable
+today — one device per daemon — but nothing stated the invariant, so `attach`
+now clears the bridge when the device changes.
+
+The reviewer's `ci-memory` run also failed once on the stale-ref check with an
+all-zeros layout hash, on a device that had been under automation for hours and
+blacked out during the session. That is the degenerate-hash class this file
+already documents, and structural identity is what is supposed to carry it. It
+passed on a re-run and is worth re-checking on a fresh device rather than
+assuming it was noise.

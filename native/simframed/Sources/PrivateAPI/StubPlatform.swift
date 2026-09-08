@@ -13,7 +13,7 @@ public final class StubPlatform: SimulatorPlatform {
     public var recorded: [String] = []
     /// What `accessibilityTree()` should answer. Empty by default, which is
     /// what a device with no app in the foreground genuinely looks like.
-    public var stubTree: [AXNode] = []
+    public var stubTree: AXTree = AXTree(nodes: [])
 
     public init(width: Int = 1206, height: Int = 2622, tint: UInt8 = 0) {
         self.width = width
@@ -105,7 +105,7 @@ extension StubPlatform {
         recorded.append("permission(\(action),\(service),\(bundleId ?? "-"))")
     }
     public func accessibilityStatus() -> (available: Bool, detail: String) { (true, "stub") }
-    public func accessibilityTree() throws -> [AXNode] {
+    public func accessibilityTree() throws -> AXTree {
         recorded.append("accessibilityTree()")
         return stubTree
     }

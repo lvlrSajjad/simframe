@@ -225,3 +225,33 @@ individual commands, which is how the state-version drift and the `tap <label>`
 crash were found. What has *not* been done from the published package is a
 multi-step verified flow on a machine that is not the author's — so the numbers
 in `docs/BENCHMARKS.md` are all from this working copy.
+
+### The memory-layer harness could not tell a dead device from a broken guard
+
+`scripts/ci-memory.mjs` failed twice on the stale-ref check for reasons that had
+nothing to do with refs, and both times it reported the failure as if the guard
+were broken.
+
+The check needs to leave a screen before asserting that a ref numbered on it
+refuses to resolve. It had two ways to leave — press home, then navigate to
+`example.com` — and the second one's destination is where the first one leaves
+the device on a run that already happened. Start a run there with `home` not
+being delivered (the long-running-simulator device state above) and neither
+leaver moves anything. The precondition then failed, and the harness asserted
+the guard anyway, producing a false accusation against the one layer the file
+exists to defend.
+
+Fixed: four genuinely different destinations, and the guard is only asserted
+when the screen actually moved. Also fixed alongside it, from the same run: a
+flow that fails outright has no `results` — `--json` reports `{ok:false, error}`
+— and reaching into it crashed the harness with a `TypeError`. A check script
+whose own failure mode is a stack trace is one more thing to debug at the moment
+you can least afford it.
+
+**Still open:** a green end-to-end run of the hardened harness. The device it
+was being re-run on went dark mid-run ("the display surface could not be read"),
+which is the device-state entry above. The stale-ref check itself passed on that
+run — `10ffff1c18 -> 0000000000`, with the guard correctly refusing on
+structural identity (`4d90b515 → 94e56cda`) rather than on the degenerate
+all-zeros pixel hash, which is the design working exactly as intended. What has
+not been observed since the fix is all 33 checks passing in one run.

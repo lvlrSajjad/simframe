@@ -211,7 +211,7 @@ case "run":
                     // OCR pass. Both run off the capture loop.
                     let wantAx = request["ax"] as? Bool ?? true
                     let wantOcr = request["ocr"] as? Bool ?? true
-                    var axNodes: [AXNode] = []
+                    var axTree = AXTree(nodes: [])
                     var axError: String?
                     var axMs = 0.0
                     var ocrElements: [Element] = []
@@ -222,7 +222,7 @@ case "run":
                     if wantAx {
                         DispatchQueue.global(qos: .userInitiated).async(group: group) {
                             let t = DispatchTime.now().uptimeNanoseconds
-                            do { axNodes = try platform.accessibilityTree() }
+                            do { axTree = try platform.accessibilityTree() }
                             catch { axError = "\(error)" }
                             axMs = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6
                         }
@@ -241,15 +241,20 @@ case "run":
                     group.wait()
                     // OCR failing is fatal to a screen read in a way a missing
                     // tree is not: without pixels there is nothing to report.
-                    if wantOcr, let ocrError, axNodes.isEmpty { return ["ok": false, "error": ocrError] }
+                    if wantOcr, let ocrError, axTree.nodes.isEmpty { return ["ok": false, "error": ocrError] }
 
-                    var elements = axNodes.enumerated().map { Element(id: $0.offset, node: $0.element) }
+                    var elements = axTree.nodes.enumerated().map { Element(id: $0.offset, node: $0.element) }
                     for (i, var e) in ocrElements.enumerated() {
                         e.id = elements.count + i
                         elements.append(e)
                     }
                     var sources: [String] = []
-                    if wantAx, axError == nil { sources.append("ax") }
+                    // A tree that stopped early is reported as nodes, not as a
+                    // source. The layer above treats accessibility elements as
+                    // the real hit targets and writes them into screen memory,
+                    // and half a screen remembered as a whole one is worse than
+                    // a screen read again from pixels.
+                    if wantAx, axError == nil, axTree.truncated == nil { sources.append("ax") }
                     if wantOcr, ocrError == nil { sources.append("ocr") }
                     let latest = store.latestState()
                     let map = ScreenMap(
@@ -265,7 +270,8 @@ case "run":
                     if wantOcr { payload["ocrMs"] = round(ocrMs) }
                     if wantAx {
                         payload["axMs"] = round(axMs)
-                        payload["axCount"] = axNodes.count
+                        payload["axCount"] = axTree.nodes.count
+                        if let truncated = axTree.truncated { payload["axTruncated"] = truncated }
                         // Why the tree is missing matters: a launching app and a
                         // framework that will not load look identical otherwise.
                         if let axError { payload["axError"] = axError }

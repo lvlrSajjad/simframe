@@ -314,8 +314,8 @@ Same screen, same element count, alternating reads:
 
 | Path | Median |
 | --- | --- |
-| `idb ui describe-all` | 203 ms |
-| host-side, in-process | 45 ms |
+| `idb ui describe-all` | 203–224 ms |
+| host-side, in-process | 42–55 ms |
 
 A read on a freshly-switched app is slower — 700–900 ms once, while the guest
 populates — then settles back. An app still launching genuinely has no tree yet

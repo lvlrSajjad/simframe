@@ -174,7 +174,10 @@ what sim_ui returns to Claude beyond the source tag.
 
 ---
 
-## Phase 2b — AXPTranslator in-process a11y tree
+## Phase 2a — AXPTranslator in-process a11y tree
+
+*(Written as "Phase 2b" while it was still scheduled; the delivered work is
+called 2a everywhere else, and this heading now matches.)*
 
 **Done.** The tree is read host-side, in-process, at 45 ms against idb's 203 ms
 on the same screen. What unblocked it is recorded in `docs/PRIVATE_API.md` under

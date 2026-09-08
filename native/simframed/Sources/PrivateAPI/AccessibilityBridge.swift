@@ -34,6 +34,24 @@ public struct AXNode: Sendable {
     }
 }
 
+/// A tree, and whether it is all of one.
+///
+/// The walk has three ways to stop early and the bridge has a fourth, and every
+/// one of them produces something that looks exactly like a small screen. A
+/// partial tree is still useful — it is not, however, authoritative, and the
+/// layer above merges accessibility elements as the real hit targets and then
+/// writes them into screen memory. So the shortfall travels with the nodes.
+public struct AXTree: Sendable {
+    public let nodes: [AXNode]
+    /// Nil when the whole tree was read; otherwise why it was not.
+    public let truncated: String?
+
+    public init(nodes: [AXNode], truncated: String? = nil) {
+        self.nodes = nodes
+        self.truncated = truncated
+    }
+}
+
 public enum AccessibilityError: Error, CustomStringConvertible {
     case unavailable(String)
     case noFrontmostApplication
@@ -131,17 +149,44 @@ public final class AccessibilityBridge {
     /// An app that is still launching genuinely has no tree yet — the read
     /// returns the application node alone. That is reported as it is, rather
     /// than retried into looking like a populated screen.
-    public func tree(budget: TimeInterval = 3) throws -> [AXNode] {
+    public func tree(budget: TimeInterval = 3) throws -> AXTree {
         guard let app = frontmostApplication() else { throw AccessibilityError.noFrontmostApplication }
         guard let root = elementClass
             .perform(NSSelectorFromString("platformElementWithTranslationObject:"), with: app)?
             .takeUnretainedValue() as? NSObject else {
             throw AccessibilityError.unavailable("the frontmost application did not translate to an element")
         }
+        delegate.resetTimeouts()
         var out: [AXNode] = []
+        var cut: String?
         let deadline = Date().addingTimeInterval(budget)
-        walk(root, depth: 0, into: &out, deadline: deadline)
-        return out
+        walk(root, depth: 0, into: &out, deadline: deadline, cut: &cut)
+        // A guest that missed the deadline answers `emptyResponse`, which makes
+        // the subtree below it look genuinely childless. Nothing in the nodes
+        // can show that, so the count has to.
+        let missed = delegate.timeouts
+        if cut == nil, missed > 0 {
+            cut = "\(missed) request(s) to the device timed out, so part of the tree is missing"
+        }
+        return AXTree(nodes: out, truncated: cut)
+    }
+
+    /// Read one attribute off the frontmost application.
+    ///
+    /// Constructing the bridge proves only that the classes and selectors are
+    /// there. The failure this whole path took two attempts to get past was a
+    /// bridge that constructed perfectly and then read nothing, so "available"
+    /// has to mean a value came back, not that the symbols exist.
+    public func probe() throws {
+        guard let app = frontmostApplication() else { throw AccessibilityError.noFrontmostApplication }
+        guard let root = elementClass
+            .perform(NSSelectorFromString("platformElementWithTranslationObject:"), with: app)?
+            .takeUnretainedValue() as? NSObject else {
+            throw AccessibilityError.unavailable("the frontmost application did not translate to an element")
+        }
+        guard attribute(root, "AXRole") is String else {
+            throw AccessibilityError.unavailable("the translator answered nil for the application's role")
+        }
     }
 
     /// The pid of the app currently frontmost, or nil when the bridge cannot say.
@@ -157,12 +202,24 @@ public final class AccessibilityBridge {
         return unsafeBitCast(imp, to: FrontFn.self)(translator, sel, 0, token as AnyObject?) as? NSObject
     }
 
-    private func walk(_ element: NSObject, depth: Int, into out: inout [AXNode], deadline: Date) {
-        if depth > Self.maxDepth || out.count >= Self.maxNodes || Date() > deadline { return }
+    private func walk(_ element: NSObject, depth: Int, into out: inout [AXNode],
+                      deadline: Date, cut: inout String?) {
+        if depth > Self.maxDepth {
+            cut = cut ?? "the tree is deeper than \(Self.maxDepth) levels"
+            return
+        }
+        if out.count >= Self.maxNodes {
+            cut = cut ?? "the tree has more than \(Self.maxNodes) nodes, which is a cycle rather than a screen"
+            return
+        }
+        if Date() > deadline {
+            cut = cut ?? "the read ran out of time"
+            return
+        }
         out.append(node(from: element, depth: depth))
         guard let children = attribute(element, "AXChildren") as? [NSObject] else { return }
         for child in children {
-            walk(child, depth: depth + 1, into: &out, deadline: deadline)
+            walk(child, depth: depth + 1, into: &out, deadline: deadline, cut: &cut)
         }
     }
 
@@ -233,16 +290,34 @@ private final class BridgeDelegate: NSObject {
     private let device: NSObject
     private let timeout: TimeInterval
     private let queue = DispatchQueue(label: "simframe.accessibility.bridge")
+    private let counter = NSLock()
+    private var timedOut = 0
 
     init(device: NSObject, timeout: TimeInterval) {
         self.device = device
         self.timeout = timeout
     }
 
+    /// How many requests the device failed to answer since the last reset.
+    var timeouts: Int {
+        counter.lock(); defer { counter.unlock() }
+        return timedOut
+    }
+
+    func resetTimeouts() {
+        counter.lock(); defer { counter.unlock() }
+        timedOut = 0
+    }
+
+    fileprivate func recordTimeout() {
+        counter.lock(); defer { counter.unlock() }
+        timedOut += 1
+    }
+
     @objc(accessibilityTranslationDelegateBridgeCallbackWithToken:)
     func bridgeCallback(token: NSString?) -> Any? {
         let device = self.device, queue = self.queue, timeout = self.timeout
-        let block: @convention(block) (Any?) -> Any? = { request in
+        let block: @convention(block) (Any?) -> Any? = { [self] request in
             guard let request else { return nil }
             let sel = NSSelectorFromString("sendAccessibilityRequestAsync:completionQueue:completionHandler:")
             guard let imp = device.method(for: sel) else { return nil }
@@ -255,6 +330,7 @@ private final class BridgeDelegate: NSObject {
             typealias SendFn = @convention(c) (AnyObject, Selector, AnyObject, AnyObject, AnyObject) -> Void
             unsafeBitCast(imp, to: SendFn.self)(device, sel, request as AnyObject, queue, handler as AnyObject)
             if waited.wait(timeout: .now() + timeout) == .timedOut {
+                self.recordTimeout()
                 // An empty response is what the translator expects when the
                 // guest does not answer. Returning nil crashes it.
                 return (NSClassFromString("AXPTranslatorResponse") as? NSObject.Type)?

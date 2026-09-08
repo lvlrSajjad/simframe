@@ -58,7 +58,7 @@ export async function axDriverFor(udid) {
     try {
       const status = await control.status(udid);
       if (status.accessibility?.available) {
-        return { name: 'simframed', available: true, version: status.accessibility.detail, reason: null };
+        return { name: 'simframed', available: true, chosen: false, version: status.accessibility.detail, reason: null };
       }
       // The daemon is up and says it cannot read the tree. idb might still,
       // so this is a reason to fall through rather than an answer.
@@ -67,8 +67,20 @@ export async function axDriverFor(udid) {
     }
   }
   const idbDriver = await detectDriver();
-  if (idbDriver.available) return { name: 'idb', available: true, version: idbDriver.version, reason: null };
-  return { name: null, available: false, version: null, reason: idbDriver.reason };
+  // Asked for, or fallen back to? A driver someone chose is not a degradation,
+  // and grading it as one turns the documented escape hatch into a red CI run
+  // on exactly the day an Xcode upgrade makes you reach for it.
+  const chosen = preferIdbTree();
+  if (idbDriver.available) {
+    return {
+      name: 'idb',
+      available: true,
+      chosen,
+      version: chosen ? `${idbDriver.version} — selected by SIMFRAME_AX_DRIVER` : idbDriver.version,
+      reason: null,
+    };
+  }
+  return { name: null, available: false, chosen, version: null, reason: idbDriver.reason };
 }
 
 /** @returns {Promise<{name: string, available: boolean, version: string|null, reason: string|null}>} */

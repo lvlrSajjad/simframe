@@ -121,8 +121,23 @@ const LOOP = writeFlow('simframe-ci-loop.json', [
 // home screen, and opening Safari does not leave Safari. Worse, the loop above
 // can halt partway on a wrong turn, so where we are standing is not knowable in
 // advance. So: try both, and take whichever moves the screen.
+// Several genuinely different destinations, tried in turn until one of them
+// moves the screen.
+//
+// Two was not enough, and the reason is worth keeping: the second leaver
+// navigated to example.com, which is exactly where the first one had already
+// left the device on an earlier run. Start a run there with `home` not being
+// delivered — the long-running-simulator device state in DEFERRED — and neither
+// leaver changes anything, so the stale-ref precondition fails and takes the
+// check that depends on it down with it. That is a harness that cannot tell
+// "the ref guard is broken" from "the device did not move", which is the one
+// distinction this check exists to make.
 const LEAVERS = [
   writeFlow('simframe-ci-leave-home.json', [{ button: 'home' }, { settle: true }]),
+  writeFlow('simframe-ci-leave-settings.json',
+    [{ launch: { value: 'com.apple.Preferences', relaunch: true } }, { settle: true }]),
+  writeFlow('simframe-ci-leave-reminders.json',
+    [{ launch: { value: 'com.apple.reminders', relaunch: true } }, { settle: true }]),
   writeFlow('simframe-ci-leave-safari.json', [{ openUrl: 'https://example.com' }, { settle: true }]),
 ];
 
@@ -189,12 +204,19 @@ if (first) {
   // Now leave that screen WITHOUT re-reading it: `--json` skips the end-state
   // map, so the ref table still describes the screen we have left.
   const { before, after } = await leaveThisScreen();
-  check(before !== after, 'the screen actually changed before testing the stale ref',
+  const moved = before !== after;
+  check(moved, 'the screen actually changed before testing the stale ref',
     `${before.slice(0, 10)} -> ${after.slice(0, 10)}`);
-  const stale = await cli(['find', `#${first.ref}`], { expectFail: true });
-  check(/different screen|read the screen/i.test(stale),
-    'a ref numbered on another screen refuses instead of tapping those coordinates',
-    stale.trim().split('\n')[0]?.slice(0, 90));
+  // Only assert the guard if the precondition actually held. Running it anyway
+  // reports "the stale-ref guard failed" for a device that never left the
+  // screen, which is a false accusation against the one layer this file exists
+  // to defend — and it is how this check has failed twice.
+  if (moved) {
+    const stale = await cli(['find', `#${first.ref}`], { expectFail: true });
+    check(/different screen|read the screen/i.test(stale),
+      'a ref numbered on another screen refuses instead of tapping those coordinates',
+      stale.trim().split('\n')[0]?.slice(0, 90));
+  }
 } else {
   check(false, 'element refs', 'no elements to number');
 }
@@ -220,12 +242,22 @@ console.log('\n--- the transition graph learns ---');
 // a flow halted at step 0 by a wrong turn reported "flow completed" with no
 // error. That is a silent failure, and it is the one thing here that must never
 // come back.
+// A run that failed outright has no `results` at all — `--json` reports
+// `{ok:false, error}`. Reaching into it crashed the harness with a TypeError
+// pointing at this line, which says nothing about what went wrong on the
+// device. A check script whose own failure mode is a stack trace is one more
+// thing to debug at the moment you can least afford it.
+const verdictsOf = (run) =>
+  Array.isArray(run?.results)
+    ? run.results.map((r) => r.verification?.verdict ?? 'none')
+    : [`did not run: ${run?.error ?? 'no results'}`];
+
 const passes = [];
 for (let pass = 1; pass <= CONVERGE_PASSES; pass += 1) {
   const run = await jsonRetry(['do', LOOP], { allowFail: true });
-  const verdicts = run.results.map((r) => r.verification?.verdict ?? 'none');
+  const verdicts = verdictsOf(run);
   passes.push({ run, verdicts });
-  console.log(`     pass ${pass}: ${run.ranSteps}/${run.totalSteps} steps, verdicts [${verdicts.join(', ')}]`);
+  console.log(`     pass ${pass}: ${run.ranSteps ?? 0}/${run.totalSteps ?? '?'} steps, verdicts [${verdicts.join(', ')}]`);
   if (pass < CONVERGE_PASSES) await new Promise((r) => setTimeout(r, BETWEEN_PASSES_MS));
 }
 
@@ -237,8 +269,10 @@ const NOVEL = writeFlow('simframe-ci-novel.json', [
   { openUrl: `https://example.com/?simframe-ci=${Date.now()}` },
 ]);
 const novel = await jsonRetry(['do', NOVEL], { allowFail: true });
-const novelVerdicts = novel.results.map((r) => r.verification?.verdict ?? (r.ok ? 'none' : `error: ${r.error}`));
-check(novel.results.some((r) => r.verification?.verdict === 'unverified'),
+const novelVerdicts = Array.isArray(novel?.results)
+  ? novel.results.map((r) => r.verification?.verdict ?? (r.ok ? 'none' : `error: ${r.error}`))
+  : [`did not run: ${novel?.error ?? 'no results'}`];
+check(Array.isArray(novel?.results) && novel.results.some((r) => r.verification?.verdict === 'unverified'),
   'an action never taken here before is reported as unverified, not as verified',
   `[${novelVerdicts.join(', ')}]`);
 check(passes.some((p) => p.verdicts.includes('ok')),
@@ -255,7 +289,8 @@ check(silent.length === 0,
 
 const halted = passes.find((p) => !p.run.ok);
 if (halted) {
-  check(halted.run.ranSteps < halted.run.totalSteps || halted.run.results.some((r) => !r.ok),
+  check(halted.run.ranSteps < halted.run.totalSteps
+      || (Array.isArray(halted.run.results) && halted.run.results.some((r) => !r.ok)),
     'and a halted run says which step stopped it',
     `${halted.run.ranSteps}/${halted.run.totalSteps}`);
 }

@@ -4,6 +4,10 @@ import { test } from 'node:test';
 import { decodePng, encodePng, grayGrid, scaleBitmap } from '../src/png.js';
 import { frameHash, rampLevel, regionMap, regionSignature, signatureDiff } from '../src/analyze.js';
 import { elementToNode } from '../src/input.js';
+import * as control from '../src/control.js';
+import * as screenmap from '../src/screenmap.js';
+import * as store from '../src/store.js';
+import net from 'node:net';
 
 function solid(width, height, [r, g, b]) {
   const data = Buffer.alloc(width * height * 4);
@@ -892,4 +896,36 @@ test('a daemon element becomes the node shape every accessibility caller expects
   assert.equal(bare.value, null);
   assert.equal(bare.identifier, null);
   assert.equal(bare.enabled, null, 'unknown is null, not false');
+});
+
+test('a daemon that answers with a failure is reported, not returned as an empty screen', async () => {
+  // The version of this that flattened the rejection to null returned
+  // {sources: [], targets: []} with no error — and because maps are persisted
+  // by default, that emptiness was written into screen memory under the
+  // current layout hash, where the next warm visit read it back instead of
+  // perceiving the screen again. A loud failure became a poisoned cache entry.
+  // A short name on purpose: a Unix socket path has about 104 characters to
+  // play with, and a real UDID under a temp root spends them all — `listen`
+  // then resolves without creating the file, which reads as an unrelated bug.
+  const udid = 'fake-daemon';
+  const dir = store.deviceDir(udid);
+  fs.mkdirSync(dir, { recursive: true });
+  // `available()` wants a meta.json naming a live process and a real socket.
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ pid: process.pid, udid }));
+  const sockPath = path.join(dir, 'control.sock');
+
+  const server = net.createServer((c) => {
+    c.on('data', () => c.end(`${JSON.stringify({ ok: false, error: 'the daemon is having a bad day' })}\n`));
+  });
+  await new Promise((resolve) => server.listen(sockPath, resolve));
+  try {
+    assert.equal(control.available(udid), true, 'the fixture has to look like a live daemon');
+    await assert.rejects(
+      () => screenmap.build(udid, { screen: { width: 402, height: 874 }, persist: false }),
+      /bad day/,
+      'the daemon’s own reason has to reach the caller');
+  } finally {
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -189,6 +189,13 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
             let size = unsafeBitCast(sizeImp, to: SizeFn.self)(descriptor, sizeSel)
             guard size.width > 0, size.height > 0 else { continue }
             display = descriptor
+            // The bridge captures one device's token and installs itself on a
+            // process-wide translator, so it belongs to the device it was built
+            // for. Binding to a different one must not inherit it.
+            if self.device !== device {
+                accessibility = nil
+                accessibilityFailure = nil
+            }
             self.device = device
             let resolved = info(for: device)
             attached = resolved
@@ -208,14 +215,17 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     public func accessibilityStatus() -> (available: Bool, detail: String) {
         guard device != nil else { return (false, "no device attached") }
         do {
-            _ = try bridge()
+            // Constructing the bridge only proves the symbols are there. The
+            // failure this path took two attempts to get past was a bridge that
+            // constructed perfectly and read nothing, so this reads.
+            try bridge().probe()
             return (true, "AXPTranslator, host-side")
         } catch {
             return (false, "\(error)")
         }
     }
 
-    public func accessibilityTree() throws -> [AXNode] {
+    public func accessibilityTree() throws -> AXTree {
         try bridge().tree()
     }
 

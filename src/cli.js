@@ -832,7 +832,11 @@ async function doctor({ json = false, strict = false, device } = {}) {
       add(`text recognition (${d.name})`, 'ok',
         daemon ? 'simframed (in-process, off the framebuffer)' : 'sips + helper binary');
       const ax = await input.axDriverFor(d.udid);
-      add(`accessibility tree (${d.name})`, ax.available ? (ax.name === 'simframed' ? 'ok' : 'warn') : 'optional',
+      // idb here is a downgrade unless it was asked for. `warn` means this
+      // machine could be doing better and silently is not; a driver someone
+      // selected on purpose is neither silent nor a surprise.
+      const axState = !ax.available ? 'optional' : ax.name === 'simframed' || ax.chosen ? 'ok' : 'warn';
+      add(`accessibility tree (${d.name})`, axState,
         ax.available ? `${ax.name}: ${ax.version}` : `unavailable: ${ax.reason}`,
         { key: 'ax.driver', value: ax.name });
     }

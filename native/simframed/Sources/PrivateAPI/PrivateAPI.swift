@@ -131,11 +131,12 @@ public protocol SimulatorPlatform: AnyObject {
 
     /// Whether the accessibility tree can be read, and why not when it cannot.
     func accessibilityStatus() -> (available: Bool, detail: String)
-    /// The frontmost application's accessibility tree, flattened depth-first.
+    /// The frontmost application's accessibility tree, flattened depth-first,
+    /// carrying whether it is all of one.
     ///
     /// An app still launching has no tree yet, and this reports that as it is —
     /// one node, no children — rather than retrying until it looks populated.
-    func accessibilityTree() throws -> [AXNode]
+    func accessibilityTree() throws -> AXTree
 
     // MARK: App lifecycle. These are simctl, not private API — no HID needed.
 

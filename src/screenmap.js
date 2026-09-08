@@ -137,9 +137,14 @@ export async function build(udid, {
     : fullFrame && fs.existsSync(fullFrame)
       ? ocr.readText(fullFrame, { density }).catch((err) => err)
       : null;
-  const daemonScreen = daemonPromise
-    ? await daemonPromise.then((r) => (r instanceof Error ? null : r.screen ?? null))
-    : null;
+  const daemonAnswer = daemonPromise ? await daemonPromise : null;
+  // Keep the failure rather than flattening it to null. A daemon that was
+  // listening and then did not answer is a loud failure, and the version of
+  // this that dropped it returned an empty map with no error — which `persist`
+  // then wrote into screen memory, so a later warm visit read the emptiness
+  // back instead of perceiving the screen again.
+  const daemonError = daemonAnswer instanceof Error ? daemonAnswer : null;
+  const daemonScreen = daemonError ? null : daemonAnswer?.screen ?? null;
   // With no geometry, treat every element as a potential control rather than
   // guessing a screen size and mis-classifying containers.
   const screenArea = screen?.width && screen?.height ? screen.width * screen.height : Infinity;
@@ -175,10 +180,15 @@ export async function build(udid, {
     }
   }
 
-  if (ocrPromise || (useOcr && daemonScreen)) {
+  // Neither layer was even attempted: nothing below can report the failure, so
+  // it has to be reported here rather than returned as an empty screen.
+  if (daemonError && !useOcr) throw daemonError;
+
+  if (ocrPromise || (useOcr && viaDaemon)) {
     try {
-      const result = ocrPromise ? await ocrPromise : daemonScreen;
+      const result = ocrPromise ? await ocrPromise : (daemonError ?? daemonScreen);
       if (result instanceof Error) throw result;
+      if (!result) throw new Error('the daemon did not answer');
       // A daemon that answered without reading text is not an OCR source, and
       // saying it was would claim the screen had been read when it had not.
       if (viaDaemon && !result.sources?.includes('ocr')) throw new Error(result.ocrError ?? 'no text was read');
