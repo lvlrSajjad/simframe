@@ -195,32 +195,82 @@ case "run":
                     return done(["device": device.name, "udid": device.udid])
                 case "status":
                     let input = platform.inputStatus()
+                    let ax = platform.accessibilityStatus()
                     return done([
                         "input": ["available": input.available, "detail": input.detail],
+                        "accessibility": ["available": ax.available, "detail": ax.detail],
                         "device": ["name": device.name, "udid": device.udid,
                                    "pointWidth": device.pointWidth, "pointHeight": device.pointHeight,
                                    "scale": device.scale],
                         "engine": "simframed",
                     ])
                 case "ui":
-                    // OCR straight off the framebuffer: no PNG encode, no file,
-                    // no process spawn. Runs on the socket queue, so a slow
-                    // recognition pass cannot stall frame capture.
-                    let started = DispatchTime.now().uptimeNanoseconds
-                    let elements = try platform.withFrame { frame in
-                        try VisionOCR.recognise(frame: frame, scale: device.scale)
+                    // The accessibility tree and OCR read the same instant of
+                    // the screen and neither needs the other, so they run
+                    // together: in series the tree read is simply added to the
+                    // OCR pass. Both run off the capture loop.
+                    let wantAx = request["ax"] as? Bool ?? true
+                    let wantOcr = request["ocr"] as? Bool ?? true
+                    var axNodes: [AXNode] = []
+                    var axError: String?
+                    var axMs = 0.0
+                    var ocrElements: [Element] = []
+                    var ocrError: String?
+                    var ocrMs = 0.0
+
+                    let group = DispatchGroup()
+                    if wantAx {
+                        DispatchQueue.global(qos: .userInitiated).async(group: group) {
+                            let t = DispatchTime.now().uptimeNanoseconds
+                            do { axNodes = try platform.accessibilityTree() }
+                            catch { axError = "\(error)" }
+                            axMs = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6
+                        }
                     }
+                    if wantOcr {
+                        DispatchQueue.global(qos: .userInitiated).async(group: group) {
+                            let t = DispatchTime.now().uptimeNanoseconds
+                            do {
+                                ocrElements = try platform.withFrame { frame in
+                                    try VisionOCR.recognise(frame: frame, scale: device.scale)
+                                }
+                            } catch { ocrError = "\(error)" }
+                            ocrMs = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6
+                        }
+                    }
+                    group.wait()
+                    // OCR failing is fatal to a screen read in a way a missing
+                    // tree is not: without pixels there is nothing to report.
+                    if wantOcr, let ocrError, axNodes.isEmpty { return ["ok": false, "error": ocrError] }
+
+                    var elements = axNodes.enumerated().map { Element(id: $0.offset, node: $0.element) }
+                    for (i, var e) in ocrElements.enumerated() {
+                        e.id = elements.count + i
+                        elements.append(e)
+                    }
+                    var sources: [String] = []
+                    if wantAx, axError == nil { sources.append("ax") }
+                    if wantOcr, ocrError == nil { sources.append("ocr") }
                     let latest = store.latestState()
                     let map = ScreenMap(
                         fingerprint: latest?["layoutHash"] as? String ?? "",
                         hash: latest?["hash"] as? String ?? "",
                         size: CGSize(width: device.pointWidth, height: device.pointHeight),
                         elements: elements,
-                        sources: ["ocr"],
+                        sources: sources,
                         capturedAt: FrameStore.nowMs()
                     )
                     var payload = map.json
-                    payload["ocrMs"] = (Double(DispatchTime.now().uptimeNanoseconds - started) / 1e6 * 100).rounded() / 100
+                    let round = { (v: Double) in (v * 100).rounded() / 100 }
+                    if wantOcr { payload["ocrMs"] = round(ocrMs) }
+                    if wantAx {
+                        payload["axMs"] = round(axMs)
+                        payload["axCount"] = axNodes.count
+                        // Why the tree is missing matters: a launching app and a
+                        // framework that will not load look identical otherwise.
+                        if let axError { payload["axError"] = axError }
+                    }
+                    if let ocrError { payload["ocrError"] = ocrError }
                     return done(["screen": payload])
                 case "tap":
                     guard let p = point("x", "y") else { return ["ok": false, "error": "tap needs x and y"] }

@@ -245,52 +245,86 @@ way to check a signature after an Xcode upgrade:
 strings SimulatorKit | grep '^IndigoHIDMessage'
 ```
 
-## Accessibility (partly verified)
+## Accessibility: the sequence that works
 
-**Verified working:** a host-side bridge that reaches the simulator's live
-accessibility server and resolves the frontmost application, with no code
-injected into the guest and no `NSView`.
-
-**Not yet working:** reading attributes off an element. See "where it stops".
-
-Sources read: `facebook/idb` (`SimulatorFrameworkBridge/AXPTranslationPrivate.h`,
-`AXPAttributes.h`, `AccessibilityRuntime.m`) and `valewnrt/testa`
-(`Sources/TestaEngine/TSTAccessibility.m`). Both are MIT and both write the
-constants out literally, which is faster and safer than sweeping for them.
-
-### The shape that works
+Verified end to end: the frontmost app's tree read from the host, in device
+points, with nothing injected into the guest, no `NSView`, and idb not on the
+path at all.
 
 ```
 AXPTranslator                                   (/System/Library/PrivateFrameworks/
                                                  AccessibilityPlatformTranslation.framework)
-  +sharedInstance                               ← this one, NOT sharediOSInstance
+  +sharedInstance                               -> AXPTranslator (the macOS one, on a Mac)
   .bridgeTokenDelegate = <your delegate>        ← held WEAKLY; retain it yourself
-  -frontmostApplicationWithDisplayId:bridgeDelegateToken:   -> AXPTranslationObject (has .pid)
-  -processTranslatorRequest:                    -> AXPTranslatorResponse (.resultData)
+  -frontmostApplicationWithDisplayId:bridgeDelegateToken:   -> AXPTranslationObject (.pid)
+
+AXPMacPlatformElement
+  +platformElementWithTranslationObject:        -> an element answering NSAccessibility
+    -accessibilityAttributeValue:               -> AXChildren, AXRole, AXValue, AXIdentifier…
+    -accessibilityLabel, -accessibilityFrame
+
+SimDevice
+  -accessibilityPlatformTranslationToken        ← the token. Do not invent one.
+  -sendAccessibilityRequestAsync:completionQueue:completionHandler:
+                                                completionHandler is ^(id) — ONE argument
 ```
 
-The delegate implements three selectors. The first is the one that matters:
+The delegate implements three selectors. The first is the one that matters; it
+returns a block taking **one** argument and returning the response:
 
 ```objc
-// Returns a block taking ONE argument and returning the response.
 - (id (^)(id))accessibilityTranslationDelegateBridgeCallbackWithToken:(NSString *)token;
 - (CGRect)accessibilityTranslationConvertPlatformFrameToSystem:(CGRect)r withToken:(NSString *)t; // return r
 - (id)accessibilityTranslationRootParentWithToken:(NSString *)token;                              // return nil
 ```
 
-Inside that block, forward the request to the device and bridge async to sync:
+Inside the block, forward the request to the device and bridge async to sync:
+wait on a semaphore, and return `AXPTranslatorResponse.emptyResponse` — never
+nil — if the guest does not answer. **The completion queue must never be main**,
+and every translator call belongs off the main queue.
 
-```
-SimDevice -sendAccessibilityRequestAsync:completionQueue:completionHandler:
-          completionHandler is ^(id response) — ONE argument
-```
+Returning the rect unchanged from the frame conversion is deliberate: frames
+then stay in the device's own top-left point space, which is the space input
+speaks, so an element's centre is a tap point with no conversion.
 
-Wait on a dispatch group with a timeout (testa uses 10s) and return
-`AXPTranslatorResponse.emptyResponse` if it does not answer. **The completion
-queue must never be main**, and every translator call should run off the main
-queue — idb wraps them all in `FBAXBridgeRunOffMainQueue`.
+### The two things that made the difference
+
+An earlier attempt had the bridge and transport working — a real
+`AXPTranslationObject` whose `pid` matched the app — and still read nothing,
+because of these:
+
+| | |
+| --- | --- |
+| **The token is the device's** | `SimDevice.accessibilityPlatformTranslationToken` publishes it. A token you invent routes to nothing. |
+| **The translation object is not the element** | Passing it to `requestWithTranslation:` and `processTranslatorRequest:` returns a response whose `resultData` is nil. `AXPMacPlatformElement.platformElementWithTranslationObject:` wraps it in something that answers ordinary `accessibilityAttributeValue:` calls, and the whole tree walks from there. |
+
+So the `AXPTranslatorRequest` constants below are not needed for reading a tree
+host-side. They are kept because they are the in-guest vocabulary idb uses, and
+because `processTranslatorRequest:` is still how a *custom* attribute would be
+asked for.
+
+`SimulatorKit.SimAccessibilityManager` implements those same three delegate
+selectors and is what Simulator.app uses — but it wants an `NSView` through
+`addWithDisplayView:`, which is exactly what a daemon does not have. Reading its
+selector list is useful; instantiating it is not.
+
+### What it costs
+
+Same screen, same element count, alternating reads:
+
+| Path | Median |
+| --- | --- |
+| `idb ui describe-all` | 203 ms |
+| host-side, in-process | 45 ms |
+
+A read on a freshly-switched app is slower — 700–900 ms once, while the guest
+populates — then settles back. An app still launching genuinely has no tree yet
+and returns the application node alone; that is worth reporting rather than
+retrying until it looks populated.
 
 ### Constants (from idb's AXPAttributes.h)
+
+Unused by the path above, kept for the in-guest request form.
 
 | Request type | Value |
 | --- | --- |
@@ -312,32 +346,13 @@ inside the guest and takes the reader down with it". idb also leaves
 `clientType` unset deliberately: setting it makes the app-side children handler
 answer from a stale `automationElements` override.
 
-### Where it stops
-
-`frontmostApplicationWithDisplayId:0` returns a real `AXPTranslationObject`
-whose `pid` matches the app under test, so the bridge and transport are sound.
-A `MultipleAttribute` request built as above against that object returns a
-response with **nil `resultData`**, both on and off the main queue.
-
-Leads for the next attempt, cheapest first:
-
-- The application object may need `translationObjectFromPlatformElement:`
-  before it can be addressed, rather than being passed straight to
-  `requestWithTranslation:`.
-- `clientType` may in fact be required for a host-side reader, despite idb's
-  comment (idb reads in-guest, where the tradeoff differs).
-- Try single `Attribute` (2) with one `attributeType` before the batch form.
-- Compare against `idb ui describe-all` running at the same moment to see
-  whether the guest answers a differently-shaped request.
-
 ### idb and testa differ, and it matters
 
 idb reads **in-guest**: `SimulatorFrameworkBridge` is loaded inside the
 simulator, dlopens the framework from the booted runtime root, and closes the
 loop locally through `processTranslatorRequest:`. testa reads **host-side**
-through `sendAccessibilityRequestAsync:`, which is the pattern above and the one
-that suits a daemon with no view. Read idb for the constants and semantics; read
-testa for the topology.
+through `sendAccessibilityRequestAsync:`, which is the topology above. Read idb
+for the constants and semantics; read testa for the shape.
 
 ## Probing pitfalls
 
@@ -364,9 +379,9 @@ API is broken" rather than like a mistake:
 Everything below is a **hypothesis** carried over from the research and must be
 checked against this machine before any code depends on it.
 
-- `AXPTranslator` / `AccessibilityPlatformTranslation` for the accessibility
-  tree. Note `SimAccessibilityManager` also exists in SimulatorKit and may be
-  the easier route; both are unverified.
+- `SimAccessibilityManager` in SimulatorKit as a route to the tree. Its
+  delegate selectors are verified by inspection; instantiating it is not, and
+  it wants an `NSView`, so nothing here depends on it.
 
 To verify: dump the symbol from the binary on this machine, read the current
 source of a working implementation (not its documentation), and confirm the

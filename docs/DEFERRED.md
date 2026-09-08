@@ -8,41 +8,26 @@ Ordered by how much it would hurt to keep ignoring.
 
 ## Correctness
 
-### Region bands are positional, and that is now three bugs
+### Region bands are positional, and that is now three bugs — fixed
 
-`src/regions.js` decides what is chrome by fraction of screen height. The
-tab-bar band starts at 0.92 with 0.06 of slack, so anything short whose top sits
-past y = 0.86 × height is a tab item. On an 874-point screen that is everything
-below y = 751 — which on a list screen is the last two rows.
+`src/regions.js` decided what was chrome by fraction of screen height, and
+because chrome labels are the only text entering a fingerprint, every
+misclassification landed in a screen's identity. Three phases paid for it: a nav
+button read as a title (6b), a screen whose identity contained `"sep 08, 2026"`
+and would have become a different screen at midnight (6d), and three of twenty
+learned screens still carrying a store address, a phone number and a nav title
+reading `"tuesday, september 8"` (7). Each was patched with another rule; the
+rules were individually defensible and collectively a smell.
 
-Because chrome labels are the only text that enters a fingerprint, every
-misclassification lands directly in a screen's identity. Three phases have paid
-for it:
-
-- **6b** — a nav button read as a title, and a date banner in the tab band.
-- **6d** — a screen whose identity contained `"sep 08, 2026"`. It would have
-  become a different screen at midnight, breaking every stored map, node and
-  route touching it overnight, and nothing would have flagged it: the
-  fingerprint was perfectly stable, just stable on something that expires.
-- **7** — dumping the structural tokens of all twenty learned screens found
-  three still carrying content: a store address, a phone number, and a nav title
-  reading `"tuesday, september 8"`.
-
-Each was patched with another rule — a nav-slot token, a tab-label width limit,
-and now a volatile-label test (a date, a time, a price or a bare count is a
-value, not a name). The rules are individually defensible and collectively a
-smell. One case from Phase 7 survives all three: a stable-looking store address
-in a misfiled list row, wrong for a reason no text pattern can see.
-
-The fix is to derive the bands from the elements' own geometry — a nav bar is a
-short row of things at the top with a gap under it, not a fraction — per screen
-rather than per HIG.
-
-What makes it non-trivial: the bands feed the fingerprint, so changing them
-invalidates every learned graph and re-opens the same-screen / different-screen
-distributions 6b measured at 0/62/74/85. It needs the fingerprint eval harness
-re-run either side of the change, not a hand check.
-
+The bands are now derived from where the elements actually sit — a nav bar is a
+short row of things at the top with a gap under it, not a fraction — with the
+HIG fractions kept as the fallback for a screen too sparse to cluster. Measured
+either side with the fingerprint eval harness, as this entry required: chrome
+labels entering identity fell from **14 to 6**, same-screen similarity held at
+1.00, different-screen similarity stayed at 0.04–0.05, and the adversarial pair
+(`settings-general` against `settings-accessibility`) separated at 0.05 with
+`general`, `accessibility` and `settings` correctly retained. Numbers in
+`docs/BENCHMARKS.md`.
 
 ### Verify-after-tap
 A tap can move the screen without doing what was meant — a swipe that animates
@@ -121,11 +106,14 @@ The remaining button codes need sweeping on a simulator someone is willing to
 have crash or lock — a wrong Indigo button code can take `backboardd` down. Both
 return errors rather than guesses today. See `docs/PRIVATE_API.md`.
 
-### The accessibility tree still comes from idb
-(And until today, so did two other things. See below.)
-The last idb dependency. Most of the hard part is done and recorded: a host-side
-bridge that resolves the frontmost application works. See **Phase 2b** in
-`docs/PHASES.md`.
+### The accessibility tree still comes from idb — fixed
+
+It comes from the daemon now, read host-side through `AXPTranslator` with
+nothing injected into the guest: 45 ms against idb's 203 ms on the same screen,
+and nothing beyond Xcode to install. idb remains a fallback, and
+`SIMFRAME_AX_DRIVER=idb` forces it, because every private-framework path here is
+version-coupled. What the two blocking mistakes were is in `docs/PRIVATE_API.md`
+under "Accessibility: the sequence that works".
 
 ### Phase 5 left four things unbuilt
 `sim_find` covers the part agents use every call. Not built, in the order they

@@ -761,7 +761,7 @@ async function flowRun(target, args, options) {
 }
 
 async function ui(target, args, options) {
-  // No idb gate here any more. The old sim_ui asked the accessibility tree
+  // No accessibility gate here any more. The old sim_ui asked the tree
   // directly, so a machine without idb could capture and tap perfectly well
   // and still not read the screen — even though OCR alone answers most of them.
   const m = await view.screenMap(target, {

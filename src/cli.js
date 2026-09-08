@@ -74,9 +74,9 @@ A script is a JSON array of steps, run in one go with a settle between each:
    {"waitFor":{"value":"Saved","timeoutMs":5000}},
    {"assert":{"value":"Saved","is":"visible"}}]
 
-Input comes from the daemon. idb is needed only for the accessibility tree
-(brew tap facebook/fb && brew install idb-companion,
-then pipx install fb-idb). Reading and OCR work without it.
+Input, text recognition and the accessibility tree all come from the daemon.
+Nothing else needs installing; idb remains a fallback for the tree and for
+input on a machine where the daemon cannot run.
 
 The reliable pattern around an action is:
 
@@ -831,10 +831,10 @@ async function doctor({ json = false, strict = false, device } = {}) {
         { key: 'input.driver', value: driver.available ? driver.name : null });
       add(`text recognition (${d.name})`, 'ok',
         daemon ? 'simframed (in-process, off the framebuffer)' : 'sips + helper binary');
-      const ax = await input.detectDriver();
-      add(`accessibility tree (${d.name})`, ax.available ? 'ok' : 'optional',
-        ax.available ? 'idb — the only thing idb is still required for' : `not installed: ${ax.reason}`,
-        { key: 'ax.driver', value: ax.available ? 'idb' : null });
+      const ax = await input.axDriverFor(d.udid);
+      add(`accessibility tree (${d.name})`, ax.available ? (ax.name === 'simframed' ? 'ok' : 'warn') : 'optional',
+        ax.available ? `${ax.name}: ${ax.version}` : `unavailable: ${ax.reason}`,
+        { key: 'ax.driver', value: ax.name });
     }
     if (booted.length) {
       const t0 = Date.now();

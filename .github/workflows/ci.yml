@@ -135,13 +135,16 @@ jobs:
               console.log(`${ok ? "ok  " : "FAIL"} ${k} = ${JSON.stringify(d[k])} (want ${JSON.stringify(v)})`);
               if (!ok) failed = true;
             }
-            // The input driver must be the daemon, not idb. idb is not installed
-            // on a hosted runner, so a fallback here shows up as unavailable —
-            // either way it is not simframed and it is not acceptable.
-            const input = d["input.driver"];
-            const inputOk = input === "simframed";
-            console.log(`${inputOk ? "ok  " : "FAIL"} input.driver = ${JSON.stringify(input)} (want "simframed")`);
-            if (!inputOk) failed = true;
+            // Input and the accessibility tree must both be the daemon, not
+            // idb. idb is not installed on a hosted runner, so a fallback here
+            // shows up as unavailable — either way it is not simframed and it
+            // is not acceptable.
+            for (const key of ["input.driver", "ax.driver"]) {
+              const got = d[key];
+              const ok = got === "simframed";
+              console.log(`${ok ? "ok  " : "FAIL"} ${key} = ${JSON.stringify(got)} (want "simframed")`);
+              if (!ok) failed = true;
+            }
             if (d.warnings > 0) {
               console.log(`\n${d.warnings} degraded layer(s):`);
               for (const c of d.checks.filter((c) => c.level !== "ok")) console.log(`  ${c.level} ${c.name}: ${c.detail}`);
@@ -201,9 +204,8 @@ jobs:
         # one edge, a halted flow reporting success. Each was found by hand or by
         # somebody else running the tool. None by CI.
         #
-        # idb is not installed on a hosted runner, so this runs OCR-only — which
-        # is the point: a warm flow makes zero accessibility reads, and this is
-        # what holds that claim up.
+        # Both perception layers are live here now that the tree is read
+        # in-process, so this covers the merged map rather than OCR alone.
         run: node scripts/ci-memory.mjs --device="$DEVICE"
 
       - name: Daemon log, on failure

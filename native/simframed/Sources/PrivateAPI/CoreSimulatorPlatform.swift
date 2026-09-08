@@ -24,6 +24,10 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     private var changeUUID: NSUUID?
     private var device: NSObject?
     private var hid: IndigoHID?
+    // Built on first use, not at attach: reading the tree is optional, and a
+    // machine where the translation framework is missing must still capture.
+    private var accessibility: AccessibilityBridge?
+    private var accessibilityFailure: String?
     private var simulatorKitHandle: UnsafeMutableRawPointer?
     // Read once at attach: spawning simctl per status call cost 300ms.
     private var cachedKeyboardWarning: [String]?
@@ -197,6 +201,38 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
             return resolved
         }
         throw PrivateAPIError.noDisplayPort
+    }
+
+    // MARK: - Accessibility
+
+    public func accessibilityStatus() -> (available: Bool, detail: String) {
+        guard device != nil else { return (false, "no device attached") }
+        do {
+            _ = try bridge()
+            return (true, "AXPTranslator, host-side")
+        } catch {
+            return (false, "\(error)")
+        }
+    }
+
+    public func accessibilityTree() throws -> [AXNode] {
+        try bridge().tree()
+    }
+
+    private func bridge() throws -> AccessibilityBridge {
+        if let accessibility { return accessibility }
+        // A framework that is missing stays missing; re-probing it on every
+        // screen read would cost a dlopen per call to learn the same thing.
+        if let accessibilityFailure { throw AccessibilityError.unavailable(accessibilityFailure) }
+        guard let device else { throw PrivateAPIError.noBootedDevice }
+        do {
+            let made = try AccessibilityBridge(device: device)
+            accessibility = made
+            return made
+        } catch {
+            accessibilityFailure = "\(error)"
+            throw error
+        }
     }
 
     public func withFrame<T>(_ body: (RawFrame) throws -> T) throws -> T {

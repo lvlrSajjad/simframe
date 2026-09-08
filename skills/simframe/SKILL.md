@@ -152,7 +152,8 @@ simframe doctor --strict  # any degraded layer is a non-zero exit
 ```
 
 simframe falls back when it must — the simctl capture loop instead of the
-daemon, idb instead of native input — but it never falls back quietly. If
+daemon, idb instead of the in-process input and accessibility paths — but it
+never falls back quietly. If
 `doctor` says a layer is degraded, believe it: the numbers above assume the
 daemon.
 

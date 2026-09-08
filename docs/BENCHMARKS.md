@@ -1411,3 +1411,86 @@ announced success.
 The retry does not fix the device-state case — the reset was measured not to
 help there. It fixes the case where the session, rather than the device, is the
 stale thing, and in every case it turns a silent failure into a visible one.
+
+---
+
+## Phase 2a — the accessibility tree, host-side
+
+Machine: M-series Mac, Xcode 26, iOS 26.5, iPhone 17 Pro simulator. Same device
+and same screens as the Phase 2a baseline above, which predicted what this
+should be worth before it was attempted.
+
+The tree is now read in the daemon through `AXPTranslator`, with nothing
+injected into the guest and no `NSView`. What unblocked it — two mistakes, not
+the four leads the baseline listed — is in `docs/PRIVATE_API.md`.
+
+### The read itself
+
+Both paths warmed, then twelve alternating reads of the same screen. Two
+screens, because the baseline's 255 ms was measured on a screen with 33 targets
+and these are device-native ones; measuring both paths on the *same* screen is
+what makes the comparison hold regardless.
+
+| Screen | Elements | `idb ui describe-all` | host-side, in-process |
+| --- | --- | --- | --- |
+| Settings, root | 15 | 222 ms (214–230) | **47 ms** (45–51) |
+| Settings › General | 14 | 203 ms (194–212) | **45 ms** (44–46) |
+
+Phase 2b's target was 60 ms warm. In-process OCR on the same screens is 108–146
+ms, so **the first visit is now bound by the pixels, not by the tree** — the
+reverse of the baseline, which is exactly what the baseline predicted would
+happen at 60 ms.
+
+A read taken just after switching apps costs 700–900 ms once, while the guest
+populates, then settles back. An app still launching genuinely has no tree yet
+and returns the application node alone; that is reported as it is rather than
+retried until it looks populated.
+
+### A cold flow, four runs each way
+
+Eleven steps inside Settings, taps only — no app launches, because a three-second
+cold launch per step buries the signal. `SIMFRAME_AX_DRIVER=idb` selects the old
+path, so this is the same tour, same device, same session.
+
+| Tree read by | N | Median | Range |
+| --- | --- | --- | --- |
+| idb | 4 | 20.0 s | 19.4–20.1 s |
+| host-side | 4 | **17.3 s** | 16.9–18.0 s |
+
+**2.7 s**, non-overlapping. The tour makes 14 tree reads cold, and 14 × 158 ms
+is 2.2 s, so the flow-level number and the per-read number agree.
+
+The first attempt at this measurement did not. A ten-step tour built out of app
+launches gave 40.0 s against 45.2 s with a warm spread of 20.4–29.9 s — a
+difference well inside its own noise, from an instrument measuring six cold app
+launches rather than fourteen tree reads. The number only became trustworthy
+once the launches came out of the timed window.
+
+Warm is unchanged, and was always going to be: a warm flow makes zero
+accessibility reads, which the baseline established before any of this was
+built.
+
+### Nothing idb finds is missing
+
+Phase 2b's verification, on the three screen kinds it named. Labelled nodes
+compared by label and by frame, at the same moment:
+
+| Screen | idb | host-side | Missing here | Extra here |
+| --- | --- | --- | --- | --- |
+| a native list (Settings) | 16 | 16 | 0 | 0 |
+| a WebView (Safari, example.com) | 6 | 6 | 0 | 0 |
+| a React Native app | 2 | 2 | 0 | 0 |
+
+The React Native screen publishing two nodes is not a regression and not
+something 2a could have changed: it is what the app publishes, and OCR is what
+carries that screen. 2a changed who reads the tree, not what is in it.
+
+### What this removes
+
+idb is no longer required for anything. Capture, input, text recognition and the
+accessibility tree all run in one daemon built from source on first use, and
+`simframe doctor` reports four `simframed` lines where it used to report one
+`idb`. idb stays as a fallback for input and for the tree, and
+`SIMFRAME_AX_DRIVER=idb` forces the tree back onto it — every private-framework
+path here is version-coupled, and an Xcode upgrade that breaks the host-side
+translator should not be the end of someone's day.

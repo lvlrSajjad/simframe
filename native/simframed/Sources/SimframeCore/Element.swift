@@ -1,4 +1,5 @@
 import CoreGraphics
+import PrivateAPI
 import Foundation
 
 /// Where an element's information came from. A single element can be seen by
@@ -53,17 +54,22 @@ public struct Element: Sendable {
     public var role: String
     public var label: String?
     public var value: String?
+    /// The app's own name for the control, when it publishes one. Never shown
+    /// to a reader, but it is what a test written against the app matches on.
+    public var identifier: String?
     public var state: ElementState
     public var source: ElementSource
     public var confidence: Double
 
     public init(id: Int, frame: CGRect, role: String, label: String? = nil, value: String? = nil,
-                state: ElementState = ElementState(), source: ElementSource, confidence: Double = 1) {
+                identifier: String? = nil, state: ElementState = ElementState(),
+                source: ElementSource, confidence: Double = 1) {
         self.id = id
         self.frame = frame
         self.role = role
         self.label = label
         self.value = value
+        self.identifier = identifier
         self.state = state
         self.source = source
         self.confidence = confidence
@@ -82,9 +88,31 @@ public struct Element: Sendable {
         ]
         if let label { out["label"] = label }
         if let value { out["value"] = value }
+        if let identifier { out["identifier"] = identifier }
         let state = state.json
         if !state.isEmpty { out["state"] = state }
         return out
+    }
+}
+
+public extension Element {
+    /// An accessibility node as an element.
+    ///
+    /// The role carries the subrole when there is one — a search field is a
+    /// `TextField` to the tree and a `SearchField` to anyone reading the map,
+    /// and the distinction is worth keeping.
+    init(id: Int, node: AXNode) {
+        self.init(
+            id: id,
+            frame: node.frame,
+            role: node.subrole ?? node.role,
+            label: node.label,
+            value: node.value,
+            identifier: node.identifier,
+            state: ElementState(enabled: node.enabled, selected: node.selected,
+                                checked: nil, focused: node.focused),
+            source: .accessibility,
+            confidence: 1)
     }
 }
 

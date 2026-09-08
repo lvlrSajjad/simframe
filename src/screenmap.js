@@ -119,20 +119,27 @@ export async function build(udid, {
 } = {}) {
   const targets = [];
   const sources = [];
-  // OCR starts before the tree read: they are independent, and running them in
-  // series costs the whole recognition pass.
+  // One round trip for both, because the daemon runs the tree read and the
+  // recognition pass concurrently against the same instant of the screen. Asked
+  // separately they would queue: the control socket serves one request at a
+  // time, so a second call pays the first one's latency before it starts.
   //
   // The daemon reads text straight off the framebuffer. The fallback encodes a
   // PNG, writes it, spawns a helper and decodes it again — measured at 555ms
   // against 174ms — so it is only used when no daemon is listening.
-  const viaDaemon = useOcr && control.available(udid);
-  const ocrPromise = !useOcr
+  const viaDaemon = (useOcr || useAx) && control.available(udid);
+  const axViaDaemon = useAx && process.env.SIMFRAME_AX_DRIVER !== 'idb';
+  const daemonPromise = viaDaemon
+    ? control.request(udid, { action: 'ui', ax: axViaDaemon, ocr: useOcr }).catch((err) => err)
+    : null;
+  const ocrPromise = !useOcr || viaDaemon
     ? null
-    : viaDaemon
-      ? control.request(udid, { action: 'ui' }).catch((err) => err)
-      : fullFrame && fs.existsSync(fullFrame)
-        ? ocr.readText(fullFrame, { density }).catch((err) => err)
-        : null;
+    : fullFrame && fs.existsSync(fullFrame)
+      ? ocr.readText(fullFrame, { density }).catch((err) => err)
+      : null;
+  const daemonScreen = daemonPromise
+    ? await daemonPromise.then((r) => (r instanceof Error ? null : r.screen ?? null))
+    : null;
   // With no geometry, treat every element as a potential control rather than
   // guessing a screen size and mis-classifying containers.
   const screenArea = screen?.width && screen?.height ? screen.width * screen.height : Infinity;
@@ -144,7 +151,12 @@ export async function build(udid, {
 
   if (useAx) {
     try {
-      const nodes = await input.describeAll(udid);
+      // The tree is already in hand when the daemon answered; describeAll would
+      // only ask for it a second time.
+      const nodes = daemonScreen?.sources?.includes('ax')
+        ? daemonScreen.elements.filter((e) => e.source?.includes('ax')).map(input.elementToNode)
+        : await input.describeAll(udid);
+
       sources.push('ax');
       for (const n of nodes) {
         if (!n.frame || !n.label || isContainer(n)) continue;
@@ -163,15 +175,18 @@ export async function build(udid, {
     }
   }
 
-  if (ocrPromise) {
+  if (ocrPromise || (useOcr && daemonScreen)) {
     try {
-      const result = await ocrPromise;
+      const result = ocrPromise ? await ocrPromise : daemonScreen;
       if (result instanceof Error) throw result;
+      // A daemon that answered without reading text is not an OCR source, and
+      // saying it was would claim the screen had been read when it had not.
+      if (viaDaemon && !result.sources?.includes('ocr')) throw new Error(result.ocrError ?? 'no text was read');
       // The daemon answers in points; readText answers in points too, having
       // divided by density. Normalise the daemon's element shape to match.
       const words = viaDaemon
-        ? (result.screen?.elements ?? [])
-            .filter((e) => e.label?.trim())
+        ? (result.elements ?? [])
+            .filter((e) => e.source?.includes('ocr') && e.label?.trim())
             .map((e) => ({
               text: e.label,
               confidence: e.confidence,

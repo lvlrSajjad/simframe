@@ -238,3 +238,33 @@ final class MotionTests: XCTestCase {
         XCTAssertTrue([.sheetPresent, .alertPresent].contains(t.kind), "got \(t.kind)")
     }
 }
+
+/// An accessibility node becoming an element. The subrole matters: a search
+/// field is a TextField to the tree and a SearchField to anyone reading the
+/// map, and losing that costs the reader the only word that identifies it.
+final class AccessibilityElementTests: XCTestCase {
+    func testSubroleWinsWhenThereIsOne() {
+        let node = AXNode(role: "TextField", subrole: "SearchField", label: nil, value: "Search",
+                          identifier: "search", enabled: true, selected: false, focused: nil,
+                          frame: CGRect(x: 32, y: 803, width: 336, height: 38), depth: 2)
+        let element = Element(id: 0, node: node)
+        XCTAssertEqual(element.role, "SearchField")
+        XCTAssertEqual(element.value, "Search")
+        XCTAssertEqual(element.identifier, "search")
+        XCTAssertEqual(element.state.enabled, true)
+        XCTAssertEqual(element.state.selected, false)
+        XCTAssertNil(element.state.focused, "unknown stays unknown rather than becoming false")
+        XCTAssertEqual(element.source.names, ["ax"])
+        XCTAssertEqual(element.center, CGPoint(x: 200, y: 822))
+    }
+
+    func testPlainRoleSurvivesWithNoSubrole() {
+        let node = AXNode(role: "Button", label: "Continue",
+                          frame: CGRect(x: 38, y: 784, width: 326, height: 52), depth: 1)
+        let element = Element(id: 3, node: node)
+        XCTAssertEqual(element.role, "Button")
+        XCTAssertEqual(element.label, "Continue")
+        XCTAssertNil(element.identifier)
+        XCTAssertNil(element.json["identifier"], "an absent identifier is absent, not null")
+    }
+}

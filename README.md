@@ -77,7 +77,8 @@ you have a simulator. Without them simframe falls back to the original
 ```
 ok   xcrun              xcrun version 72.
 ok   sips               available
-ok   input driver (idb) companion built Sep 1 2026
+ok   input driver      simframed: Indigo HID
+ok   accessibility tree simframed: AXPTranslator, host-side
 ok   on-device OCR      available
 ok   booted simulator   iPhone 17 Pro (iOS 26.5)
 ok   capture            frame #888 322x700 in 2ms (age 538ms)
@@ -111,20 +112,22 @@ have. **Observation needs nothing but Xcode.**
 | --- | --- | --- |
 | Watch the screen, wait, recall | nothing extra | — |
 | Read labels + coordinates from pixels | `swiftc` (Xcode CLT) | falls back to the accessibility tree alone |
-| Tap, type, swipe | nothing extra, or [`idb`](https://fbidb.io) as a fallback | simframe observes but cannot touch |
-| Accessibility tree | [`idb`](https://fbidb.io) | OCR alone still yields labels and coordinates |
+| Tap, type, swipe | nothing extra | simframe observes but cannot touch |
+| Accessibility tree | nothing extra | OCR alone still yields labels and coordinates |
 
 `simframe doctor` names which engine is carrying each capability, per device.
-**idb is now required only for the accessibility tree** — capture, input and text
-recognition all run in-process.
+**Nothing beyond Xcode is required.** Capture, input, text recognition and the
+accessibility tree all run in-process, in one daemon.
+
+[`idb`](https://fbidb.io) is still accepted as a fallback for input and for the
+tree, for a machine where the daemon cannot run — and `SIMFRAME_AX_DRIVER=idb`
+forces the tree back onto it, which is the escape hatch if an Xcode upgrade
+breaks the host-side path.
 
 ```bash
-# input, optional
+# optional fallback, not a requirement
 brew tap facebook/fb && brew install idb-companion && pipx install fb-idb
 ```
-
-Homebrew may ask you to trust the tap first; that is a deliberate prompt for a
-human, and the narrow form is `brew trust --formula facebook/fb/idb-companion`.
 
 ## The tools
 
@@ -355,7 +358,8 @@ iPhone 17 Pro, iOS 26.5, Apple Silicon, default settings.
 | Tap (70 ms hold / 10 ms hold) | 76 ms / 13 ms |
 | Text recognition, in-process | **~174 ms** |
 | Text recognition, via PNG + helper (fallback) | ~555 ms |
-| Accessibility tree read (idb) | ~570 ms |
+| Accessibility tree read, in-process | **~45 ms** |
+| Accessibility tree read, via idb (fallback) | ~203 ms |
 | Screen map: first visit / remembered | ~305 ms / **~1 ms** |
 | CPU | 1.1 % idle · 3.1 % active |
 | Frame memory | ~60 s of screen, ~2.7 MB |
@@ -482,8 +486,8 @@ So every downgrade now announces itself:
   is degraded and what that costs.
 - A dependency that is simply not installed is `--`, not `WARN`. The distinction
   is deliberate: `WARN` means this machine could be doing better and silently is
-  not, which is the failure worth shouting about. idb missing on a fresh machine
-  has not degraded from anything, and `--strict` ignores it.
+  not, which is the failure worth shouting about. An optional fallback missing on
+  a fresh machine has not degraded from anything, and `--strict` ignores it.
 - `--strict`, or `SIMFRAME_STRICT=1`, turns any downgrade into a non-zero exit.
   CI runs strict, so a release cannot ship in the state that shipped twice.
 
@@ -491,7 +495,7 @@ So every downgrade now announces itself:
 $ simframe doctor
 ok   capture engine        simframed
 WARN input driver          idb — the daemon's control socket is not up
---   accessibility tree    not installed: idb is not installed
+WARN accessibility tree    idb — the host-side translator did not load
 ```
 
 Two checks enforce it. A packaging check derives the required file list from the
@@ -528,19 +532,8 @@ said a word — the exact failure shape, found by the thing built to catch it.
 
 ## Roadmap
 
-- **The accessibility tree without idb.** `AXPTranslator` would remove the last
-  heavyweight install. Capture, input and geometry already come from the daemon;
-  the tree is all that is left.
-- **Region bands from where elements cluster**, rather than fractions of screen
-  height. This has now caused three bugs in three phases, each patched with
-  another rule: a nav button read as a title, a screen identity containing
-  `"sep 08, 2026"` that would have expired at midnight, and three of twenty
-  learned screens still carrying a store address, a phone number and a nav title
-  reading `"tuesday, september 8"`. The patches hold; the cause does not move.
-- **Reduce the input dependency.** idb is the one heavyweight requirement. Its
-  simulator input is a reimplementation of the Indigo HID transport rather than a
-  public API, so replacing it is real work, not a wrapper — but it is the last
-  thing standing between simframe and a zero-install tool.
+- **Android, as a second backend.** Everything above the platform boundary is
+  already platform-agnostic; nothing above it imports a simulator framework.
 - **Extend the confirm vocabulary beyond English.**
 
 ## Releasing

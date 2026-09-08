@@ -20,8 +20,9 @@ open work is in `docs/DEFERRED.md`.
 | --- | --- |
 | 0 — Swift daemon, framebuffer capture | done |
 | 1 — Indigo HID input | done |
-| 2 — OCR half | done. **2a a11y (`AXPTranslator`) not started** — idb is still the accessibility path and the last heavyweight dependency |
-| 3 — replace idb/simctl | done for capture and input, not for a11y |
+| 2 — OCR half | done |
+| 2a — a11y via `AXPTranslator` | done. The tree is read host-side, in-process; idb is no longer required for anything |
+| 3 — replace idb/simctl | done. Capture, input and the accessibility tree all go through the daemon; idb is a fallback, not a requirement |
 | 4 — settle and transition classification | done. The classifier is noisy enough that transition *kind* is advisory, not a reason to halt a flow |
 | 5 — layout priors and intent matching | done |
 | 6 — transition graph, verify-after-tap | done |
@@ -34,21 +35,18 @@ open work is in `docs/DEFERRED.md`.
 | 7 — compact agent state, skill | done. A ten-step flow is **1 tool call, 0 images, ~1,650 characters**. Every action returns the numbered text screen map; `sim_look` is the only image path and is capped at 1024 px |
 | 8 — Android | not started |
 
-**Pick up here.** Phase 2a (`AXPTranslator`), which removes the last idb
-dependency and has the highest variance of anything left — better attempted now
-that everything above it is shipped, stable, and covered by CI.
+**Pick up here.** Nothing in the engine is outstanding. Phase 8 (Android) is
+the next planned body of work; open items smaller than a phase are in
+`docs/DEFERRED.md`.
 
-Measured before starting it, so the payoff is known rather than assumed: a warm
-ten-step flow makes **zero** accessibility reads, so no warm number moves at
-all. The tree read is 255 ms against in-process OCR's 123 ms on the same screen,
-which makes a first visit accessibility-bound; cold, 14 reads are ~3.8 s of a
-17 s run, so 2a should take that to roughly 14 s. The case for it is the install
-story — idb is the last heavyweight requirement — not speed, and it is not a
-perception-quality win: it changes who reads the tree, not what the app
-publishes. Most of the hard part is already
-isolated: the host-side bridge works and the frontmost application resolves;
-only the attribute read returns nil. Four leads are listed in
-`docs/PRIVATE_API.md`, cheapest first.
+**What 2a turned out to be worth.** Measured before it was attempted, so the
+payoff was known rather than assumed: a warm ten-step flow makes **zero**
+accessibility reads, so no warm number was ever going to move. Measured after:
+the tree read went from 203 ms to 45 ms on the same screen, which puts a first
+visit back under OCR and makes the screen-map build OCR-bound. The case for it
+was always the install story — idb was the last heavyweight requirement — and
+that is what it delivered. It is not a perception-quality win: it changed who
+reads the tree, not what the app publishes.
 
 **Region-bands-from-clustering has earned its way up the list.** Phase 7 found
 it for the third time: dumping the structural tokens of twenty learned screens
@@ -178,22 +176,14 @@ what sim_ui returns to Claude beyond the source tag.
 
 ## Phase 2b — AXPTranslator in-process a11y tree
 
-**The last idb dependency.** Scheduled after Phase 4 or 5, depending on how much
-the OCR-only path actually costs on accessibility-poor screens. Do not start it
-before there is evidence from those phases about what is being missed.
+**Done.** The tree is read host-side, in-process, at 45 ms against idb's 203 ms
+on the same screen. What unblocked it is recorded in `docs/PRIVATE_API.md` under
+"Accessibility: the sequence that works" — two mistakes, not four leads: the
+delegate token belongs to the `SimDevice` and must not be invented, and the
+translation object is not the element (`AXPMacPlatformElement` wraps it in
+something that answers ordinary `accessibilityAttributeValue:` calls).
 
-Most of the hard part is already done and recorded in `docs/PRIVATE_API.md`
-under "Accessibility (partly verified)":
-
-- A host-side bridge that reaches the simulator's live accessibility server,
-  with no injected code and no `NSView`, **works**: `frontmostApplicationWithDisplayId:`
-  returns a real application object whose pid matches the app under test.
-- The delegate protocol, the one-argument block signature, the request-type and
-  attribute constants, and the off-main-queue requirement are all written down.
-
-What remains is one specific failure: a `MultipleAttribute` request against that
-application object returns a response with nil `resultData`. Four leads are
-listed in `PRIVATE_API.md`, cheapest first.
+The prompt that ran is kept below.
 
 ```
 Read CLAUDE.md and docs/PRIVATE_API.md, in particular "Accessibility (partly

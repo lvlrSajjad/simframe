@@ -11,6 +11,9 @@ public final class StubPlatform: SimulatorPlatform {
     private var buffer: [UInt8] = []
     /// What was asked of it, so tests can assert on gestures without a device.
     public var recorded: [String] = []
+    /// What `accessibilityTree()` should answer. Empty by default, which is
+    /// what a device with no app in the foreground genuinely looks like.
+    public var stubTree: [AXNode] = []
 
     public init(width: Int = 1206, height: Int = 2622, tint: UInt8 = 0) {
         self.width = width
@@ -100,5 +103,10 @@ extension StubPlatform {
     public func openURL(_ url: String) throws { recorded.append("openURL(\(url))") }
     public func permission(action: String, service: String, bundleId: String?) throws {
         recorded.append("permission(\(action),\(service),\(bundleId ?? "-"))")
+    }
+    public func accessibilityStatus() -> (available: Bool, detail: String) { (true, "stub") }
+    public func accessibilityTree() throws -> [AXNode] {
+        recorded.append("accessibilityTree()")
+        return stubTree
     }
 }

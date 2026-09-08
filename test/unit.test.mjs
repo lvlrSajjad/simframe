@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { decodePng, encodePng, grayGrid, scaleBitmap } from '../src/png.js';
 import { frameHash, rampLevel, regionMap, regionSignature, signatureDiff } from '../src/analyze.js';
+import { elementToNode } from '../src/input.js';
 
 function solid(width, height, [r, g, b]) {
   const data = Buffer.alloc(width * height * 4);
@@ -861,4 +862,34 @@ test('a list cell and the text printed inside it are one control', () => {
   ];
   const kept = rankIntent(group, 'Home', { screen: { width: 402, height: 874 } });
   assert.ok(kept.some((c) => c.target.label === 'Home'), 'the tab survives');
+});
+
+test('a daemon element becomes the node shape every accessibility caller expects', () => {
+  // The tree now arrives as elements over the control socket rather than as
+  // idb's JSON, and every caller downstream — intent matching, tap-by-label,
+  // the screen map — reads the older shape. This is the whole of the seam.
+  const node = elementToNode({
+    role: 'Button',
+    label: ', My Tools',
+    value: '3 open',
+    identifier: 'tools-tab',
+    frame: { x: 20, y: 810, width: 80, height: 50 },
+    state: { enabled: false, selected: true },
+    source: ['ax'],
+  });
+  assert.equal(node.type, 'Button');
+  assert.equal(node.label, 'My Tools', 'a private-use glyph is not part of the name');
+  assert.equal(node.rawLabel, ', My Tools', 'but the raw label is still there to match on');
+  assert.equal(node.value, '3 open');
+  assert.equal(node.identifier, 'tools-tab');
+  assert.equal(node.enabled, false, 'disabled must survive as false, not be lost to a nullish default');
+  assert.deepEqual(node.frame, { x: 20, y: 810, width: 80, height: 50 });
+
+  // An element with nothing published reports null rather than inventing a
+  // label, because a wrong label is worse than no label.
+  const bare = elementToNode({ role: 'Image', frame: { x: 0, y: 0, width: 10, height: 10 } });
+  assert.equal(bare.label, null);
+  assert.equal(bare.value, null);
+  assert.equal(bare.identifier, null);
+  assert.equal(bare.enabled, null, 'unknown is null, not false');
 });

@@ -126,6 +126,17 @@ public protocol SimulatorPlatform: AnyObject {
     /// that notices is the one with the frames.
     func resetInput() throws
 
+    // MARK: Accessibility. Optional in the same way input is: a platform may
+    // see the screen without being able to read the app's own tree.
+
+    /// Whether the accessibility tree can be read, and why not when it cannot.
+    func accessibilityStatus() -> (available: Bool, detail: String)
+    /// The frontmost application's accessibility tree, flattened depth-first.
+    ///
+    /// An app still launching has no tree yet, and this reports that as it is —
+    /// one node, no children — rather than retrying until it looks populated.
+    func accessibilityTree() throws -> [AXNode]
+
     // MARK: App lifecycle. These are simctl, not private API — no HID needed.
 
     @discardableResult
