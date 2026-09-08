@@ -161,11 +161,22 @@ intermittently* — an app mid-launch genuinely has no tree, a slow guest can bl
 the read's time budget, and either produces an OCR-only map of a screen whose
 other reads are ax+OCR.
 
-The visible symptom is a graph that will not converge. On a hosted runner the
-loop went `[unverified, unexpected-screen]`, `[unexpected-screen]`,
+A graph that will not converge is **consistent** with this, and that is as far
+as the evidence goes. On a hosted runner the loop went
+`[unverified, unexpected-screen]`, `[unexpected-screen]`,
 `[no-visible-change, unexpected-screen]` over three passes of two steps, never
-predicting an outcome it had already seen, because it was not seeing the same
-screen twice.
+predicting an outcome it had already seen. The two-identities measurement above
+is solid — reproducible, on a healthy device, twice each way. The claim that it
+*causes* the CI failure is not: CI's map read `16 element(s) from ax+ocr` with
+both layers answering, so the mechanism above may not even have been active
+there.
+
+An attempt to reproduce the convergence failure locally measured nothing, on a
+device whose display surface had died mid-run — every read after that point was
+`ocrError: the display surface could not be read`, which degrades every map to
+ax-only and collapses different screens onto one identity. That is a third
+possible explanation for what CI saw, and it is not the same as the first two.
+The cause of the convergence failure is **open**.
 
 Three ways out, none of them obviously right:
 
