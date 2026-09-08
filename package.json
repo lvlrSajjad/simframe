@@ -1,6 +1,6 @@
 {
   "name": "simframe",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "mcpName": "io.github.lvlrSajjad/simframe",
   "description": "Always-warm iOS Simulator frames: agents read the screen in ~20ms instead of waiting on screenshots. MCP server + CLI.",
   "keywords": [
