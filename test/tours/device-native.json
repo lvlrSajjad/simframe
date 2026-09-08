@@ -1,0 +1,17 @@
+[
+  {
+    "name": "springboard",
+    "note": "Carries a live weather widget and a clock, so it is the hardest screen on the device to fingerprint stably — which is why it is first.",
+    "steps": [{ "button": "home" }, { "pause": 700 }]
+  },
+  {
+    "name": "browser",
+    "note": "A static page, so its structure should be identical on every visit.",
+    "steps": [{ "openUrl": "https://example.com" }, { "pause": 900 }]
+  },
+  {
+    "name": "settings",
+    "note": "A long list under a nav bar — the shape most likely to have content misfiled as chrome.",
+    "steps": [{ "launch": { "value": "com.apple.Preferences", "relaunch": true } }, { "pause": 1200 }]
+  }
+]
