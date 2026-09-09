@@ -19,6 +19,13 @@ orphaned HID session** (the staleness gate was keyed on the process, so it
 could not fire in the MCP server; `simframe input reset` now exists and is what
 `doctor` prints).
 
+> **Status, end of 2026-09-10.** Everything down to Phase 12 is done except
+> item 11. Gate A (1, 14, 22) and Gate B (3, 4, 6, 8, 21) are complete; Gate C
+> is complete except item 11, with item 10 half done on purpose — its
+> measurement is in and nothing acts on it. Struck items keep their original
+> diagnosis where the diagnosis was wrong, because that is the instructive half.
+> **Phase 12 is the next thing.**
+
 ### P0 — the engine is learning wrong things, and everything else measures on top
 
 1. ~~**A settle can be satisfied by stillness older than the action it waits
@@ -177,10 +184,16 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    afternoon; a number earns the right to act by being watched first. Four edges
    over two runs is the start of that. What remains is the decision to use it,
    and it should not be taken on this much data.
-11. **The structural window itself** (300 ms), per-screen learnable. Its
+11. **The structural window itself** (300 ms), per-screen learnable. **The one
+   thing on this list still undone before Phase 12**, and deliberately last: its
    estimator is self-correcting rather than self-reinforcing — a window too
-   short produces disagreeing samples, which lengthens it — which is a reason
-   to expect it to work, not evidence that it does. Needs 2.
+   short produces disagreeing samples, which lengthens it — which is a reason to
+   expect it to work and not evidence that it does. Item 1 already removed the
+   part of it that was pure waste, by crediting the time a sample had already
+   spent instead of sleeping a fresh 300 ms. What is left is learning the window
+   per screen, and item 10's data is the argument for taking that slowly: the
+   pause statistic it would be built on was noise in *both* directions, not the
+   one direction the design assumed.
 
 ### P2 — Phase 12, which real-app use has now specified
 
@@ -382,11 +395,21 @@ day's work.
     app drew black, and what makes it the wedge is staying black while input is
     delivered, which only the caller knows.
 
-    **Unverified against a live wedge**, and it cannot be: the wedge is not
-    inducible on demand, and the button that would blank the screen on purpose
-    is one of the unverified Indigo codes that can take `backboardd` down. What
-    is covered is the detection and the decision, not the event — the same
-    disposition as `CaptureRecovery`.
+    **Verified on a live wedge**, hours after being written and after being
+    filed as unverifiable. The device blacked out mid-benchmark and `doctor`
+    said so from the new check:
+
+    ```
+    WARN capture  frame #5718 322x700 in 167ms (age 15ms) — and every pixel of
+                  it is black. If the device is not showing a black screen on
+                  purpose, this is the display pipeline having stopped
+                  rendering…
+    ```
+
+    Worth the comparison: the existing `display` probe reports the same fact by
+    reading 3,162,132 pixels through Apple's screenshot path and took
+    **6174 ms** to do it. This one is 32 integer comparisons on a signature the
+    frame already carried.
 23. Worth an Apple feedback report: rapid app relaunch cycling kills the
     simulator's display pipeline in about six cycles, reproducibly, and
     `simctl io screenshot` confirms it from outside simframe.
