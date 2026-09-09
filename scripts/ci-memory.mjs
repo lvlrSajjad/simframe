@@ -41,6 +41,15 @@ const CONVERGE_PASSES = 3;
 const BETWEEN_PASSES_MS = 1200;
 
 let failures = 0;
+/**
+ * The device is gone, as distinct from having blinked. See `jsonRetry`, which
+ * is the only thing that sets it: a dropped frame is retryable and this file
+ * already treats it that way, so calling the first one fatal would fight the
+ * retry rather than help it. Exhausted attempts are the difference between a
+ * blink and a death.
+ */
+let deviceDied = null;
+
 function check(ok, label, detail = '') {
   if (!ok) failures += 1;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}${detail ? ` — ${detail}` : ''}`);
@@ -65,6 +74,10 @@ async function cli(args, { expectFail = false, allowFail = false } = {}) {
     if (err.unexpectedSuccess) throw err;
     if (expectFail || allowFail) return `${err.stdout ?? ''}${err.stderr ?? ''}`;
     const why = (err.stdout || err.stderr || err.message || '').trim();
+    // Noted here, not in `check`: by the time a failure reaches a check its
+    // detail has been truncated for legibility, and the first version of this
+    // guard looked for "did not produce a frame" in a string that had been cut
+    // to "simframe daemon di". The full text only exists at this boundary.
     throw new Error(`simframe ${full.join(' ')} failed: ${why.slice(0, 400)}`);
   }
 }
@@ -96,6 +109,23 @@ async function jsonRetry(args, opts, attempts = 3) {
       console.log(`     (capture dropped out; retrying \`${args.join(' ')}\`)`);
       await new Promise((r) => setTimeout(r, 1500));
     }
+  }
+  // Out of attempts on a capture error: the device is not blinking, it is gone.
+  //
+  // Diagnosed and exited here rather than flagged for a later `check` to
+  // notice, because most call sites do not wrap this — the throw escapes, the
+  // run dies on an unhandled rejection, and the operator gets a stack trace
+  // pointing at this file instead of a sentence about their simulator. Which is
+  // exactly what the first version of this did.
+  if (TRANSIENT.test(last?.message ?? '')) {
+    deviceDied = last.message;
+    console.error(`\nFAIL the device stopped producing frames, and did not come back after ${attempts} attempts:`);
+    console.error(`  ${String(last.message).split('\n')[0]}`);
+    console.error('\nEverything after this point would be testing a dead simulator, so the run');
+    console.error('stops here. This is not a memory-layer failure — it is the device-state');
+    console.error('problem in docs/DEFERRED.md. A device restart is the only known cure;');
+    console.error('on a hosted runner it means a retry.');
+    process.exit(1);
   }
   throw last;
 }
@@ -394,9 +424,14 @@ if (check(forced.saved?.ok === true, 'and --force saves it anyway', `${forced.sa
 console.log('\n--- every command speaks JSON ---');
 // The --json plumbing is per-command and hand-written, so one command quietly
 // printing prose is exactly the kind of thing nothing else would catch.
+// Through `jsonRetry` like everything else. This loop used to call `cli`
+// directly, and it is the last section of a run that takes minutes — so a
+// capture dropout here failed five checks about `--json` plumbing that was
+// working perfectly, while every earlier section shrugged the same dropout off.
+// The one place that did not retry was the one place most likely to need it.
 for (const args of [['status'], ['state'], ['mark'], ['ui'], ['screens'], ['devices'], ['doctor'], ['flow', 'list'], ['recall']]) {
   try {
-    const parsed = JSON.parse(await cli([...args, '--json']));
+    const parsed = await jsonRetry([...args]);
     check(parsed !== null && parsed !== undefined, `simframe ${args.join(' ')} --json`);
   } catch (err) {
     check(false, `simframe ${args.join(' ')} --json`, err.message.slice(0, 120));
