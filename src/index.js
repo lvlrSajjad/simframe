@@ -502,7 +502,47 @@ export async function getState(deviceQuery, { since, options, inputHealth = fals
     // action anyway (input.ensureFreshSession) — this is the report, not the
     // repair.
     input: inputHealth ? await input.sessionHealth(device.udid) : undefined,
+    timing: inputHealth ? timingOfNow(device.udid, state) : undefined,
   };
+}
+
+/**
+ * How long this screen has been moving, against how long it usually takes.
+ *
+ * Research §7 asks `sim_state` for this, and the point is a sentence an agent
+ * can act on: a screen 400 ms into a transition that normally takes 350 ms is
+ * fine, and the same screen four seconds in is not. Elapsed comes from the
+ * frame store's own clock; the distribution comes from the edge that was most
+ * recently traversed into this screen.
+ *
+ * Reads no frames and takes no perception pass: the layout hash and the
+ * structural hash screen memory filed under it are both already on disk.
+ */
+function timingOfNow(udid, state) {
+  try {
+    const near = screenmap.recallNearest(udid, state.layoutHash);
+    const edge = graph.timingInto(udid, near?.entry?.structuralHash);
+    const elapsed = Number.isFinite(state.lastChangeAt) ? Date.now() - state.lastChangeAt : null;
+    const settled = state.stableForMs >= STRUCTURAL_SETTLE_MS;
+    const slower = graph.slowerThanUsual({
+      elapsedMs: elapsed,
+      p95: edge?.p95,
+      settled,
+      kind: state.transition?.kind,
+    });
+    return {
+      edge_p50: edge?.p50 ?? null,
+      edge_p95: edge?.p95 ?? null,
+      samples: edge?.samples ?? 0,
+      elapsed_ms: elapsed,
+      stable_for_ms: state.stableForMs ?? null,
+      slower_than_usual: Boolean(slower.slower),
+      note: slower.slower ? slower.note : null,
+    };
+  } catch {
+    // Timing is commentary. A screen with no history still has a state.
+    return null;
+  }
 }
 
 /**

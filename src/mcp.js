@@ -504,6 +504,15 @@ async function state(target, args, options) {
   // tap on a correct element did nothing. The repair happens before the next
   // action either way; this is so the cause is visible when it does.
   if (res.input?.stale) lines.unshift(`input: stale — ${res.input.reason}`);
+  // §7's timing line. Worth a line because "is it still coming or is it done"
+  // is a question an agent otherwise answers by waiting and guessing.
+  if (res.timing?.samples) {
+    lines.push(
+      `timing: usually ${res.timing.edge_p50}ms to arrive here (p95 ${res.timing.edge_p95}ms over `
+      + `${res.timing.samples} samples), ${res.timing.elapsed_ms}ms since the last change`
+      + (res.timing.slower_than_usual ? ` — ${res.timing.note}` : ''),
+    );
+  }
   remember(device.udid, s);
   return { content: [text(lines.filter(Boolean).join('\n'))] };
 }

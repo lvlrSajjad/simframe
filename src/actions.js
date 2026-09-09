@@ -273,6 +273,33 @@ export async function runScript(
         };
       };
       let settled = await settleFor();
+      // A screen that is still working earns more time; a screen doing nothing
+      // visible has already answered. Research §7: keep waiting past p95 only
+      // while the transition classifier says something is loading, and never
+      // past Nielsen's 10 s — at which point it escalates with the timing
+      // attached rather than waiting longer.
+      if (settled && !settled.ok && !settled.noVisibleChange && learned && !learned.cold) {
+        const kind = (await api.getState(deviceQuery, { options })).state.transition?.kind;
+        const verdict = graph.slowerThanUsual({
+          elapsedMs: settled.waitedMs, p95: learned.p95, settled: false, kind,
+        });
+        if (verdict.keepWaiting) {
+          const remaining = graph.HARD_CAP_MS - settled.waitedMs;
+          const more = await api.waitFor(deviceQuery, {
+            mode: 'settle', since: before, stableMs: stillness, timeoutMs: remaining, options,
+          });
+          settled = {
+            ...settled,
+            ok: more.satisfied,
+            waitedMs: settled.waitedMs + more.waitedMs,
+            sawChange: settled.sawChange || more.sawChange,
+            quietGapMs: Math.max(settled.quietGapMs ?? 0, more.quietGapMs ?? 0),
+            slowerThanUsual: verdict.note,
+          };
+        } else if (verdict.slower) {
+          settled = { ...settled, slowerThanUsual: verdict.note };
+        }
+      }
 
       // A hardware button that moved nothing did not arrive.
       //
@@ -358,7 +385,11 @@ export async function runScript(
           // reads the result.
           outcome: halt.halt ? 'failed' : 'escalated_to_model',
           wallMs: Date.now() - stepStart,
-          detail: `${verification.verdict}: ${verification.detail}`,
+          detail: `${verification.verdict}: ${verification.detail}`
+            + (settled?.slowerThanUsual ? ` [${settled.slowerThanUsual}]` : '')
+            + (settled?.timing && !settled.timing.cold
+              ? ` [waited ${settled.waitedMs}ms of a ${settled.budgetMs}ms budget; p95 ${settled.timing.p95}ms]`
+              : ''),
         });
       }
       if (halt.halt) {

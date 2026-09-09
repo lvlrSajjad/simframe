@@ -2328,3 +2328,42 @@ The gaps are still recorded and no longer act on anything. The unbiased
 estimator is available and is the next piece of work: the frame history holds
 every frame's timestamp and diff, so a transition's true motion profile can be
 computed *after* it is over rather than from inside the wait that cut it short.
+
+### Phase 11, as closed
+
+Done and live:
+
+1. **Per-edge timing**, persisted with the graph — last 50 settle durations, and
+   the longest pause inside each transition recorded alongside them.
+2. **Adaptive timeout**, p95 + max(150 ms, 20%), capped at 10 s, cold edges
+   (<5 samples) keeping the previous fixed 8 s and reporting themselves cold.
+3. **A working screen earns patience.** A settle that runs out while the
+   transition classifier still says `loading` gets the rest of the 10 s cap,
+   and anything else that exceeds p95 stays `no-visible-change` as before. The
+   escalation record carries the timing that produced it: `waited 8000ms of a
+   2400ms budget; p95 2000ms`.
+5. **`sim_state` reports timing**, from research §7 and free of any perception
+   pass — the layout hash and the structural hash are already on disk:
+
+   ```
+   timing: this screen usually arrives in 2703ms (p95 2781ms, 4 samples);
+           6283ms since the last change
+   ```
+
+Not done, both deliberately:
+
+4. **The fixed sleeps are still there.** Step 0's inventory separates two
+   kinds. The poll intervals — 40, 60, 80, 250 ms — are loop cadence, not
+   guessed waits, and removing them would mean polling faster for no reason.
+   The genuinely fixed waits are the focus window after tapping a field
+   (250/900/3000 ms) and the identity settle (300 ms), and both sit on the
+   perception path this phase was told not to touch. They want the same
+   per-edge treatment and the same eval harness behind it.
+
+   **Learned stillness** is the other half and is reverted for cause, above.
+
+Measured after: the Settings flow runs 15.3 s cold and 11.1 s warm, 4/4 steps,
+which is where it was before Phase 11 — as expected, because a shorter timeout
+cannot speed up a flow that never times out. HPI_time is unmoved. The phase's
+value is what it makes possible next: a distribution per edge, and a
+`slower_than_usual` an agent can read instead of a fixed budget it cannot.

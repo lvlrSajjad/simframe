@@ -411,6 +411,28 @@ export function timingFor(udid, screen, step) {
   return { ...stats, ...adaptiveTimeout(stats), known: Boolean(edge) };
 }
 
+/**
+ * What getting *to* this screen has cost before.
+ *
+ * `sim_state` is asked "what is on screen and is it done moving", with no
+ * action in hand, so there is no outgoing edge to consult. The useful answer
+ * is the inbound one: the edge most recently traversed into this screen is how
+ * we got here, and its distribution is what "slower than usual" means right
+ * now. Most recently seen rather than most travelled — a screen reachable two
+ * ways is being timed against the way it was just reached.
+ */
+export function timingInto(udid, hash) {
+  if (!hash) return null;
+  let best = null;
+  for (const node of allNodes(udid)) {
+    for (const edge of node.edges ?? []) {
+      if (edge.to !== hash) continue;
+      if (!best || (edge.lastSeen ?? 0) > (best.lastSeen ?? 0)) best = edge;
+    }
+  }
+  return best ? { ...timingOf(best), action: best.action, kind: best.kind ?? null } : null;
+}
+
 export function record(udid, { from, action, to, kind, settleMs, quietGapMs }) {
   const fromKey = typeof from === 'string' ? { hash: from } : from;
   const toHash = typeof to === 'string' ? to : to?.hash;

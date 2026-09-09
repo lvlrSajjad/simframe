@@ -374,6 +374,13 @@ async function main() {
         // A cause, rather than five silent no-ops. Every tap on a stale
         // session is dispatched successfully and moves nothing.
         if (res.input?.stale) out.push(`input: stale — ${res.input.reason}`);
+        if (res.timing?.samples) {
+          out.push(
+            `timing: this screen usually arrives in ${res.timing.edge_p50}ms (p95 ${res.timing.edge_p95}ms, `
+            + `${res.timing.samples} samples); ${res.timing.elapsed_ms}ms since the last change`
+            + (res.timing.slower_than_usual ? ` — ${res.timing.note}` : ''),
+          );
+        }
         out.push(`${res.device.name}  frame #${s.seq}  age ${res.ageMs}ms  ${s.width}x${s.height}`);
         out.push(`hash ${s.hash}  stable ${s.stableForMs}ms`);
         if (res.since?.kind === 'history') {
