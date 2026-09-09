@@ -165,3 +165,35 @@ the pathological one. Three MCP servers were attached to this machine's
 simulator while this was written, which is what a person with several agents
 open looks like. An instrument that only works when nothing else is running is
 an instrument with a precondition nobody will remember to check.
+
+## Fixed: a record now says which agent wrote it — 2026-09-10
+
+The instrument described above is repaired. Every escalation record now carries
+`session_id` — the process start, its pid and a random tail, computed once per
+process — and `client`, which is one of `mcp`, `cli`, `script` or `library`.
+Flow refusals carry `flow_name` too, and a `goto` refusal names its
+destination, because "this agent could not route to Settings" and "this flow
+failed" are different rows in the same column.
+
+`simframe escalations` gained three things:
+
+- `--session` narrows to this process, `--session=<id>` to one, `--flow=<name>`
+  to one flow. `total` and every rate derived from it describe the narrowed set,
+  model turns included.
+- A **warning before the counts**, not after, whenever the breakdown might be
+  pooling more than one agent's work — either several sessions or any records
+  written before sessions were logged.
+- A faculty marked `[built]` reads differently. Phase 11 shipped, so
+  `verification_failed` no longer maps to something unwritten: those 34 records
+  are not a queue waiting on a phase, they are evidence the phase that shipped
+  is not sufficient. The line says `not removed by: sense of time (Phase 11)
+  [built]` rather than `would be removed by`.
+
+What is deliberately not recorded: no device id, no username, nothing about the
+machine. The question this has to answer is "was this all one agent", and that
+needs no identity to answer.
+
+The 92 records already in the bench device's log stay unattributable, and the
+breakdown says so every time it prints them rather than quietly averaging them.
+The Phase 10 breakdown above was collected on a device one session owned and is
+still good; anything measured on that device between then and now is a pool.

@@ -41,12 +41,15 @@ export function stepFor(edge) {
  * count. The reason mapping lives in metrics.PLAN_REASONS so the five reasons
  * have one owner.
  */
-function refuse(udid, result, { detail = null } = {}) {
+function refuse(udid, result, { detail = null, flowName = null } = {}) {
   try {
     const reason = metrics.PLAN_REASONS[result.reason];
     if (reason) {
       metrics.recordEscalation(udid, {
         reason,
+        // A refusal by `goto` is about a destination and one by `flow run` is
+        // about a named flow. Either is what a breakdown wants to group by.
+        flowName,
         fingerprint: metrics.fingerprintNow(udid, screenmap),
         outcome: 'escalated_to_model',
         detail: detail ?? result.reason,
@@ -70,8 +73,8 @@ export async function goto(deviceQuery, target, { options, ...runOptions } = {})
   const udid = device.udid;
 
   const found = graph.findScreen(udid, target);
-  if (!found) return refuse(udid, { ok: false, reason: 'unknown-screen', known: knownScreens(udid) }, { detail: `no screen matches "${target}"` });
-  if (found.ambiguous) return refuse(udid, { ok: false, reason: 'ambiguous', candidates: found.ambiguous }, { detail: `"${target}" fits ${found.ambiguous.length} screens` });
+  if (!found) return refuse(udid, { ok: false, reason: 'unknown-screen', known: knownScreens(udid) }, { detail: `no screen matches "${target}"`, flowName: `goto:${target}` });
+  if (found.ambiguous) return refuse(udid, { ok: false, reason: 'ambiguous', candidates: found.ambiguous }, { detail: `"${target}" fits ${found.ambiguous.length} screens`, flowName: `goto:${target}` });
 
   const here = await api.screenIdentity(udid, {});
   if (here.hash === found.node.hash) {
@@ -84,12 +87,12 @@ export async function goto(deviceQuery, target, { options, ...runOptions } = {})
   // `Cannot read properties of null (reading 'slice')` instead of answering.
   // Not hypothetical on Android, where README's own table puts the launcher at
   // one token.
-  if (!here.hash) return refuse(udid, { ok: false, reason: 'no-identity', to: found.name });
+  if (!here.hash) return refuse(udid, { ok: false, reason: 'no-identity', to: found.name }, { flowName: `goto:${target}` });
   const path_ = graph.route(udid, { hash: here.hash, tokens: here.tokens }, found.node.hash);
-  if (!path_) return refuse(udid, { ok: false, reason: 'no-route', from: here.hash.slice(0, 8), to: found.name });
+  if (!path_) return refuse(udid, { ok: false, reason: 'no-route', from: here.hash.slice(0, 8), to: found.name }, { flowName: `goto:${target}` });
 
   const steps = path_.map(stepFor);
-  if (steps.some((s) => !s)) return refuse(udid, { ok: false, reason: 'unreplayable-edge', to: found.name });
+  if (steps.some((s) => !s)) return refuse(udid, { ok: false, reason: 'unreplayable-edge', to: found.name }, { flowName: `goto:${target}` });
 
   const result = await runScript(udid, { steps, stopOnUnexpected: true, ...runOptions });
   const arrived = await api.screenIdentity(udid, {});
@@ -148,7 +151,7 @@ export function listFlows(udid) {
 export async function runFlow(deviceQuery, name, { options, ...runOptions } = {}) {
   const { device } = await api.ensureDaemon(deviceQuery, options);
   const flow = loadFlow(device.udid, name);
-  if (!flow) return refuse(device.udid, { ok: false, reason: 'unknown-flow', known: listFlows(device.udid).map((f) => f.name) }, { detail: `no saved flow "${name}"` });
+  if (!flow) return refuse(device.udid, { ok: false, reason: 'unknown-flow', known: listFlows(device.udid).map((f) => f.name) }, { detail: `no saved flow "${name}"`, flowName: name });
   // A replayed flow knows its own name, so its record can be compared against
   // a human doing the same thing. `minSteps` comes from the flow definition or
   // stays null — the step count of a recorded route is not a claim about the

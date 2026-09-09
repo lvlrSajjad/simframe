@@ -975,23 +975,52 @@ async function main() {
     case 'escalations': {
       const dev = await resolveDevice(flags.device);
       const records = metrics.readEscalations(dev.udid, { limit: flags.last ? num(flags.last) : undefined });
-      const b = metrics.breakdown(records);
+      const b = metrics.breakdown(records, {
+        session: flags.session === true ? metrics.sessionId() : (flags.session ? String(flags.session) : null),
+        flow: flags.flow ? String(flags.flow) : null,
+      });
       if (flags.out) store.writeAtomic(String(flags.out), `${JSON.stringify(b, null, 2)}\n`);
       emit(flags, b, [
         `${b.total} escalation${b.total === 1 ? '' : 's'} on ${dev.name}`,
         ...metrics.REASONS
           .filter((r) => b.by_reason[r])
           .sort((a, c) => b.by_reason[c] - b.by_reason[a])
-          .map((r) => `  ${r.padEnd(20)} ${String(b.by_reason[r]).padStart(4)}   would be removed by: ${metrics.FACULTY[r]}`),
+          .map((r) => `  ${r.padEnd(20)} ${String(b.by_reason[r]).padStart(4)}   `
+            + (metrics.BUILT_FACULTIES.has(metrics.FACULTY[r])
+              ? `not removed by: ${metrics.FACULTY[r]} [built]`
+              : `would be removed by: ${metrics.FACULTY[r]}`)),
         b.total ? '' : null,
         b.total ? `avoidable ${b.avoidable}/${b.total} (${b.avoidable_escalation_rate})` : null,
         // Said out loud rather than left for someone to discover: the rate is
         // 1.0 while no faculty exists, so the breakdown above is the number
         // that decides the next phase.
         b.total && b.avoidable_escalation_rate === 1
-          ? '  every reason maps to a faculty that is not built yet, so this rate is 1.0 by construction. The per-reason counts are the steering wheel.'
+          ? (metrics.REASONS.some((r) => b.by_reason[r] && metrics.BUILT_FACULTIES.has(metrics.FACULTY[r]))
+            ? '  the rate is 1.0 because nothing resolves locally yet. A reason marked [built] is not a queue waiting on a phase — it is evidence the phase that shipped is not sufficient.'
+            : '  every reason maps to a faculty that is not built yet, so this rate is 1.0 by construction. The per-reason counts are the steering wheel.')
           : null,
         b.total ? `model turns spent on escalations: ${b.model_turns_spent}` : null,
+        // The log is per-device and shared. Said before the counts are used,
+        // not after: two agents on one booted simulator write one interleaved
+        // file, and CLAUDE.md makes these counts the thing that picks the next
+        // faculty. A pooled breakdown errs toward whichever session made more
+        // mistakes, which is a different question.
+        b.pooled
+          ? 'WARNING these counts may pool more than one agent\'s work: '
+            + [
+              b.session_count > 1 ? `${b.session_count} sessions` : null,
+              b.unattributed ? `${b.unattributed} record(s) written before sessions were logged` : null,
+            ].filter(Boolean).join(', ')
+            + '. Narrow with --session (this process), --session=<id>, or --flow=<name>.'
+          : null,
+        b.session_count > 1 ? 'sessions:' : null,
+        ...(b.session_count > 1
+          ? b.sessions.map((x) => `  ${x.session_id.padEnd(22)} ${String(x.count).padStart(4)}  ${x.client}`)
+          : []),
+        Object.keys(b.by_flow).length > 1 ? 'flows:' : null,
+        ...(Object.keys(b.by_flow).length > 1
+          ? Object.entries(b.by_flow).slice(0, 10).map(([n, c]) => `  ${n.padEnd(28)} ${String(c).padStart(4)}`)
+          : []),
         b.top_screens.length ? 'top screens:' : null,
         ...b.top_screens.map((s) => `  ${s.fingerprint.slice(0, 16).padEnd(18)} ${s.count}`),
         metrics.writeError() ? `WARNING a log write failed: ${metrics.writeError()}` : null,

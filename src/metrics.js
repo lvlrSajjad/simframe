@@ -40,8 +40,16 @@ export const FACULTY = {
   no_plan: 'exploration (Phase 14)',
 };
 
-/** Faculties that exist. Empty until Phase 11 lands the first one. */
-export const BUILT_FACULTIES = new Set();
+/**
+ * Faculties that exist.
+ *
+ * Phase 11 landed the first one, so `verification_failed` no longer maps to
+ * something unbuilt — which changes what those records *mean*. Before, they
+ * were a queue waiting on a phase. Now they are evidence that the phase which
+ * shipped is not sufficient, and that is a more useful thing for the log to be
+ * able to say than a count of things nobody has written yet.
+ */
+export const BUILT_FACULTIES = new Set(['sense of time (Phase 11)']);
 
 function metricPaths(udid) {
   const dir = store.deviceDir(udid);
@@ -213,8 +221,50 @@ export function fingerprintNow(udid, screenmap) {
  * measurement's clothes, and every number in this project is supposed to say
  * where it came from.
  */
+/**
+ * Which run of which program wrote a record.
+ *
+ * The log is per-device and, until now, anonymous — so two agents driving one
+ * booted simulator wrote one interleaved file with no way to separate them.
+ * Measured on the bench device in a single evening: 57 records to 81, a third
+ * of the new ones naming screens from an app the suite has never launched.
+ *
+ * That is not a corrupted file, it is a corrupted instrument. CLAUDE.md makes
+ * the reason breakdown of this log the thing that chooses which faculty gets
+ * built next, and a breakdown that silently pools two sessions errs toward
+ * whichever of them made more mistakes — which is not the same question as
+ * which faculty is missing.
+ *
+ * A pid alone would not do: pids are reused, and the useful grouping is "one
+ * agent's run", which for the MCP server is the life of the process and for
+ * the CLI is a single command. So: the start time, the pid, and a random tail,
+ * computed once per process. `client` says what kind of process it was, since
+ * "the MCP server did this" and "somebody ran a CLI command" deserve different
+ * readings of the same reason.
+ *
+ * Deliberately not a device id, a username, or anything about the machine. This
+ * file is committed to a public repo in summary form, and the question it has
+ * to answer is "was this all one agent", which needs no identity to answer.
+ */
+const SESSION_ID = `${process.pid.toString(36)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+/** How this process is being used, for reading a breakdown afterwards. */
+function clientKind() {
+  const argv = process.argv.join(' ');
+  if (/\bmcp\b/.test(argv)) return 'mcp';
+  if (/bench-hpi|scripts\//.test(argv)) return 'script';
+  if (/cli\.js|\bsimframe\b/.test(argv)) return 'cli';
+  return 'library';
+}
+const CLIENT = clientKind();
+
+/** The session this process's records belong to. Exported for `escalations`. */
+export const sessionId = () => SESSION_ID;
+export const clientName = () => CLIENT;
+
 export function recordEscalation(udid, {
   flowId = null,
+  flowName = null,
   stepIndex = null,
   fingerprint = null,
   reason,
@@ -229,7 +279,13 @@ export function recordEscalation(udid, {
   if (!OUTCOMES.includes(outcome)) throw new Error(`not an escalation outcome: ${outcome}`);
   const record = {
     timestamp: new Date().toISOString(),
+    // Added after the log turned out to pool two agents' work invisibly. Both
+    // are cheap and neither is derivable afterwards, which is the test for
+    // whether a field belongs in a log at all.
+    session_id: SESSION_ID,
+    client: CLIENT,
     flow_id: flowId,
+    flow_name: flowName,
     step_index: stepIndex,
     screen_fingerprint: fingerprint,
     reason,
@@ -408,14 +464,31 @@ export function hpi({ flows, baselines = {} }) {
  * rate is 1.0 by construction and says nothing. The per-reason breakdown is
  * the part that decides the next phase, and it is informative today.
  */
-export function breakdown(records) {
+export function breakdown(records, { session = null, flow = null } = {}) {
   const byReason = {};
   for (const r of REASONS) byReason[r] = 0;
   const byScreen = new Map();
   const byOutcome = {};
+  const bySession = new Map();
+  const byFlow = new Map();
   let avoidable = 0;
-  for (const r of records) {
+  let unattributed = 0;
+  // Filtering happens here rather than at the call site so `total` and every
+  // rate below it describe the same set of records.
+  const kept = records.filter((r) => (session ? r?.session_id === session : true))
+    .filter((r) => (flow ? r?.flow_name === flow : true));
+  for (const r of kept) {
     if (!REASONS.includes(r?.reason)) continue;
+    // Records written before sessions were recorded cannot be attributed, and
+    // saying how many there are is the difference between a breakdown that
+    // pools two agents and one that says it might be.
+    if (r.session_id) {
+      const key = `${r.session_id}|${r.client ?? '?'}`;
+      bySession.set(key, (bySession.get(key) ?? 0) + 1);
+    } else {
+      unattributed += 1;
+    }
+    if (r.flow_name) byFlow.set(r.flow_name, (byFlow.get(r.flow_name) ?? 0) + 1);
     byReason[r.reason] += 1;
     byOutcome[r.outcome] = (byOutcome[r.outcome] ?? 0) + 1;
     // Already avoided locally, so not avoidable by anything unbuilt.
@@ -423,9 +496,25 @@ export function breakdown(records) {
     const key = r.screen_fingerprint ?? '(no fingerprint)';
     byScreen.set(key, (byScreen.get(key) ?? 0) + 1);
   }
-  const total = records.filter((r) => REASONS.includes(r?.reason)).length;
+  const total = kept.filter((r) => REASONS.includes(r?.reason)).length;
+  const sessions = [...bySession.entries()]
+    .map(([key, count]) => {
+      const [id, client] = key.split('|');
+      return { session_id: id, client, count };
+    })
+    .sort((a, b) => b.count - a.count);
   return {
     total,
+    // The log is per-device and shared: two agents on one booted simulator
+    // write one interleaved file. More than one session here means the counts
+    // below are a pool, and CLAUDE.md uses those counts to choose a phase.
+    sessions,
+    session_count: sessions.length,
+    unattributed,
+    // Any unattributed record at all makes this a pool: the whole point is
+    // that they cannot be told apart, and 92 of them is not "one session".
+    pooled: sessions.length > 1 || unattributed > 0,
+    by_flow: Object.fromEntries([...byFlow.entries()].sort((a, b) => b[1] - a[1])),
     by_reason: byReason,
     by_outcome: byOutcome,
     faculty: Object.fromEntries(
@@ -437,7 +526,9 @@ export function breakdown(records) {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map(([fingerprint, count]) => ({ fingerprint, count })),
-    model_turns_spent: records.reduce((acc, r) => acc + (r.model_turns_spent ?? 0), 0),
+    // `kept`, not `records` — a filtered breakdown that reports the whole
+    // log's model turns is the same class of mistake as pooling two sessions.
+    model_turns_spent: kept.reduce((acc, r) => acc + (r.model_turns_spent ?? 0), 0),
   };
 }
 

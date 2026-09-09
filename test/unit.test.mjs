@@ -2106,3 +2106,54 @@ test('an action with no observed effect records no edge', async () => {
   const after = src.slice(src.indexOf('graph.record(udid, {'));
   assert.match(after.slice(0, 1400), /else if \(afterScreen\.confirmed && afterScreen\.hash\) \{[\s\S]{0,300}carriedScreen = afterScreen/);
 });
+
+test('an escalation breakdown says when it is pooling more than one agent', async () => {
+  const metrics = await import('../src/metrics.js');
+  const rec = (extra) => ({
+    reason: 'ambiguous_intent', outcome: 'failed', model_turns_spent: 1, screen_fingerprint: 'a', ...extra,
+  });
+
+  // The state the log was actually in: every record anonymous, so nothing can
+  // be told apart. 92 unattributable records is not "one session", and this is
+  // the count CLAUDE.md uses to pick the next phase.
+  const old = metrics.breakdown([rec({}), rec({}), rec({})]);
+  assert.equal(old.pooled, true);
+  assert.equal(old.unattributed, 3);
+  assert.equal(old.session_count, 0);
+
+  // Two agents on one booted simulator.
+  const two = metrics.breakdown([
+    rec({ session_id: 's1', client: 'mcp', flow_name: 'settings' }),
+    rec({ session_id: 's1', client: 'mcp', flow_name: 'settings' }),
+    rec({ session_id: 's2', client: 'cli' }),
+  ]);
+  assert.equal(two.pooled, true);
+  assert.equal(two.session_count, 2);
+  assert.deepEqual(two.sessions[0], { session_id: 's1', client: 'mcp', count: 2 });
+  assert.deepEqual(two.by_flow, { settings: 2 });
+
+  // One agent, nothing anonymous: no warning, because there is nothing to warn
+  // about, and a warning that always fires is one nobody reads.
+  const one = metrics.breakdown([rec({ session_id: 's1', client: 'mcp' })]);
+  assert.equal(one.pooled, false);
+
+  // Narrowing filters `total` and every rate derived from it, model turns
+  // included — a filtered breakdown reporting the whole log's turns would be
+  // the same mistake as pooling.
+  const narrowed = metrics.breakdown([
+    rec({ session_id: 's1', model_turns_spent: 1 }),
+    rec({ session_id: 's2', model_turns_spent: 5 }),
+  ], { session: 's1' });
+  assert.equal(narrowed.total, 1);
+  assert.equal(narrowed.model_turns_spent, 1);
+  assert.equal(narrowed.pooled, false);
+
+  // A record carries its session and the kind of client that wrote it, and the
+  // session id is stable within a process.
+  assert.equal(metrics.sessionId(), metrics.sessionId());
+  assert.ok(['mcp', 'cli', 'script', 'library'].includes(metrics.clientName()));
+
+  // Phase 11 shipped, so its faculty is built — which changes what those
+  // records mean rather than how many there are.
+  assert.ok(metrics.BUILT_FACULTIES.has(metrics.FACULTY.verification_failed));
+});

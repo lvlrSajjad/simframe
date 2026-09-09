@@ -151,7 +151,7 @@ export async function runScript(
   // than no instrumentation.
   const noteEscalation = (record) => {
     try {
-      escalations.push(metrics.recordEscalation(udid, { flowId, ...record }));
+      escalations.push(metrics.recordEscalation(udid, { flowId, flowName, ...record }));
     } catch {
       /* instrumentation must not be able to fail a flow it is only watching */
     }
