@@ -1,15 +1,22 @@
 ---
 name: simframe
-description: Drive and inspect the iOS Simulator with eyes, hands and memory. Use for any task that involves running, testing, navigating or verifying an iOS app on a simulator — "does this screen look right", "tap through the signup flow", "why is this button not working", "is the list loading". Reads screens as text rather than screenshots, batches whole flows into one command, and verifies each step against what it did last time.
+description: Drive and inspect the iOS Simulator or an Android emulator with eyes, hands and memory. Use for any task that involves running, testing, navigating or verifying an app on a simulator or emulator — "does this screen look right", "tap through the signup flow", "why is this button not working", "is the list loading". Reads screens as text rather than screenshots, batches whole flows into one command, and verifies each step against what it did last time.
 ---
 
 # simframe
 
-A background daemon keeps the simulator's framebuffer warm, reads the screen
+A background daemon keeps the device's framebuffer warm, reads the screen
 through the accessibility tree and on-device OCR, and remembers which action
 leads from which screen to which. So the three things that make simulator work
 expensive — waiting for screenshots, spending tokens on images, and re-deriving
 the same screen every time — are already paid for.
+
+Both an iOS simulator and an Android emulator are driven the same way, by the
+same commands, and `simframe devices` lists both. The one difference worth
+knowing: **Android has no accessibility tree**, so its screens are read by OCR
+and CV alone. Tapping by label works; screen recognition is thinner, so prefer
+naming a device explicitly and re-reading the screen after a step you are unsure
+about.
 
 ## Read the screen as text, not as an image
 
@@ -161,7 +168,7 @@ daemon.
 
 ```bash
 simframe start [device]     # capture starts on first use anyway
-simframe devices            # booted simulators
+simframe devices            # booted simulators and emulators
 simframe recall             # what happened in the last ~60s, as text
 simframe strip              # recent frames tiled into one image, for an animation
 simframe find "the save button"   # resolve an intent without acting on it

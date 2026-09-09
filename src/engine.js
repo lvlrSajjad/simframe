@@ -8,7 +8,7 @@
 //
 // The loop used to be called `simctl`, after the tool it shelled out to. It no
 // longer shells out to anything in particular: on Android the same loop reaches
-// the emulator console and captures a frame in ~21 ms, which is not `simctl` by
+// the emulator console and captures a frame in ~41 ms, which is not `simctl` by
 // any reading. `simctl` stays accepted as an alias, because it is in shipped
 // meta.json files, in documentation and in people's shell history.
 import { execFile, spawn } from 'node:child_process';

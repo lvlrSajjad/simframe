@@ -1696,37 +1696,52 @@ Apple M-series, macOS 26, Android 16 (API 36), `Small_Phone_API_36`,
 
 | Path | Median | Note |
 | --- | --- | --- |
-| emulator console `screenrecord screenshot <dir>` | **21 ms** | the emulator writes the PNG onto the host filesystem itself |
-| `adb exec-out screencap -p` | 113 ms | 9 KB PNG across the adb transport |
+| emulator console `screenrecord screenshot <dir>` | **41 ms** | the emulator writes the PNG onto the host filesystem itself |
+| `adb exec-out screencap -p`, from a shell | 113 ms | 9 KB PNG across the adb transport |
+| `adb exec-out screencap -p`, in process | 401 ms | how simframe would actually pay for it, spawn included |
 | `adb exec-out screencap` (raw RGBA) | 218 ms | 3.7 MB — the transfer dominates, not the encode |
+| emulator gRPC `setClipboard` | 48 ms cold, 10 ms warm | `node:http2`, no dependency |
+| `event mouse` down/up over a held console | 3 ms | the whole reason the session is held open |
+| `adb shell input keyevent` | 35 ms | the key path; public API, so no guessing at codes |
+| `am start -W -S --activity-clear-task` | 6,117 ms | a cold start with the task cleared, which is what `relaunch` means |
 | `adb shell getprop` x5, one hop | 28 ms | the same batching lesson as `accessibilityMultipleAttributes:` |
 | `adb shell dumpsys package <pkg>` | 130 ms | the permission read-back |
 | `adb shell dumpsys window displays` | 27 ms | names the focused activity — cheap, and not a screen map |
 | `uiautomator dump` | **2,012 ms** | the accessibility tree, and the reason it is not wired yet |
 
-**Capture on the second platform costs 21 ms, which nobody expected.** The
+**Capture on the second platform costs 41 ms, which nobody expected.** The
 plan assumed Android capture would be the emulator's gRPC streaming endpoint
-(port 8554 is open and unused) with a scrcpy-style fallback, and that
+(port 8554, which the clipboard now uses) with a scrcpy-style fallback, and that
 `adb screencap` would be the slow stopgap. It turns out the console's
 `screenrecord screenshot` writes the frame to a host path with no device-to-host
 transfer at all, over a plain TCP socket with no protobuf and no dependency —
-five times faster than adb and in the same range as the iOS framebuffer
-callback. gRPC is still the path to *streaming*; it is no longer the path to a
-frame.
+an order of magnitude faster than adb as simframe would actually pay for it,
+though **not** in the same range as the iOS framebuffer callback's 16-20 ms.
+gRPC is still the path to *streaming*; it is no longer the path to a frame.
 
-Two measurements corrected themselves under repetition, which is the habit this
-project keeps re-earning:
+**This was published as 21 ms and that was wrong.** Four measurements of one
+number, each wrong in its own way, kept because the sequence is the lesson:
 
-- The console path first measured **67 ms** in Node against 20 ms in a shell.
-  All of the difference was a 10 ms poll interval waiting for the file to be
-  complete; at 3 ms it is 21 ms. The number was measuring the poll, not the
-  emulator.
-- Before that it measured **2,400 ms** and appeared to be the adb fallback.
-  It was: `completePng` looked for the `IEND` chunk type four bytes from the end
-  of the file, which is the CRC and never spells anything, so no frame was ever
-  judged complete and every capture fell through to adb after a 2 s poll. A
-  fallback that works is the hardest kind of bug to see — the numbers were the
-  only thing that showed it.
+- **2,400 ms**, which looked like the adb fallback and was one. `completePng`
+  looked for the `IEND` chunk type four bytes from the end of the file, which is
+  the CRC and never spells anything, so no frame was ever judged complete and
+  every capture fell through to adb after a 2 s poll. A fallback that works is
+  the hardest kind of bug to see.
+- **67 ms**, which was mostly a 10 ms poll interval waiting for a file that had
+  already arrived. At 3 ms it read 21 ms.
+- **21 ms**, which was not a measurement of a screenshot at all. The console
+  emits an extra `OK` after `auth` — its banner — so the script sent `quit` one
+  response early and closed the socket while the emulator was still writing the
+  PNG, then read the *previous* run's file out of a shared directory. Five
+  consecutive runs reporting byte-identical file sizes was the tell, and it got
+  explained away as a static screen. This number reached BENCHMARKS, the README,
+  PHASES and a commit message before it was caught.
+- **41 ms**, phase-timed: the console answers `OK` at 41 ms and the PNG is
+  complete the instant it answers, so nothing is spent polling.
+
+The fix for a number that keeps being wrong is not more care. It is timing the
+phases separately, so a measurement can never be the sum of one thing finishing
+and another thing not having started.
 
 **`uiautomator dump` at 2 s a read is the real problem of the phase.** iOS's
 tree went 203 ms → 45 ms by moving the read host-side and batching it; there is
@@ -1745,3 +1760,87 @@ they were never written for, because the capture loop asks the boundary for a
 screenshot and a resize and both are real on Android. The only edits outside
 `src/platform/` were to stop *claiming iOS mechanisms* for a non-iOS device:
 engine selection, and four lines of `doctor`.
+
+### The two distributions, stated exactly
+
+The number people quote as "the fingerprint margin" is not one number, and
+"0.67–0.75 against 0.36" was ambiguous. Precisely:
+
+A screen's identity is a **set of structural tokens** — role, region, nav slot,
+quantised width and height, chrome label where the element is plausibly chrome,
+quantised anchor, and a one-or-many sibling bucket. Two readings are compared by
+**Jaccard similarity** of those sets: `|A ∩ B| / |A ∪ B|`, so 1.00 is identical
+and 0.00 is disjoint. **Higher means more alike.** Nothing in the comparison
+knows about content: the *text* of a content-region element never enters a
+token. Its presence, size and position do.
+
+From that, two distributions over a tour that visits every screen several times:
+
+| Distribution | What it is | Where "fine" lies |
+| --- | --- | --- |
+| **same screen, revisited** | every pair of readings of the *same* tour screen, taken cold on separate visits | **high** — 1.00 is perfect |
+| **different screens** | every pair of readings of *different* tour screens | **low** — 0.00 is perfect |
+
+`graph.SIMILARITY_THRESHOLD` is **0.36**: at or above it, two readings are the
+same screen. So the requirement is that the whole same-screen distribution sits
+above 0.36 and the whole different-screen distribution sits below it, with room
+either side. Measured on an iPhone 17, 36 same-screen pairs across four apps:
+
+| | n | min | median | max |
+| --- | --- | --- | --- | --- |
+| same screen, revisited | 36 | **0.75** | 1.00 | 1.00 |
+| different screens | 240 | 0.00 | 0.00 | **0.05** |
+
+So "0.67–0.75" is the **worst same-screen pair** across runs — the closest any
+screen came to failing to recognise itself — and 0.36 is the threshold it must
+stay above. It is not a distance, and lower is not better. CI enforces
+clearance rather than a bare gap: every same-screen pair at or above
+`threshold + 0.10` and every different-screen pair at or below
+`threshold - 0.10`, because a wide gap with the threshold at its edge is
+exactly where a screen gets misclassified.
+
+The residual instability is one thing only: a content-region text element's
+quantised box and its group's anchor move between reads, because OCR decides
+where lines break. Six divergent tokens across 36 pairs, all of them
+`content/text`.
+
+### Why the obvious fix cannot be applied: Android
+
+The clean fix on iOS is to stop letting content-region text into identity at
+all. Simulated over recorded elements by re-running the real tokeniser, it is
+dramatic: same-screen min **1.00**, different-screen max 0.10, gap 0.90, against
+0.75/0.05/0.70 today.
+
+It would also leave Android with no identity. Measured on `Small_Phone_API_36`,
+tokens per screen and where they come from:
+
+| Screen | Tokens | Regions | Roles | Chrome labels |
+| --- | --- | --- | --- | --- |
+| launcher | **1** | nav-bar 1 | text 1 | 0 |
+| Settings root | 9 | content 9 | text 9 | 0 |
+| example.com in Chrome | 6 | content 3, nav-bar 3 | text 6 | 3 |
+
+Every token on every screen has role `text`, because without an accessibility
+tree nothing infers a button from a rectangle reliably enough to say so. Two of
+those three screens carry **no chrome label at all**, and Settings' root is nine
+content-text tokens and nothing else — so the iOS fix would take it to zero
+tokens, and `hashTokens([])` is deliberately `null`, which is "no identity" and
+means no screen memory, no refs, no graph.
+
+**Android identity is therefore weaker by construction until Phase 8b**, and
+weak in three specific ways rather than vaguely:
+
+1. **Thin.** One token on the launcher. A one-token identity matches anything
+   else with that token, and there is no margin in a Jaccard of one element.
+2. **Single-roled.** Everything is `text`, so the structural half of the
+   fingerprint — "the same kinds of thing in the same places" — has only one
+   kind of thing to work with.
+3. **Content in identity.** The three "chrome labels" on the browser screen are
+   `"== example.com"`, `":"` and `"+"`. The first is a URL, so a different page
+   is a different screen; the other two are OCR reading punctuation off icons.
+   The positional region bands put the URL bar in `nav-bar`, and chrome labels
+   are the one text that enters identity.
+
+That third one is the region-bands bug, on a second platform, doing more damage
+than it does on the first. It is also a cheap partial: a label of one
+punctuation character is not a name and `isVolatileLabel` should say so.

@@ -131,40 +131,66 @@ brew tap facebook/fb && brew install idb-companion && pipx install fb-idb
 
 ## Android
 
-simframe's second backend is real, and honest about being partial: **Android
-looks but does not touch yet.** Everything above the platform boundary — the
-frame store, settle, the structural fingerprint, the screen map, refs and the
-transition graph — runs on an Android emulator unmodified, because the boundary
-hands it frames and nothing above it knows what a simulator is.
+simframe's second backend drives an Android emulator with the same commands, the
+same screen map and the same memory as a simulator. Everything above the
+platform boundary — the frame store, settle, the structural fingerprint, the
+screen map, refs and the transition graph — runs on it unmodified, because the
+boundary hands it frames and nothing above it knows what a simulator is.
 
 | Capability | Android | How |
 | --- | --- | --- |
-| Watch the screen, wait, recall | yes | frames at **21 ms** through the emulator console, host-side |
+| Watch the screen, wait, recall | yes | frames at **41 ms** through the emulator console, host-side — no adb in the capture path |
 | Read labels + coordinates from pixels | yes | the same Vision OCR + CV, off the same PNG |
 | Screen map, refs, screen memory, the graph | yes | unchanged above the boundary |
+| Tap, type, swipe, keys | yes | the console's `event mouse` as a real down/move/up, `event text` for characters, `input keyevent` for keys |
+| Clipboard | yes | the emulator's gRPC `setClipboard`, over `node:http2`, no dependency |
 | List/resolve devices, launch, terminate, open a URL, permissions | yes | `adb`, with the permission state read back off the device |
-| Tap, type, swipe | **no** | measured and unwired — the console's `event mouse` puts a real down/move/up on the touch screen in ~20 ms |
 | Accessibility tree | **not available (OCR + CV only)** | `uiautomator dump` costs **2,012 ms** a read, against 45 ms for the iOS tree. See [`docs/DEFERRED.md`](docs/DEFERRED.md) |
+
+```bash
+# an emulator is found the same way a simulator is
+simframe devices          # ● Small_Phone_API_36  Android 16 (API 36)  emulator-5554
+simframe ui --device=emulator-5554
+simframe do --device=emulator-5554 flow.json
+```
 
 The tree is a deliberate omission, not an oversight. Making it fast needs a
 resident instrumentation APK on the device — the shape uiautomator2, Maestro and
 Appium all converged on — and that would be simframe's first runtime artifact
 installed onto your device. The perception ladder was built so a missing tier
 degrades rather than fails, and this is exactly that case: OCR and CV yield
-labels and coordinates on Android today. `simframe doctor` reports the tier as
-`optional` with that number, so the gap is visible rather than silent. The
-criteria for revisiting it are written down in `docs/DEFERRED.md` under
-**Phase 8b**.
+labels and coordinates on Android today, and a tap by label works without a tree
+at all. `simframe doctor` reports the tier as `optional` with that number, so
+the gap is visible rather than silent, and the criteria for revisiting it are in
+`docs/DEFERRED.md` under **Phase 8b**.
+
+**What the missing tree costs, measured rather than hand-waved.** Screen
+*identity* is weaker on Android than on iOS, and specifically so. Tokens per
+screen, and where they come from:
+
+| Screen | Tokens | Regions | Roles | Chrome labels |
+| --- | --- | --- | --- | --- |
+| launcher | **1** | nav-bar 1 | text 1 | 0 |
+| Settings root | 9 | content 9 | text 9 | 0 |
+| example.com in Chrome | 6 | content 3, nav-bar 3 | text 6 | 3 |
+
+Every token has role `text`, because without a tree nothing infers a button from
+a rectangle reliably enough to say so. Two of those screens carry no chrome
+label at all. And the browser's three "labels" are `"== example.com"`, `":"` and
+`"+"` — a URL, so a different page reads as a different screen, and two OCR
+misreads of icons. So on Android a screen is recognised by the geometry of its
+text, which is thinner and noisier than the iOS mix of roles, chrome labels and
+geometry. Flows still work; screen *memory* is doing more guessing, and that is
+the honest cost of the tier being absent. It is also why the obvious fix for the
+iOS drift — dropping content-region text out of identity, which would be a
+strict improvement there — is not available: it would leave Settings' root with
+zero tokens, and zero tokens is no identity at all. See
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 The emulator's own gRPC surface was checked for anything tree-shaped and has
 nothing: 43 RPCs for sensors, input, screenshots and VM state, and no notion of
-a view. That question is settled, not open.
-
-```bash
-# an emulator is found the same way a simulator is
-simframe devices          # ● Small_Phone_API_36  Android 16 (API 36)  emulator-5554
-simframe ui --device=emulator-5554
-```
+a view. That question is settled, not open. The same surface is what carries the
+clipboard.
 
 ## The tools
 
@@ -560,8 +586,9 @@ said a word — the exact failure shape, found by the thing built to catch it.
 
 - Simulators and Android emulators only. Neither the framebuffer nor `simctl`
   nor the emulator console can reach a physical device.
-- Android observes but cannot act: no input path and no accessibility tree yet.
-  See [Android](#android) above.
+- Android has no accessibility tree, so its screen identity rests on the
+  geometry of OCR'd text: thinner and noisier than iOS's. See
+  [Android](#android) above.
 - The daemon depends on private frameworks. They are stable enough to build on —
   capture and accessibility survived the iOS 26 transition — but an Xcode
   upgrade can move a symbol. `doctor` reports each layer separately so a break
@@ -581,10 +608,10 @@ said a word — the exact failure shape, found by the thing built to catch it.
 
 ## Roadmap
 
-- **Android input.** The backend reads today; the console's `event mouse` and
-  `event text` are measured and need wiring as one gesture vocabulary, so that
-  `sim_tap` never exists on a platform where `swipe` does not.
 - **Extend the confirm vocabulary beyond English.**
+- **Region bands from clustering**, replacing the positional bands. They have
+  produced three bugs in three phases, and on Android they put a URL bar in the
+  nav bar and its URL into the screen's identity.
 - **Phase 8b, conditionally:** an instrumentation APK for the Android
   accessibility tree, with the criteria for doing it stated in
   `docs/DEFERRED.md` rather than left to enthusiasm.

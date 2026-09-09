@@ -170,7 +170,7 @@ The emulator can hand over pixels and take input. It has no idea what a view is,
 and it is not going to.
 
 Two things in that list are worth remembering rather than rediscovering:
-`streamScreenshot` is the streaming capture path if 21 ms per frame ever stops
+`streamScreenshot` is the streaming capture path if 41 ms per frame ever stops
 being enough, and `setClipboard` is the answer to the entry below.
 
 ### Android's accessibility tree costs 2 seconds a read

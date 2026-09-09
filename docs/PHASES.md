@@ -33,7 +33,7 @@ open work is in `docs/DEFERRED.md`.
 | CI — packaging + integration gates | done. `integration` boots a simulator on `macos-15` and asserts every layer under `--strict`; required on `main` with an admin bypass |
 | CI — the memory layer | done. `scripts/ci-memory.mjs` drives the real CLI over the screen map, refs, graph, verdicts, flows and `goto`, OCR-only. Four bugs found writing it, one of them a capture loop that could not recover a lost display port |
 | 7 — compact agent state, skill | done. A ten-step flow is **1 tool call, 0 images, ~1,650 characters**. Every action returns the numbered text screen map; `sim_look` is the only image path and is capped at 1024 px |
-| 8 — Android | steps 0-2 done — the seam exists, dispatch is device-keyed, and Android reads: frames at 21 ms, a screen map, the graph. No input yet |
+| 8 — Android | steps 0-2 done — the seam exists, dispatch is device-keyed, and Android reads and acts: frames at 41 ms, a screen map, the graph, taps, typing and the clipboard |
 
 **Pick up here: Phase 8, and here is what is actually in the way.**
 
@@ -488,7 +488,7 @@ do: act. There is no input path and no accessibility tree yet.
 
 Three things step 2 found that were not in the plan:
 
-- **Capture is 21 ms, and not over gRPC.** The plan said emulator gRPC
+- **Capture is 41 ms, and not over gRPC.** The plan said emulator gRPC
   streaming with a scrcpy fallback, and `adb screencap` as the slow stopgap.
   The emulator *console* — a plain TCP line protocol, no protobuf, no
   dependency — has `screenrecord screenshot <dir>`, which makes the emulator

@@ -230,9 +230,8 @@ function consoleToken() {
  * strictly request/response.
  *
  * Held open rather than opened per command, for two reasons. The capture loop
- * asks for a frame several times a second, and a connect plus an auth was
- * costing more than the screenshot: 21 ms per frame became 47 ms when a
- * short-lived session was introduced, which is how this was noticed. And a
+ * asks for a frame several times a second, and a connect plus an auth is not
+ * free. And a
  * gesture is not one command — a tap is a down, a hold and an up, a swipe is a
  * run of moves with time between them — and paying for a handshake between the
  * down and the up would make the timing a fiction.

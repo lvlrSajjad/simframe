@@ -180,7 +180,7 @@ const TOOLS = [
   },
   {
     name: 'sim_open_url',
-    description: 'Open a URL or deep link on the simulator — the fastest way to reach a screen when the app has a link for it.',
+    description: 'Open a URL or deep link on the device — the fastest way to reach a screen when the app has a link for it.',
     inputSchema: {
       type: 'object',
       properties: { ...deviceProp, url: { type: 'string' } },
@@ -189,7 +189,7 @@ const TOOLS = [
   },
   {
     name: 'sim_permission',
-    description: `Grant, revoke or reset a privacy permission for an app. Do this instead of tapping the system alert: the alert is not part of the app under test, and its buttons move between iOS versions. Services: ${permissionServices().join(', ')}.`,
+    description: `Grant, revoke or reset a privacy permission for an app. Do this instead of tapping the system alert: the alert is not part of the app under test, and its buttons move between OS versions. Not every service exists on every platform — the device's own backend refuses one it does not have. Services: ${permissionServices().join(', ')}.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -304,7 +304,7 @@ const TOOLS = [
   },
   {
     name: 'sim_devices',
-    description: 'List booted iOS simulators that simframe can capture.',
+    description: 'List the booted devices simframe can drive — iOS simulators and Android emulators.',
     inputSchema: { type: 'object', properties: {} },
   },
 ];
