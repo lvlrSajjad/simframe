@@ -419,6 +419,45 @@ model API.
 
 ## Phase 8 — Android backend behind the Platform boundary
 
+**Before the prompt below: there is no Platform boundary on the JavaScript
+side.** The Swift half is ready and verified — `SimframeCore` imports no
+platform framework, and the 21-method `SimulatorPlatform` protocol already has a
+non-simulator implementation in `StubPlatform`. But `src/simctl.js` is imported
+directly by five modules, and every consumer below would otherwise need an
+`if (android)` in it:
+
+| Module | What it takes from `simctl.js` |
+| --- | --- |
+| `index.js` | `resolveDevice`, `resize`, `screenshot` |
+| `daemon.js` | `isBootedSync`, `resize`, `screenshot` |
+| `actions.js` | `launchApp`, `openUrl`, `setPasteboard`, `setPermission`, `terminateApp` |
+| `mcp.js` | `bootedDevices`, `PERMISSION_SERVICES` |
+| `cli.js` | `bootedDevices`, `listDevices`, `resolveDevice` |
+
+Eleven functions and one constant, none of them conceptually iOS: list devices,
+resolve one, launch and terminate an app, open a URL, set the pasteboard, grant
+a permission, screenshot, resize an image. Every one has an `adb` equivalent.
+
+**So Phase 8 step 0 is a `src/platform/` seam with `ios.js` behind it and no
+behaviour change at all** — same tests, same benchmarks, same output, verified by
+`scripts/ci-memory.mjs` still passing 33/33 and the eval harness still
+separating. Do that as its own commit before writing a line of Android. A
+boundary drawn after the second backend exists is a boundary drawn around
+whatever the second backend happened to need.
+
+Two smaller things Android meets immediately, both in `docs/DEFERRED.md`: the
+confirm vocabulary is hardcoded English, and `PERMISSION_SERVICES` is a list of
+simctl's own service names with no Android meaning — that one is a genuine
+protocol question, not a rename, because the two platforms do not have the same
+permissions.
+
+One thing to carry across rather than rediscover: **identity is settled by the
+graph, not by whichever sensor answered.** Android's `AccessibilityNodeInfo`
+tree will disagree with OCR about roles exactly as iOS's does — measured at
+0.33–0.47 token agreement on the same screen — so the aliasing path is load
+bearing on the second platform too, and `FINGERPRINT_VERSION` must be bumped if
+the token rules change to accommodate it.
+
 ```
 Read CLAUDE.md (Platform boundary) and skim both research docs for the
 platform-agnostic parts (frame history, settle/transition, fusion, intent
