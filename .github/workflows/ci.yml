@@ -185,7 +185,31 @@ jobs:
           simframe do /tmp/reset.json --device="$DEVICE"
           BEFORE=$(read_state)
           printf '[{"openUrl":"https://example.com"},{"settle":true}]\n' > /tmp/flow.json
-          simframe do /tmp/flow.json --device="$DEVICE"
+          # Retried, and only here. `xcrun simctl openurl` returns
+          # NSPOSIXErrorDomain code 60 — "Operation timed out" — on a loaded
+          # hosted runner: three consecutive runs failed on it while the same
+          # commit passed on a quieter one, and the flow immediately before it
+          # took 33 s against 21 s on the passing run. simctl times out
+          # internally, so simframe never gets to see it, and the timeout does
+          # not mean the URL failed to open — it means simctl stopped waiting.
+          #
+          # Deliberately NOT retried inside simframe. `openurl` may well have
+          # succeeded before it stopped answering, so a product-level retry can
+          # open the URL twice, and an action that fires twice is exactly what
+          # the verify barrier in CLAUDE.md exists to prevent. A timeout stays a
+          # hard failure for a real user, who can see their own screen. This
+          # loop buys the runner patience, not simframe dishonesty.
+          for attempt in 1 2 3; do
+            if simframe do /tmp/flow.json --device="$DEVICE"; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "FAIL openUrl failed $attempt times; this is no longer the runner" >&2
+              exit 1
+            fi
+            echo "     (openUrl failed on attempt $attempt — retrying; see the comment above)"
+            sleep 5
+          done
           AFTER=$(read_state)
           node -e '
             const [bh, bs] = process.argv[1].split(" ");

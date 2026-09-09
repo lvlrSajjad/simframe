@@ -1264,6 +1264,37 @@ test('the steps that put text in a field deliver it, and the stall clock resets'
   assert.match(recovery[0], /stalledSince = null/, 'recovery resets the clock, as the Swift loop does');
 });
 
+test('a bare command refuses to pick a device when more than one is booted', async () => {
+  // `booted[0]` is not "yours" by any definition simctl or adb offers, and a
+  // bare `simframe tap` would have injected input into whichever came first. A
+  // reviewer reproduced exactly that against a colleague's simulator, while
+  // `doctor` — which had its own inline guard — correctly chose the right one in
+  // the same moment. So the refusal belongs in the backends, where the default
+  // is decided, not in one command.
+  const platform = await import('../src/platform/index.js');
+  for (const [id, backend] of Object.entries(platform.PLATFORMS)) {
+    const source = fs.readFileSync(new URL(`../src/platform/${id}.js`, import.meta.url), 'utf8');
+    const guard = /if \(booted\.length > 1\) \{([\s\S]*?)\n    \}/.exec(source);
+    assert.ok(guard, `${id} refuses a bare query when several devices are booted`);
+    assert.match(guard[1], /ambiguous: true/,
+      `${id} marks it ambiguous, so a clean match on the other platform cannot override it`);
+    assert.match(guard[1], /SIMFRAME_DEVICE/, `${id} says how to answer the question once`);
+    assert.ok(typeof backend.resolveDevice === 'function');
+  }
+
+  // And an ambiguous default must not be resolved by the other platform having
+  // exactly one device — that is the wrong-device bug with an extra step.
+  const ambiguous = {
+    id: 'many', deviceNoun: 'simulator', ownsUdid: () => false,
+    resolveDevice: async () => {
+      throw Object.assign(new Error('2 simulators are booted and none was named'), { ambiguous: true });
+    },
+  };
+  const single = fakeBackend('one', 'O-', [{ udid: 'O-1', name: 'Only', runtime: 'r', state: 'Booted' }]);
+  await assert.rejects(() => platform.resolveAcross(undefined, null, [ambiguous, single]),
+    /none was named/);
+});
+
 test('a listing unions the backends and stamps every record', async () => {
   const platform = await import('../src/platform/index.js');
   const devices = await platform.listDevices();

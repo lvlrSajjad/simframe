@@ -176,6 +176,18 @@ async function resolveDevice(query, opts) {
           : 'no booted emulator (start one with `emulator -avd <name>`)',
       );
     }
+    // See the same guard in ios.js: an arbitrary pick is a tap on the wrong
+    // device, and this backend can act too.
+    if (booted.length > 1) {
+      throw Object.assign(
+        new Error(
+          `${booted.length} emulators are running and none was named: ` +
+            `${booted.map((d) => `${d.name} (${d.udid})`).join(', ')} — name one with --device, ` +
+            'or set SIMFRAME_DEVICE to pick a default for this shell',
+        ),
+        { ambiguous: true },
+      );
+    }
     return booted[0];
   }
   const q = loose(query);

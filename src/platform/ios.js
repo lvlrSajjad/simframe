@@ -66,6 +66,29 @@ async function resolveDevice(query, opts) {
   const booted = all.filter((d) => d.state === 'Booted');
   if (!query) {
     if (booted.length === 0) throw new Error('no booted simulator (open Simulator.app or run `xcrun simctl boot <udid>`)');
+    // `booted[0]` was the wrong-device bug, and it was worse than it looked.
+    // simctl's order is not "yours" by any definition, so on a machine with
+    // more than one booted simulator a bare `simframe ui` read whichever came
+    // first — and a bare `simframe tap` would have *injected input* into it. A
+    // reviewer reproduced it deterministically against a colleague's simulator.
+    //
+    // `doctor` got a guard for its own fan-out and this default did not, which
+    // is how the same command set could pick two different devices in one
+    // moment. Refusing is the only safe answer here: the seam cannot see which
+    // device simframe is already driving (that is store state, above the
+    // boundary), and a backend must never guess when the cost of guessing wrong
+    // is a tap on somebody else's screen. `ambiguous` so that a second platform
+    // matching cleanly cannot override this — see resolveAcross.
+    if (booted.length > 1) {
+      throw Object.assign(
+        new Error(
+          `${booted.length} simulators are booted and none was named: ` +
+            `${booted.map((d) => `${d.name} (${d.udid})`).join(', ')} — name one with --device, ` +
+            'or set SIMFRAME_DEVICE to pick a default for this shell',
+        ),
+        { ambiguous: true },
+      );
+    }
     return booted[0];
   }
   const q = query.toLowerCase();

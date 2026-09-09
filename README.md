@@ -37,12 +37,20 @@ Same four-tab navigation flow, on a real production app:
 | | Before | With simframe |
 | --- | --- | --- |
 | Look at the screen | ~130–400 ms, blocking | **~20 ms**, already captured |
+
 | "Did anything change?" | a full image | **~2 ms**, text only |
 | Finding a control | read tree (~570 ms) + reason | **~1 ms** from memory |
 | A 4-step flow, verified | 4+ model round trips | **1 call**, 3.6 s |
 | Same flow, 3rd run | no improvement — every run is the first | **3.7 s, 4/4 from memory, 4/4 verified** |
 | A 10-step flow | 10 turns, 10 images (~16,000 tokens at best) | **1 turn, 0 images, ~1,650 characters** |
 | Reading a screen | an image: ~1,600 tokens, no tap points | **~330 tokens** of text, with tap points |
+
+Every figure above is the cost inside a live process — the MCP server, or the
+daemon answering a socket — which is how an agent actually uses simframe. A
+one-shot `simframe` command from a shell pays about 200 ms of Node startup on
+top, and a frame sitting on an idle screen can be older than 20 ms because the
+capture loop throttles when nothing moves. `~20 ms` is the read, not the
+process.
 
 The four-tab tour, three times back to back from a cleared memory:
 
@@ -67,10 +75,16 @@ npm install -g simframe
 simframe doctor
 ```
 
-The first `simframe start` builds a small Swift daemon from source — a few
-seconds, once. It needs the Xcode command line tools, which you already have if
-you have a simulator. Without them simframe falls back to the original
-`simctl` loop and says so.
+**Whichever of those two commands you run first** builds a small Swift daemon
+from source — including `doctor`, which is why a cold `doctor` takes around 15
+seconds and every later one takes two. It needs the Xcode command line tools,
+which you already have if you have a simulator. Without them simframe falls
+back to the original `simctl` loop and says so.
+
+If more than one simulator is booted, name the one you mean — `--device=<udid>`,
+or `export SIMFRAME_DEVICE=<udid>` once per shell. simframe refuses to choose
+for you, because the first booted device is nobody's idea of "yours" and the
+command that would act on it is a tap.
 
 `doctor` checks each capability separately and tells you what you have:
 

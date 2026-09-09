@@ -581,6 +581,81 @@ question to ask a reviewer is "what reports success without doing the work",**
 and asking it found a bug that had been filed for a whole release under the
 wrong platform. Three of the seven were of that shape.
 
+### `xcrun simctl openurl` times out on a loaded runner — retried in CI, not in simframe
+Three consecutive integration runs failed at `openUrl` with
+`NSPOSIXErrorDomain code 60, Operation timed out`, and the same commit passed on
+a quieter runner, so it is load and not code. The evidence that it is load: the
+flow immediately before the failure took **33 s** on the failing runs against
+**21 s** on the passing one, and one run logged `capture failed: the display
+surface could not be read (6 in a row)`. The timeout is simctl's own; simframe
+never gets a chance to see it.
+
+The CI step retries three times with a 5 s gap. **simframe deliberately does
+not.** A timeout is not evidence the URL failed to open — it is evidence simctl
+stopped waiting — so a product-level retry can open the URL twice, and an action
+that fires twice is precisely what the verify barrier in `CLAUDE.md` exists to
+prevent. For a real user, who can see their own screen, a hard failure is the
+honest answer. The retry buys the runner patience without buying simframe a lie.
+
+Worth revisiting if a user ever reports this off a hosted runner. Then the
+question becomes whether `openUrl` can be made *checkable* — open, then confirm
+the frontmost app changed — which is a retry with evidence rather than a retry
+with hope, and is the only version of it that belongs in the product.
+
+### `doctor` was fixed and the default device was not — fixed, 0.7.3
+The 0.7.2 guard stopped `doctor` fanning out across every booted device. It did
+not touch the thing that chose the device in the first place, and a clean-room
+review of the published 0.7.2 found the rest of it in minutes.
+
+Both backends answered a bare query with `booted[0]`. On a host with more than
+one booted simulator that meant `simframe ui` read whichever simctl happened to
+list first — reproduced deterministically against a colleague's simulator,
+starting a daemon on it and writing a frame store — and the same unguarded path
+is reached by `tap`, `type`, `swipe`, `keys`, `press`, `do`, `goto`, `find`,
+`start` and the MCP server's default. So a bare `simframe tap "Save"` would have
+**injected input into somebody else's device**.
+
+The sharpest piece of evidence is the inconsistency: at one moment, in one
+state, bare `doctor` correctly picked the reviewer's own device while bare `ui`
+picked the colleague's. That is the signature of a fix applied to a command
+instead of to a default.
+
+Both backends now refuse, marked `ambiguous` so a clean match on the other
+platform cannot override it, and name the devices plus `SIMFRAME_DEVICE`.
+Refusing rather than preferring, for a reason that is a boundary constraint and
+not timidity: the seam cannot see which device simframe is already driving,
+because that is store state above the boundary, and a backend must not guess
+when guessing wrong is a tap on another person's screen.
+
+**What is still open is the convenience `doctor` has and nothing else does:**
+preferring the device that is already capturing. Doing it generally means the
+default-device decision moving above the boundary — a small helper in `src/` that
+every call site uses instead of importing `resolveDevice` from the seam directly,
+which is seven call sites across `cli.js` and `index.js`. Worth doing; not worth
+folding into a fix for a wrong-device hazard.
+
+### `stop` exited 0 after refusing to stop anything — fixed, 0.7.3
+`stop --device=X` against a daemon another client holds printed "stopped 0
+daemons; left 1 in use by another client" and exited **0**. The text was honest
+and the exit code was not, so a script could not tell the difference. An
+explicit device that was refused now exits non-zero; `--all` still exits 0 when
+it skips a device somebody else holds, because there it is informational.
+
+### Three README claims that were not true — fixed, 0.7.3
+Found by the same review, and all three are the kind of small dishonesty this
+project says it cares about:
+
+- *"The first `simframe start` builds a small Swift daemon"* — `doctor` builds
+  it too, and `doctor` is the first command the quickstart tells you to run. A
+  cold `doctor` measured **16.7 s** against 2.2 s for the `start` after it, and
+  the README explained none of it.
+- **`~20 ms` was quoted as though it were the cost of a shell command.** It is
+  the read inside a live process. A one-shot CLI invocation pays ~200 ms of Node
+  startup on top, and frame age on an *idle* screen measured min 17 / median 75
+  / p90 462 ms because the loop throttles when nothing moves.
+- **The sample `doctor` output is a single-simulator host.** With several booted
+  it prints `WARN device probes` and none of the per-device layer lines.
+
 ### The Android backend has ~970 lines and two assertions
 Fixed in 0.7.1 only where a fix was one line. The coverage gap is real and
 mostly *pure* functions, which is the annoying part — none of this needs a

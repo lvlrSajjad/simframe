@@ -243,6 +243,11 @@ async function main() {
         `stopped ${stopped} daemon${stopped === 1 ? '' : 's'}` +
           (inUse ? `; left ${inUse} in use by another client (pass --force to stop anyway)` : ''),
       );
+      // Asked to stop one device, refused, and exited 0 — which is a success
+      // code for work not done, and a script checking `$?` could not tell the
+      // difference. `--all` is informational by nature, so it keeps exiting 0
+      // when it skips a device somebody else holds.
+      if (!flags.all && inUse && !stopped) process.exitCode = 1;
       return;
     }
 
