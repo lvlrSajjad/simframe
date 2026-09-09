@@ -240,7 +240,7 @@ list, so neither substitutes for perception — OCR does, and does it today.
 Until this is settled, Android reports its accessibility layer as `optional`
 with the reason, which is the state doctor exists to make visible.
 
-### There is no *adb* path to the Android clipboard — but there is a gRPC one
+### There is no *adb* path to the Android clipboard — the gRPC one is shipped, 0.7.0
 `cmd clipboard` does not exist on API 36 — the shell answers "No shell command
 implementation" — and `service call clipboard` depends on transaction numbers
 that move between platform versions. So `setPasteboard` throws on Android with
@@ -267,21 +267,35 @@ built in, so this is reachable in about forty lines with **no npm dependency**
 and no APK — which makes it the cheapest real capability left on the Android
 side, and it should not stay filed under "not possible".
 
-Two things to settle first: whether the gRPC endpoint wants a token (there is an
-`emulator_access.json` beside the protos), and whether the port is discoverable
-without parsing `lsof` — 8554 is the documented default and is what this machine
-uses, but a second emulator will not be on it.
+Both open questions turned out to have the same answer, and it is a file. A
+running emulator writes its own `grpc.port` and `grpc.token` into a per-process
+record beside the AVD, so nothing is hardcoded to 8554 and a second emulator on
+another port works. The token is required — the `unprotected` list in
+`emulator_access.json` is empty — and it is read at call time, never logged.
 
-### Android input is measured and unwired
+Measured: 48 ms cold, 10 ms warm. Verified where it counts, which is not the
+`getClipboard` round trip — that only proves the emulator accepted the text.
+`CLIPTEST-7391` set through the seam and then pasted into Chrome's address bar
+proves the guest has it.
+
+### Android input is measured and unwired — wired, 0.7.0
 The emulator console's `event mouse <x> <y> 0 1` / `... 0 0` puts a real
-down-and-up on the touch screen — verified by the screen changing — in about
-20 ms, host-side, with no adb and no dependency. That is the Android equivalent
-of Indigo HID, including the ability to write real down→move→up sequences with
-honest timing rather than teleporting taps, and `event text` types.
+down-and-up on the touch screen, host-side, with no adb and no dependency. That
+is the Android equivalent of Indigo HID, including real down→move→up sequences
+with honest timing rather than teleporting taps, and `event text` types.
 
-It is deliberately not wired yet: input belongs to the same step as the control
-socket and the gesture vocabulary, and landing half of it would mean `sim_tap`
-existing on Android while `swipe` and `key` did not. Phase 8's next step.
+Shipped as one gesture vocabulary — tap, swipe, type, keys — so `sim_tap` never
+existed on a platform where `swipe` did not. The coordinate space is device
+pixels, settled by watching the touch driver report `0x3fff` for a point at half
+the screen rather than by reading the help text.
+
+**What is still open is the `paste` *step*, not the clipboard.** Putting text on
+the Android clipboard works (see below). But the step then long-presses the
+field, which raises a paste *menu* on iOS and does nothing useful on Android,
+where the completion is a tap and `KEYCODE_PASTE` — a key the vocabulary now
+has. So `paste` on Android places the text and does not deliver it. Small, and
+the kind of half-working that is worse than absent, because the step reports
+success.
 
 ### The capture loop's recovery path has no test — fixed
 A display port torn down under a live daemon left capture dead for six minutes
@@ -301,11 +315,19 @@ recovered from.
 The teardown itself still cannot be induced on demand, so what is covered is the
 decision and the act, not the event.
 
-### Fixed sleeps in `actions.js`
+### Fixed sleeps in `actions.js` — one of them is gone
 `sim_wait` and the settle gate defer to the daemon's real settle detector, but
-individual step types in `src/actions.js` still carry fixed sleeps. Removing them
-touches every step and deserves its own pass rather than being folded into a
-phase about something else.
+individual step types in `src/actions.js` still carry fixed sleeps. Removing
+them touches every step and deserves its own pass rather than being folded into
+a phase about something else.
+
+The keyboard-focus one is done, because Android forced it: 150 ms is enough for
+a keyboard rising over the screen you are already on and nowhere near enough for
+a tap that starts a whole activity, and the text went before the field existed
+while the step reported success. It waits for a real settle now. That is the
+argument for the rest of the pass — every one of these numbers is calibrated
+against one platform's animation timings, and the second platform is slower in
+places the first never was.
 
 ### Screen memory still lives in Node
 Phase 2 called for porting the layout-hash cache into the daemon. It was left
