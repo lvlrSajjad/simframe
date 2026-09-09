@@ -35,9 +35,42 @@ open work is in `docs/DEFERRED.md`.
 | 7 — compact agent state, skill | done. A ten-step flow is **1 tool call, 0 images, ~1,650 characters**. Every action returns the numbered text screen map; `sim_look` is the only image path and is capped at 1024 px |
 | 8 — Android | not started |
 
-**Pick up here.** Nothing in the engine is outstanding. Phase 8 (Android) is
-the next planned body of work; open items smaller than a phase are in
-`docs/DEFERRED.md`.
+**Pick up here: Phase 8, and here is what is actually in the way.**
+
+The Swift half is ready. `SimframeCore` — history, settle, transitions, hashing,
+the frame store — imports no platform framework at all, verified rather than
+assumed: no `CoreSimulator`, no `SimulatorKit`, no `IOSurface`, no
+`NSClassFromString`, no `dlopen`. Everything simulator-specific is behind the
+21-method `SimulatorPlatform` protocol in `PrivateAPI`, with `StubPlatform`
+already proving the protocol is implementable by something that is not a
+simulator.
+
+**The JavaScript half has no such boundary, and that is Phase 8's real first
+task.** `src/simctl.js` is imported directly by five modules:
+
+| Module | What it takes from `simctl.js` |
+| --- | --- |
+| `index.js` | `resolveDevice`, `resize`, `screenshot` |
+| `daemon.js` | `isBootedSync`, `resize`, `screenshot` |
+| `actions.js` | `launchApp`, `openUrl`, `setPasteboard`, `setPermission`, `terminateApp` |
+| `mcp.js` | `bootedDevices`, `PERMISSION_SERVICES` |
+| `cli.js` | `bootedDevices`, `listDevices`, `resolveDevice` |
+
+Eleven functions and one constant, and none of them is conceptually iOS: listing
+devices, resolving one, launching and terminating an app, opening a URL, setting
+the pasteboard, granting a permission, taking a screenshot, resizing an image.
+Every one has an `adb` equivalent. So the work is a `platform/` seam with two
+implementations rather than anything architectural — but it is real work, and
+doing it *before* an Android backend is what stops the second backend from
+being bolted on beside the first.
+
+Two smaller things Android will meet immediately, both already recorded in
+`docs/DEFERRED.md`: the confirm vocabulary is hardcoded English, and
+`PERMISSION_SERVICES` is a list of simctl's service names, which has no meaning
+on Android.
+
+Nothing else is outstanding. Every finding from the 0.6.0 review is closed, the
+identity question is decided and measured, and the memory harness passes 33/33.
 
 **What 2a turned out to be worth.** Measured before it was attempted, so the
 payoff was known rather than assumed: a warm ten-step flow makes **zero**

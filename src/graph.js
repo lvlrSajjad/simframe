@@ -7,11 +7,28 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { hashDistance } from './analyze.js';
+import { informative } from './refs.js';
 import * as fingerprint from './fingerprint.js';
 import * as matching from './matching.js';
 import * as store from './store.js';
 
-const GRAPH_VERSION = 2;
+const GRAPH_VERSION = 3;
+
+/**
+ * Which fingerprint produced the hashes in these files.
+ *
+ * Separate from `GRAPH_VERSION` because it answers a different question: not
+ * "is this file shaped the way I expect" but "were these hashes computed by the
+ * same rules I am about to compare them with". A stored graph whose hashes came
+ * from an older fingerprint is not stale, it is *incomparable* — and the failure
+ * is silent, because an old hash is a perfectly well-formed hash that simply
+ * never matches anything.
+ *
+ * On a mismatch the graph is discarded and rebuilt, never translated. A rebuild
+ * costs a few hundred milliseconds per screen and happens once. A mis-merged
+ * graph costs a wrong tap, and costs it for as long as the file survives.
+ */
+export const FINGERPRINT_VERSION = fingerprint.TOKEN_RULES_VERSION;
 /**
  * Screens are matched by structural hash, exactly, and then by how alike their
  * token sets are — which tolerates one optional element appearing (a badge, a
@@ -38,6 +55,14 @@ const GRAPH_VERSION = 2;
  * Most revisits match on a hash outright and never reach this at all.
  */
 export const SIMILARITY_THRESHOLD = 0.36;
+
+/**
+ * How many of the 288 layout bits may differ and still be the same arrangement
+ * of light. The same number `screenmap` recalls maps by, and for the same
+ * reason: measured, a revisit is usually identical and different screens sit at
+ * 74 and above, so 20 is well inside the gap.
+ */
+export const SAME_SCREEN_LAYOUT_BITS = 20;
 /**
  * A screen with three async sections has a few settled structures, not endless
  * ones. Capping this keeps a genuinely wrong merge bounded: if a node starts
@@ -105,11 +130,28 @@ function fingerprintsOf(node) {
 function load(udid, screen) {
   const key = typeof screen === 'string' ? { hash: screen, tokens: [] } : screen;
   const entry = store.readJson(path.join(graphDir(udid), `${key.hash}.json`));
-  if (entry?.version === GRAPH_VERSION) return entry;
+  if (entry?.version === GRAPH_VERSION && entry?.fingerprintVersion === FINGERPRINT_VERSION) return entry;
   // The hash may be a variant of a node filed under a different name.
   const byVariant = allNodes(udid).find((n) => (n.variants ?? []).some((v) => v.hash === key.hash));
   if (byVariant) return byVariant;
-  return { version: GRAPH_VERSION, hash: key.hash, tokens: key.tokens ?? [], variants: [], edges: [] };
+  return {
+    version: GRAPH_VERSION,
+    fingerprintVersion: FINGERPRINT_VERSION,
+    hash: key.hash,
+    tokens: key.tokens ?? [],
+    // What the pixels looked like here. Kept because it is the evidence that
+    // two structurally different readings are the same screen — see `record`.
+    layoutHash: key.layoutHash ?? null,
+    variants: [],
+    edges: [],
+  };
+}
+
+/** Keep the pixel baseline current for a screen we are standing on. */
+function noteLayout(node, reading) {
+  const now = typeof reading === 'string' ? null : reading?.layoutHash;
+  if (now && informative(now)) node.layoutHash = now;
+  return node;
 }
 
 function save(udid, node) {
@@ -124,7 +166,7 @@ export function allNodes(udid) {
       .readdirSync(graphDir(udid))
       .filter((f) => f.endsWith('.json'))
       .map((f) => store.readJson(path.join(graphDir(udid), f)))
-      .filter((n) => n?.version === GRAPH_VERSION);
+      .filter((n) => n?.version === GRAPH_VERSION && n?.fingerprintVersion === FINGERPRINT_VERSION);
   } catch {
     return [];
   }
@@ -243,6 +285,10 @@ export function record(udid, { from, action, to, kind }) {
   // arrive as — that is what variants are for, and rewriting it here would let
   // a node drift screen by screen into something it never was.
   if (!node.tokens?.length && fromKey.tokens?.length) node.tokens = fromKey.tokens;
+  // The pixel baseline, on the other hand, *should* track: it is the evidence
+  // for "same arrangement of light as last time I stood here", and a stale one
+  // answers a question about a screen as it was weeks ago.
+  noteLayout(node, fromKey);
   const to_ = toHash;
   const signature = actionSignature(action);
   const existing = node.edges.find((e) => e.action === signature);
@@ -272,9 +318,28 @@ export function record(udid, { from, action, to, kind }) {
       // So the reading has to positively look like the target before it is
       // called a face of it. Unclaimed is a necessary condition, not a
       // sufficient one.
-      const looksLikeTarget = resembles(target, reading);
+      // Two kinds of positive evidence that this reading is a face of the
+      // target, and either will do. What will not do is "nothing else claims
+      // it", which is an absence of evidence and used to be the whole test.
+      //
+      //  * It looks like the target — the tokens overlap enough to be the same
+      //    screen by the same measure used everywhere else.
+      //  * It *looks like* the target on screen. The pixels are within the
+      //    same-screen band of what was seen here before, and we arrived
+      //    through an edge that has led here. Identity belongs to the graph as
+      //    much as to the hash: the transition is evidence the fingerprint
+      //    cannot supply, and it is exactly the evidence needed when one
+      //    perception layer answered this time and not last time.
+      //
+      // That second route is what carries a screen whose structure genuinely
+      // differs between reads. Measured on four device-native screens, the
+      // accessibility tree and OCR agree on only 0.33–0.47 of a screen's
+      // tokens and never on its hash, and coarsening the vocabulary barely
+      // moved it — so this is not a residual case, it is the common one.
+      const looksLikeTarget = resembles(target, reading) || pixelsAgree(target, reading);
       if (unclaimed && looksLikeTarget && target.hash !== to_ && reading.tokens?.length) {
         addVariant(target, reading);
+        noteLayout(target, reading);
         save(udid, target);
         existing.count += 1;
         existing.lastSeen = Date.now();
@@ -306,6 +371,25 @@ export function record(udid, { from, action, to, kind }) {
 }
 
 /** What this action did last time, if we have ever seen it here. */
+/**
+ * Do the pixels say this is the same screen we have stood on here before?
+ *
+ * The layout hash is a poor answer to "which screen is this" on its own — that
+ * is why identity is structural — but it is a good answer to "is this the same
+ * arrangement of light", and combined with having arrived through a known edge
+ * it is the evidence that two structurally different readings are one screen.
+ *
+ * Guarded by `informative`, because a dark or uniform screen hashes to almost
+ * nothing and two of those are within any tolerance of each other while being
+ * evidence of nothing at all.
+ */
+function pixelsAgree(node, reading) {
+  const before = node?.layoutHash;
+  const now = reading?.layoutHash;
+  if (!before || !now || !informative(before) || !informative(now)) return false;
+  return hashDistance(before, now) <= SAME_SCREEN_LAYOUT_BITS;
+}
+
 /**
  * Does this reading look like a face of this screen, rather than a different
  * screen we happen not to have stored yet?

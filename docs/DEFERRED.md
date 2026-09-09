@@ -266,91 +266,64 @@ and free to fix whenever that file is next open.
 
 ## Known and unresolved
 
-### A screen has two identities: one with the tree, one without
+### A screen has two identities: one with the tree, one without — decided
 
-Measured on one screen, alternating reads on a live daemon:
+Decided while graphs were still cache rather than data, on the principle that
+**identity is what the screen is, not which sensor happened to see it** — and
+that where the hash cannot deliver that, the graph should.
 
-```
-useAx=true   sources=ax,ocr  targets=27  structural=5b72c1535c66
-useAx=false  sources=ocr     targets=17  structural=15521f646255
-```
+**The number that decided it.** Measured on four device-native screens, the same
+screen read with the accessibility tree and without it:
 
-The same screen, a second apart, with two structural fingerprints. Identity is
-built from the elements, and the accessibility layer contributes ten of the
-twenty-seven, so a read taken without the tree is a different screen as far as
-memory is concerned.
+| | similarity | same hash |
+| --- | --- | --- |
+| before | 0.300–0.600, median 0.438 | 0/4 |
+| after coarsening | 0.333–0.467, median 0.467 | 0/4 |
 
-This was always true in principle and never mattered, because the tree was
-either always there (a machine with idb) or never there (CI, which had none).
-Phase 2a made it matter: the tree is now present by default and *absent
-intermittently* — an app mid-launch genuinely has no tree, a slow guest can blow
-the read's time budget, and either produces an OCR-only map of a screen whose
-other reads are ax+OCR.
+Coarsening the representation was expected to collapse most of the gap. **It
+collapsed almost none of it**, and the reason is worth keeping: the divergence
+was predicted to be containers and non-visual nodes, and only 4 of 23 divergent
+tokens were. The rest is the two sensors *disagreeing about role for the same
+visible element* — the tree says `button` and `heading` where OCR says `text`,
+and a search field reads as `slider` to one and `text` to the other. `roleOf`
+already mapped every source into one small vocabulary and `source` never entered
+the hash, so the cheap half was already done.
 
-A graph that will not converge is **consistent** with this, and that is as far
-as the evidence goes. On a hosted runner the loop went
-`[unverified, unexpected-screen]`, `[unexpected-screen]`,
-`[no-visible-change, unexpected-screen]` over three passes of two steps, never
-predicting an outcome it had already seen. The two-identities measurement above
-is solid — reproducible, on a healthy device, twice each way. The claim that it
-*causes* the CI failure is not: CI's map read `16 element(s) from ax+ocr` with
-both layers answering, so the mechanism above may not even have been active
-there.
+That inverts the design: aliasing is not the safety net for a residual, it is
+the mechanism. Three parts, all in:
 
-An attempt to reproduce the convergence failure locally measured nothing, on a
-device whose display surface had died mid-run — every read after that point was
-`ocrError: the display surface could not be read`, which degrades every map to
-ax-only and collapses different screens onto one identity. That is a third
-possible explanation for what CI saw, and it is not the same as the first two.
-The cause of the convergence failure is **open**.
+1. **Only what any sensor could see enters identity.** An element with no
+   visible footprint, and a container holding two or more others, are both
+   things only the tree can report. Worth doing on its own terms; worth almost
+   nothing for this problem, as above.
+2. **A screen node carries a set of fingerprints.** A reading that matches no
+   node is attached to the node an edge predicted, given positive evidence:
+   either the tokens overlap by the usual threshold, or the pixels are within
+   the same-screen band of what was seen there before. What no longer counts is
+   "nothing else claims it" — an absence of evidence, and previously the whole
+   test. The transition is evidence the fingerprint cannot supply, which is the
+   point: identity belongs to the graph as much as to the hash.
+3. **The fingerprint is versioned and stored graphs are discarded, never
+   migrated.** `FINGERPRINT_VERSION` travels with every node file and is
+   separate from `GRAPH_VERSION` on purpose: not "is this file shaped right" but
+   "were these hashes computed by the rules I am about to compare them with". An
+   old hash is a well-formed hash that never matches anything — the graph looks
+   populated, every prediction misses, and nothing says why. A rebuild costs a
+   few hundred milliseconds per screen, once. A mis-merged graph costs a wrong
+   tap for as long as the file lives.
 
-Three ways out, none of them obviously right:
+**Separation held**, which was the thing that could have made this worse rather
+than better. Six-screen tour including the adversarial `settings-general` /
+`settings-accessibility` pair:
 
-1. **Do not remember a degraded read.** `build` already records which layer is
-   missing and why; the same logic that says only a settled screen is worth
-   keeping says only a whole read is worth keeping. The map is still returned
-   and still usable — it just does not become an identity. Closest to the
-   existing philosophy and the smallest change.
-2. **Let it be a variant.** A screen may already hold several accepted
-   fingerprints, which is exactly the machinery for "the same screen looked
-   different this time". Costs nothing to build and makes convergence slower,
-   which is what a convergence assertion would then have to allow for.
-3. **Make identity layer-independent** by fingerprinting only what both layers
-   can see. Loses the tree's structure, which is the most reliable part of the
-   identity, to protect against its absence. Probably wrong, listed because it
-   is the obvious idea.
+| | before | after |
+| --- | --- | --- |
+| same screen, revisited | min 1.00 | min 0.69, median 1.00 |
+| different screens | max 0.05 | max 0.05 |
+| gap | 0.62 | **0.64** |
 
-Not decided, and deliberately not decided in a hurry: this is what a screen's
-identity *means*, and getting it wrong invalidates every learned graph. The CI
-check that caught it is asserting convergence, which is something this project
-elsewhere says it does not claim — so that check needs revisiting whichever way
-this goes.
-
-
-
-### The layout hash fingerprints pixels, and content is pixels
-**This was the "unexplained variance", and it is now measured.** Across four
-visits to each of five screens: a revisit is usually identical (median 0 bits)
-but the tail reaches **62** when list content has changed, while different
-screens sit at **74** and above.
-
-The first calibration saw 0-3 against 77-96 and chose a tolerance of 12. That
-was measured on screens whose content happened to be stable, and it is not
-representative. The real margin is 62 against 74, which is narrow enough that no
-threshold separates the two cleanly.
-
-The tolerance is 20: it covers ordinary drift and leaves the tail to rebuild,
-because a rebuild costs about 300ms and a false match taps the wrong control.
-
-The fix is not a better threshold. It is to fingerprint **structure** rather
-than pixels — the research calls for "dHash of structure + role histogram", and
-the element map that would come from is already built. A fingerprint over
-element roles and positions is content-independent by construction, and would
-make both screen memory and the transition graph stable on exactly the screens
-where they are weakest today. **Done** — Phase 6b replaced pixel identity with a
-structural fingerprint, and Phase 6d added variants for screens with more than
-one settled structure. Kept here because the reasoning is the record of why
-pixel identity failed.
+The same-screen floor tightened from 1.00 to 0.69 — the price of dropping
+tokens — and the gap still widened, with the 0.36 threshold inside it.
 
 ### Screens without a nav title are named by their tab bar
 `simframe screens` lists one screen as `assets / home / more / •.. / $ /

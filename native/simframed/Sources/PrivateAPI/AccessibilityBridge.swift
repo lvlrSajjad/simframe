@@ -237,8 +237,13 @@ public final class AccessibilityBridge {
             cut = cut ?? "the read ran out of time"
             return
         }
-        out.append(node(from: element, depth: depth))
-        guard let children = attribute(element, "AXChildren") as? [NSObject] else { return }
+        // Each node's reads hand back autoreleased objects, and a 4000-node
+        // cap means 4000 nodes' worth of them living until the whole walk
+        // returns. Draining per node keeps the peak flat.
+        autoreleasepool {
+            out.append(node(from: element, depth: depth))
+        }
+        guard let children = autoreleasepool(invoking: { attribute(element, "AXChildren") as? [NSObject] }) else { return }
         for child in children {
             walk(child, depth: depth + 1, into: &out, deadline: deadline, cut: &cut)
         }

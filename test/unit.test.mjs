@@ -1029,3 +1029,24 @@ test('a route through a screen wearing its second face is still a route', () => 
   assert.ok(graphmod.route(UDID, A, B.hash), 'reaching B by its canonical hash');
   assert.ok(graphmod.route(UDID, A, Bface.hash), 'reaching B by its variant hash');
 });
+
+test('a graph whose hashes came from older rules is discarded, not compared', () => {
+  // An old hash is a perfectly well-formed hash that never matches anything,
+  // which is the quietest kind of wrong: the graph looks populated, every
+  // prediction misses, and nothing says why. So the fingerprint's version
+  // travels with the file and a mismatch means rebuild, never translate.
+  const UDID = freshDevice('fp-version');
+  const A = { hash: 'a'.repeat(32), tokens: tok(6, 'a') };
+  graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: { hash: 'b'.repeat(32), tokens: tok(6, 'b') } });
+  assert.equal(graphmod.stats(UDID).screens, 1, 'the fixture stored something');
+
+  // Rewrite the stored node as if an older fingerprint had produced it.
+  const file = path.join(store.ROOT, UDID, 'graph', `${A.hash}.json`);
+  const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(stored.fingerprintVersion, graphmod.FINGERPRINT_VERSION);
+  fs.writeFileSync(file, JSON.stringify({ ...stored, fingerprintVersion: stored.fingerprintVersion - 1 }));
+
+  assert.equal(graphmod.stats(UDID).screens, 0, 'incomparable hashes are not offered as knowledge');
+  assert.equal(graphmod.nearestScreen(UDID, A), null, 'and nothing resolves against them');
+  assert.equal(graphmod.predict(UDID, A, { tap: 'go' }), null, 'so no prediction is made from them');
+});

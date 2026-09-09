@@ -16,7 +16,7 @@ import * as regions from './regions.js';
 import { informative } from './refs.js';
 import * as store from './store.js';
 
-const MAP_VERSION = 6; // dates, prices and phone numbers no longer contribute labels
+const MAP_VERSION = 7; // footprintless elements and containers no longer enter identity
 
 function mapDir(udid) {
   return path.join(store.deviceDir(udid), 'screens');

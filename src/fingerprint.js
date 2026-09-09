@@ -11,6 +11,18 @@
 import crypto from 'node:crypto';
 import * as regions from './regions.js';
 
+/**
+ * Bumped whenever the token rules change, and read by `graph.FINGERPRINT_VERSION`
+ * and `screenmap.MAP_VERSION` so stored hashes are discarded rather than
+ * compared against hashes computed by different rules. An old hash is a
+ * perfectly well-formed hash that never matches anything, which is the quietest
+ * kind of wrong.
+ *
+ * 2 — elements with no visible footprint, and containers holding two or more
+ *     others, no longer enter identity: only one sensor can see either.
+ */
+export const TOKEN_RULES_VERSION = 2;
+
 /** Frames are quantised to this, so sub-pixel drift and a nudged row do not matter. */
 export const GRID = 24;
 
@@ -108,13 +120,31 @@ export function tokens(targets, screen) {
   const keyboardTop = regions.detectKeyboardTop(targets, screen);
   const groups = new Map();
 
+  // Identity is what the screen *is*, not which sensor happened to see it, so
+  // two things that only one sensor can produce must not enter it: an element
+  // with no visible footprint, and a container that exists to hold others.
+  // Pixels cannot see either, and the accessibility tree reports both.
+  const encloses = (frame) => targets.filter((o) => {
+    const f = o.frame;
+    if (!f || f === frame) return false;
+    const cx = f.x + (f.width ?? 0) / 2;
+    const cy = f.y + (f.height ?? 0) / 2;
+    return cx > frame.x && cx < frame.x + (frame.width ?? 0)
+      && cy > frame.y && cy < frame.y + (frame.height ?? 0);
+  }).length;
+
   for (const t of targets) {
     const frame = t.frame ?? { x: t.x, y: t.y, width: 0, height: 0 };
     // Off-screen elements are not part of what this screen looks like.
     if (frame.y + (frame.height ?? 0) <= 0 || frame.y >= screen.height) continue;
+    // Nor is anything with no footprint to be seen.
+    if (!(frame.width > 0) || !(frame.height > 0)) continue;
     const region = t.region ?? regions.regionFor(frame, screen, { keyboardTop });
     if (region === 'status-bar') continue;
     if (keyboardTop != null && frame.y >= keyboardTop) continue;
+    // A thing that holds two or more other things is scenery, and only the
+    // tree can see it. Its children are already in the fingerprint.
+    if (/group|other|generic/i.test(String(t.type ?? '')) && encloses(frame) >= 2) continue;
 
     const role = roleOf(t);
     // Group by what a thing IS and how big it is, not where it is. Repeated
