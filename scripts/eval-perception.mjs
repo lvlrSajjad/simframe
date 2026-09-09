@@ -68,6 +68,7 @@ export function checkScreen(fx) {
   const authored = (expect.resolutions?.length ?? 0)
     + (expect.ambiguous?.length ?? 0)
     + (expect.none?.length ?? 0)
+    + (fx.frame_pairs?.length ?? 0)
     + (expect.identity ? 1 : 0);
 
   for (const r of expect.resolutions ?? []) {
@@ -136,14 +137,21 @@ export function checkScreen(fx) {
   // Frame pairs, for the change detector. `changed: true` means an action that
   // a person would call visible — a switch flipping, a radio dot moving.
   for (const pair of fx.frame_pairs ?? []) {
-    const diff = analyze.signatureDiff(analyze.hexToSignature(pair.after), analyze.hexToSignature(pair.before));
+    const a = analyze.hexToSignature(pair.after);
+    const b = analyze.hexToSignature(pair.before);
+    // Two different questions about the same pair of frames: has the *screen*
+    // changed (the mean, which drives stillness) and has a *control* changed
+    // (the largest single region, which drives the verdict). A switch flip
+    // answers no to the first and yes to the second, which is the whole reason
+    // both exist.
+    const diff = pair.per_cell ? analyze.maxCellDelta(a, b) : analyze.signatureDiff(a, b);
     const seen = diff > (pair.threshold ?? 0.004);
     if (seen !== Boolean(pair.changed)) {
       findings.push({
         kind: 'change',
         query: pair.note ?? '(frame pair)',
         want: pair.changed ? 'a visible change' : 'no change',
-        got: `diff ${diff.toFixed(5)} against a threshold of ${pair.threshold ?? 0.004}`,
+        got: `${pair.per_cell ? 'max cell' : 'mean'} ${diff.toFixed(5)} against a threshold of ${pair.threshold ?? 0.004}`,
       });
     }
   }

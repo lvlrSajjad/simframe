@@ -54,15 +54,38 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    threshold change since Phase 5 has shipped on unit tests and one eval run
    because this does not exist.
 
-3. **Small-delta taps are invisible to the change detector.** Measured: a
-   switch flip peaks at a frame diff of **0.00049** against a `changeThreshold`
-   of **0.004** — eight times below it — so switches, radio dots, checkboxes
-   and segment highlights do not change the screen as far as the daemon is
-   concerned. `analyze.js` says so in a comment two lines from the constant.
-   Costs either the full settle budget (~2.5 s per tap, reported) or a bogus
-   `no-visible-change` in 124 ms when 1 fires first, and `no-visible-change`
-   escalates. `Motion.swift` already builds the per-cell map that would see it,
-   at a threshold tuned for a different question. Needs 2.
+3. ~~**Small-delta taps are invisible to the change detector.**~~ **Done,
+   2026-09-10 — and my own framing of it was wrong in a way worth keeping.**
+
+   True: the daemon's `changed` is `signatureDiff > 0.004`, a mean over a 4x8
+   grid, and a measured switch flip moves the mean by **0.001348** — a third of
+   the threshold. So `stableForMs` genuinely cannot see a switch.
+
+   Not true: the consequence I asserted. `waitFor` does not use `changed` for
+   `sawChange` — it compares **frame hashes**, which are far more sensitive, and
+   measured on the same flip the hash *did* change (`…dbdf` → `…dbdb`). So this
+   switch was never actually costing a settle budget, and the reported ~2.5 s
+   per radio/segment tap **does not reproduce here**. The 124 ms
+   `no-visible-change` I attributed to it was a tap on the row *centre* that
+   flipped nothing at all — which is its own bug, filed below.
+
+   What shipped is the backstop for changes below the *hash's* resolution,
+   calibrated to a measured gap rather than chosen: `analyze.CELL_CHANGE =
+   0.012`, sitting between the flip's largest single-region delta of **0.0431**
+   and the loudest thing on eighty seconds of a static screen — the status-bar
+   clock ticking, at **0.0039**. Eleven times' separation, so no row needs
+   excluding; the clock simply does not reach it, which is a better reason to
+   ignore it than a structural exclusion that would also blind the nav bar.
+
+   It feeds `sawChange` and deliberately **not** stillness. A blinking text
+   caret is a small localised change, and a screen with a cursor in it would
+   otherwise never settle. The two signals answer different questions: "did the
+   action do anything" and "has the screen finished moving".
+
+   **Not demonstrated firing on a real control**, because the one I could flip
+   is already caught by the frame hash. Both measured signature pairs are in
+   the harness as `frame_pairs`, so the calibration is regression-tested even
+   though the path is not yet exercised in anger.
 
 ### P1 — wrong actions and wrong state, all from real-app use
 

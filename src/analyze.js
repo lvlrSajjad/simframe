@@ -35,6 +35,42 @@ export function signatureDiff(a, b) {
   return sum / a.length / 255;
 }
 
+/**
+ * A change small enough that the whole-screen mean cannot see it.
+ *
+ * `changed` in both daemons is `signatureDiff > 0.004`, a mean over a 4x8 grid
+ * of gray means. Measured on this device, an iOS switch flipping:
+ *
+ *   mean diff        0.001348   — a third of the threshold, so: not a change
+ *   max cell delta   0.043137   — one cell of thirty-two, in row 1
+ *
+ * So the entire class of small binary controls — switches, radio dots,
+ * checkboxes, segment highlights — changes nothing as far as the daemon is
+ * concerned, and a step that flips one reports `no-visible-change`, which is a
+ * verdict that escalates.
+ *
+ * The threshold sits in a measured gap rather than being chosen. Eighty seconds
+ * of a *static* screen gave a largest per-cell delta of 0.003922, in row 0,
+ * which is the status-bar clock ticking over — the only thing moving. So the
+ * separation is 0.0039 against 0.0431, eleven times, and 0.012 is three times
+ * the noise and three and a half times under the signal. No row is excluded:
+ * the clock does not reach the threshold, which is a better reason to ignore it
+ * than a structural exclusion that would also blind the nav bar.
+ *
+ * What this deliberately does **not** do is feed stillness. `stableForMs` stays
+ * on the mean, because a blinking text caret is a small localised change and a
+ * screen with a cursor in it would otherwise never settle. The two signals are
+ * independent by design: this one answers "did the action do anything", and the
+ * mean answers "has the screen finished moving".
+ */
+export const CELL_CHANGE = 0.012;
+
+/** The largest single-region change between two signatures, 0-1. */
+export function maxCellDelta(a, b) {
+  const deltas = regionDeltas(a, b);
+  return deltas.length ? Math.max(...deltas) : 0;
+}
+
 /** Per-region change fractions, so callers can tell a toast from a screen push. */
 export function regionDeltas(a, b) {
   if (!a || !b || a.length !== b.length) return a ? a.map(() => 1) : [];

@@ -2298,3 +2298,35 @@ test('waiting for something already on screen stops immediately', async () => {
   // "did not come forward", and the step is the only place that can say so.
   assert.match(src, /already in front — or it did not come forward/);
 });
+
+test('a change too small for the mean is still a change', async () => {
+  const a = await import('../src/analyze.js');
+  const h = a.hexToSignature;
+  // Both measured on this device rather than constructed. An iOS switch
+  // flipping, and eighty seconds of a static screen whose only moving part is
+  // the status-bar clock.
+  const flip = ['eabbbcecf1fafcf3f1f8fef3f2f2f6f1eeeaf2eeeef0f6efeeecf1f1f0eef6ee',
+                'eabbbcecf1fafce8f1f8fef3f2f2f6f1eeeaf2eeeef0f6efeeecf1f1f0eef6ee'].map(h);
+  const tick = ['e8b9b9eceef9fcf0eef6fef5f1f1f5f4ebe6f0efecebf5f1ece7eef1efebf5ee',
+                'e9b9b9eceef9fcf0eef6fef5f1f1f5f4ebe6f0efecebf5f1ece7eef1efebf5ee'].map(h);
+
+  // The mean cannot see the flip: 0.0013 against a threshold of 0.004.
+  assert.ok(a.signatureDiff(flip[1], flip[0]) < 0.004);
+  // One region moved by 0.043 — thirty-two times the mean.
+  assert.ok(a.maxCellDelta(flip[1], flip[0]) > a.CELL_CHANGE);
+
+  // And the threshold sits in a measured gap rather than being chosen: the
+  // loudest thing on a static screen is the clock at 0.0039, eleven times
+  // below the flip. Asserted as the gap so tuning one number cannot quietly
+  // close it.
+  assert.ok(a.maxCellDelta(tick[1], tick[0]) < a.CELL_CHANGE);
+  assert.ok(a.maxCellDelta(flip[1], flip[0]) > a.maxCellDelta(tick[1], tick[0]) * 5,
+    'the signal must stay well clear of the loudest thing on a still screen');
+
+  // Independent of stillness on purpose: a blinking caret is a small localised
+  // change, and a screen with a cursor in it must still be able to settle.
+  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  const block = src.slice(src.indexOf('if (!sawChange && baselineSig)'), src.indexOf('if (!sawChange && baselineSig)') + 400);
+  assert.match(block, /sawChange = true/);
+  assert.ok(!/stableForMs/.test(block), 'the per-cell signal must not touch stillness');
+});

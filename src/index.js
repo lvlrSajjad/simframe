@@ -10,6 +10,8 @@ import {
   REGION_COLS,
   hexToSignature,
   isBlackFrame,
+  maxCellDelta,
+  CELL_CHANGE,
   regionDeltas,
   regionMap,
   signatureDiff,
@@ -619,6 +621,17 @@ export async function waitFor(
    */
   let quietGapMs = 0;
   let quietRun = 0;
+  /**
+   * The baseline's own signature, for changes the mean cannot see.
+   *
+   * Only when the baseline was found in the frame history — a hash we cannot
+   * place has no signature to compare against, and guessing one would be worse
+   * than not looking.
+   */
+  const baselineSig = resolved?.kind === 'history' && resolved.entry?.sig
+    ? hexToSignature(resolved.entry.sig)
+    : (requested == null ? hexToSignature(currentSig(first) ?? '') : null);
+  let smallChange = false;
   /** Frames the display was not rendering at all. See `isBlackFrame`. */
   let blackFrames = 0;
   let blackSinceStart = null;
@@ -672,6 +685,9 @@ export async function waitFor(
     quietGapMs,
     sawChange,
     changedBeforeWait: changedAtStart,
+    // Something moved, but only in one region — a control changing state
+    // rather than a screen changing.
+    smallChange,
     staleBaseline,
     blackFrames,
     // Said as an observation, never as a diagnosis: a screen can be black
@@ -711,6 +727,25 @@ export async function waitFor(
       blackSinceStart = null;
 
       if (!sawChange && state.hash !== baselineHashValue) sawChange = true;
+
+      // A change too small for the whole-screen mean to see.
+      //
+      // A switch flipping moves one cell of thirty-two by 0.043 and the mean by
+      // 0.0013 — a third of the threshold — so every switch, radio dot,
+      // checkbox and segment highlight was an action that "changed nothing",
+      // and `no-visible-change` is a verdict that escalates. See
+      // analyze.CELL_CHANGE for the measured gap this sits in.
+      //
+      // Deliberately feeding `sawChange` and *not* stillness: `stableForMs`
+      // stays on the mean, because a blinking text caret is a small localised
+      // change and a screen with a cursor would otherwise never settle.
+      if (!sawChange && baselineSig) {
+        const sig = currentSig(state);
+        if (sig && maxCellDelta(hexToSignature(sig), baselineSig) > CELL_CHANGE) {
+          sawChange = true;
+          smallChange = true;
+        }
+      }
 
       // A pause that turned out not to be the end of the transition. Only
       // pauses followed by more movement count: the quiet at the end of a

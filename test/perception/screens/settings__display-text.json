@@ -392,5 +392,30 @@
     ],
     "ambiguous": [],
     "none": []
-  }
+  },
+  "frame_pairs": [
+    {
+      "note": "an iOS switch flipping (Bold Text), whole-screen mean",
+      "before": "eabbbcecf1fafcf3f1f8fef3f2f2f6f1eeeaf2eeeef0f6efeeecf1f1f0eef6ee",
+      "after": "eabbbcecf1fafce8f1f8fef3f2f2f6f1eeeaf2eeeef0f6efeeecf1f1f0eef6ee",
+      "changed": false,
+      "threshold": 0.004
+    },
+    {
+      "note": "the same flip, against the per-cell threshold",
+      "before": "eabbbcecf1fafcf3f1f8fef3f2f2f6f1eeeaf2eeeef0f6efeeecf1f1f0eef6ee",
+      "after": "eabbbcecf1fafce8f1f8fef3f2f2f6f1eeeaf2eeeef0f6efeeecf1f1f0eef6ee",
+      "changed": true,
+      "threshold": 0.012,
+      "per_cell": true
+    },
+    {
+      "note": "the status-bar clock ticking on an otherwise static screen \u2014 must not read as a change",
+      "before": "e8b9b9eceef9fcf0eef6fef5f1f1f5f4ebe6f0efecebf5f1ece7eef1efebf5ee",
+      "after": "e9b9b9eceef9fcf0eef6fef5f1f1f5f4ebe6f0efecebf5f1ece7eef1efebf5ee",
+      "changed": false,
+      "threshold": 0.012,
+      "per_cell": true
+    }
+  ]
 }

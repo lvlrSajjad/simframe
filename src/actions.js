@@ -285,6 +285,11 @@ export async function runScript(
           // was re-taken from the live screen. Surfaced because it means the
           // step before this one had not finished when this one started.
           staleBaseline: Boolean(w.staleBaseline),
+          // Something moved in one region only — a switch, a radio dot, a
+          // segment highlight. Worth saying, because it is the difference
+          // between "the action did nothing" and "the action did something the
+          // whole-screen mean cannot see".
+          smallChange: Boolean(w.smallChange),
           timing: learned
             ? {
               p50: learned.p50,
@@ -423,7 +428,9 @@ export async function runScript(
       const launchNote = step.action === 'launch' && settled?.noVisibleChange
         ? ' [the screen did not change, so this app was already in front — or it did not come forward]'
         : '';
-      const note = launchNote + (settled?.noVisibleChange ? ' [no visible change]' : '')
+      const note = launchNote
+        + (settled?.smallChange ? ' [a small change, in one region only]' : '')
+        + (settled?.noVisibleChange ? ' [no visible change]' : '')
         + (settled?.staleBaseline ? ' [baseline had already settled; re-taken from the live screen]' : '')
         + (settled?.blackFrames
           ? ` [${settled.blackFrames} black frame(s) waited through${settled.blackMs ? `, still black after ${settled.blackMs}ms` : ''}]`
