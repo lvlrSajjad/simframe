@@ -202,6 +202,36 @@ export function rowsFor(entry, { screen, filter, interactive, all = false, limit
   return { rows: rows.slice(0, limit), truncated: Math.max(0, rows.length - limit), collapsed };
 }
 
+/**
+ * Say when the rows below were remembered rather than looked at.
+ *
+ * Screen memory is deliberately keyed on the pixel layout hash, because a list
+ * with new rows is the same screen and re-perceiving it per step is the cost
+ * Phase 13 exists to remove. That is right for *identity* and wrong for
+ * *contents*, and the map made no distinction: a field's text reaches a row as
+ * an OCR alias, so a recalled map reports the text the field held when the map
+ * was built. Reported from a real session — a picker described the previous
+ * sheet's options and did it in 23 ms, which is the giveaway, because 23 ms is
+ * not enough time to have looked.
+ *
+ * This does not fix that. It stops it being invisible, which is the part that
+ * cost two wrong conclusions about an app.
+ *
+ * Only past a second, because a map built by this very call is not a
+ * recollection and saying so on every screen is how a real warning gets
+ * skimmed.
+ */
+export const RECALL_NOTE_FLOOR_MS = 1000;
+
+export function recalledNote(identity, now = Date.now()) {
+  const at = identity?.entry?.at;
+  if (!Number.isFinite(at)) return null;
+  const age = now - at;
+  if (age < RECALL_NOTE_FLOOR_MS) return null;
+  const ago = age < 60_000 ? `${Math.round(age / 1000)}s` : `${Math.round(age / 60_000)}m`;
+  return `elements recalled from ${ago} ago — pass refresh for what is there now`;
+}
+
 function renderRow(r) {
   const name = [
     trim(r.label) || (matching.isAxTarget(r) ? '(unlabelled)' : '(no text)'),
@@ -320,6 +350,7 @@ export function render({ device, identity, rows, truncated, collapsed, screen, n
       : 'screen unidentified',
     identity?.keyboard ? 'keyboard up' : null,
     identity?.settled === false ? 'STILL MOVING' : null,
+    recalledNote(identity),
   ].filter(Boolean).join(' · ');
 
   const lines = [head];

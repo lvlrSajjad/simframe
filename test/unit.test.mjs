@@ -1998,3 +1998,46 @@ test('the structural settle credits the time a sample already spent getting ther
   assert.equal(api.structuralSettleOwed(undefined, 1000), 300);
   assert.equal(api.structuralSettleOwed(null, 1000), 300);
 });
+
+test('the session gate is keyed on the boot, not on the process', async () => {
+  const input = await import('../src/input.js');
+  const stale = { stale: true, bootedAt: 5000 };
+
+  // Nothing rebuilt yet: act.
+  assert.equal(input.shouldRebuildSession(stale, undefined), true);
+  // Already rebuilt for this boot: do not rebuild on every tap forever, which
+  // is what a failed rebuild would otherwise cause.
+  assert.equal(input.shouldRebuildSession(stale, 5000), false);
+  // A *newer* boot than the one we rebuilt for is a new device session.
+  assert.equal(input.shouldRebuildSession({ stale: true, bootedAt: 9000 }, 5000), true);
+  // Not stale, nothing to do.
+  assert.equal(input.shouldRebuildSession({ stale: false, bootedAt: 9000 }, undefined), false);
+  // A boot with no date cannot be memoised, so re-attempting on every action
+  // would be worse than not detecting it.
+  assert.equal(input.shouldRebuildSession({ stale: true, bootedAt: null }, undefined), false);
+
+  // The bug this replaced, asserted at the source so it cannot come back as a
+  // convenience: a gate keyed on the udid alone fires once per process, and the
+  // MCP server is one process for a whole session — which is the only place a
+  // device can reboot *between* two actions.
+  const src = fs.readFileSync(new URL('../src/input.js', import.meta.url), 'utf8');
+  const gate = src.slice(src.indexOf('export async function ensureFreshSession'));
+  assert.ok(!/\.has\(udid\)/.test(gate.slice(0, 400)),
+    'ensureFreshSession must not gate on having seen the udid before');
+});
+
+test('a recalled screen map says how old it is', async () => {
+  const view = await import('../src/view.js');
+  // A map built by this very call is not a recollection, and saying so on
+  // every screen is how a real warning gets skimmed.
+  assert.equal(view.recalledNote({ entry: { at: 1000 } }, 1000), null);
+  assert.equal(view.recalledNote({ entry: { at: 1000 } }, 1900), null);
+  // Past the floor it says so, and says what to do about it.
+  const s = view.recalledNote({ entry: { at: 1000 } }, 41_000);
+  assert.match(s, /recalled from 40s ago/);
+  assert.match(s, /refresh/);
+  assert.match(view.recalledNote({ entry: { at: 0 } }, 2_400_000), /recalled from 40m ago/);
+  // No entry, or no timestamp: no claim either way.
+  assert.equal(view.recalledNote(null), null);
+  assert.equal(view.recalledNote({ entry: {} }), null);
+});

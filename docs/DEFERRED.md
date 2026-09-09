@@ -63,18 +63,40 @@ for. Each item is written up in full further down or in
    captured after the dispatch returned, not before the step began. See
    `docs/BENCHMARKS.md`, "Phase 11 step 4".
 
+**P0 — reported worst, and fixed this session**
+
+1e. ~~Reboot orphans the HID session, silently: capture keeps working, input
+   dies, every tap returns `ok`.~~ **Fixed.** Two faults — the staleness gate
+   was keyed on the process, so it could not fire in the MCP server, which is
+   the only place a device reboots between two actions; and the remedy `doctor`
+   printed named a command that fails twice. `simframe input reset` now exists
+   and is what `doctor` prints. Verified end to end; the reported *symptom*
+   did not reproduce, so this removes a certain cause rather than proving a
+   cure.
+
 **P1 — from a fresh-install session on a real third-party app**
 
-1c. **The rendered screen map drops state it already collected.** `value` and
-   `enabled` are on every element node and `src/view.js` prints neither, so a
-   text field appears as a bare label whether it is empty or holds a paragraph.
-   Verified in the code, not just reported. Every text verification in that
-   session fell back to a screenshot, and one `assert` against a field that did
-   contain the wanted string failed, prompted a retype, and produced a doubled
-   value and a validation error. Cheapest high-value fix on this list.
+1c. **An action-returned map describes remembered state, not live state.**
+   Corrected from my first version of this, which blamed the renderer for
+   dropping `value`: it does drop `value`, but a field's text arrives as the
+   OCR alias regardless, and the real fault is that it is as old as the map.
+   Worst case reported: a picker described the previous sheet's options, in
+   23 ms. Partly addressed — the header now says how old a recalled map is.
+   What is left is giving a field's contents an authoritative source: render
+   AX `value` beside the OCR alias and let the two disagree visibly.
 
 1d. **Label resolution silently picks the wrong element**, three sightings that
    are one bug. Full write-up below; it merges with 7.
+
+1f. **Small-delta taps are invisible to the change detector.** Measured: a
+   switch flip peaks at a frame diff of 0.00049 against a `changeThreshold` of
+   0.004 — eight times below it — so a switch, radio dot, checkbox or segment
+   highlight does not change the screen as far as the daemon is concerned. It
+   costs either the full settle budget (~2.5 s per tap, as reported) or a
+   bogus `no-visible-change` in 124 ms when the P0 above fires first. The
+   per-cell difference map that would see it already exists in `Motion.swift`
+   at a threshold tuned for a different question. Calibration on the settle
+   path, so it waits on 1.
 
 **P2 — CI worth trusting**
 
@@ -1358,14 +1380,79 @@ it should weigh deleting it against fixing it a sixth time.
 
 ## What a fresh-install session on a real app found
 
-Nine findings from a separate 0.9.0 session driving a third-party app installed
-from scratch on a clean simulator, plus what I could verify of each from here.
+Twenty findings reported across two rounds by a separate 0.9.0 session driving
+a third-party app installed from scratch on a clean simulator. The second round
+**corrects** the first in one important place and supersedes it in several, so
+what follows is the consolidated list — eleven distinct faults, each with what I
+could verify of it from here and what was done about it. Where my first
+write-up got a diagnosis wrong, the correction is in the entry rather than
+quietly replacing it, because the wrong diagnosis is the more instructive half.
+
 The app is not named anywhere in this repo and neither is its bundle id; nothing
 below needs either. Every observation is reproducible per the reporter.
 
 The session's own summary of the human comparison is worth keeping at the top:
 **much slower than the person doing it by hand.** That is HPI_time on an app
 nobody has a baseline for, and it agrees with the suite.
+
+### Status at a glance
+
+| | finding | status |
+|---|---|---|
+| 0 | Reboot orphans the HID session, silently | **fixed**, both halves |
+| 1 | Action-returned maps describe remembered state | age now shown; contents still unauthoritative |
+| 2 | `enabled` stale the same way | same cause as 1 |
+| 3 | Fuzzy matching guesses instead of asking | mechanism found, filed |
+| 4 | Small-delta taps are invisible to the change detector | **measured**, filed |
+| 5 | Back chevron undetectable | filed |
+| 6 | Ambiguity reported only after the full timeout | filed |
+| 7 | OS dialogs invalidate refs mid-batch | working as designed; cost belongs to 8 |
+| 8 | `type` pastes, consent dialog eats the first paste | Phase 12 `prep` |
+| 9 | `sim_launch` reports success without fronting | filed |
+| 10 | `settle` misses slow progress | filed, related to the P0 above |
+| 11 | OCR confusables | filed |
+
+### 0. Reboot orphans the HID session, silently — **fixed**
+
+Ranked worst by the reporter and it deserves it: capture kept working, input
+died, every tap returned `ok`. About ten calls and two wrong conclusions about
+the app went into it.
+
+Two independent faults, both now fixed.
+
+**The gate was keyed on the process.** `ensureFreshSession` held a
+`Set` of udids — "once per process, per device" — so the staleness check ran at
+the first action and never again. In the CLI that is invisible, because every
+command is a new process and per-process is per-call. In the **MCP server** it
+is fatal, because that is one process for a whole session, and a device
+rebooting *between two actions* is the only situation this feature exists for.
+The key is now the boot the rebuild was for (`shouldRebuildSession`), so the
+check runs on every dispatch and rebuilds once per device boot — enough that a
+failed rebuild does not retry on every tap, not so much that the next boot is
+invisible. The check costs two small `readJson`s; `bootedAtCached` already
+capped the part that was expensive, which is what made the old gate unnecessary
+as well as wrong.
+
+**The printed remedy was wrong twice.** It read "The next action rebuilds it
+automatically; simframe stop && simframe start does it now". The first clause
+was false exactly where it mattered, per above. The second names a command that
+fails twice — `stop` needs `--device` when two simulators are booted, then
+refuses because a client holds the daemon — so the sequence that actually works
+is `stop --device <udid> --force && start --device <udid>`, as the reporter
+found. That is a daemon restart, discarding the frame ring and every warm cache,
+to cure a session the daemon can rebuild on request. It simply had no way in
+from outside. It does now: **`simframe input reset [--device <udid>]`**, which
+is what `doctor` prints.
+
+*What is verified and what is not.* The gate bug is a code-level certainty and
+the fix is unit-tested and driven end to end: one process, a tap, a device
+reboot mid-process, another tap. After the reboot the old code reports the
+session `stale` and the new code reports it `current`. What did **not**
+reproduce is input actually dying — the tap worked on both sides, which means
+the HID session sometimes survives a reboot here (the capture recovery path
+rebinds the device and warms input, which may cure it as a side effect). So
+this removes one certain cause of the reported symptom; it is not proof that
+the symptom is gone.
 
 ### The map answers "which screen", and was asked "what state"
 
@@ -1421,6 +1508,61 @@ waited the full 30 s and then reported four matches, all four of which were on
 screen in the first frame. The disambiguation message is good — labels,
 coordinates, confidence — and arrives twenty-nine seconds after everything it
 needed. Ambiguity is knowable on the first frame and should be answered there.
+
+### 4. Small-delta taps are invisible to the change detector — measured
+
+Reported as "radio/segment taps cost ~2.5 s each — invisible to the settle
+detector, so it waits out the full timeout every time". Measured here on a
+switch in Settings, which is the same class of control:
+
+```
+frame diffs across the flip   0.00049  0.00037  0.00025  0.00025  0.00037
+changeThreshold                0.004
+```
+
+**Eight times below the threshold at its peak.** `changed = diff > 0.004` where
+`diff` is the mean absolute difference over a 4×8 grid of gray means, so a
+control that repaints a switch, a radio dot, a checkbox or a segment highlight
+does not change the screen as far as the daemon is concerned. `analyze.js`
+already says so in a comment two lines from the constant: "a moving caret is
+~0.3%".
+
+Two consequences and they look nothing like each other, which is why this took
+a report plus a measurement to see:
+
+- `mode: settle` never observes `sawChange`, so the wait runs to its budget —
+  the reporter's ~2.5 s per tap, on a cold-ish edge.
+- Or the P0 above fires first, the settle is satisfied by stillness older than
+  the tap, and the step returns in **124 ms** with `[no visible change]`. That
+  is what happened here. The same bug, seen through a second bug, reads as its
+  opposite.
+
+Either way the verdict is wrong: a toggle that flipped is reported as an action
+that did nothing, and `no-visible-change` is one of the verdicts that escalates.
+
+The machinery to see it already exists and is not consulted. `Motion.swift`
+builds a per-cell difference map — "Per-cell, not global: a cell either changed
+or it did not" — with `cellThreshold = 0.06`, for deciding whether something is
+*animating*. Redistribute this switch's 0.00049 mean onto one cell of the 4×8
+grid and it is about 0.016, still under 0.06, so this is a calibration question
+rather than a wiring one, and calibration on the settle path is what the eval
+harness at 1 exists to make safe. Filed, with the number, rather than tuned by
+hand.
+
+### 7. OS dialogs invalidate refs mid-batch — working as designed
+
+Reported as a fault and it is the ref guard doing its job. A dialog is a
+different screen, `resolveRef` compares the structural hash the numbers were
+assigned under against the one on screen, and refuses: "#4 was numbered on a
+different screen (a1b2c3d4 → e5f6a7b8) — read the screen again before using
+refs". Guessing would tap whatever now sits at those coordinates, on a dialog,
+which is the worst place to do it.
+
+So nothing to fix here, and the cost is real and belongs to 8 below: the batch
+dies partway because a dialog appeared that should never have been there. Two
+things would remove it — `prep` granting the consent up front, and a reflex
+dismissing what still arrives. Both are Phase 12. Recorded here so it does not
+get "fixed" by loosening the one guard that stops a ref tapping a dialog.
 
 ### Label resolution, which is the one that can do damage
 

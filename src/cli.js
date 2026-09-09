@@ -20,6 +20,7 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe start   [device]          start the capture loop in the background
   simframe stop    [device|--all]    stop the capture loop
   simframe status  [device]          show daemon and newest-frame status
+  simframe input   reset             rebuild the HID session (see doctor)
   simframe frame   [device]          write the newest frame to a file
   simframe state   [device]          print frame metadata and the change map
   simframe mark    [device]          print the current frame hash, to use as --since
@@ -307,6 +308,29 @@ async function main() {
       // difference. `--all` is informational by nature, so it keeps exiting 0
       // when it skips a device somebody else holds.
       if (!flags.all && inUse && !stopped) process.exitCode = 1;
+      return;
+    }
+
+    // Rebuild the daemon's HID session, and nothing else.
+    //
+    // The narrow remedy for the narrow fault. Restarting the daemon also cures
+    // a stale session and throws away the frame ring and every warm cache to do
+    // it, which is the difference between a fix and a power cycle.
+    case 'input': {
+      const what = positional[0];
+      if (what !== 'reset') throw new Error('usage: simframe input reset [--device <udid>]');
+      const dev = await resolveDevice(device);
+      const before = await input.sessionHealth(dev.udid);
+      const reset = await input.resetSession(dev.udid);
+      if (!reset) {
+        // Said plainly rather than as a success: there is no daemon holding a
+        // session to rebuild, so nothing was wrong and nothing was done.
+        console.log(`no simframed session to rebuild for ${dev.name} — the daemon is not running, or this device is not driven by it`);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`rebuilt the HID session for ${dev.name}`
+        + (before.stale ? `\n  it was stale: ${before.reason}` : '\n  it did not report stale; rebuilt anyway, as asked'));
       return;
     }
 
@@ -1228,7 +1252,18 @@ async function doctor({ json = false, strict = false, device } = {}) {
       // dispatched successfully and moved nothing, five runs in a row.
       const session = await input.sessionHealth(d.udid);
       if (session.stale) {
-        add(`input session (${d.name})`, 'warn', `stale — ${session.reason}. The next action rebuilds it automatically; simframe stop && simframe start does it now`,
+        // The remedy used to read "the next action rebuilds it automatically;
+        // simframe stop && simframe start does it now", and both halves were
+        // wrong. The first was false wherever it mattered, because the rebuild
+        // check was gated once per process and the MCP server is one process
+        // for a whole session. The second names a command that fails twice:
+        // `stop` needs `--device` when two simulators are booted, and then
+        // refuses because a client holds the daemon, so the sequence that
+        // actually works is `stop --device <udid> --force && start --device
+        // <udid>` — a daemon restart, to fix a session, when rebuilding the
+        // session is a thing the daemon can already do on request. It just had
+        // no way in from outside. It does now.
+        add(`input session (${d.name})`, 'warn', `stale — ${session.reason}. The next action rebuilds it; simframe input reset --device ${d.udid} does it now`,
           { key: 'input.session', value: 'stale' });
       } else if (caps.input.supported) {
         add(`input session (${d.name})`, 'ok', session.reason ?? 'current with this device session',

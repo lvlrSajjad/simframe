@@ -506,19 +506,52 @@ export async function sessionHealth(udid) {
 }
 
 /**
- * Rebuild the session if the device outlived it. Once per process, per device.
+ * Should this staleness be acted on, given what has already been rebuilt?
+ *
+ * Pure, and separate from the check because the *key* is the whole bug. This
+ * gate used to be a set of udids — "once per process, per device" — and the
+ * reasoning was to avoid statting on every action. What it actually bought was
+ * that the feature could not fire in the one process that matters. A CLI
+ * command is a new process every time, so per-process is per-call there and
+ * the gate never showed; the MCP server is a single process that lives for a
+ * whole session, so it checked once, at the first action, and then never
+ * again — and a device that reboots *mid-session* is precisely the case this
+ * exists to catch. Reported from a real session: capture kept working, input
+ * died, every tap returned `ok`, and about ten calls went into two wrong
+ * conclusions about the app.
+ *
+ * The right key is the boot the rebuild was for. One attempt per device boot:
+ * enough that a failed rebuild does not retry on every tap forever, and not so
+ * much that the next boot is invisible.
+ */
+export function shouldRebuildSession({ stale, bootedAt }, rebuiltFor) {
+  if (!stale) return false;
+  // A boot we cannot date cannot be memoised against, and re-attempting on
+  // every action would be worse than not detecting it. sessionStaleness only
+  // reports stale with a finite bootedAt, so this is a belt, not a case.
+  if (!Number.isFinite(bootedAt)) return false;
+  return rebuiltFor !== bootedAt;
+}
+
+/**
+ * Rebuild the session if the device outlived it. Once per device boot.
  *
  * Rebuild, and retry nothing: this runs *before* the action, so the action is
  * delivered on a session known to be current. Retrying afterwards is how an
  * action fires twice, which is the hazard the verify barrier exists to
  * prevent — and it is why the existing recovery covers hardware buttons only.
+ *
+ * The check now runs on every dispatch rather than once. It costs two small
+ * `readJson`s and, at most every three seconds, one stat — `bootedAtCached`
+ * already caps the part that was expensive, which is what made the
+ * once-per-process gate unnecessary as well as wrong.
  */
-const freshened = new Set();
+const rebuiltForBoot = new Map();
 export async function ensureFreshSession(udid) {
-  if (!udid || freshened.has(udid)) return null;
-  freshened.add(udid);
+  if (!udid) return null;
   const health = await sessionHealth(udid);
-  if (!health.stale) return null;
+  if (!shouldRebuildSession(health, rebuiltForBoot.get(udid))) return null;
+  rebuiltForBoot.set(udid, health.bootedAt);
   const rebuilt = await resetSession(udid);
   return { ...health, rebuilt };
 }
