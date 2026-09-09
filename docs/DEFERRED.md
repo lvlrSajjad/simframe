@@ -125,6 +125,62 @@ port was never the problem. The Node capture loop, which has no port to
 re-resolve, counts consecutive errors instead, so a wedged Android emulator is
 not silent either.
 
+### Three small things from the 0.7.0 session, written down so they survive it
+None of these is hard. They are here because they existed only in a
+conversation, and this file is where a status is supposed to live.
+
+- **`server.json`'s description still says iOS only.** *"Always-warm iOS
+  Simulator frames: agents read the screen in ~20ms instead of screenshotting"*
+  is what the MCP Registry shows, and Android is the headline of 0.7.0. The
+  description only reaches the registry on a publish, so it rides along with
+  whatever ships next rather than justifying a release of its own.
+- **`doctor` with no `--device` fans out across every booted device.** It reports
+  per-device layers for all of them, which means it starts capture on each and
+  writes frames for each. On a shared machine that reaches devices somebody else
+  is using: it did, during this session, on a colleague's simulator. Nothing
+  read their screen content and nothing left the machine, but the default is too
+  broad. Options, in increasing order of nerve: prefer one device and say which,
+  ask before touching a device with a live client heartbeat, or keep the fan-out
+  and skip devices held by another client. The one-writer guard already knows
+  which those are — `stop --all` refuses them correctly.
+- **The release workflow creates no GitHub Release.** It publishes to npm and
+  the MCP Registry off a `v*` tag and stops. Nothing is missing, but the commit
+  messages in this project are detailed enough to be release notes, and nobody
+  reading the repository can see them as such.
+
+### Phase 9 is optional, and today's numbers moved its gate — but not enough
+`docs/PHASES.md` gates Phase 9, the tier-2 local model, on the Phase 5 eval
+showing vision-only recall on accessibility-poor screens is below what you can
+live with, and says not to start before those numbers exist. The a11y-tier
+measurement is the first evidence that bears on it, and it points somewhere
+narrow: what vision-only cannot do is **icon-only controls**. 83% of interactive
+elements carry no text, and every OCR-only failure was that shape — two
+refusals, and `Back` resolving to `"B"`.
+
+Three reasons not to start it anyway, recorded so the next person does not have
+to re-derive them:
+
+1. **The cheaper tool for that exact gap is already on the list, unbuilt.**
+   Phase 5's remaining pieces lead with the SF Symbol template bank, whose own
+   entry says these are exactly the controls with no text for OCR to find.
+   Template matching needs no weights, no license review and no download.
+2. **The gate is not actually met**, because the thing that would meet it does
+   not exist: the eval harness over fifteen screens from three apps. This
+   session measured six screens from four Apple apps, which are unusually
+   well-labelled — suggestive, not a recall number. Phase 2a was supposed to
+   wait on that harness and did not; doing it again would be the same mistake
+   twice.
+3. **It contradicts a stated non-goal.** CLAUDE.md lists shipping ML model
+   weights as a non-goal for now, so Phase 9 is a promise change rather than
+   just work — the same class of decision as the APK above. Both are "put a
+   runtime artifact on the user's machine", and they should be decided together
+   rather than one at a time.
+
+The order that respects all three: template bank and contours first, then the
+eval harness for a real recall number on a11y-poor screens, and only then is
+Phase 9 a decision with evidence behind it. That sequence is also the best
+available answer for Android without an APK.
+
 ### Phase 8b — the instrumentation APK, and when to build it
 **Decided 2026-09-09: Android ships OCR + CV only.** Not because the tree is
 worthless but because of where the pain is. Android is the second proof of the
