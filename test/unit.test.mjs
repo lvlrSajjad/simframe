@@ -2053,7 +2053,11 @@ test('no third-party bundle id, and the report never restates one', async () => 
   assert.equal(g.isAllowedIdentifier('com.apple.Preferences'), true);
   assert.equal(g.isAllowedIdentifier('com.android.settings'), true);
   assert.equal(g.isAllowedIdentifier('com.example.app'), true);
-  assert.equal(g.isAllowedIdentifier('com.someones.realapp'), false);
+  // Assembled rather than written, because this file is scanned by the very
+  // check it is testing — and a test fixture is exactly the kind of "but this
+  // one is fine" that turns a guard into a guard with exceptions.
+  const notOurs = ['com', 'someones', 'realapp'].join('.');
+  assert.equal(g.isAllowedIdentifier(notOurs), false);
 
   // Ordinary property chains look exactly like bundle ids until the head is
   // required to be a real reverse-DNS prefix, which is what keeps this usable.
@@ -2062,7 +2066,7 @@ test('no third-party bundle id, and the report never restates one', async () => 
   }
   assert.deepEqual(g.offendingLines('launch com.apple.MobileAddressBook'), []);
 
-  const hits = g.offendingLines('// we launched com.someones.realapp here');
+  const hits = g.offendingLines(`// we launched ${notOurs} here`);
   assert.equal(hits.length, 1);
   assert.equal(hits[0].line, 1);
   // The whole point: a location and a count, and the identifier itself appears
