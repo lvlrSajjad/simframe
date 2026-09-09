@@ -2599,3 +2599,61 @@ switch flip produces (Gate A/B item 3). So its edge is no longer recorded. That
 is the right trade while the detector cannot see it: a missing true edge costs
 a perception pass, and a false self-edge costs a wrong prediction on every
 later visit. It comes back on its own when item 3 lands.
+
+## Gate C item 10: the pause statistic, measured after the fact
+
+M4 Max, Xcode 26.0, iOS 26.5, iPhone 17 Pro (`326464A4-…`). Two runs of
+`settings-larger-text`, graph deleted first.
+
+Phase 11 recorded `quietGaps` from *inside* the wait — the longest stretch of
+stillness the wait itself happened to observe — and the write-up explained why
+that is biased: a wait that ends early never sees the pauses that come later, so
+the gaps read low, and feeding that back into how long to wait eats itself.
+
+`index.longestQuietGap` reads the same statistic off the frame history once the
+transition is definitely over, in the *next* step, over a window whose end
+nothing about the wait decided. It returns `null` rather than a number when the
+frame ring no longer reaches back to the action, because a partial window
+produces a short gap — the exact direction of the bias being removed.
+
+| edge | settles (ms) | biased gaps | **true gaps** |
+|---|---|---|---|
+| `launch com.apple.preferences` | 311, 1109 | 0, 392 | **1641, 1161** |
+| `tap accessibility` | 1728, 2475 | 957, 636 | **2047, 2081** |
+| `tap display & text size` | 992, 985 | 1148, 787 | **533, 175** |
+| `tap larger text` | 2215, 2221 | 1398, 614 | **173, 88** |
+
+### The bias goes both ways, which the earlier write-up got wrong
+
+Phase 11 described a one-directional error: gaps read as zero, the window
+ratchets down. Two of these edges do exactly that — a launch whose true pause is
+1641 ms was recorded as **0**, and `tap accessibility` reads 957 against a true
+2047.
+
+The other two go the other way, and the mechanism is different. The biased
+figure tracks `state.stableForMs`, which accumulates stillness from *before* the
+wait began; the unbiased one only counts pauses between two observed changes
+inside the window. So `tap larger text` recorded 1398 ms of "pause" for a
+transition whose real longest pause was 88 ms — it was counting quiet that
+belonged to the previous screen.
+
+So the statistic was not an underestimate. It was noise with a sign that depends
+on what happened before the step, which is a considerably better reason never to
+have built a wait on it than the one written down at the time.
+
+### What it says about the window that corrupted the graph
+
+`tap accessibility` genuinely pauses for **about two seconds** mid-transition.
+The stillness window is 500 ms. Any window shorter than the true pause mistakes
+mid-flight quiet for a finished screen — which is precisely the edge whose
+`root → root` self-loop had to be deleted twice, and it now has a measured
+explanation rather than an inferred one.
+
+### Nothing acts on it
+
+`trueGaps` is written and reported and read by no decision, and the unit test
+asserts that `stillnessFor` does not consult it. Phase 11 built a wait on the
+biased version and corrupted the graph inside an afternoon; the lesson taken was
+not "use a better estimator" but that a number earns the right to act by first
+being watched for a while doing nothing. Four edges over two runs is the start
+of that, not the end of it.

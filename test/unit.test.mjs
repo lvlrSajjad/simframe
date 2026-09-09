@@ -2330,3 +2330,39 @@ test('a change too small for the mean is still a change', async () => {
   assert.match(block, /sawChange = true/);
   assert.ok(!/stableForMs/.test(block), 'the per-cell signal must not touch stillness');
 });
+
+test('the pause statistic is measured after the transition, or not at all', async () => {
+  const api = await import('../src/index.js');
+  const g = api.longestQuietGap;
+  const f = (at, hash) => ({ at, hash, seq: at });
+
+  // A transition that moves, pauses 400ms mid-flight, moves again, then stops.
+  // The pause inside is 400; the quiet *after* the last change is the
+  // transition being over, which a settle already measures and this must not
+  // count as a pause within it.
+  const history = [
+    f(1000, 'a'), f(1050, 'b'), f(1100, 'c'), f(1500, 'd'), f(1550, 'e'), f(3000, 'e'),
+  ];
+  assert.equal(g(history, 1000, 3000), 400);
+
+  // The window must reach back to the action. A history that starts well after
+  // it would report a *shorter* gap than really occurred — the exact direction
+  // of the bias being removed — so the honest answer is no answer.
+  assert.equal(g(history, 200), null);
+  assert.equal(g([], 1000), null);
+  assert.equal(g([f(1000, 'a')], 1000), null);
+
+  // A transition with no pause at all reports zero, which is a measurement and
+  // not a missing value.
+  assert.equal(g([f(1000, 'a'), f(1050, 'b'), f(1100, 'c')], 1000), 50);
+
+  // Nothing acts on it yet, and that is the point: Phase 11 built a wait on the
+  // biased version of this statistic and corrupted the graph inside an
+  // afternoon. A number earns the right to act by being watched first.
+  const graphSrc = fs.readFileSync(new URL('../src/graph.js', import.meta.url), 'utf8');
+  assert.match(graphSrc, /export function noteTrueGap/);
+  const readers = graphSrc.match(/trueGaps/g) ?? [];
+  assert.ok(readers.length >= 2, 'trueGaps is written and reported');
+  assert.ok(!/stillnessFor[\s\S]{0,400}trueGap/.test(graphSrc),
+    'the stillness window must not consult trueGaps until it has been watched');
+});

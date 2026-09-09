@@ -153,9 +153,30 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 
 9. **Perception cost per step**: 36% of a clean flow is two `screenIdentity`
    passes plus locate. Phase 13, and the larger half of the gap.
-10. **Unbiased stillness estimator**, computed from the frame history after a
-   transition completes rather than from inside the wait that cut it short.
-   ~13% of wall time. Needs 2.
+10. **Unbiased stillness estimator.** *Half done, 2026-09-10 — the measurement
+   is in, the decision is not.* `index.longestQuietGap` reads the pause profile
+   off the frame history one step later, over a window whose end nothing about
+   the wait decided, and returns `null` rather than a number when the ring no
+   longer reaches back to the action. `graph.noteTrueGap` stores it beside the
+   biased figure so the difference is visible.
+
+   Measured over two runs, and it corrects the Phase 11 write-up: **the bias
+   goes both ways.** `launch` recorded a gap of 0 against a true 1641 ms, as
+   predicted; but `tap larger text` recorded 1398 ms against a true 88 ms,
+   because the biased figure tracks `stableForMs`, which accumulates quiet from
+   *before* the wait. So it was never an underestimate — it was noise whose sign
+   depends on the previous step, which is a better reason not to build a wait on
+   it than the one written down at the time.
+
+   It also explains the corruption: `tap accessibility` genuinely pauses ~2 s
+   mid-transition against a 500 ms stillness window. See `docs/BENCHMARKS.md`,
+   "Gate C item 10".
+
+   **Nothing reads it**, and the unit test asserts that `stillnessFor` does not.
+   Phase 11 built a wait on the biased version and corrupted the graph in an
+   afternoon; a number earns the right to act by being watched first. Four edges
+   over two runs is the start of that. What remains is the decision to use it,
+   and it should not be taken on this much data.
 11. **The structural window itself** (300 ms), per-screen learnable. Its
    estimator is self-correcting rather than self-reinforcing — a window too
    short produces disagreeing samples, which lengthens it — which is a reason

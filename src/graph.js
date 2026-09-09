@@ -367,6 +367,32 @@ function noteSettle(edge, settleMs, quietGapMs, focusMs) {
 }
 
 /**
+ * Record the unbiased pause statistic for an edge already written.
+ *
+ * Separate from `record` because it arrives later on purpose. The biased
+ * `quietGaps` are gathered from inside the wait and are therefore bounded by
+ * when the wait chose to stop; `trueGaps` are read off the frame history once
+ * the transition is definitely over, which is one step later. So the edge has
+ * to be found again rather than passed along.
+ *
+ * Nothing reads `trueGaps` yet, and that is deliberate. Phase 11 built the
+ * learned stillness window on the biased statistic, it corrupted the graph
+ * inside an afternoon, and the lesson taken was not "use a better estimator" —
+ * it was that a number gets to *act* only after it has been watched for a while
+ * doing nothing. This is the watching.
+ */
+export function noteTrueGap(udid, screen, step, trueGapMs) {
+  if (!Number.isFinite(trueGapMs) || trueGapMs < 0) return null;
+  const node = screen?.hash ? nearestScreen(udid, screen)?.node : null;
+  if (!node) return null;
+  const edge = node.edges?.find((e) => e.action === actionSignature(step));
+  if (!edge) return null;
+  edge.trueGaps = [...(edge.trueGaps ?? []), Math.round(trueGapMs)].slice(-TIMING_WINDOW);
+  save(udid, node);
+  return edge;
+}
+
+/**
  * How long a screen must hold still on this edge before it is finished.
  *
  * Derived from the longest pause ever seen *inside* this transition, plus a
@@ -453,6 +479,11 @@ export function timingOf(edge) {
     p95: metrics.percentile(samples, 95),
     gapSamples: gaps.length,
     gapP95: metrics.percentile(gaps, 95),
+    // The same statistic measured after the transition rather than during it.
+    // Reported side by side so the size of the bias is visible rather than
+    // argued about — see `index.longestQuietGap`.
+    trueGapSamples: (edge?.trueGaps ?? []).length,
+    trueGapP95: metrics.percentile(edge?.trueGaps ?? [], 95),
     focusSamples: focuses.length,
     focusP50: metrics.percentile(focuses, 50),
     focusP95: metrics.percentile(focuses, 95),

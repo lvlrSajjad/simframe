@@ -182,10 +182,35 @@ export async function runScript(
   // moves nothing and is not a failure, so an unbounded retry would rebuild the
   // session and press again on every such step for no reason.
   let inputRecovered = false;
+  /**
+   * The previous step's transition, still to be measured.
+   *
+   * Its pause profile cannot be read while the step is running — that is the
+   * biased measurement that corrupted the graph — so it is read one step later,
+   * off a frame history whose end nothing about the wait decided. See
+   * `api.longestQuietGap`.
+   */
+  let pendingGap = null;
+  const measurePendingGap = async () => {
+    if (!pendingGap) return;
+    const { from, step: prevStep, actionAt } = pendingGap;
+    pendingGap = null;
+    try {
+      const history = (await api.getState(deviceQuery, { options })).state.history ?? [];
+      const trueGapMs = api.longestQuietGap(history, actionAt);
+      if (trueGapMs != null) graph.noteTrueGap(udid, from, prevStep, trueGapMs);
+    } catch {
+      /* a statistic nothing acts on must never be able to fail a flow */
+    }
+  };
 
   for (const [i, raw] of steps.entries()) {
     const step = normalizeStep(raw);
     const stepStart = Date.now();
+    // Before anything else, and before this step disturbs the screen: the
+    // previous transition is definitely over by now, so its true pause profile
+    // is readable.
+    await measurePendingGap();
     // The baseline for "did the screen react" must predate the action itself.
     const beforeState = (await api.getState(deviceQuery, { options })).state;
     const before = beforeState.hash;
@@ -409,6 +434,7 @@ export async function runScript(
             // Only set when a field was tapped and visibly took focus.
             focusMs: focus.observedMs ?? undefined,
           });
+          pendingGap = { from: beforeScreen, step, actionAt: stepStart };
           carriedScreen = afterScreen;
         } else if (afterScreen.confirmed && afterScreen.hash) {
           // Where we are is still known; only what got us here is not worth
@@ -487,6 +513,10 @@ export async function runScript(
       if (!continueOnError) break;
     }
   }
+
+  // The last step has no next step to measure it, and its transition is over by
+  // the time the loop exits.
+  await measurePendingGap();
 
   const wallMs = Date.now() - startedAt;
   try {

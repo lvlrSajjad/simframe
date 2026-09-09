@@ -419,6 +419,56 @@ function currentSig(state) {
   return newest?.sig ?? null;
 }
 
+/**
+ * The longest pause inside a transition, measured after the transition is over.
+ *
+ * This is the unbiased half of the estimator that was reverted in Phase 11, and
+ * the difference is entirely about *when* the measurement stops.
+ *
+ * The biased version accumulated the statistic from inside the wait: the
+ * longest stretch of stillness the wait itself happened to observe. Feed that
+ * back into how long the next wait runs and it eats itself — a wait that ends
+ * early never sees the pauses that come later, so the gaps read as zero, the
+ * window ratchets down, the next wait ends earlier still, and eventually a
+ * settle returns mid-transition and the graph learns a screen it never reached.
+ * That is not a theory; it corrupted this device's graph in one afternoon.
+ *
+ * This one reads the frame history *after* the fact, over a window whose end is
+ * not decided by the wait. The frames are already on disk with their timestamps
+ * and their hashes, so the true profile of a transition is recoverable as long
+ * as the history still reaches back to it.
+ *
+ * That last condition is the whole reason this returns null rather than a
+ * number: the ring is bounded, and during fast motion it holds a second or two.
+ * A partial window would produce a *shorter* gap than really occurred, which is
+ * the exact direction of the bias being removed. Reporting nothing is the only
+ * honest answer to a question the evidence cannot reach.
+ */
+export function longestQuietGap(history, sinceMs, untilMs = Date.now()) {
+  if (!Array.isArray(history) || history.length < 2) return null;
+  const frames = history
+    .filter((f) => Number.isFinite(f?.at) && f.at >= sinceMs && f.at <= untilMs)
+    .sort((a, b) => a.at - b.at);
+  if (frames.length < 2) return null;
+  // The history has to reach back to the action itself. One frame interval of
+  // slack, because the frame that captures the moment of the action is not
+  // required to land exactly on it.
+  const span = frames[1].at - frames[0].at;
+  if (frames[0].at > sinceMs + Math.max(250, span)) return null;
+
+  let longest = 0;
+  let lastChangeAt = frames[0].at;
+  for (let i = 1; i < frames.length; i += 1) {
+    if (frames[i].hash !== frames[i - 1].hash) {
+      longest = Math.max(longest, frames[i].at - lastChangeAt);
+      lastChangeAt = frames[i].at;
+    }
+  }
+  // The quiet after the last change is not a pause *inside* the transition —
+  // it is the transition being over, which is what a settle already measures.
+  return longest;
+}
+
 export function baselineAlreadySettled({ mode, changedAtStart, stableForMs, stableMs } = {}) {
   if (mode === 'stable' || !changedAtStart) return false;
   if (!Number.isFinite(stableForMs) || !Number.isFinite(stableMs)) return false;
