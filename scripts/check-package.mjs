@@ -75,6 +75,13 @@ function requiredFiles() {
     throw new Error('no skill found under skills/ — has the layout moved? This check would silently pass.');
   }
 
+  // The flow suite. `simframe baseline` and `simframe hpi` read it at
+  // runtime, so an absent one is a command that only fails once installed.
+  for (const f of walk(path.join(ROOT, 'flows'), (p) => p.endsWith('.json'))) required.add(rel(f));
+  if (!walk(path.join(ROOT, 'flows'), (p) => p.endsWith('.json')).length) {
+    throw new Error('no flow suite found under flows/ — has the layout moved? This check would silently pass.');
+  }
+
   // Anything package.json points at to run.
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   for (const target of Object.values(pkg.bin ?? {})) required.add(target.replace(/^\.\//, ''));

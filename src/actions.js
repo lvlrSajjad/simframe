@@ -6,6 +6,8 @@ import * as api from './index.js';
 import * as graph from './graph.js';
 import * as input from './input.js';
 import * as intent from './intent.js';
+import * as metrics from './metrics.js';
+import * as screenmap from './screenmap.js';
 import { launchApp, openUrl, setPermission, terminateApp } from './platform/index.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -112,6 +114,12 @@ export async function runScript(
     // Rebuild the HID session and retry once when a hardware button provably
     // did nothing. Off only for a caller deliberately testing that path.
     recoverInput = true,
+    // What this run is called and how few steps it could take, for the flow
+    // record. A bare `sim_do` has neither and says so with nulls rather than
+    // inventing a name — an unnamed run still gets timed, it just cannot be
+    // compared against a human baseline.
+    flowName = null,
+    minSteps = null,
     options,
   } = {},
 ) {
@@ -119,6 +127,18 @@ export async function runScript(
   const { device } = await api.ensureDaemon(deviceQuery, options);
   const udid = device.udid;
   const startedAt = Date.now();
+  // Measurement only. Nothing below reads these, and a failure to write one
+  // can never change what a step does — see `note`.
+  const flowId = metrics.newFlowId();
+  const escalations = [];
+  const verdicts = [];
+  const note = (record) => {
+    try {
+      escalations.push(metrics.recordEscalation(udid, { flowId, ...record }));
+    } catch {
+      /* instrumentation must not be able to fail a flow it is only watching */
+    }
+  };
 
   const needsInput = steps.some((s) => ACTION_STEPS.has(normalizeStep(s).action));
   if (needsInput) {
@@ -244,6 +264,21 @@ export async function runScript(
         settled,
       });
       const halt = haltDecision({ verification, stopOnUnexpected, continueOnError });
+      if (verification?.verdict) verdicts.push(verification.verdict);
+      if (metrics.ESCALATING_VERDICTS.has(verification?.verdict)) {
+        note({
+          stepIndex: i,
+          fingerprint: beforeScreen?.hash ?? null,
+          reason: 'verification_failed',
+          candidates: [],
+          // A halted run is a decision simframe made and stopped on; a step
+          // that moved nothing carries on and leaves the judgement to whoever
+          // reads the result.
+          outcome: halt.halt ? 'failed' : 'escalated_to_model',
+          wallMs: Date.now() - stepStart,
+          detail: `${verification.verdict}: ${verification.detail}`,
+        });
+      }
       if (halt.halt) {
         results[results.length - 1].ok = false;
         results[results.length - 1].error = halt.error;
@@ -252,9 +287,40 @@ export async function runScript(
       }
     } catch (err) {
       results.push({ index: i, action: step.action, ok: false, ms: Date.now() - stepStart, error: err.message });
+      const why = metrics.reasonForStepError(step, err);
+      note({
+        stepIndex: i,
+        fingerprint: beforeScreen?.hash ?? metrics.fingerprintNow(udid, screenmap),
+        reason: why.reason,
+        candidates: why.candidates,
+        tried: why.tried,
+        outcome: 'failed',
+        wallMs: Date.now() - stepStart,
+        detail: err.message,
+      });
       failed = true;
       if (!continueOnError) break;
     }
+  }
+
+  const wallMs = Date.now() - startedAt;
+  try {
+    metrics.recordFlow(udid, metrics.flowRecordFrom({
+      flowId,
+      flowName,
+      udid,
+      startedAt,
+      wallMs,
+      stepsTaken: results.length,
+      totalSteps: steps.length,
+      minSteps,
+      imagesSent: frames.length,
+      escalations,
+      verdicts,
+      completed: !failed && results.length === steps.length,
+    }));
+  } catch {
+    /* as above: a flow that ran is not a flow that failed because of a log */
   }
 
   return {
@@ -262,10 +328,11 @@ export async function runScript(
     // Returned so a run that verified end to end can be handed straight to
     // navigate.saveFlow without the caller reassembling what it just ran.
     steps,
+    flowId,
     endScreen,
     results,
     ok: !failed,
-    totalMs: Date.now() - startedAt,
+    totalMs: wallMs,
     ranSteps: results.length,
     totalSteps: steps.length,
     frames,

@@ -5,6 +5,7 @@
 // instinct removes the expensive part of driving a UI with an agent: the model
 // round trip spent reasoning about controls it has never seen.
 import * as input from './input.js';
+import * as metrics from './metrics.js';
 
 /** Confirming words, most specific first. The first tier with a hit wins. */
 const CONFIRM_TIERS = [
@@ -77,7 +78,11 @@ export function findOptions(nodes, geo) {
 export async function chooseAny(udid, { prefer, geo } = {}) {
   const nodes = await input.describeAll(udid);
   const options = findOptions(nodes, geo);
-  if (!options.length) throw new Error('no selectable options found on screen');
+  if (!options.length) {
+    throw metrics.tag(new Error('no selectable options found on screen'), 'novel_dialog', {
+      candidates: nodes.filter((n) => n.label).slice(0, 8).map((n) => ({ label: n.label })),
+    });
+  }
   const chosen =
     (prefer && options.find((o) => o.label.toLowerCase().includes(String(prefer).toLowerCase()))) ||
     options[0];
@@ -89,7 +94,11 @@ export async function chooseAny(udid, { prefer, geo } = {}) {
 export async function confirm(udid, { geo } = {}) {
   const nodes = await input.describeAll(udid);
   const target = findConfirm(nodes, geo);
-  if (!target) throw new Error('no confirming control on screen');
+  if (!target) {
+    throw metrics.tag(new Error('no confirming control on screen'), 'novel_dialog', {
+      candidates: nodes.filter((n) => n.label).slice(0, 8).map((n) => ({ label: n.label })),
+    });
+  }
   const point = input.centerOf(target);
   await input.tapPoint(udid, point.x, point.y);
   return { label: target.label, point, enabled: target.enabled };

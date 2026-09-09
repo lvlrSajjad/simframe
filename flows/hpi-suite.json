@@ -1,0 +1,64 @@
+[
+  {
+    "name": "settings-larger-text",
+    "note": "Four steps into a nested Settings list. The two Settings sublists are the fingerprint pair that needs a nav title to tell them apart, so this flow exercises screen identity as well as navigation.",
+    "minSteps": 4,
+    "endsOn": "Larger Text",
+    "human": [
+      "Tap Settings on the home screen.",
+      "Tap Accessibility.",
+      "Tap Display & Text Size.",
+      "Tap Larger Text, and stop there."
+    ],
+    "reset": {
+      "terminate": [
+        "com.apple.Preferences"
+      ],
+      "home": true
+    },
+    "steps": [
+      {
+        "launch": {
+          "value": "com.apple.Preferences",
+          "relaunch": true
+        }
+      },
+      {
+        "tap": "Accessibility"
+      },
+      {
+        "tap": "Display & Text Size"
+      },
+      {
+        "tap": "Larger Text"
+      }
+    ]
+  },
+  {
+    "name": "contacts-kate-bell",
+    "note": "An indexed list with a search field, two steps deep. Short on purpose: a flow this shallow is where a per-step overhead shows up as a ratio rather than being absorbed by navigation.",
+    "minSteps": 2,
+    "endsOn": "Kate Bell",
+    "human": [
+      "Tap Contacts on the home screen.",
+      "Tap Kate Bell, and stop there."
+    ],
+    "reset": {
+      "terminate": [
+        "com.apple.MobileAddressBook"
+      ],
+      "home": true
+    },
+    "steps": [
+      {
+        "launch": {
+          "value": "com.apple.MobileAddressBook",
+          "relaunch": true
+        }
+      },
+      {
+        "tap": "Kate Bell"
+      }
+    ]
+  }
+]

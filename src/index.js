@@ -19,6 +19,7 @@ import * as graph from './graph.js';
 import * as matching from './matching.js';
 import * as refs from './refs.js';
 import * as screenmap from './screenmap.js';
+import * as metrics from './metrics.js';
 import { capabilitiesFor, resolveDevice, resize, screenshot } from './platform/index.js';
 import * as store from './store.js';
 
@@ -890,8 +891,15 @@ export async function locate(
       const list = outcome.alternatives
         .map((a, i) => `[${i}] "${a.label}" (${a.x},${a.y}) ${a.region ?? 'content'} ${a.score}`)
         .join(', ');
-      throw new Error(
-        `"${query}" matches ${outcome.alternatives.length} things on this screen — say which, or pass index: ${list}`,
+      // Tagged, not just thrown: the reason an escalation happened is known
+      // here and nowhere above here. See metrics.tag — it adds a property and
+      // changes nothing else about the error.
+      throw metrics.tag(
+        new Error(
+          `"${query}" matches ${outcome.alternatives.length} things on this screen — say which, or pass index: ${list}`,
+        ),
+        'ambiguous_intent',
+        { candidates: outcome.alternatives },
       );
     }
     if (outcome.status === 'ok') {
@@ -905,24 +913,28 @@ export async function locate(
     // here undoes every guard above — it has no off-screen filter and no
     // coverage weighting, and it is what returned a scrolled-away list row for
     // "back". "Not found" is the correct answer.
-    const sample = entry.targets
-      .filter((t) => t.label && t.y >= 0 && t.y <= points.height)
-      .slice(0, 12)
-      .map((t) => t.label.slice(0, 24))
-      .join(', ');
-    throw new Error(`"${query}" is not on this screen. Visible: ${sample || '(nothing readable)'}`);
+    const visible = entry.targets.filter((t) => t.label && t.y >= 0 && t.y <= points.height);
+    const sample = visible.slice(0, 12).map((t) => t.label.slice(0, 24)).join(', ');
+    // Which escalation this is depends on whether the screen was recognised.
+    // Screen memory had nothing for it (`from` is one of the built values) and
+    // the target is missing: that is not knowing the screen. On a screen
+    // recalled from memory, the screen is known and the intent did not resolve.
+    throw metrics.tag(
+      new Error(`"${query}" is not on this screen. Visible: ${sample || '(nothing readable)'}`),
+      from === 'memory' ? 'ambiguous_intent' : 'unknown_screen',
+      { candidates: visible.slice(0, 8) },
+    );
   }
 
   const candidates = screenmap.rank(entry, query);
   const target = index != null ? candidates[index] : candidates[0];
   if (!target) {
-    const sample = entry.targets
-      .filter((t) => t.label)
-      .slice(0, 12)
-      .map((t) => t.label)
-      .join(', ');
-    throw new Error(
-      `"${query}" is not on this screen. Visible: ${sample || '(nothing readable)'}`,
+    const visible = entry.targets.filter((t) => t.label);
+    const sample = visible.slice(0, 12).map((t) => t.label).join(', ');
+    throw metrics.tag(
+      new Error(`"${query}" is not on this screen. Visible: ${sample || '(nothing readable)'}`),
+      from === 'memory' ? 'ambiguous_intent' : 'unknown_screen',
+      { candidates: visible.slice(0, 8) },
     );
   }
   return { device, state: current, entry, target, from, distance, settled, screens: screenmap.stats(udid).screens };

@@ -1413,3 +1413,280 @@ test('a chrome label has to be a name before it can be an identity', async () =>
   // Dates were the first bug in this class and stay fixed.
   assert.equal(isVolatileLabel('Tuesday, September 8'), true);
 });
+
+// ---------------------------------------------------------------------------
+// Phase 10: instrumentation. Every number simframe reports about itself is
+// computed here, so every one of them is testable without a simulator.
+// ---------------------------------------------------------------------------
+
+test('a reason is one of five, and there is no way to write "unknown"', async () => {
+  const metrics = await import('../src/metrics.js');
+  assert.deepEqual(metrics.REASONS, [
+    'unknown_screen', 'ambiguous_intent', 'verification_failed', 'novel_dialog', 'no_plan',
+  ]);
+  // The two mappings that turn real events into reasons can only produce those
+  // five. This is the assertion behind "unknown is not a reason": a new refusal
+  // reason added to goto without a mapping fails here rather than logging a
+  // sixth category nobody counts.
+  for (const [refusal, reason] of Object.entries(metrics.PLAN_REASONS)) {
+    assert.ok(metrics.REASONS.includes(reason), `${refusal} maps to ${reason}`);
+  }
+  for (const reason of Object.keys(metrics.FACULTY)) {
+    assert.ok(metrics.REASONS.includes(reason), `${reason} has a faculty`);
+  }
+  // And every reason has a faculty, so the breakdown can always say what would
+  // remove it. A reason with no faculty is a phase nobody can plan.
+  for (const reason of metrics.REASONS) assert.ok(metrics.FACULTY[reason], `${reason} needs a faculty`);
+  assert.throws(() => metrics.tag(new Error('x'), 'unknown'), /not an escalation reason/);
+  assert.throws(() => metrics.recordEscalation('TEST-metrics', { reason: 'vibes' }), /not an escalation reason/);
+});
+
+test('tagging an error adds a reason and changes nothing else about it', async () => {
+  const metrics = await import('../src/metrics.js');
+  // The classification has to be free of side effects: locate throws the same
+  // error to the same callers whether or not anybody is measuring.
+  const err = new TypeError('"Save" matches 2 things on this screen');
+  const tagged = metrics.tag(err, 'ambiguous_intent', { candidates: [{ label: 'Save' }, { label: 'Saved' }] });
+  assert.equal(tagged, err);
+  assert.ok(err instanceof TypeError);
+  assert.equal(err.message, '"Save" matches 2 things on this screen');
+  assert.equal(metrics.escalationOf(err).reason, 'ambiguous_intent');
+  assert.equal(metrics.escalationOf(new Error('plain')), null);
+  // A tag nobody set, or one set to nonsense by something else, is not a reason.
+  const forged = new Error('x');
+  forged.escalation = { reason: 'unknown' };
+  assert.equal(metrics.escalationOf(forged), null);
+});
+
+test('a thrown step always classifies, and a tag beats the fallback', async () => {
+  const metrics = await import('../src/metrics.js');
+  const tagged = metrics.tag(new Error('no confirming control'), 'novel_dialog');
+  assert.equal(metrics.reasonForStepError({ action: 'tap' }, tagged).reason, 'novel_dialog');
+  assert.equal(metrics.reasonForStepError({ action: 'confirm' }, new Error('x')).reason, 'novel_dialog');
+  assert.equal(metrics.reasonForStepError({ action: 'assert' }, new Error('x')).reason, 'verification_failed');
+  assert.equal(metrics.reasonForStepError({ action: 'waitFor' }, new Error('x')).reason, 'verification_failed');
+  // The point of the fallback: a step nobody anticipated still gets a reason.
+  assert.equal(metrics.reasonForStepError({ action: 'somethingNew' }, new Error('x')).reason, 'verification_failed');
+  assert.equal(metrics.reasonForStepError(undefined, undefined).reason, 'verification_failed');
+});
+
+test('only the verdicts that hand a decision back count as escalations', async () => {
+  const metrics = await import('../src/metrics.js');
+  const graph = await import('../src/graph.js');
+  // Cross-checked against the verdicts that exist, so renaming one here shows
+  // up as a failing test rather than as an escalation category that silently
+  // stops being counted.
+  for (const v of metrics.ESCALATING_VERDICTS) {
+    assert.ok(graph.VERDICTS.includes(v), `${v} is a real verdict`);
+  }
+  assert.ok(metrics.ESCALATING_VERDICTS.has('unexpected-screen'));
+  assert.ok(metrics.ESCALATING_VERDICTS.has('no-visible-change'));
+  // `unverified` is a fact about the graph, not a question for anybody.
+  assert.equal(metrics.ESCALATING_VERDICTS.has('unverified'), false);
+  assert.equal(metrics.ESCALATING_VERDICTS.has('ok'), false);
+});
+
+test('a flow record counts turns, mis-taps and verdicts the way HPI needs', async () => {
+  const metrics = await import('../src/metrics.js');
+  const rec = metrics.flowRecordFrom({
+    flowId: 'f1',
+    flowName: 'settings-larger-text',
+    udid: 'TEST-metrics',
+    startedAt: 1_700_000_000_000,
+    wallMs: 4200,
+    stepsTaken: 5,
+    totalSteps: 5,
+    minSteps: 4,
+    imagesSent: 1,
+    escalations: [
+      { reason: 'verification_failed', step_index: 2, outcome: 'escalated_to_model' },
+      { reason: 'novel_dialog', step_index: 3, outcome: 'resolved_locally' },
+    ],
+    verdicts: ['ok', 'no-visible-change', 'ok', 'unexpected-screen', 'unverified'],
+    completed: true,
+  });
+  // One turn for the call itself, plus one per escalation the agent has to
+  // answer. A reflex that resolved locally cost nobody a turn.
+  assert.equal(rec.model_turns, 2);
+  assert.equal(rec.mis_taps, 2);
+  assert.equal(rec.wrong_action_taken, true);
+  assert.equal(rec.step_ratio, 1.25);
+  assert.deepEqual(rec.verdict_histogram, { ok: 2, 'no-visible-change': 1, 'unexpected-screen': 1, unverified: 1 });
+  assert.equal(rec.escalation_count, 2);
+  // No baseline, no ratio — never a 1.0 standing in for a missing number.
+  assert.equal(metrics.flowRecordFrom({ ...{
+    flowId: 'f2', udid: 'TEST-metrics', startedAt: 0, wallMs: 1, stepsTaken: 2, totalSteps: 2, completed: true,
+  } }).step_ratio, null);
+});
+
+test('median, IQR and the harmonic mean behave at the edges', async () => {
+  const metrics = await import('../src/metrics.js');
+  assert.equal(metrics.median([]), null);
+  assert.equal(metrics.median([5]), 5);
+  assert.equal(metrics.median([1, 2, 3, 4]), 2.5);
+  assert.equal(metrics.median([3, 1, 2]), 2);
+  assert.equal(metrics.quartiles([]), null);
+  const q = metrics.quartiles([1, 2, 3, 4, 5]);
+  // Exclusive median: the halves are [1,2] and [4,5], so the IQR is 3 and not 2.
+  assert.deepEqual([q.p25, q.p50, q.p75, q.iqr, q.n], [1.5, 3, 4.5, 3, 5]);
+  assert.equal(metrics.harmonicMean([]), null);
+  // The reason §1 asks for it: one flow at half parity drags the index below
+  // the arithmetic mean, so being fast on three flows cannot hide being slow
+  // on the fourth.
+  assert.ok(metrics.harmonicMean([2, 2, 2, 0.5]) < (2 + 2 + 2 + 0.5) / 4);
+  assert.equal(metrics.harmonicMean([2, 2]), 2);
+  // Zero and negative times are not times.
+  assert.equal(metrics.harmonicMean([0, -1]), null);
+});
+
+test('HPI is null without a human, and accuracy punishes a wrong action', async () => {
+  const metrics = await import('../src/metrics.js');
+  const flow = (name, ms, extra = {}) => ({
+    flow_name: name, wall_time_ms: ms, completed: true, wrong_action_taken: false,
+    step_ratio: 1, model_turns: 1, escalation_count: 0, ...extra,
+  });
+
+  const noHuman = metrics.hpi({ flows: [flow('a', 1000), flow('a', 2000)] });
+  assert.equal(noHuman.flows[0].hpi_time, null, 'a missing denominator is not parity');
+  assert.equal(noHuman.overall.hpi_time, null);
+  assert.equal(noHuman.overall.hpi, null);
+  assert.equal(noHuman.overall.hpi_accuracy, 1);
+
+  const report = metrics.hpi({
+    flows: [flow('a', 1000), flow('a', 3000), flow('b', 1000, { completed: false, wrong_action_taken: true })],
+    baselines: { a: { wall_time_ms: { p50: 4000 } }, b: { wall_time_ms: { p50: 1000 } } },
+  });
+  const a = report.flows.find((f) => f.flow === 'a');
+  // Agent median 2000 against a human's 4000 is twice human speed.
+  assert.equal(a.hpi_time, 2);
+  assert.equal(report.overall.hpi_accuracy, 0.667);
+  assert.equal(report.overall.hpi_time, 1.333);
+  assert.equal(report.overall.hpi, Number((0.667 * 1.333).toFixed(3)));
+  // Flows with no name are ad-hoc runs; they are timed but have no counterpart.
+  assert.equal(metrics.hpi({ flows: [{ wall_time_ms: 10, completed: true }] }).flows.length, 0);
+});
+
+test('the escalation breakdown says which faculty would remove each one', async () => {
+  const metrics = await import('../src/metrics.js');
+  const at = (reason, outcome, fingerprint) => ({
+    reason, outcome, screen_fingerprint: fingerprint, model_turns_spent: outcome === 'resolved_locally' ? 0 : 1,
+  });
+  const b = metrics.breakdown([
+    at('novel_dialog', 'escalated_to_model', 'aaa'),
+    at('novel_dialog', 'resolved_locally', 'aaa'),
+    at('unknown_screen', 'failed', 'bbb'),
+    at('verification_failed', 'escalated_to_model', 'aaa'),
+    { reason: 'not-a-reason', outcome: 'failed' },
+  ]);
+  assert.equal(b.total, 4, 'a record with a bogus reason is not counted');
+  assert.equal(b.by_reason.novel_dialog, 2);
+  // Already handled locally, so not avoidable by anything unbuilt. This is the
+  // one term that makes the rate mean something once Phase 12 lands.
+  assert.equal(b.avoidable, 3);
+  assert.equal(b.avoidable_escalation_rate, 0.75);
+  assert.equal(b.model_turns_spent, 3);
+  assert.deepEqual(b.top_screens[0], { fingerprint: 'aaa', count: 3 });
+  assert.match(b.faculty.novel_dialog, /reflexes/);
+  assert.equal(metrics.breakdown([]).avoidable_escalation_rate, null);
+});
+
+test('the escalation log survives a torn line and round-trips the §8 schema', async () => {
+  const fs = await import('node:fs');
+  const metrics = await import('../src/metrics.js');
+  const udid = 'TEST-escalations';
+  const file = metrics.paths(udid).escalations;
+  fs.rmSync(file, { force: true });
+
+  const written = metrics.recordEscalation(udid, {
+    flowId: 'f1', stepIndex: 3, fingerprint: 'abc123', reason: 'ambiguous_intent',
+    candidates: [{ label: 'Save', x: 10, y: 20, region: 'content', score: 0.4 }, 'Saved'],
+    outcome: 'escalated_to_model', wallMs: 240, detail: 'two matches',
+  });
+  for (const key of [
+    'timestamp', 'flow_id', 'step_index', 'screen_fingerprint', 'reason', 'candidate_elements',
+    'reflex_or_exploration_tried', 'outcome', 'model_turns_spent', 'tokens_spent', 'wall_time_ms',
+  ]) {
+    assert.ok(key in written, `§8 requires ${key}`);
+  }
+  // Not measurable from this side of the model, and recorded as null rather
+  // than estimated. See docs/ESCALATIONS.md.
+  assert.equal(written.tokens_spent, null);
+  assert.equal(written.candidate_elements.length, 2);
+  assert.equal(written.candidate_elements[1].label, 'Saved');
+
+  // A half-written append is a line to skip, not a reason to report no history.
+  fs.appendFileSync(file, '{"reason":"no_plan","outcome":"fai');
+  const read = metrics.readEscalations(udid);
+  assert.equal(read.length, 1);
+  assert.equal(read[0].reason, 'ambiguous_intent');
+  fs.rmSync(file, { force: true });
+});
+
+test('a human run is timed by the clock and counted by the frames', async () => {
+  const baseline = await import('../src/baseline.js');
+  const t0 = 1_700_000_000_000;
+  // A push animation is a burst of changed frames and must count as one step.
+  const history = [
+    { at: t0 + 100, diff: 0.001 },            // a clock digit, below threshold
+    { at: t0 + 1000, diff: 0.4 },             // tap 1 ...
+    { at: t0 + 1100, diff: 0.3 },             // ... still the same animation
+    { at: t0 + 1300, diff: 0.05 },            // ... and its tail
+    { at: t0 + 3000, diff: 0.5 },             // tap 2
+    { at: t0 + 9000, diff: 0.5 },             // after the window closed
+  ];
+  const groups = baseline.transitionsIn(history, { from: t0, to: t0 + 5000 });
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].frames, 3);
+  assert.deepEqual(baseline.intervalsBetween(groups), [2000]);
+
+  const run = baseline.runFrom({ flow: 'f', startedAt: t0, endedAt: t0 + 5000, history, oldestHistoryAt: t0 - 1 });
+  assert.equal(run.wall_time_ms, 5000);
+  assert.equal(run.steps_observed, 2);
+  assert.equal(run.steps_source, 'screen-transitions', 'a transition is not a tap and must not be called one');
+  assert.equal(run.history_complete, true);
+  // The frame history is 90s. A run older than the window has transitions the
+  // log can no longer see, so its step count is an undercount and says so.
+  const truncated = baseline.runFrom({ flow: 'f', startedAt: t0, endedAt: t0 + 5000, history, oldestHistoryAt: t0 + 500 });
+  assert.equal(truncated.history_complete, false);
+});
+
+test('a baseline refuses to exist below three runs', async () => {
+  const baseline = await import('../src/baseline.js');
+  const run = (ms, extra = {}) => ({ wall_time_ms: ms, steps_observed: 4, interaction_intervals_ms: [900, 1100], ...extra });
+  const few = baseline.summarizeRuns('f', [run(1000), run(2000)]);
+  assert.equal(few.ok, false);
+  assert.equal(few.reason, 'too-few-runs');
+  assert.equal(few.need, 3);
+
+  const ok = baseline.summarizeRuns('f', [run(1000), run(2000), run(3000), run(4000), run(5000, { history_complete: false })], { minSteps: 4 });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.summary.runs, 5);
+  assert.equal(ok.summary.wall_time_ms.p50, 3000);
+  assert.equal(ok.summary.wall_time_ms.iqr, 3000);
+  // min_steps comes from the flow definition; a human run is authoritative
+  // about time and not about the shortest route.
+  assert.equal(ok.summary.min_steps, 4);
+  assert.equal(ok.summary.runs_with_incomplete_history, 1);
+  assert.match(ok.summary.note, /no host-readable HID log/);
+});
+
+test('the flow suite is shipped, valid, and replayable as written', async () => {
+  const baseline = await import('../src/baseline.js');
+  const actions = await import('../src/actions.js');
+  const suite = baseline.loadSuite();
+  assert.ok(suite.length >= 2, 'a harmonic mean over one flow is just that flow');
+  for (const flow of suite) {
+    assert.ok(flow.name && flow.minSteps > 0 && flow.steps?.length, `${flow.name} is complete`);
+    assert.equal(flow.human.length > 0, true, `${flow.name} tells the human what to do`);
+    // The human and the agent must be doing the same amount of work, or the
+    // ratio compares two different tasks.
+    assert.equal(flow.steps.length, flow.minSteps, `${flow.name}: agent steps == minSteps`);
+    assert.equal(flow.human.length, flow.minSteps, `${flow.name}: human steps == minSteps`);
+    // Every step has to normalize, or the flow fails at run time on a typo.
+    for (const step of flow.steps) assert.ok(actions.normalizeStep(step).action, `${flow.name} step parses`);
+    // Stock apps only. Measurements from this suite get committed to a public
+    // repo, so nothing here may name a private app.
+    for (const bundle of flow.reset.terminate) assert.match(bundle, /^com\.apple\./, 'stock apps only');
+  }
+  assert.throws(() => baseline.flowFrom(suite, 'nope'), /no flow "nope"/);
+});

@@ -284,3 +284,84 @@ jobs:
           simframe stop --all || true
           xcrun simctl shutdown "$DEVICE" || true
           xcrun simctl delete "$DEVICE" || true
+
+  # The Human Parity Index, measured on every push.
+  #
+  # Phases 10–16 are scored on two numbers — model turns removed, and HPI —
+  # and a number nobody recomputes is a number that quietly stops being true.
+  # This job runs the agent side of the flow suite and compares it against the
+  # committed baseline. The human side of the ratio is recorded once by a
+  # person and committed under docs/research/human-baselines/.
+  bench:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+
+      - name: Boot a simulator
+        # Same device choice as the integration job, and for the same reasons —
+        # see the long comment there. Deliberately not factored into a shared
+        # script: a bench that silently starts measuring a different device
+        # class would look like a performance regression.
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available -j | node -e '
+            const j = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const rows = Object.entries(j.devices)
+              .filter(([rt]) => /SimRuntime\.iOS-/.test(rt))
+              .flatMap(([rt, ds]) => ds
+                .filter((d) => d.isAvailable && /^iPhone/.test(d.name))
+                .map((d) => ({ udid: d.udid, name: d.name, rt })));
+            if (!rows.length) { console.error("no available iPhone simulator on this runner"); process.exit(1); }
+            const runtime = [...new Set(rows.map((d) => d.rt))]
+              .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop();
+            const here = rows.filter((d) => d.rt === runtime);
+            const rank = (n) =>
+              /^iPhone \d+ Pro$/.test(n) ? 0 : /^iPhone \d+$/.test(n) ? 1 : /^iPhone \d/.test(n) ? 2 : 3;
+            here.sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+            process.stderr.write(`using ${here[0].name} on ${runtime.split(".").pop()}\n`);
+            process.stdout.write(here[0].udid);
+          ')
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+
+      - name: Start capture
+        run: node src/cli.js start --device="$DEVICE"
+
+      - name: Run the flow suite and gate on HPI
+        # No pipe. `node script.mjs | tee` reports tee's exit status, and this
+        # project has already shipped one check that could not fail because of
+        # exactly that. The gate IS this step's exit code.
+        #
+        # With no committed baseline the gate prints GATE INACTIVE and exits 0 —
+        # loudly inactive rather than quietly passing, because a gate with
+        # nothing to compare against cannot detect a regression.
+        run: node scripts/bench-hpi.mjs --device="$DEVICE" --runs=3 --out=/tmp/hpi.json --gate
+
+      - name: Keep the measurement
+        # Recorded every run so HPI can be read as a series. This is the file
+        # that becomes docs/research/hpi-baseline.json when a run is adopted
+        # as the baseline.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hpi
+          path: /tmp/hpi.json
+          if-no-files-found: warn
+
+      - name: Escalation breakdown
+        # Printed rather than gated. Phase ordering is a human decision made
+        # from this table; a CI job is not the place to fail on it.
+        if: always()
+        run: node src/cli.js escalations --device="$DEVICE" || true
+
+      - name: Tear down
+        if: always()
+        run: |
+          node src/cli.js stop --all || true
+          xcrun simctl shutdown "$DEVICE" || true

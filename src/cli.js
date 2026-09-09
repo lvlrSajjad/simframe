@@ -6,6 +6,8 @@ import { bootedDevices, capabilitiesFor, listDevices, PLATFORMS, resolveDevice, 
 import * as actions from './actions.js';
 import * as api from './index.js';
 import * as input from './input.js';
+import * as baseline from './baseline.js';
+import * as metrics from './metrics.js';
 import * as navigate from './navigate.js';
 import * as store from './store.js';
 import * as view from './view.js';
@@ -36,6 +38,11 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe type    <text>            enter text (exact; uses the pasteboard)
   simframe keys    <text>            send key events instead (layout-dependent)
   simframe press   <button>          a hardware button, e.g. home
+  simframe baseline record <flow>    record a human performing a flow (see below)
+  simframe baseline summarize <flow> write the median/IQR baseline for it
+  simframe baseline list             recorded runs per flow, and what is committed
+  simframe hpi     [device]          Human Parity Index, per flow and overall
+  simframe escalations [device]      why simframe handed decisions back, by reason
   simframe devices                   list simulators
   simframe doctor                    check that this machine can capture
                                      (--strict, or SIMFRAME_STRICT=1, makes any
@@ -45,6 +52,21 @@ Selectors — anywhere a control is named
   #3            the number \`simframe ui\` gave it. Cheapest, unambiguous.
   "Save"        a label or a phrase, resolved by intent (verbs, typos, synonyms)
   @120,400      raw point coordinates
+
+Measuring against a human — the Human Parity Index
+
+  A flow's agent time is measured every time it runs; the human half has to be
+  recorded once, by a person, on the same simulator:
+
+    simframe baseline record settings-larger-text --device=<udid> --runs=5
+    simframe baseline summarize settings-larger-text
+    simframe hpi --device=<udid>
+
+  \`record\` puts the device on the home screen, waits for you to start, and
+  waits again for you to stop. Wall time is measured between those two; the
+  step count is derived from screen transitions, because a human tapping the
+  Simulator window leaves no HID log to read. Five runs is the recommendation
+  and three is the floor. The flows live in flows/hpi-suite.json.
 
 Options
   --device=<udid|name>   simulator to target (default: the booted one)
@@ -96,6 +118,7 @@ The reliable pattern around an action is:
 const VALUE_FLAGS = new Set([
   'ago', 'count', 'detail', 'device', 'durationMs', 'engine', 'filter', 'fps', 'index', 'maxDim',
   'mode', 'out', 'ringSize', 'since', 'spanMs', 'stableMs', 'timeoutMs',
+  'last', 'runs', 'suite',
 ]);
 
 function parseArgs(argv) {
@@ -152,6 +175,40 @@ async function mapText(device, options, identity) {
   } catch (err) {
     return `(could not read the screen: ${err.message})`;
   }
+}
+
+/**
+ * Wait for Enter, on a terminal or on a pipe.
+ *
+ * `readline/promises` looked like the obvious choice and threw "readline was
+ * closed" the first time it was asked a question after piped input ran out —
+ * which is how a smoke test of `baseline record` would have handed a stack
+ * trace to the person recording. Buffered lines are queued, and a closed
+ * stream is reported as what it is rather than thrown from inside a library.
+ */
+async function lineReader() {
+  const readline = await import('node:readline');
+  const rl = readline.createInterface({ input: process.stdin, terminal: Boolean(process.stdin.isTTY) });
+  const queue = [];
+  const waiters = [];
+  let closed = false;
+  rl.on('line', (line) => (waiters.length ? waiters.shift()({ line }) : queue.push(line)));
+  rl.on('close', () => {
+    closed = true;
+    while (waiters.length) waiters.shift()({ closed: true });
+  });
+  return {
+    async enter(prompt) {
+      process.stdout.write(prompt);
+      const got = queue.length ? { line: queue.shift() } : closed ? { closed: true } : await new Promise((r) => waiters.push(r));
+      if (got.closed) {
+        throw new Error('stdin closed before the run ended — baseline record needs an interactive terminal');
+      }
+      process.stdout.write('\n');
+      return got.line;
+    },
+    close: () => rl.close(),
+  };
 }
 
 /** A step result, the same shape in every command that runs steps. */
@@ -721,6 +778,165 @@ async function main() {
         emit(flags, { ok: false, error: err.message }, err.message);
         process.exitCode = 1;
       }
+      return;
+    }
+
+    case 'baseline': {
+      const [sub, name] = positional;
+      const suite = baseline.loadSuite(flags.suite ?? baseline.SUITE_FILE);
+
+      if (sub === 'list' || sub == null) {
+        const dev = await resolveDevice(flags.device);
+        const committed = baseline.readBaselines();
+        const rows = suite.map((f) => {
+          const runs = baseline.readRuns(dev.udid, f.name);
+          return {
+            flow: f.name,
+            recorded_runs: runs.length,
+            committed: Boolean(committed[f.name]),
+            human_median_ms: committed[f.name]?.wall_time_ms?.p50 ?? null,
+            min_steps: f.minSteps ?? null,
+          };
+        });
+        emit(flags, rows, rows.map((r) =>
+          `${r.flow.padEnd(24)} ${String(r.recorded_runs).padStart(2)} run${r.recorded_runs === 1 ? ' ' : 's'}` +
+          `  ${r.committed ? `committed, human p50 ${r.human_median_ms}ms` : 'not committed'}`));
+        return;
+      }
+
+      if (sub === 'summarize') {
+        if (!name) throw new Error('usage: simframe baseline summarize <flow>');
+        const dev = await resolveDevice(flags.device);
+        const flow = baseline.flowFrom(suite, name);
+        const runs = baseline.readRuns(dev.udid, name);
+        const res = baseline.summarizeRuns(name, runs, { minSteps: flow.minSteps ?? null, device: dev.udid });
+        if (!res.ok) {
+          emit(flags, res, `${runs.length} recorded run${runs.length === 1 ? '' : 's'} for "${name}" — ` +
+            `${baseline.MIN_RUNS} is the floor and ${baseline.WANT_RUNS} is the recommendation. ` +
+            `Record more: simframe baseline record ${name} --device=${dev.udid}`);
+          process.exitCode = 1;
+          return;
+        }
+        const file = flags.out ? baseline.writeSummary(res.summary, { dir: path.dirname(flags.out) }) : baseline.writeSummary(res.summary);
+        const w = res.summary.wall_time_ms;
+        emit(flags, { ...res.summary, file }, [
+          `${name}: ${res.summary.runs} runs`,
+          `  wall time  p50 ${w.p50}ms   IQR ${w.p25}–${w.p75}ms   range ${w.min}–${w.max}ms`,
+          `  steps      p50 ${res.summary.steps_observed.p50} (from screen transitions; min_steps ${res.summary.min_steps ?? '?'} from the flow)`,
+          res.summary.runs_with_incomplete_history
+            ? `  WARNING ${res.summary.runs_with_incomplete_history} run(s) outran the 90s frame history; their step counts are undercounts`
+            : null,
+          `  wrote ${file}`,
+        ]);
+        return;
+      }
+
+      if (sub === 'record') {
+        if (!name) throw new Error('usage: simframe baseline record <flow>');
+        const flow = baseline.flowFrom(suite, name);
+        const dev = await resolveDevice(flags.device);
+        const wanted = Math.max(1, num(flags.runs, 1));
+        const rl = await lineReader();
+        const done = [];
+        try {
+          console.log(`${name} on ${dev.name} (${dev.udid})`);
+          console.log(`${flow.note ?? ''}\n`);
+          console.log('Do this, at your natural pace:');
+          for (const [i, line] of (flow.human ?? []).entries()) console.log(`  ${i + 1}. ${line}`);
+          console.log(`\nThe shortest route is ${flow.minSteps} steps. Practise once or twice first —`);
+          console.log('a baseline should measure a tester who knows the flow, not one discovering it.\n');
+          for (let run = 1; run <= wanted; run += 1) {
+            const reset = await baseline.resetFor(dev.udid, flow);
+            if (reset.failures.length) console.log(`  (reset: ${reset.failures.join('; ')})`);
+            await rl.enter(`run ${run}/${wanted} — device is on the home screen. Press Enter, then do the flow: `);
+            const res = await baseline.recordHumanRun(dev.udid, name, {
+              suite,
+              options,
+              waitForStop: () => rl.enter(`  timing... press Enter the moment you are on "${flow.endsOn ?? 'the last screen'}": `),
+            });
+            done.push(res.run);
+            const r = res.run;
+            console.log(`  ${r.wall_time_ms}ms, ${r.steps_observed} screen transitions` +
+              (r.history_complete === false ? ' — WARNING: longer than the frame history, steps undercounted' : ''));
+          }
+        } finally {
+          rl.close();
+        }
+        const total = baseline.readRuns(dev.udid, name).length;
+        emit(flags, { flow: name, recorded: done, runs_on_file: total }, [
+          '',
+          `${done.length} run${done.length === 1 ? '' : 's'} recorded — ${total} on file for "${name}"`,
+          total < baseline.WANT_RUNS
+            ? `${baseline.WANT_RUNS - total} more would meet the recommendation; ${Math.max(0, baseline.MIN_RUNS - total)} more is the floor`
+            : `enough to summarize: simframe baseline summarize ${name} --device=${dev.udid}`,
+        ]);
+        return;
+      }
+
+      throw new Error('usage: simframe baseline <record|summarize|list> [flow]');
+    }
+
+    case 'hpi': {
+      const dev = await resolveDevice(flags.device);
+      const suite = baseline.loadSuite(flags.suite ?? baseline.SUITE_FILE);
+      const names = new Set(suite.map((f) => f.name));
+      const all = metrics.readFlows(dev.udid);
+      // Named runs only, and only flows this suite defines. An ad-hoc `sim_do`
+      // is timed and logged, but it has no human counterpart and averaging it
+      // into a parity index would be inventing a comparison.
+      const runs = all.filter((f) => f.flow_name && names.has(f.flow_name) && (!flags.flow || f.flow_name === flags.flow));
+      const report = metrics.hpi({ flows: runs, baselines: baseline.readBaselines() });
+      if (flags.out) store.writeAtomic(String(flags.out), `${JSON.stringify(report, null, 2)}\n`);
+      if (!runs.length) {
+        emit(flags, report, [
+          `no runs of any suite flow on this device yet (${all.length} unnamed run${all.length === 1 ? '' : 's'} in the log)`,
+          'run the agent side: node scripts/bench-hpi.mjs --device=' + dev.udid,
+        ]);
+        return;
+      }
+      emit(flags, report, [
+        'flow                      runs  agent p50   human p50   HPI_time  step_ratio  turns  esc',
+        ...report.flows.map((f) =>
+          `${f.flow.padEnd(24)} ${String(f.runs).padStart(5)}  ${`${f.agent_ms.p50}ms`.padStart(9)}   ` +
+          `${(f.human_median_ms ? `${f.human_median_ms}ms` : '—').padStart(9)}   ` +
+          `${(f.hpi_time ?? '—').toString().padStart(8)}  ${(f.step_ratio ?? '—').toString().padStart(10)}  ` +
+          `${(f.model_turns ?? '—').toString().padStart(5)}  ${String(f.escalations).padStart(3)}`),
+        '',
+        `HPI_accuracy ${report.overall.hpi_accuracy} (${report.overall.runs} runs, ` +
+          `${report.overall.runs - runs.filter((r) => r.completed && !r.wrong_action_taken).length} not clean)`,
+        report.overall.hpi_time == null
+          ? `HPI_time and HPI need a human baseline — none of ${report.overall.flows_measured} measured flow(s) has one yet.`
+          : `HPI_time ${report.overall.hpi_time} (harmonic mean over ${report.overall.flows_with_human_baseline} flow(s)), HPI ${report.overall.hpi}`,
+        `step_ratio ${report.overall.step_ratio ?? '—'} (target ≤1.5), model turns per flow ${report.overall.model_turns_median ?? '—'}`,
+        flags.out ? `wrote ${flags.out}` : null,
+      ]);
+      return;
+    }
+
+    case 'escalations': {
+      const dev = await resolveDevice(flags.device);
+      const records = metrics.readEscalations(dev.udid, { limit: flags.last ? num(flags.last) : undefined });
+      const b = metrics.breakdown(records);
+      if (flags.out) store.writeAtomic(String(flags.out), `${JSON.stringify(b, null, 2)}\n`);
+      emit(flags, b, [
+        `${b.total} escalation${b.total === 1 ? '' : 's'} on ${dev.name}`,
+        ...metrics.REASONS
+          .filter((r) => b.by_reason[r])
+          .sort((a, c) => b.by_reason[c] - b.by_reason[a])
+          .map((r) => `  ${r.padEnd(20)} ${String(b.by_reason[r]).padStart(4)}   would be removed by: ${metrics.FACULTY[r]}`),
+        b.total ? '' : null,
+        b.total ? `avoidable ${b.avoidable}/${b.total} (${b.avoidable_escalation_rate})` : null,
+        // Said out loud rather than left for someone to discover: the rate is
+        // 1.0 while no faculty exists, so the breakdown above is the number
+        // that decides the next phase.
+        b.total && b.avoidable_escalation_rate === 1
+          ? '  every reason maps to a faculty that is not built yet, so this rate is 1.0 by construction. The per-reason counts are the steering wheel.'
+          : null,
+        b.total ? `model turns spent on escalations: ${b.model_turns_spent}` : null,
+        b.top_screens.length ? 'top screens:' : null,
+        ...b.top_screens.map((s) => `  ${s.fingerprint.slice(0, 16).padEnd(18)} ${s.count}`),
+        metrics.writeError() ? `WARNING a log write failed: ${metrics.writeError()}` : null,
+      ]);
       return;
     }
 

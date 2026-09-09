@@ -42,6 +42,7 @@
   },
   "files": [
     "src",
+    "flows",
     "native/ocr.swift",
     "native/simframed/Package.swift",
     "native/simframed/Sources",

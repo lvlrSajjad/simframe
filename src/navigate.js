@@ -6,6 +6,8 @@
 // somebody already walked, saved so it can be walked again.
 import { runScript } from './actions.js';
 import * as graph from './graph.js';
+import * as metrics from './metrics.js';
+import * as screenmap from './screenmap.js';
 import * as api from './index.js';
 import * as store from './store.js';
 import fs from 'node:fs';
@@ -32,6 +34,31 @@ export function stepFor(edge) {
 }
 
 /**
+ * A refusal to act, written down.
+ *
+ * `goto` and `flow run` refuse rather than guess, and a refusal is exactly
+ * "the tool handed the decision back" — the thing the escalation log exists to
+ * count. The reason mapping lives in metrics.PLAN_REASONS so the five reasons
+ * have one owner.
+ */
+function refuse(udid, result, { detail = null } = {}) {
+  try {
+    const reason = metrics.PLAN_REASONS[result.reason];
+    if (reason) {
+      metrics.recordEscalation(udid, {
+        reason,
+        fingerprint: metrics.fingerprintNow(udid, screenmap),
+        outcome: 'escalated_to_model',
+        detail: detail ?? result.reason,
+      });
+    }
+  } catch {
+    /* a log that cannot be written must not change what is returned */
+  }
+  return result;
+}
+
+/**
  * Walk to a known screen.
  *
  * Fails rather than guesses: if the destination is not in the graph, or the
@@ -43,8 +70,8 @@ export async function goto(deviceQuery, target, { options, ...runOptions } = {})
   const udid = device.udid;
 
   const found = graph.findScreen(udid, target);
-  if (!found) return { ok: false, reason: 'unknown-screen', known: knownScreens(udid) };
-  if (found.ambiguous) return { ok: false, reason: 'ambiguous', candidates: found.ambiguous };
+  if (!found) return refuse(udid, { ok: false, reason: 'unknown-screen', known: knownScreens(udid) }, { detail: `no screen matches "${target}"` });
+  if (found.ambiguous) return refuse(udid, { ok: false, reason: 'ambiguous', candidates: found.ambiguous }, { detail: `"${target}" fits ${found.ambiguous.length} screens` });
 
   const here = await api.screenIdentity(udid, {});
   if (here.hash === found.node.hash) {
@@ -57,12 +84,12 @@ export async function goto(deviceQuery, target, { options, ...runOptions } = {})
   // `Cannot read properties of null (reading 'slice')` instead of answering.
   // Not hypothetical on Android, where README's own table puts the launcher at
   // one token.
-  if (!here.hash) return { ok: false, reason: 'no-identity', to: found.name };
+  if (!here.hash) return refuse(udid, { ok: false, reason: 'no-identity', to: found.name });
   const path_ = graph.route(udid, { hash: here.hash, tokens: here.tokens }, found.node.hash);
-  if (!path_) return { ok: false, reason: 'no-route', from: here.hash.slice(0, 8), to: found.name };
+  if (!path_) return refuse(udid, { ok: false, reason: 'no-route', from: here.hash.slice(0, 8), to: found.name });
 
   const steps = path_.map(stepFor);
-  if (steps.some((s) => !s)) return { ok: false, reason: 'unreplayable-edge', to: found.name };
+  if (steps.some((s) => !s)) return refuse(udid, { ok: false, reason: 'unreplayable-edge', to: found.name });
 
   const result = await runScript(udid, { steps, stopOnUnexpected: true, ...runOptions });
   const arrived = await api.screenIdentity(udid, {});
@@ -121,7 +148,17 @@ export function listFlows(udid) {
 export async function runFlow(deviceQuery, name, { options, ...runOptions } = {}) {
   const { device } = await api.ensureDaemon(deviceQuery, options);
   const flow = loadFlow(device.udid, name);
-  if (!flow) return { ok: false, reason: 'unknown-flow', known: listFlows(device.udid).map((f) => f.name) };
-  const result = await runScript(device.udid, { steps: flow.steps, stopOnUnexpected: true, ...runOptions });
+  if (!flow) return refuse(device.udid, { ok: false, reason: 'unknown-flow', known: listFlows(device.udid).map((f) => f.name) }, { detail: `no saved flow "${name}"` });
+  // A replayed flow knows its own name, so its record can be compared against
+  // a human doing the same thing. `minSteps` comes from the flow definition or
+  // stays null — the step count of a recorded route is not a claim about the
+  // shortest one.
+  const result = await runScript(device.udid, {
+    steps: flow.steps,
+    stopOnUnexpected: true,
+    flowName: name,
+    minSteps: flow.minSteps ?? null,
+    ...runOptions,
+  });
   return { ok: result.ranSteps === flow.steps.length, name, ...result };
 }
