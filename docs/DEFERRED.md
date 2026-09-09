@@ -6,145 +6,150 @@ as such.
 
 Ordered by how much it would hurt to keep ignoring.
 
-## Priority right now — 2026-09-09, after 0.9.0
+## Priority right now — 2026-09-09, end of the Phase 11 session
 
-The order below was derived from this session's measurements rather than from
-the phase plan, which is what `docs/ESCALATIONS.md` says the escalation log is
-for. Each item is written up in full further down or in
-`docs/PHASES-HUMAN-PARITY.md`.
+Rewritten, because the previous version had grown three separate "P0" headings
+and a numbering of 1, 1b, 1c, 1d, 1e, 1f. Ordered by what it costs to keep
+ignoring, and everything with a threshold in it sits behind the thing that
+would say whether the threshold is right.
 
-**P0, and it now blocks three separate phases**
+Done this session and struck rather than deleted, so the order is traceable:
+**Phase 11 step 4** (the focus window and the identity settle) and **the
+orphaned HID session** (the staleness gate was keyed on the process, so it
+could not fire in the MCP server; `simframe input reset` now exists and is what
+`doctor` prints).
 
-1. **The Phase 5 perception eval harness** — fifteen screens, three apps. It
-   gates learned stillness (a wrong window *corrupts the graph*: proved this
-   session, not theorised), it gates Phase 13's ROI safety valve, and it is
-   Phase 9's own gate. The de-duplication fix shipped on unit tests plus one
-   fingerprint eval run because this does not exist.
+### P0 — the engine is learning wrong things, and everything else measures on top
 
-**P1 — where HPI_time actually is, both gated by P0**
+1. **A settle can be satisfied by stillness older than the action it waits on.**
+   `tap Accessibility` reports `settled 124ms` against a 500 ms stillness
+   window and the screen never left the Settings root. The baseline hash is
+   taken at the top of the step; if it lands mid-animation it already differs
+   from the live hash when the wait begins, so `sawChange` is true before the
+   action did anything.
 
-2. Unbiased stillness estimator, from the frame history after a transition
-   completes rather than from inside the wait that cut it short. ~13% of wall
-   time.
-3. Perception cost per step: 36% of a clean flow is two `screenIdentity`
-   passes plus locate. That is Phase 13, and it is the larger half of the gap
-   to the human median.
-4. ~~Phase 11 step 4 — the focus window and the identity settle.~~ **Done.**
-   The focus window is learned per edge and may only ever lengthen; the
-   identity settle now waits for the remainder it owes rather than a fresh
-   300 ms. See `docs/BENCHMARKS.md`, "Phase 11 step 4". What is left of it is
-   the structural window itself, which is per-screen learnable and still gated
-   on the eval harness at 1 — its estimator is self-correcting rather than
-   self-reinforcing, which is the opposite sign to the one that corrupted the
-   graph, and that is a reason to expect it to work, not evidence that it does.
+   The cost is not the failed step — `screenIdentity` then reads the screen we
+   never left and the graph records **root → root** as verified. The stored
+   edge had `count: 11`, `changedOutcomes: 5`. This is the corruption the
+   learned-stillness revert cleaned up, and it came back *without* learned
+   stillness, so that was never its only cause and deleting the graph is a
+   remedy for the symptom. Measured 2/6 suite passes before step 4 and 5/6
+   after, which nudges it and does not touch it.
 
-**P0 — and it outranks the harness, because it corrupts learning**
+   **No harness needed.** This is a logic fix, not a threshold: `sawChange`
+   must mean "changed after the dispatch returned", so the baseline has to be a
+   frame captured after the action, not before the step. First thing to do.
 
-1b. **A settle can be satisfied by stillness older than the action it is
-   waiting on.** Measured this session: `tap Accessibility` on the Settings
-   root reports `settled 124ms` — less than the 500 ms of stillness a settle
-   requires — and the screen never left the root. The baseline hash is captured
-   at the top of the step, and if it lands mid-animation it already differs
-   from the live hash by the time the wait starts, so `sawChange` is true before
-   the action did anything and the wait returns on quiet that predates it.
+2. **The Phase 5 perception eval harness** — fifteen screens, three apps. It
+   gates 3, 4 and 11 below, Phase 13's ROI safety valve, and Phase 9. Every
+   threshold change since Phase 5 has shipped on unit tests and one eval run
+   because this does not exist.
 
-   The cost is not the failed step. `screenIdentity` then reads the screen we
-   have not left and the graph records **root → root** as a verified edge; the
-   stored edge has `count: 11` and `changedOutcomes: 5`, flipping between the
-   real destination and itself. Measured 2/6 passes on `settings-larger-text`
-   before Phase 11 step 4 and 5/6 after, which nudges the symptom and does not
-   touch this. This is the same corruption the learned-stillness revert cleaned
-   up, and it came back **without** learned stillness — so that experiment was
-   never its only cause, and the graph deletion documented as the remedy is a
-   remedy for the symptom.
+3. **Small-delta taps are invisible to the change detector.** Measured: a
+   switch flip peaks at a frame diff of **0.00049** against a `changeThreshold`
+   of **0.004** — eight times below it — so switches, radio dots, checkboxes
+   and segment highlights do not change the screen as far as the daemon is
+   concerned. `analyze.js` says so in a comment two lines from the constant.
+   Costs either the full settle budget (~2.5 s per tap, reported) or a bogus
+   `no-visible-change` in 124 ms when 1 fires first, and `no-visible-change`
+   escalates. `Motion.swift` already builds the per-cell map that would see it,
+   at a threshold tuned for a different question. Needs 2.
 
-   The fix is not a longer wait. `sawChange` needs to mean "changed after the
-   action was dispatched", which means the baseline must be a frame the daemon
-   captured after the dispatch returned, not before the step began. See
-   `docs/BENCHMARKS.md`, "Phase 11 step 4".
+### P1 — wrong actions and wrong state, all from real-app use
 
-**P0 — reported worst, and fixed this session**
+4. **Label resolution silently picks the wrong element.** Three sightings, one
+   bug: a bottom tab resolved at `memory d=6` into a list row containing the
+   query as a substring and opened an unrelated record; `type into "Search"`
+   typed into a section-index letter; and `nameScore`'s `q.startsWith(n)`
+   branch returns a flat 0.86 however little of the query the name covers, so
+   `"S"` beats `"Q Search"` at 0.585 while the sibling `n.includes(q)` branch
+   already scales by coverage. Looks like one line; it is a ranking change, so
+   it needs 2. Worst outcome on this list — it acts, and reports success.
 
-1e. ~~Reboot orphans the HID session, silently: capture keeps working, input
-   dies, every tap returns `ok`.~~ **Fixed.** Two faults — the staleness gate
-   was keyed on the process, so it could not fire in the MCP server, which is
-   the only place a device reboots between two actions; and the remedy `doctor`
-   printed named a command that fails twice. `simframe input reset` now exists
-   and is what `doctor` prints. Verified end to end; the reported *symptom*
-   did not reproduce, so this removes a certain cause rather than proving a
-   cure.
+5. **A field's contents have no authoritative source.** They reach a row only
+   as the OCR alias, so they are exactly as old as the map. Partly addressed:
+   the header now says how old a recalled map is. The fix is to render AX
+   `value` beside the alias and let the two disagree visibly.
 
-**P1 — from a fresh-install session on a real third-party app**
+6. **Ambiguity is reported only after the full timeout.** A `waitFor` on an
+   ambiguous string spent 30 s and then listed four matches that were all on
+   the first frame. Ambiguity is knowable immediately.
 
-1c. **An action-returned map describes remembered state, not live state.**
-   Corrected from my first version of this, which blamed the renderer for
-   dropping `value`: it does drop `value`, but a field's text arrives as the
-   OCR alias regardless, and the real fault is that it is as old as the map.
-   Worst case reported: a picker described the previous sheet's options, in
-   23 ms. Partly addressed — the header now says how old a recalled map is.
-   What is left is giving a field's contents an authoritative source: render
-   AX `value` beside the OCR alias and let the two disagree visibly.
+7. **The nav-bar back chevron is undetectable** — absent from the map, from
+   `all: true`, and from `sim_find` asked in plain language, while coordinates
+   work every time. This is the SF Symbol template bank, filed since Phase 5.
 
-1d. **Label resolution silently picks the wrong element**, three sightings that
-   are one bug. Full write-up below; it merges with 7.
+8. **`sim_launch` reports success without fronting an already-running app.**
 
-1f. **Small-delta taps are invisible to the change detector.** Measured: a
-   switch flip peaks at a frame diff of 0.00049 against a `changeThreshold` of
-   0.004 — eight times below it — so a switch, radio dot, checkbox or segment
-   highlight does not change the screen as far as the daemon is concerned. It
-   costs either the full settle budget (~2.5 s per tap, as reported) or a
-   bogus `no-visible-change` in 124 ms when the P0 above fires first. The
-   per-cell difference map that would see it already exists in `Motion.swift`
-   at a threshold tuned for a different question. Calibration on the settle
-   path, so it waits on 1.
+### P1 — HPI_time, where the gap to the human median actually is
 
-**P2 — CI worth trusting**
+9. **Perception cost per step**: 36% of a clean flow is two `screenIdentity`
+   passes plus locate. Phase 13, and the larger half of the gap.
+10. **Unbiased stillness estimator**, computed from the frame history after a
+   transition completes rather than from inside the wait that cut it short.
+   ~13% of wall time. Needs 2.
+11. **The structural window itself** (300 ms), per-screen learnable. Its
+   estimator is self-correcting rather than self-reinforcing — a window too
+   short produces disagreeing samples, which lengthens it — which is a reason
+   to expect it to work, not evidence that it does. Needs 2.
 
-5. The `bench` gate cannot gate: a hosted runner cannot `simctl launch`
-   Settings (47-55 s per failed attempt), so it only warns.
-6. The fingerprint gate is intermittent — failed on the 0.8.0 push, passed on
+### P2 — Phase 12, which real-app use has now specified
+
+12. **`simframe prep` and the reflex table.** A fresh install adds two dialogs
+   the suite's device has never had: the pasteboard consent alert **swallowed
+   the first paste entirely** (and `type` pastes, so it hits the commonest step
+   there is), and the notifications prompt blocked a `waitFor` on content
+   behind it. The ref invalidation reported as a fault is the ref guard working
+   correctly — its cost belongs here. Argues for `prep` running by default on a
+   device simframe has not seen before.
+13. **`settle` under-detects slow progress.** It reported "nothing moved" at
+   94% of a visible progress counter, after which `mode: change` returned
+   instantly every time with "the change had already happened before this
+   call". Same family as 1 and 3: the settle detector's evidence is wrong.
+
+### P2 — the instruments
+
+14. **The escalation log pools sessions and cannot say so.** It is per-UDID and
+   a record names no session, so two agents on one simulator write one
+   interleaved log — 57 to 81 entries in an evening, a third of the new ones
+   naming an app the suite never launched. CLAUDE.md makes that breakdown the
+   thing that picks the next phase. Cheap: a session id and the flow's own name
+   per record. Worth doing before the next breakdown is used to choose.
+15. The `bench` gate cannot gate — a hosted runner cannot `simctl launch`
+   Settings (47–55 s per failed attempt), so it only warns.
+16. The fingerprint gate is intermittent: failed on the 0.8.0 push, passed on
    the next with nothing changed.
 
-**P2 — and this one is a wrong-action risk, found by accident**
+### Phases still unbuilt
 
-7. `type into "Search"` on the Contacts root resolved to the **section-index
-   letter "S"** at 393,521 rather than the search field at 88,821, tapped it,
-   and typed. It flagged itself twice — `[the field did not visibly take focus]`
-   and `[no visible change]` — so it is not silent, but "typed into S" is a
-   claim about a scrubber.
+**12** reflexes (specified by 12–13 above), **13** ROI perception (gated by 2),
+**14** anticipation, **15** goal-directed exploration, **16** icon semantics —
+and **9**, the Tier-2 local model, still deferred. Phase 13 is where HPI_time
+moves; Phase 12 is where the real-app failures are.
 
-   The mechanism is exact, and it is an asymmetry in `matching.nameScore`.
-   `q.startsWith(n)` returns a flat **0.86** no matter how little of the query
-   the name covers, so "S" against "Search" scores 0.86; the field's own label
-   "Q Search" goes through `n.includes(q)`, which *does* scale by coverage, and
-   scores 0.78 × 0.75 = **0.585**. One character outranks the whole label
-   because only one of the two branches was taught that coverage matters — the
-   same lesson `n.includes(q)` already carries in a comment about "back"
-   matching a list row.
+### P3 — known product gaps, all filed below
 
-   The fix looks like one line and is a ranking change, which is why it is
-   filed rather than done: 1 is the thing that would say whether scaling that
-   branch fixes this without breaking the prefix matches it exists for. First
-   case for the harness, and it was found by hand instead.
-
-**P3 — known product gaps, all filed below**
-
-8. The default-device *preference* helper above the platform boundary.
-9. `android.internals.js`, so ~970 lines with two assertions become testable.
-10. `getPasteboard` has no dispatch wrapper.
-11. English-only confirm vocabulary; the iOS/Android permission-name mismatch;
+17. The default-device *preference* helper above the platform boundary.
+18. `android.internals.js`, so ~970 lines with two assertions become testable.
+19. `getPasteboard` has no dispatch wrapper.
+20. English-only confirm vocabulary; the iOS/Android permission-name mismatch;
     pinch and the unverified iOS hardware buttons.
+21. OCR confusables: `(All)` reads back as `(AII)` and a heading came through
+    as `=x`. Language correction is deliberately off, which is right for labels
+    and wrong for exactly this — a confusable-character pass on *comparison*,
+    never on display, would cost nothing.
 
-**P4 — the wedge, which is the simulator's bug and not ours**
+### P4 — the wedge, which is the simulator's bug and not ours
 
-12. Spot an all-black frame early — frames are already decoded, so it is nearly
+22. Spot an all-black frame early — frames are already decoded, so it is nearly
     free — and let `sim_do` wait for the likely self-recovery instead of
-    failing the flow.
-13. Worth an Apple feedback report: rapid app relaunch cycling kills the
+    failing the flow. Now seen on a second device, in another person's session,
+    which supports the diagnosis.
+23. Worth an Apple feedback report: rapid app relaunch cycling kills the
     simulator's display pipeline in about six cycles, reproducibly, and
     `simctl io screenshot` confirms it from outside simframe.
 
-**Waiting on the user, not on work**
+### Waiting on the user, not on work
 
 - The client bundle id in two public commit diffs. Three options were laid out:
   rewrite and force-push *plus* a GitHub Support request to garbage-collect
