@@ -1924,6 +1924,48 @@ The capture wedge is therefore not specific to the bench device, which is
 consistent with it being the simulator's display pipeline rather than
 simframe's use of it. See P4 below.
 
+### Four fixes the reporter proposed that are better than mine
+
+Read out of their full session notes, which I had filed only the *findings*
+from. Each is a mechanism rather than a complaint, and three of them are now
+cheaper than when they were written.
+
+- **The matcher does not use regions, and the map already knows them.** An
+  intent naming a *tab* resolved into a content-region list row. Region is
+  already computed for every element and printed in every map; the ranker
+  ignores it. "A tab intent should not resolve to a content row" is a rule with
+  no new data behind it, and it is a second, independent guard on the failure
+  that item 4 fixed by score alone.
+- **A distance ceiling on screen-memory matches.** The wrong tap came from
+  `memory d=6` — a recalled map six bits of layout hash away, which then
+  answered a query the live screen would not have. There is no ceiling past
+  which a memory match declines to act; there should be.
+- **Re-read once when a selector misses.** A miss is the single moment the cache
+  is most likely to be wrong, and it is when we currently trust it hardest: a
+  tap failed in **23 ms** against a remembered screen while a screenshot from
+  one call earlier showed the target plainly. One re-read on miss converts the
+  worst failure mode into a cost of one perception pass.
+- **Verify small-delta taps against the accessibility state, not the
+  framebuffer.** Their number for this: every radio and segment tap cost
+  ~2.5 s of dead wait, and *pickers are radio lists, forms are pickers*. This
+  was not actionable when written, because the tree's state never reached the
+  map — item 5 fixed that today, so a tap on a control whose `value` or
+  `selected` can be re-read no longer needs the framebuffer to move at all.
+  Probably the single largest HPI_time item now on this list.
+
+### What it cost, measured by the reporter
+
+Setting one dropdown value: **13.8 s over five steps** — 2.5 s of dead wait on
+the small-delta tap, 3.3 s of the agent's own defensive padding, 1 s on an image
+taken only because the map could not be trusted, and 2.8 s of genuine app work.
+The form has three such dropdowns. Two other measured sequences show the same
+shape: 18.5 s and 16.4 s, each containing a 2.55 s radio tap that did nothing.
+
+Their fourth point is about themselves and worth keeping: the padding is a
+*reflex* an agent develops after being burned by stale reads. Fix the staleness
+and the padding goes away on its own — which makes item 5 worth more than its
+own line suggests.
+
 ### What worked
 
 Recorded because a findings list with nothing in this section is not a report,
