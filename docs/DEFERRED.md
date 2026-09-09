@@ -75,6 +75,33 @@ Worth revisiting if it starts happening inside a single test session rather than
 after hours, because then it stops being an operational annoyance and starts
 being a correctness problem for long flows.
 
+**2026-09-09: it does happen inside a single session, and it takes capture with
+it.** Same class, different casualty. On a freshly booted iPhone 17 (iOS 26.5),
+the memory harness passed clean, and by the third run the daemon was logging
+`the display surface could not be read` continuously — 475 failures, the frame
+hash frozen for 46 s, swipes reporting no visible change. `CaptureRecovery`
+re-resolved the display port every six failures, as designed, and it made no
+difference: the surface stays unreadable. Only a device restart cures it, after
+which a full harness run passes with 6 surface failures, one recovery cycle,
+which is what that code is for.
+
+Two things it is *not*. It is not simframe holding something: the failure is
+inside the daemon, reading IOSurface, and the daemon binary was not rebuilt or
+touched across the runs that went from clean to wedged. And it is not the
+window: a device booted headlessly with `simctl boot` while Simulator.app is
+running and showing a different device captures fine on its first run, and
+fronting a wedged device's own window revives nothing (+16 failures in the 8 s
+after fronting it). CI boots headlessly with no Simulator.app at all and
+captures fine, which rules the window out as the rule.
+
+So the honest shape is: **display-surface capture degrades under sustained
+automation on a timescale of minutes, not hours, and a device restart is the
+only known cure.** That is now two independent subsystems — HID button presses
+and the display surface — degrading the same way on a device that has been
+driven hard, which makes a shared cause in CoreSimulator more likely than two
+coincidences. The next step is not more recovery code; recovery already runs and
+already fails. It is finding out what a restart resets.
+
 ### The capture loop's recovery path has no test — fixed
 A display port torn down under a live daemon left capture dead for six minutes
 until the process was restarted (see `docs/BENCHMARKS.md`). The fix re-resolves

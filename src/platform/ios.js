@@ -76,7 +76,13 @@ async function resolveDevice(query, opts) {
     const partial = pool.filter((d) => d.name.toLowerCase().includes(q));
     if (partial.length === 1) return partial[0];
     if (partial.length > 1) {
-      throw new Error(`"${query}" matches ${partial.length} devices: ${partial.map((d) => d.name).join(', ')}`);
+      // Marked, because the seam asks every backend to resolve and must not
+      // answer with an Android device when the query was ambiguous here. A
+      // plain "no match" may be passed over; an ambiguity may not.
+      throw Object.assign(
+        new Error(`"${query}" matches ${partial.length} devices: ${partial.map((d) => d.name).join(', ')}`),
+        { ambiguous: true },
+      );
     }
   }
   throw new Error(`no simulator matches "${query}"; booted: ${booted.map((d) => d.name).join(', ') || 'none'}`);
@@ -198,6 +204,18 @@ async function setPasteboard(udid, value) {
 }
 
 /**
+ * Does this backend own that device id, judged without touching the device?
+ *
+ * The routing question is asked from inside a capture loop and from a daemon
+ * process that never resolved the device itself, so it has to be answered
+ * synchronously and for free. A simulator udid is a UUID; an emulator serial
+ * (`emulator-5554`) is not, and cannot be mistaken for one.
+ */
+function ownsUdid(udid) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(udid ?? ''));
+}
+
+/**
  * The prerequisites `simframe doctor` reports for this backend. Returned rather
  * than printed so doctor stays one renderer: a backend says what it needs, and
  * a machine missing it is told which tool, not which platform.
@@ -219,6 +237,7 @@ export const platform = {
   bootedDevices,
   resolveDevice,
   isBootedSync,
+  ownsUdid,
   screenshot,
   launchApp,
   terminateApp,

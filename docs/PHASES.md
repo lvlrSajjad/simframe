@@ -33,7 +33,7 @@ open work is in `docs/DEFERRED.md`.
 | CI — packaging + integration gates | done. `integration` boots a simulator on `macos-15` and asserts every layer under `--strict`; required on `main` with an admin bypass |
 | CI — the memory layer | done. `scripts/ci-memory.mjs` drives the real CLI over the screen map, refs, graph, verdicts, flows and `goto`, OCR-only. Four bugs found writing it, one of them a capture loop that could not recover a lost display port |
 | 7 — compact agent state, skill | done. A ten-step flow is **1 tool call, 0 images, ~1,650 characters**. Every action returns the numbered text screen map; `sim_look` is the only image path and is capped at 1024 px |
-| 8 — Android | step 0 done — the `platform/` seam exists and dispatches; no second backend yet |
+| 8 — Android | steps 0 and 1 done — the `platform/` seam exists and dispatch is device-keyed; no second backend yet |
 
 **Pick up here: Phase 8, and here is what is actually in the way.**
 
@@ -68,11 +68,33 @@ ever checked.
 `doctor`'s `xcrun` line now comes from `platform.toolchain()`, so the backend
 names its own prerequisites and doctor stays one renderer.
 
-**Selection is deliberately still trivial**: one backend, so `activePlatform()`
-returns it. Step 1 is where that becomes device-keyed — `listDevices` unions the
-backends, each device record carries its own `platform`, and every udid-taking
-function routes on the record rather than on a process-wide default. Writing
-that dispatch against one backend would have been writing it blind.
+**Step 1 made the dispatch device-keyed**, which is the part that had to exist
+before a second backend rather than because of one. `listDevices` and
+`bootedDevices` union the backends and stamp every record with the platform it
+came from; `resolveDevice` asks each backend in turn; and the seven udid-taking
+members route on the udid itself through `platformFor(udid)`.
+
+Three decisions in there are worth not rediscovering:
+
+- **Routing is synchronous and free.** `isBootedSync` is called from the capture
+  loop, inside a daemon process that was handed a udid and never listed
+  anything. So a backend answers `ownsUdid(udid)` from the id's shape — a
+  simulator udid is a UUID, an emulator serial (`emulator-5554`) is not — and
+  the seam remembers what any listing taught it. Nothing about routing touches a
+  device.
+- **An ambiguity outranks a match.** A backend that finds nothing is passed
+  over; a backend that finds the query *ambiguous* throws with `ambiguous: true`
+  and that error wins even when another backend matched exactly. Answering an
+  ambiguous query with the other platform's device is the wrong-device bug
+  wearing a different hat, and this project has already shipped two of those.
+- **Cross-platform name collisions are reported, not guessed at.** Which of a
+  simulator and an emulator a bare `iPhone`-ish query should prefer is a
+  question for the step that adds the second backend.
+
+`chooseBackend(udid, backends)` and `resolveAcross(query, opts, backends)` take
+their backend list as an argument for exactly one reason: the routing is tested
+against *two* backends today, with a fake second one, so the seam is not shaped
+around whatever `android.js` happens to need when it arrives.
 
 Two smaller things Android will meet immediately, both already recorded in
 `docs/DEFERRED.md`: the confirm vocabulary is hardcoded English, and
@@ -445,13 +467,18 @@ tests plus a wrapper-name check), `scripts/ci-memory.mjs` green on every check,
 gap 0.64, `simframe doctor --strict` all-ok, `check:package` shipping the new
 directory, and the `sim_permission` tool description byte-identical.
 
-**Step 1 is device-keyed dispatch**, and it is the first thing to do here.
-Today `activePlatform()` returns the only backend. Android makes a device iOS
-*or* Android: `listDevices` has to union the backends, each device record has to
-carry its own `platform`, and every udid-taking member has to route on that
-record. Do that with the iOS backend still the only one — the union of one set
-is a set, and the routing is testable with the fake backend the contract test
-already builds — and only then write `android.js`.
+**Step 1 is done too: dispatch is device-keyed.** `platformFor(udid)` routes
+every udid-taking call, records carry their own `platform`, listings union the
+backends, and `chooseBackend`/`resolveAcross` take their backend list as an
+argument so both are tested against two backends before a second one exists.
+Verified as no behaviour change: 81 unit tests, `ci-memory.mjs` 33/33 on a
+restarted device, the eval separating at gap 0.65, `doctor --strict` all-ok, and
+`devices --json` gaining exactly one additive field (`platform`).
+
+**So step 2 is `android.js` itself**, and the prompt below is what it looks
+like. Nothing above the boundary should need to change to accommodate it; if
+something does, that is the boundary being wrong and worth fixing there rather
+than routing around.
 
 Two smaller things Android meets immediately, both in `docs/DEFERRED.md`: the
 confirm vocabulary is hardcoded English, and `PERMISSION_SERVICES` is a list of

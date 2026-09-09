@@ -1076,6 +1076,7 @@ test('the platform surface is satisfiable by something that is not a simulator',
     bootedDevices: async () => [{ udid: 'F', name: 'Fake', runtime: 'none', state: 'Booted' }],
     resolveDevice: async () => ({ udid: 'F', name: 'Fake', runtime: 'none', state: 'Booted' }),
     isBootedSync: () => true,
+    ownsUdid: (udid) => String(udid).startsWith('fake-'),
     screenshot: async () => {},
     launchApp: async () => {},
     terminateApp: async () => {},
@@ -1092,14 +1093,106 @@ test('the platform surface is satisfiable by something that is not a simulator',
 test('every dispatch wrapper reaches the backend member of the same name', async () => {
   // A wrapper is one line, which is exactly the kind of line where openUrl
   // forwards to openURL and nothing notices until an Android backend spells it
-  // the other way. Checked at the source, since the registry is frozen and
-  // there is no second backend to swap in yet.
+  // the other way. Checked at the source, since the registry is frozen.
   const src = fs.readFileSync(new URL('../src/platform/index.js', import.meta.url), 'utf8');
-  const wrappers = [...src.matchAll(/^export const (\w+) = \(\.\.\.args\) => activePlatform\(\)\.(\w+)\(\.\.\.args\);$/gm)];
-  assert.ok(wrappers.length >= 10, `found ${wrappers.length} dispatch wrappers`);
+  const wrappers = [...src.matchAll(
+    /^export const (\w+) = \(udid, \.\.\.args\) => platformFor\(udid\)\.(\w+)\(udid, \.\.\.args\);$/gm,
+  )];
+  assert.ok(wrappers.length >= 7, `found ${wrappers.length} dispatch wrappers`);
   for (const [, exported, called] of wrappers) {
     assert.equal(called, exported, `${exported} forwards to ${called}`);
   }
+});
+
+// A second backend, so the routing can be tested before Android exists. It
+// answers every call by naming itself, which is all a routing test needs.
+function fakeBackend(id, ownedPrefix, devices) {
+  const say = (what) => async (...args) => `${id}:${what}:${args[0]}`;
+  return {
+    id,
+    deviceNoun: 'device',
+    ownsUdid: (udid) => String(udid ?? '').startsWith(ownedPrefix),
+    listDevices: async () => devices,
+    bootedDevices: async () => devices.filter((d) => d.state === 'Booted'),
+    resolveDevice: async (query) => {
+      const hits = devices.filter((d) => d.udid === query || d.name.toLowerCase().includes(String(query ?? '').toLowerCase()));
+      if (hits.length === 1) return hits[0];
+      if (hits.length > 1) throw Object.assign(new Error(`"${query}" matches ${hits.length} on ${id}`), { ambiguous: true });
+      throw new Error(`nothing on ${id} matches "${query}"`);
+    },
+    isBootedSync: () => true,
+    screenshot: say('screenshot'),
+    launchApp: say('launch'),
+    terminateApp: say('terminate'),
+    openUrl: say('openUrl'),
+    setPermission: say('permission'),
+    setPasteboard: say('paste'),
+    permissionServices: () => [`${id}-only`, 'shared'],
+    toolchain: () => [{ name: `${id}-tool`, level: 'ok', detail: 'present' }],
+  };
+}
+
+test('a device is routed by its own id, not by a process-wide default', async () => {
+  const platform = await import('../src/platform/index.js');
+  const left = fakeBackend('left', 'L-', [{ udid: 'L-1', name: 'Left One', runtime: 'r', state: 'Booted' }]);
+  const right = fakeBackend('right', 'R-', [{ udid: 'R-1', name: 'Right One', runtime: 'r', state: 'Booted' }]);
+  const both = [left, right];
+
+  assert.equal(platform.chooseBackend('L-1', both).id, 'left');
+  assert.equal(platform.chooseBackend('R-1', both).id, 'right', 'the second backend is reachable at all');
+
+  // An id nobody claims is an error only once there is a choice to get wrong.
+  // With one backend it still routes there, so a typo gets that platform's own
+  // message about the device — which is what it got before the seam existed.
+  assert.equal(platform.chooseBackend('nonsense', [left]).id, 'left');
+  assert.throws(() => platform.chooseBackend('nonsense', both), /no platform recognises/);
+
+  // And a real udid routes to the real backend by shape, with no listing first.
+  assert.equal(platform.platformFor('CDB00FD6-9782-45FC-8E2A-856D794F9FEF').id, 'ios');
+});
+
+test('resolving a device asks every backend, and an ambiguity outranks a match', async () => {
+  const platform = await import('../src/platform/index.js');
+  const left = fakeBackend('left', 'L-', [
+    { udid: 'L-1', name: 'Pixel One', runtime: 'r', state: 'Booted' },
+    { udid: 'L-2', name: 'Pixel Two', runtime: 'r', state: 'Booted' },
+  ]);
+  const right = fakeBackend('right', 'R-', [{ udid: 'R-1', name: 'Pixel Three', runtime: 'r', state: 'Booted' }]);
+  const both = [left, right];
+
+  const hit = await platform.resolveAcross('Pixel Three', null, both);
+  assert.equal(hit.udid, 'R-1');
+  assert.equal(hit.platform, 'right', 'the record carries the platform it came from');
+
+  // "Pixel" is ambiguous on `left` and matches exactly one device on `right`.
+  // Answering with the right-hand device would be the wrong-device bug wearing
+  // a different hat, so the ambiguity wins.
+  await assert.rejects(() => platform.resolveAcross('Pixel', null, both), /matches 2 on left/);
+
+  // One name, one device each side: reported, never guessed at.
+  const twin = fakeBackend('twin', 'T-', [{ udid: 'T-1', name: 'Pixel Three', runtime: 'r', state: 'Booted' }]);
+  await assert.rejects(
+    () => platform.resolveAcross('Pixel Three', null, [right, twin]),
+    /more than one platform/,
+  );
+
+  // Nothing anywhere, one backend: that backend's own message, unchanged.
+  await assert.rejects(() => platform.resolveAcross('Nexus', null, [right]), /nothing on right matches/);
+});
+
+test('a listing unions the backends and stamps every record', async () => {
+  const platform = await import('../src/platform/index.js');
+  const devices = await platform.listDevices();
+  for (const d of devices) assert.equal(d.platform, 'ios', 'every record says where it came from');
+  assert.deepEqual(
+    [...new Set(platform.permissionServices())].length,
+    platform.permissionServices().length,
+    'the unioned service menu has no duplicates',
+  );
+  // Unioned across one backend is that backend's list, in its order — which is
+  // what keeps the MCP tool description byte-identical.
+  const { PLATFORMS } = platform;
+  assert.deepEqual(platform.permissionServices(), PLATFORMS.ios.permissionServices());
 });
 
 test('nothing above the boundary shells out to a platform tool', async () => {
