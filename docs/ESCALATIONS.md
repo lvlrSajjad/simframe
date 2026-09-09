@@ -47,22 +47,34 @@ Two fields are worth explaining rather than leaving to be discovered:
 
 ## First breakdown — Phase 10, 2026-09-09
 
-Six agent flow runs on an iPhone 17 Pro (iOS 26.5), Apple M2 Pro, Xcode 26.6,
-all layers `simframed`. Flows: `flows/hpi-suite.json`, stock apps only.
+Twenty-two agent flow runs on an iPhone 17 Pro (iOS 26.5), Apple M2 Pro, Xcode
+26.6, all layers `simframed`. Flows: `flows/hpi-suite.json`, stock apps only.
 
 ```
-3 escalations
-  ambiguous_intent   3   would be removed by: icon semantics (Phase 15)
+19 escalations
+  ambiguous_intent      16   would be removed by: icon semantics (Phase 15)
+  verification_failed    3   would be removed by: sense of time (Phase 11)
 
-avoidable 3/3 (1.0)
-model turns spent on escalations: 3
+avoidable 19/19 (1.0)      outcomes: failed 19
+model turns spent on escalations: 19
 top screens:
-  5d3ee404fb88d3b2   3      (the Contacts list)
+  5d3ee404fb88d3b2      16      (the Contacts list)
 ```
 
-`settings-larger-text` produced **zero** escalations across three runs — four
-steps, all verified, one model turn. Every escalation came from
-`contacts-kate-bell`, all three the same one, on the same screen.
+**Three of these are artifacts and must not steer anything.** All three
+`verification_failed` records carry the detail `note is not a function` — a
+JavaScript TypeError from a name collision in this phase's own escalation
+recorder, since fixed (`docs/BENCHMARKS.md`, "Two faults found by measuring").
+The fallback classified them as `verification_failed` because a step that threw
+is a step whose effect could not be confirmed, which is the right rule applied
+to a bogus input. They are left in the log rather than deleted — the log is
+evidence, and evidence does not get edited when it is embarrassing — but the
+real reason distribution here is **16 escalations, all `ambiguous_intent`, all
+one screen**.
+
+`settings-larger-text` produces **zero** escalations across every clean run:
+four steps, all verified, one model turn. Every real escalation in this data
+comes from `contacts-kate-bell`, and they are all the same one.
 
 ### What the records say, which is not what the count says
 
@@ -76,38 +88,38 @@ for that field:
 "K"          (393,411)  source ocr                       score 0.86
 ```
 
-The first two are the same contact row. The accessibility tree reports the
-row; OCR reports the words inside it; the OCR box is wholly contained in the
-AX box; both score 1.0, so the matcher calls it ambiguous and refuses. Nothing
-about icons is involved. Two further facts make it sharper: `simframe ui`
-displays **one** "Kate Bell" — the renderer collapses the duplicate and the
-matcher that acts on it does not — and the OCR-only condition has one element
-there and resolves it, so the tree being *present* is what causes this.
+The first two are the same contact row. The accessibility tree reports the row;
+OCR reports the words inside it; the OCR box is wholly contained in the AX box;
+both score 1.00, so the matcher calls it ambiguous and refuses. Nothing about
+icons is involved. Two further facts make it sharper: `simframe ui` displays
+**one** "Kate Bell" — the renderer collapses the duplicate and the matcher that
+acts on it does not — and the OCR-only condition has one element there and
+resolves it, so the tree being *present* is what causes this.
 
 This is not a new discovery. It is filed in `docs/DEFERRED.md` ("A contact row
-is ambiguous with its own name"), found while measuring the accessibility
-tier, with the same diagnosis: the fix is probably in `collapseSamePlace`,
-where a text element wholly inside a row *is* that row. What Phase 10 adds is
-that it now carries a count, a screen fingerprint and the candidate list, so
-it can be tracked rather than remembered.
+is ambiguous with its own name"), found while measuring the accessibility tier,
+with the same diagnosis: the fix is probably in `collapseSamePlace`, where a
+text element wholly inside a row *is* that row. What Phase 10 adds is that it
+now carries a count, a screen fingerprint and the candidate list, so it can be
+tracked rather than remembered — and a price: it is the entire difference
+between `HPI_accuracy` 0.5 and 1.0.
 
 ### Next faculty, derived from the above
 
-**Not Phase 11 first, and not Phase 15.** The single escalation in this data
-is a same-element de-duplication in the fused element list — a bounded fix in
-perception, cheaper than any planned faculty, and worth roughly half of
-`HPI_accuracy` on this suite (`contacts-kate-bell` fails on every run because
-of it; it is the only reason accuracy is 0.5 rather than 1.0).
+**First, and it is not a faculty:** de-duplicate same-element entries in the
+fused list. One bounded change in perception, worth half of `HPI_accuracy` on
+this suite, cheaper than anything in Phases 11–16. Phase 10 forbids perception
+changes, so it is not done here. Do it before Phase 11.
 
-Phase 10 forbids perception changes, so it is not fixed here. It should be the
-first thing done after this phase, before Phase 11.
-
-**Phase 11 remains next among the faculties**, on different evidence: no
-escalation blames waiting, but the agent spends ~3.5 s per step and a human
-does not, so the time is going somewhere the escalation log cannot see. That
-makes it a Phase 11 target measured by HPI_time rather than by escalation
-count — which is the other half of what this series is scored on.
+**Then Phase 11 (adaptive waiting)**, on evidence the escalation log cannot
+see: `HPI_time` is 0.475 — the agent takes about twice a human's time — at
+`step_ratio` 1.0, so the cost is per step rather than in extra steps, and the
+Settings flow's IQR is a third of its own median. Variable per-step cost with
+nothing wasted on wandering is the shape of a timeout being waited out. No
+escalation blames waiting, which is precisely why this phase is scored on two
+numbers and not one.
 
 One caveat on this breakdown, stated because it bounds every conclusion above:
-six runs of two flows on Apple's own apps. The reason distribution from a
-third-party app with poorer labelling will not look like this.
+two flows on Apple's own apps, one device, one afternoon. The reason
+distribution from a third-party app with poorer labelling will not look like
+this.

@@ -427,6 +427,37 @@ export function breakdown(records) {
   };
 }
 
+/** >10% slower than the committed baseline fails. CLAUDE.md fixes this; research §1 sets it. */
+export const TIME_REGRESSION = 0.10;
+
+/**
+ * Compare a measurement against the committed baseline.
+ *
+ * A pure function rather than a few lines inside the CI script, because an
+ * untested gate is this project's recurring failure: the packaging check and a
+ * fingerprint eval both shipped unable to fail, and both looked exactly like
+ * this. Returns the reasons it should fail — empty means pass.
+ */
+export function gateAgainst(baseline, measured, { timeRegression = TIME_REGRESSION } = {}) {
+  const base = baseline?.overall ?? {};
+  const now = measured?.overall ?? measured ?? {};
+  const failures = [];
+  if (base.hpi_accuracy != null && now.hpi_accuracy != null && now.hpi_accuracy < base.hpi_accuracy) {
+    failures.push(`HPI_accuracy dropped: ${now.hpi_accuracy} < ${base.hpi_accuracy} (any drop fails)`);
+  }
+  if (base.hpi_time != null && now.hpi_time != null && now.hpi_time < base.hpi_time * (1 - timeRegression)) {
+    failures.push(
+      `HPI_time regressed >${timeRegression * 100}%: ${now.hpi_time} < ${(base.hpi_time * (1 - timeRegression)).toFixed(3)}`,
+    );
+  }
+  // A checkout missing the human baseline the committed number was computed
+  // against would otherwise pass by having nothing to compare.
+  if (base.hpi_time != null && now.hpi_time == null) {
+    failures.push('HPI_time is null but the baseline has one — the human baseline it needs is missing from this checkout');
+  }
+  return failures;
+}
+
 /** A flow id that sorts by time and is short enough to read in a log. */
 export function newFlowId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;

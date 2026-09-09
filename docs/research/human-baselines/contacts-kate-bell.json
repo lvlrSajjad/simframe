@@ -1,0 +1,39 @@
+{
+  "flow": "contacts-kate-bell",
+  "device": "326464A4-331E-47A3-A90F-6A2E85BCEE18",
+  "generated_at": "2026-09-09T18:49:17.259Z",
+  "runs": 5,
+  "wall_time_ms": {
+    "min": 3714,
+    "p25": 3760.5,
+    "p50": 4300,
+    "p75": 4815,
+    "max": 5301,
+    "iqr": 1054.5,
+    "n": 5
+  },
+  "steps_observed": {
+    "min": 3,
+    "p25": 3,
+    "p50": 3,
+    "p75": 3.5,
+    "max": 4,
+    "iqr": 0.5,
+    "n": 5
+  },
+  "steps_source": "screen-transitions",
+  "min_steps": 2,
+  "interaction_intervals_ms": {
+    "min": 748,
+    "p25": 763,
+    "p50": 978,
+    "p75": 1395,
+    "max": 2605,
+    "iqr": 632,
+    "n": 11
+  },
+  "runs_with_incomplete_history": 0,
+  "runs_recorded": 5,
+  "runs_excluded": [],
+  "note": "wall_time_ms is measured, from an explicit start and stop. steps_observed counts screen transitions and is an estimate of taps in BOTH directions — taps within 400ms merge into one, and a single tap that launches an app can produce two or three. Use min_steps, which comes from the flow definition. There is no host-readable HID log for human input, which is why the two numbers come from different places."
+}

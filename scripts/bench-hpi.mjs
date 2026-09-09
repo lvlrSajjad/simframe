@@ -36,9 +36,6 @@ const out = arg('out');
 const baselineFile = arg('baseline', path.join(ROOT, 'docs', 'research', 'hpi-baseline.json'));
 const gate = has('gate');
 
-/** >10% slower than the committed baseline fails, per research §1 and CLAUDE.md. */
-const TIME_REGRESSION = 0.10;
-
 const suite = baseline.loadSuite(arg('suite', baseline.SUITE_FILE)).filter((f) => !only || f.name === only);
 if (!suite.length) {
   console.error(`no flows to run${only ? ` matching "${only}"` : ''}`);
@@ -144,17 +141,8 @@ if (!committed) {
   process.exit(0);
 }
 
-const failures = [];
 const base = committed.overall ?? {};
-if (base.hpi_accuracy != null && o.hpi_accuracy != null && o.hpi_accuracy < base.hpi_accuracy) {
-  failures.push(`HPI_accuracy dropped: ${o.hpi_accuracy} < ${base.hpi_accuracy} (any drop fails)`);
-}
-if (base.hpi_time != null && o.hpi_time != null && o.hpi_time < base.hpi_time * (1 - TIME_REGRESSION)) {
-  failures.push(`HPI_time regressed >${TIME_REGRESSION * 100}%: ${o.hpi_time} < ${(base.hpi_time * (1 - TIME_REGRESSION)).toFixed(3)}`);
-}
-if (base.hpi_time != null && o.hpi_time == null) {
-  failures.push('HPI_time is null but the baseline has one — the human baseline it needs is missing from this checkout');
-}
+const failures = metrics.gateAgainst(committed, report);
 
 console.log(`\ngate vs ${path.relative(ROOT, baselineFile)} (measured ${committed.measured_at ?? '?'})`);
 console.log(`  HPI_accuracy ${base.hpi_accuracy ?? '—'} -> ${o.hpi_accuracy ?? '—'}`);

@@ -14,9 +14,17 @@
 //
 //   wall time     measured, from an explicit start and an explicit stop
 //   step count    derived from screen transitions in the frame history, which
-//                 is a lower bound (two taps inside one animation window read
-//                 as one) and is recorded as `source: screen-transitions`
-//                 rather than as taps
+//                 is an *estimate* in both directions and is recorded as
+//                 `source: screen-transitions` rather than as taps
+//
+// That second point was filed here as a "lower bound" and the first real
+// recording disproved it within the hour: a 4-tap Settings flow produced a
+// median of 3 transitions (two taps merged inside one window) and a 2-tap
+// Contacts flow produced 3 (one tap launched an app, whose launch animation
+// and whose content arrived more than a window apart). It is neither an upper
+// nor a lower bound. Nothing numeric rests on it — `min_steps` comes from the
+// flow definition and `step_ratio` uses that — so it stays as a shape-of-the-run
+// signal, correctly labelled.
 //
 // `min_steps` therefore comes from the authored flow definition, never from a
 // human run. What the human run is authoritative about is time.
@@ -166,6 +174,37 @@ export const recordRun = (udid, flow, run) => metrics.appendJsonl(runsFile(udid,
 export const readRuns = (udid, flow) => metrics.readJsonl(runsFile(udid, flow));
 
 /** How few runs is not a baseline. §1 recommends N≥5; below three there is no IQR worth printing. */
+/**
+ * Take a run out of the baseline without taking it out of the record.
+ *
+ * A wedged device produced four unusable runs the first time this was used on
+ * a real person: two slow ones, one that recorded 2.2 s and zero transitions,
+ * and one mid-recovery. Deleting them would have been the obvious move and the
+ * wrong one — a measurement log that gets edited when the numbers are
+ * inconvenient is not evidence. So the runs stay, carrying why they do not
+ * count, and `summarizeRuns` skips them. The alternative, a `--last=5` flag on
+ * summarize, was rejected: it puts the exclusion in the command that happened
+ * to be typed once rather than in the data, and the next person to summarize
+ * gets a different answer with no way to know it.
+ */
+export function markExcluded(runs, { keepLast, reason, at = Date.now() } = {}) {
+  if (!Number.isFinite(keepLast) || keepLast < 1) throw new Error('keepLast must be a positive number of runs');
+  const cut = Math.max(0, runs.length - keepLast);
+  return runs.map((run, i) => {
+    if (i >= cut || run.excluded) return run;
+    return { ...run, excluded: { reason: reason ?? 'unspecified', at: new Date(at).toISOString() } };
+  });
+}
+
+export function excludeRuns(udid, flow, { keepLast, reason } = {}) {
+  const runs = readRuns(udid, flow);
+  const marked = markExcluded(runs, { keepLast, reason });
+  const file = runsFile(udid, flow);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  store.writeAtomic(file, marked.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  return { file, total: marked.length, excluded: marked.filter((r) => r.excluded).length };
+}
+
 export const MIN_RUNS = 3;
 export const WANT_RUNS = 5;
 
@@ -177,7 +216,8 @@ export const WANT_RUNS = 5;
  * invites a comparison it cannot support.
  */
 export function summarizeRuns(flow, runs, { minSteps = null, device = null } = {}) {
-  const usable = runs.filter((r) => Number.isFinite(r?.wall_time_ms));
+  const excluded = runs.filter((r) => r?.excluded);
+  const usable = runs.filter((r) => Number.isFinite(r?.wall_time_ms) && !r.excluded);
   if (usable.length < MIN_RUNS) {
     return { ok: false, reason: 'too-few-runs', runs: usable.length, need: MIN_RUNS };
   }
@@ -196,7 +236,12 @@ export function summarizeRuns(flow, runs, { minSteps = null, device = null } = {
       min_steps: minSteps,
       interaction_intervals_ms: metrics.quartiles(usable.flatMap((r) => r.interaction_intervals_ms ?? [])),
       runs_with_incomplete_history: incomplete,
-      note: 'wall_time_ms is measured from an explicit start and stop. steps_observed is derived from screen transitions and is a lower bound on taps; min_steps comes from the flow definition. There is no host-readable HID log for human input.',
+      // Named in the committed baseline, not just in a shell history. A
+      // baseline that silently rests on a subset is a baseline nobody can
+      // check.
+      runs_recorded: runs.length,
+      runs_excluded: excluded.map((r) => ({ recorded_at: r.recorded_at, wall_time_ms: r.wall_time_ms, reason: r.excluded.reason })),
+      note: 'wall_time_ms is measured, from an explicit start and stop. steps_observed counts screen transitions and is an estimate of taps in BOTH directions — taps within 400ms merge into one, and a single tap that launches an app can produce two or three. Use min_steps, which comes from the flow definition. There is no host-readable HID log for human input, which is why the two numbers come from different places.',
     },
   };
 }

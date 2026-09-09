@@ -845,27 +845,58 @@ twice a short interval apart and only key on it once it stops growing — which
 costs a second perception pass and so needs measuring before it is adopted.
 Which of the four tabs produced the extra node has not been isolated.
 
-### Phase 10 left three things open, all of them inputs rather than code
-**The human baseline.** `simframe baseline record` works and no human has run
-it yet, so `HPI_time` and `HPI` are null — reported as null, deliberately, not
-as 1.0. Five runs per flow on the same simulator is the whole remaining input;
-`baseline summarize` refuses under three. Until then `simframe hpi` reports
-`HPI_accuracy` and `step_ratio` only, and says why.
+### The HPI gate's 10% threshold is tighter than the measurement's own noise
+`CLAUDE.md` fixes the `bench` gate at ">10% HPI_time regression or any
+HPI_accuracy drop". It is implemented exactly that way and it works — verified
+by an exit code, not through a pipe. What it did not have when it was decided
+is a variance number, and now it does: three runs of identical code on one
+device in one afternoon produced `HPI_time` 0.475 (warm), 0.413 (after a
+wedge), and 0.406 (freshly restarted). **A 17% spread against a 10%
+threshold.** The accuracy half is not affected — it is a ratio of whole runs
+and held at 0.5 across both healthy runs.
 
-**The committed gate baseline.** The `bench` CI job runs on every push and
-prints `GATE INACTIVE` because `docs/research/hpi-baseline.json` does not
-exist. It is loudly inactive rather than quietly green, which is the right
-failure, but it is not a gate until a measured run is adopted as the baseline.
-That should happen once the human side exists, so the first committed baseline
-has an `HPI_time` in it to regress against.
+Two things reduce it without touching the decision, and both are done: the
+committed baseline is the *cold* run, since CI boots a fresh simulator every
+job, and the gate compares p50s over N=5 rather than single runs. What remains
+is the random half, concentrated almost entirely in `settings-larger-text`
+(IQR 4591–5803 ms against a 13977–19199 ms median; `contacts-kate-bell` is
+stable to ±110 ms in the best run).
 
-**Where 3.5 s per step goes.** Measured: four steps take 14.2 s and two take
-11.2 s, at `step_ratio` 1.0 — the agent takes exactly the authored minimum
-number of steps, so the cost is per step and not wandering. Not measured: the
-split between the settle wait and the structural-identity pass, because
-instrumenting perception is precisely what Phase 10's prompt forbids. No
-escalation blames waiting, so this is invisible to the escalation log and only
-`HPI_time` can see it. It is Phase 11's target and its evidence.
+Three options if it proves flaky in practice, none of them taken here because
+the threshold is not mine to move: widen the time threshold to ~25% and keep
+accuracy strict; gate on the flow with the tighter distribution and report the
+other; or require the regression to repeat before failing. The first is
+probably right — HPI is described in the research as a trend metric, and a
+trend does not need a 10% trigger to be visible.
+
+### Two faults found while measuring Phase 10, both fixed or filed
+**The escalation recorder shadowed a local `note` string and failed real
+flows** — fixed. The recorder was named `note`; the step loop already had a
+`note` string for the no-visible-change suffix, so an escalating verdict
+called a string and threw `note is not a function` from inside the step's try
+block, which the catch turned into a failed step. Every guard against this was
+inside the recorder, one scope too deep to help. Three escalation records in
+this device's log carry that message and are artifacts; `docs/ESCALATIONS.md`
+names them so they cannot steer a phase.
+
+**A device restart leaves a live daemon's HID session dead for taps** — open.
+After the simulator was restarted mid-session, every tap dispatched
+successfully and moved nothing: `tapped "Accessibility" at 201,380 (memory
+d=0, via ax) [no visible change]`, correct coordinates, correct element, five
+runs in a row. `simframe stop && simframe start` cured it entirely. simframe's
+existing input recovery covers hardware buttons only, deliberately, because
+retrying a tap can act twice — so a tap has no such path and a whole flow can
+fail for a reason that has nothing to do with the flow. The verdict layer
+caught it honestly every time, which is the difference between a wrong answer
+and a slow one. What would fix it without retrying anything: notice that the
+device's boot session changed and rebuild the HID session before the next
+action, which is a cheap check against `simctl`'s boot time rather than a
+guess about a tap.
+
+Also observed twice in one afternoon: the capture wedge already filed as "only
+restarting the device is known to cure it". Both occurrences followed heavy
+relaunch cycling, and one followed Simulator.app being quit and reopened. That
+is frequency data on an entry that had none.
 
 ### The escalation log has two fields that cannot be filled honestly
 `tokens_spent` is always null: simframe is on the far side of the model from

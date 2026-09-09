@@ -1953,60 +1953,149 @@ navigation shifts it up.
 
 Apple M2 Pro, Xcode 26.6, iPhone 17 Pro on iOS 26.5, capture/input/OCR/tree all
 `simframed`. Flows are `flows/hpi-suite.json` — stock apps only, because these
-numbers get committed to a public repo. N=3 per flow, medians, and the full
-quartiles because with N=3 a median alone hides the spread.
+numbers get committed to a public repo. N=5 both sides, medians with quartiles,
+because with N=5 a median alone hides the spread and the spread is part of the
+finding.
 
-Phase 10 changed no perception and no action behaviour, so this is a
-measurement of 0.8.0 and not of anything new. It is the denominator every later
-phase is compared against.
+Phase 10 changed no perception and no action behaviour. This is a measurement of
+0.8.0, and it is the denominator every later phase is compared against.
+
+### The human side — measured, not assumed
+
+One person, five runs per flow, on this same booted simulator, at a natural
+pace after practice runs.
+
+| flow | taps | runs | p50 | IQR | min–max | median gap between transitions |
+|---|---|---|---|---|---|---|
+| `settings-larger-text` | 4 | 5 | **7799 ms** | 498 | 7487–8180 | 3682 ms |
+| `contacts-kate-bell` | 2 | 5 | **4300 ms** | 1055 | 3714–5301 | 978 ms |
+
+An IQR of 498 ms on a 7.8 s flow is a tester who knows the flow, which is what
+a baseline is supposed to measure. Nine runs of the Settings flow were
+recorded; the first four are marked excluded in the log — a capture task had
+wedged the device, and one of them recorded 2.2 s with zero transitions. They
+are annotated rather than deleted: a measurement log that gets edited when the
+numbers are inconvenient is not evidence, so the runs stay carrying why they do
+not count, and `summarizeRuns` skips them.
 
 ### The agent side
 
-| flow | min steps | runs | p50 | IQR | min–max | ms/step | model turns | escalations |
-|---|---|---|---|---|---|---|---|---|
-| `settings-larger-text` | 4 | 3 | 14211 ms | 2109 | 12279–14388 | 3553 | 1 | 0 |
-| `contacts-kate-bell` | 2 | 3 | 11230 ms | 1484 | 11207–12691 | 5615 | 2 | 3 |
+| flow | min steps | runs | p50 | IQR | min–max | ms/step | model turns |
+|---|---|---|---|---|---|---|---|
+| `settings-larger-text` | 4 | 5 | **13977 ms** | 4591 | 11982–18270 | 3494 | 1 |
+| `contacts-kate-bell` | 2 | 5 | **10407 ms** | 1204 | 10360–12517 | 5204 | 2 |
 
-`step_ratio` is 1.0 on both: the agent takes exactly the authored minimum
-number of steps. Whatever is wrong here is not wandering — it is per-step cost.
+### HPI, first reading
 
-**HPI_accuracy 0.5.** `contacts-kate-bell` fails on all three runs, refusing
-rather than guessing, on the already-filed ambiguity between a contact row and
-its own text (`docs/DEFERRED.md`, and quantified in `docs/ESCALATIONS.md`).
-`settings-larger-text` completes cleanly on all three.
+Measured warm, N=5 per flow, against the human baseline above:
 
-**HPI_time and HPI are null**, not 1.0 and not absent: no human baseline
-existed when these were measured, and a ratio with no denominator is reported
-as null. That is a deliberate property of `metrics.hpi` and has a test.
+| | |
+|---|---|
+| `HPI_time` `settings-larger-text` | **0.558** — the agent takes 1.79× the human's time |
+| `HPI_time` `contacts-kate-bell` | **0.413** — 2.42× |
+| `HPI_time` overall (harmonic mean) | **0.475** |
+| `HPI_accuracy` | **0.5** |
+| **`HPI`** | **0.237** |
+| `step_ratio` | **1.0** (target ≤1.5) |
+| model turns, median per flow | 1.5 |
 
-### Where 3.5 s per step goes
+Read plainly: **the agent is about twice as slow as a human and half as
+accurate**, and it wastes no steps getting there. Both halves have a single
+named cause, which is the point of measuring.
 
-Not measured per-component in this phase — that would have meant instrumenting
-perception, which the phase prompt forbids. What is known from the existing
-numbers in this file: each action step pays a settle wait plus **two**
-structural-identity readings (before and after), and the before-reading is
-already carried forward from the previous step's after-reading, so the marginal
-cost per step is one settle plus one perception pass. A human tapping four rows
-in Settings does not pay either.
+Accuracy is 0.5 because `contacts-kate-bell` fails on every run, refusing
+rather than guessing, on the contact-row ambiguity already filed in
+`docs/DEFERRED.md` and quantified in `docs/ESCALATIONS.md`. One fix is worth
+the whole 0.5.
 
-This is the number Phase 11 (adaptive waiting) is aimed at, and it is aimed
-there on this evidence rather than on the default phase order: no escalation in
-the log blames waiting, so the time is going somewhere the escalation log
-cannot see, and only HPI_time can.
+### The same code, measured three times
 
-### The human side
+This matters more than any single number above, and it was found by running the
+gate rather than by reasoning about it:
 
-Not yet recorded. `simframe baseline record <flow>` exists and works; five runs
-per flow by a person on this same simulator is the remaining input, and
-`baseline summarize` refuses under three. Until those land, `simframe hpi`
-prints HPI_accuracy and step_ratio and says plainly that HPI_time needs a human.
+| run | conditions | `HPI_time` | `HPI_accuracy` | settings p50 / IQR | contacts p50 / IQR |
+|---|---|---|---|---|---|
+| A | warm device, N=5 | 0.475 | 0.5 | 13977 / 4591 | 10407 / 1204 |
+| B | after a capture wedge and a SpringBoard crash, N=3 | 0.413 | 0.167 | 15376 / 5006 | 12325 / 1198 |
+| C | freshly restarted device, N=5 | 0.406 | 0.5 | 19199 / 5803 | 10570 / 110 |
 
-One limitation of that recorder, recorded here because the research assumed
-otherwise: §1 calls human baseline collection "essentially free" because HID
-events are already logged. That holds for events simframe *injects*. A person
-tapping the Simulator window leaves no host-readable HID log, so wall time is
-measured between an explicit start and stop, while the step count is derived
-from screen transitions in the frame history and is a lower bound — two taps
-inside one 400 ms animation window read as one. The recorder labels it
-`source: screen-transitions` rather than calling them taps, and `min_steps`
-comes from the flow definition instead.
+Identical code, identical flows, identical human baseline. **`HPI_time` spans
+0.406–0.475 — a 17% spread — against a gate threshold of 10%.** Run B is a
+legitimate catch: accuracy fell to 0.167 because SpringBoard crashed and two
+runs landed on the wrong screen, and the gate should fail that. Runs A and C
+differ only in how warm the simulator was, and the gate fails C against A.
+
+The variance is not spread evenly. `contacts-kate-bell` is stable to ±110 ms
+in the best run; `settings-larger-text` carries an IQR of a third of its own
+median in every run. A four-step flow whose per-step cost swings by seconds is
+the signature of waiting being waited out rather than observed — the same
+conclusion "where the time goes" reaches below, arrived at from a different
+direction.
+
+**The committed baseline is run C, the cold one**, on the reasoning that CI
+boots a fresh simulator for every job and would otherwise be compared against a
+warmth it never has. That removes the systematic half of the problem and not
+the random half; `docs/DEFERRED.md` records what is left, because the 10%
+threshold is a fixed decision in `CLAUDE.md` and now has data it did not have
+when it was made.
+
+### Where the time goes
+
+`step_ratio` is exactly 1.0 on both flows: the agent takes precisely the
+authored minimum number of steps. Nothing is being wasted on wandering — the
+cost is per step, ~3.5 s on Settings against a human's 3.7 s median gap between
+transitions, which sounds like parity until you notice the human's gap includes
+reading the screen and deciding, while the agent's does not.
+
+Not measured per-component here, because instrumenting perception is what this
+phase's prompt forbids. What is known from the numbers already in this file:
+each action step pays a settle wait plus a structural-identity reading, and the
+before-reading is carried forward from the previous step, so the marginal cost
+is one settle plus one perception pass per step. The Settings flow's IQR of
+4591 ms — a third of its own median — says that cost is also *variable*, which
+is the shape of a fixed timeout being waited out rather than a screen being
+observed.
+
+That makes Phase 11 (adaptive waiting) the next faculty, and it makes it so on
+this evidence rather than on the default order: no escalation in the log blames
+waiting, so this cost is invisible to the escalation log and only HPI_time can
+see it.
+
+### Two faults found by measuring, both worth recording
+
+**The instrumentation broke the thing it was measuring, for one run.** The
+escalation recorder was called `note`; the step loop already had a `note`
+string for the no-visible-change suffix. The shadowed call threw `note is not a
+function` from inside the step's try block, so the catch turned it into a
+failed step — an instrumentation bug that failed real flows, which is exactly
+the property the recorder's internal try/catch was supposed to guarantee. The
+guard was one scope too deep to help. Renamed, and the reason is in the code.
+
+**A device restart leaves a live daemon's HID session dead for taps.** After the
+simulator was restarted mid-session, every tap was dispatched successfully and
+moved nothing: `tapped "Accessibility" at 201,380 (memory d=0, via ax) [no
+visible change]`, on the correct coordinates for the correct element, five runs
+in a row. `simframe stop && simframe start` fixed it completely. simframe's
+existing input recovery covers hardware buttons only — deliberately, because
+retrying a tap can act twice — so a tap has no such path. Two things this
+confirms: the Indigo dispatch reporting success is not evidence the device
+acted, which this file already recorded for buttons, and the verdict layer
+caught it honestly every time rather than reporting a completed flow. Filed in
+`docs/DEFERRED.md`.
+
+### One limitation of the human recorder, since the research assumed otherwise
+
+§1 calls human baseline collection "essentially free" because HID events are
+already logged. That holds for events simframe *injects*. A person tapping the
+Simulator window leaves no host-readable HID log, so wall time is measured
+between an explicit start and stop, while the step count is derived from screen
+transitions in the frame history.
+
+That derived count was filed as a lower bound on taps, and the first human
+recording disproved it in both directions within the hour: the 4-tap Settings
+flow produced a median of **3** transitions — two taps merging inside one
+400 ms window — and the 2-tap Contacts flow produced **3**, because one tap
+launched an app whose launch animation and whose content arrived more than a
+window apart. It is an estimate, not a bound. Nothing numeric rests on it:
+`min_steps` comes from the flow definition and `step_ratio` uses that, so
+`steps_observed` stays a shape-of-the-run signal with the label it deserves.

@@ -118,7 +118,7 @@ The reliable pattern around an action is:
 const VALUE_FLAGS = new Set([
   'ago', 'count', 'detail', 'device', 'durationMs', 'engine', 'filter', 'fps', 'index', 'maxDim',
   'mode', 'out', 'ringSize', 'since', 'spanMs', 'stableMs', 'timeoutMs',
-  'last', 'runs', 'suite',
+  'last', 'runs', 'suite', 'keepLast', 'reason',
 ]);
 
 function parseArgs(argv) {
@@ -804,6 +804,17 @@ async function main() {
         return;
       }
 
+      if (sub === 'exclude') {
+        if (!name) throw new Error('usage: simframe baseline exclude <flow> --keep-last=<n> [--reason="..."]');
+        const dev = await resolveDevice(flags.device);
+        baseline.flowFrom(suite, name);
+        const keepLast = num(flags.keepLast, NaN);
+        if (!Number.isFinite(keepLast)) throw new Error('pass --keep-last=<n>: how many of the most recent runs to keep');
+        const res = baseline.excludeRuns(dev.udid, name, { keepLast, reason: flags.reason ? String(flags.reason) : undefined });
+        emit(flags, res, `${name}: ${res.excluded} of ${res.total} run(s) marked excluded — the runs stay in the log, carrying why`);
+        return;
+      }
+
       if (sub === 'summarize') {
         if (!name) throw new Error('usage: simframe baseline summarize <flow>');
         const dev = await resolveDevice(flags.device);
@@ -884,7 +895,18 @@ async function main() {
       // Named runs only, and only flows this suite defines. An ad-hoc `sim_do`
       // is timed and logged, but it has no human counterpart and averaging it
       // into a parity index would be inventing a comparison.
-      const runs = all.filter((f) => f.flow_name && names.has(f.flow_name) && (!flags.flow || f.flow_name === flags.flow));
+      let runs = all.filter((f) => f.flow_name && names.has(f.flow_name) && (!flags.flow || f.flow_name === flags.flow));
+      // `--last=n` keeps the n most recent runs of each flow. The log is
+      // append-only on purpose — it is the trend — but a local log carries
+      // runs from a wedged device and from a bug since fixed, and averaging
+      // those into today's number describes neither day. CI computes its
+      // number from one process's own runs and never needs this.
+      if (flags.last) {
+        const keep = num(flags.last);
+        const perFlow = new Map();
+        for (const r of runs) perFlow.set(r.flow_name, [...(perFlow.get(r.flow_name) ?? []), r]);
+        runs = [...perFlow.values()].flatMap((rs) => rs.slice(-keep));
+      }
       const report = metrics.hpi({ flows: runs, baselines: baseline.readBaselines() });
       if (flags.out) store.writeAtomic(String(flags.out), `${JSON.stringify(report, null, 2)}\n`);
       if (!runs.length) {
@@ -895,6 +917,7 @@ async function main() {
         return;
       }
       emit(flags, report, [
+        flags.last ? `the last ${num(flags.last)} run(s) of each flow, of ${all.filter((f) => f.flow_name).length} named runs in the log` : null,
         'flow                      runs  agent p50   human p50   HPI_time  step_ratio  turns  esc',
         ...report.flows.map((f) =>
           `${f.flow.padEnd(24)} ${String(f.runs).padStart(5)}  ${`${f.agent_ms.p50}ms`.padStart(9)}   ` +

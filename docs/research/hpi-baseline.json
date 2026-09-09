@@ -1,0 +1,72 @@
+{
+  "flows": [
+    {
+      "flow": "contacts-kate-bell",
+      "runs": 5,
+      "agent_ms": {
+        "min": 10437,
+        "p25": 10465.5,
+        "p50": 10570,
+        "p75": 10575.5,
+        "max": 10577,
+        "iqr": 110,
+        "n": 5
+      },
+      "human_median_ms": 4300,
+      "hpi_time": 0.407,
+      "step_ratio": 1,
+      "completed": 0,
+      "wrong_action": 0,
+      "escalations": 5,
+      "model_turns": 2
+    },
+    {
+      "flow": "settings-larger-text",
+      "runs": 5,
+      "agent_ms": {
+        "min": 12657,
+        "p25": 14615.5,
+        "p50": 19199,
+        "p75": 20418.5,
+        "max": 21306,
+        "iqr": 5803,
+        "n": 5
+      },
+      "human_median_ms": 7799,
+      "hpi_time": 0.406,
+      "step_ratio": 1,
+      "completed": 5,
+      "wrong_action": 0,
+      "escalations": 0,
+      "model_turns": 1
+    }
+  ],
+  "overall": {
+    "runs": 10,
+    "flows_measured": 2,
+    "flows_with_human_baseline": 2,
+    "hpi_accuracy": 0.5,
+    "hpi_time": 0.406,
+    "hpi": 0.203,
+    "step_ratio": 1,
+    "model_turns_median": 1.5
+  },
+  "measured_at": "2026-09-09T19:06:17.252Z",
+  "device": {
+    "udid": "326464A4-331E-47A3-A90F-6A2E85BCEE18",
+    "name": "iPhone 17 Pro",
+    "runtime": "iOS 26.5"
+  },
+  "runs_per_flow": 5,
+  "hard_failures": 0,
+  "human_baselines": {
+    "contacts-kate-bell": {
+      "runs": 5,
+      "p50": 4300
+    },
+    "settings-larger-text": {
+      "runs": 5,
+      "p50": 7799
+    }
+  }
+}

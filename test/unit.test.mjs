@@ -1690,3 +1690,51 @@ test('the flow suite is shipped, valid, and replayable as written', async () => 
   }
   assert.throws(() => baseline.flowFrom(suite, 'nope'), /no flow "nope"/);
 });
+
+test('a run leaves the baseline without leaving the record', async () => {
+  const baseline = await import('../src/baseline.js');
+  const runs = [1, 2, 3, 4, 5, 6, 7].map((n) => ({ recorded_at: `t${n}`, wall_time_ms: n * 1000, steps_observed: 4, interaction_intervals_ms: [] }));
+  const marked = baseline.markExcluded(runs, { keepLast: 5, reason: 'device wedged' });
+  assert.equal(marked.length, 7, 'nothing is deleted');
+  assert.equal(marked.filter((r) => r.excluded).length, 2);
+  assert.deepEqual(marked.slice(0, 2).map((r) => r.excluded.reason), ['device wedged', 'device wedged']);
+  assert.equal(marked[2].excluded, undefined);
+  // Idempotent, and an earlier reason is never overwritten by a later pass.
+  const again = baseline.markExcluded(marked, { keepLast: 6, reason: 'something else' });
+  assert.equal(again[0].excluded.reason, 'device wedged');
+  assert.equal(again.filter((r) => r.excluded).length, 2);
+  assert.throws(() => baseline.markExcluded(runs, { keepLast: 0 }), /positive number/);
+
+  // The summary rests on the kept runs and names the ones it dropped, so a
+  // committed baseline can be checked rather than trusted.
+  const res = baseline.summarizeRuns('f', marked, { minSteps: 4 });
+  assert.equal(res.summary.runs, 5);
+  assert.equal(res.summary.runs_recorded, 7);
+  assert.equal(res.summary.wall_time_ms.p50, 5000);
+  assert.equal(res.summary.runs_excluded.length, 2);
+  assert.equal(res.summary.runs_excluded[0].reason, 'device wedged');
+  // And an excluded run cannot prop up a baseline that is otherwise too small.
+  const thin = baseline.markExcluded(runs.slice(0, 4), { keepLast: 2, reason: 'x' });
+  assert.equal(baseline.summarizeRuns('f', thin).ok, false);
+});
+
+test('the HPI gate fails on the two conditions it is supposed to, and no others', async () => {
+  const metrics = await import('../src/metrics.js');
+  const base = { overall: { hpi_accuracy: 0.5, hpi_time: 0.475 } };
+  const at = (hpi_accuracy, hpi_time) => ({ overall: { hpi_accuracy, hpi_time } });
+
+  assert.deepEqual(metrics.gateAgainst(base, at(0.5, 0.475)), [], 'the baseline passes against itself');
+  assert.deepEqual(metrics.gateAgainst(base, at(1, 0.9)), [], 'better on both passes');
+  // 10% is the bound CLAUDE.md fixes: 0.4275 is exactly at it and passes.
+  assert.deepEqual(metrics.gateAgainst(base, at(0.5, 0.4275)), []);
+  assert.equal(metrics.gateAgainst(base, at(0.5, 0.427)).length, 1);
+  assert.match(metrics.gateAgainst(base, at(0.5, 0.427))[0], /HPI_time regressed/);
+  // Any accuracy drop at all, however small.
+  assert.match(metrics.gateAgainst(base, at(0.499, 0.475))[0], /HPI_accuracy dropped/);
+  assert.equal(metrics.gateAgainst(base, at(0.4, 0.3)).length, 2);
+  // A checkout with no human baseline must not pass by having nothing to compare.
+  assert.match(metrics.gateAgainst(base, at(0.5, null))[0], /missing from this checkout/);
+  // And with nothing committed there is nothing to fail against.
+  assert.deepEqual(metrics.gateAgainst(null, at(0.1, 0.1)), []);
+  assert.deepEqual(metrics.gateAgainst({ overall: {} }, at(0.1, 0.1)), []);
+});

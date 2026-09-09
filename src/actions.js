@@ -132,7 +132,13 @@ export async function runScript(
   const flowId = metrics.newFlowId();
   const escalations = [];
   const verdicts = [];
-  const note = (record) => {
+  // Named noteEscalation, not note: the step loop below declares its own
+  // `note` string for the no-visible-change suffix, which shadowed this and
+  // turned every escalating verdict into a failed step reading "note is not a
+  // function". The try/catch inside here could not help — the throw was at the
+  // call site, one scope out. Instrumentation that can fail a flow is worse
+  // than no instrumentation.
+  const noteEscalation = (record) => {
     try {
       escalations.push(metrics.recordEscalation(udid, { flowId, ...record }));
     } catch {
@@ -266,7 +272,7 @@ export async function runScript(
       const halt = haltDecision({ verification, stopOnUnexpected, continueOnError });
       if (verification?.verdict) verdicts.push(verification.verdict);
       if (metrics.ESCALATING_VERDICTS.has(verification?.verdict)) {
-        note({
+        noteEscalation({
           stepIndex: i,
           fingerprint: beforeScreen?.hash ?? null,
           reason: 'verification_failed',
@@ -288,7 +294,7 @@ export async function runScript(
     } catch (err) {
       results.push({ index: i, action: step.action, ok: false, ms: Date.now() - stepStart, error: err.message });
       const why = metrics.reasonForStepError(step, err);
-      note({
+      noteEscalation({
         stepIndex: i,
         fingerprint: beforeScreen?.hash ?? metrics.fingerprintNow(udid, screenmap),
         reason: why.reason,
