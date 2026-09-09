@@ -257,7 +257,14 @@ if (first) {
   // to defend — and it is how this check has failed twice.
   if (moved) {
     const stale = await cli(['find', `#${first.ref}`], { expectFail: true });
-    check(/different screen|read the screen/i.test(stale),
+    // Matched on prose, which is this check's weakness: simframe refused
+    // correctly with "#1 cannot be trusted here — simframe does not recognise
+    // this screen. Read it again", and the check failed because that wording was
+    // not one of the two it knew. The refusal is what matters, so the
+    // alternation covers how a refusal is actually phrased; the durable fix is a
+    // machine-readable reason on the failure, which `find --json` does not yet
+    // carry.
+    check(/different screen|read the screen|read it again|does not recognise this screen|cannot be trusted/i.test(stale),
       'a ref numbered on another screen refuses instead of tapping those coordinates',
       stale.trim().split('\n')[0]?.slice(0, 90));
   }
@@ -398,7 +405,13 @@ check(Array.isArray(nonsense.known) && nonsense.known.length > 0,
 
 const target = screens[0];
 const walked = await jsonRetry(['goto', target.hash], { allowFail: true });
-const outcomes = ['no-route', 'unreplayable-edge', 'ambiguous', 'unknown-screen'];
+// `no-identity` is new in 0.7.2 and belongs here: `goto` used to *throw*
+// `Cannot read properties of null (reading 'slice')` on a screen whose token set
+// was empty, because `hashTokens` returns null for one on purpose. A crash is
+// neither walking there nor naming why it cannot, so this check failed with an
+// empty detail — the reason was `undefined` — and the check was right to fail.
+// Now there is a name for it, and the list has to know the name.
+const outcomes = ['no-route', 'unreplayable-edge', 'ambiguous', 'unknown-screen', 'no-identity'];
 check(walked.ok === true || outcomes.includes(walked.reason),
   'and asked for a screen it knows, it either walks there or names why it cannot',
   walked.ok ? (walked.already ? 'already there' : `walked ${walked.ranSteps} step(s)`) : walked.reason);
