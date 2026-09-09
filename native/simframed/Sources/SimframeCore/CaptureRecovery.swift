@@ -36,9 +36,19 @@ public struct CaptureRecovery {
     /// failure count does keep growing because nothing resets it.
     public static let stalledAfterFailures = reattachAfterFailures * 3
 
+    /// How many times to rebind the device per stall episode.
+    ///
+    /// Bounded because a rebind asks CoreSimulator for the whole device list
+    /// and warms input: worth doing when re-resolving has failed twice, not
+    /// worth doing every half second forever. Two attempts, then the loop goes
+    /// back to reporting the state it is in.
+    public static let maxRebinds = 2
+
     public private(set) var consecutiveFailures = 0
     /// Successful re-resolves since the last real frame.
     public private(set) var reattaches = 0
+    /// Full rebinds since the last real frame.
+    public private(set) var rebinds = 0
     private let threshold: Int
 
     public init(threshold: Int = CaptureRecovery.reattachAfterFailures) {
@@ -54,12 +64,24 @@ public struct CaptureRecovery {
         reattaches >= Self.stalledAfterReattaches || consecutiveFailures >= Self.stalledAfterFailures
     }
 
+    /// Has re-resolving the port had its chance?
+    ///
+    /// Two successful re-resolves with no frame between them is the port
+    /// telling us it was never the problem. That was already the *stalled*
+    /// signal; now it is also the trigger to try the one thing that had only
+    /// ever been done by hand — rebinding to the device, which is what
+    /// restarting the daemon did.
+    public var needsRebind: Bool {
+        reattaches >= Self.stalledAfterReattaches && rebinds < Self.maxRebinds
+    }
+
     public mutating func captureSucceeded() {
         consecutiveFailures = 0
         // A real frame is the only evidence that health is back. Resetting this
         // anywhere else — on a re-resolve, say — is how the loop above stayed
         // invisible.
         reattaches = 0
+        rebinds = 0
     }
 
     /// Records a failure and says whether the port is now due a re-resolve.
@@ -88,6 +110,32 @@ public struct CaptureRecovery {
         } catch {
             // Deliberately not reset: if the port cannot be re-resolved, the
             // next failure should try again rather than wait for another six.
+            return .failure(error)
+        }
+    }
+
+    /// Rebind to the device itself, and re-arm the callback on the new port.
+    ///
+    /// The escalation `needsRebind` gates. Re-arming matters here for the same
+    /// reason it does in `reattach`: a fresh descriptor with no callback on it
+    /// is a daemon that has recovered and will never notice another change,
+    /// which looks exactly like the failure it just recovered from.
+    public mutating func rebind(
+        platform: SimulatorPlatform,
+        udid: String?,
+        onDamage: @escaping () -> Void
+    ) -> Result<Int, Error> {
+        let failures = consecutiveFailures
+        rebinds += 1
+        do {
+            _ = try platform.reattachDevice(udid: udid)
+            try platform.observeChanges(onDamage)
+            consecutiveFailures = 0
+            // `reattaches` is deliberately left alone. It is the evidence that
+            // the port was not the problem, and a rebind does not make that
+            // untrue — only a real frame does, in captureSucceeded().
+            return .success(failures)
+        } catch {
             return .failure(error)
         }
     }

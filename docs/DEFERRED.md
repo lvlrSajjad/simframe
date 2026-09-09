@@ -953,7 +953,7 @@ defined, with the degeneracy stated in the doc, rather than redefined to look
 meaningful — but it means the per-reason breakdown is the number that decides
 phase order, and the rate is decoration until Phase 12 lands.
 
-### The capture wedge: measured four times, cause still unproven
+### The capture wedge: it is the simulator's display, and it often heals
 Capture stops with `the display surface could not be read`, the daemon
 re-resolves the display port, and every read after that fails identically until
 the **device** is restarted. Four occurrences in one session, all during flow
@@ -963,29 +963,34 @@ different code from a regression, so a CI job can tell them apart).
 
 Two candidate mechanisms, and the honest state of each:
 
-**Memory pressure.** The daemon's RSS was 732 MB after 11 minutes and 2831
-frames, which is absurd for a process that holds one frame at a time — and then
-it fell to 530 MB over 25 seconds, so it is *not* a monotonic leak. There is no
-`autoreleasepool` anywhere in the capture loop; the only ones in the package are
-in `AccessibilityBridge`. On Darwin, a tight loop creating CF/ObjC temporaries
-with no pool of its own is the standard way to get a working set this shape.
-Worth fixing on its own merits whether or not it causes the wedge.
+**Answered, and it was neither candidate.** Both were built and measured; the
+numbers are in `docs/BENCHMARKS.md` under "The capture wedge, diagnosed".
 
-**A surface handle that is invalid for the rest of the boot session.** Fits the
-evidence better: re-resolving the display port does not help, and only
-restarting the device does. That would mean the fix is a full
-re-registration of the IOSurface callback with a fresh UUID, not a port
-re-resolve.
+The display pipeline stops rendering. `simctl io screenshot` on a wedged device
+*succeeds* and returns a valid PNG whose 3,162,132 pixels are all black, in
+16.2 s — so Apple's own path agrees the screen is black, and simframe's failed
+read is an accurate report of it rather than a bug in it. One session's log
+holds 223 port re-resolves and 6 device rebinds, none of which cured anything,
+and 9 `capture recovered on its own` lines, which is what usually does.
 
-What would settle it: log RSS and peak footprint every N frames, so a wedge can
-be correlated with a spike or exonerated; then try full re-registration on N
-consecutive failures and see whether it recovers without a device restart.
+Memory is exonerated. RSS is logged every second now and the shape is a
+sawtooth, not a leak: 202 MB to 306 MB under load, 313 MB back down to 265 MB
+idle. A few hundred megabytes cannot exhaust a machine with tens of gigabytes.
+The `autoreleasepool` the capture loop was missing is in place and did not
+change the profile materially; it stays as hygiene.
 
-Regardless of cause, the mitigation is the one this project's own rules
-prescribe and capture does not yet do: **degrade rather than fail** — fall back
-to the screenshot engine when the framebuffer path is wedged, and say so in
-`doctor` and `sim_state`. A wedge currently takes the whole tool down for a
-cause the agent cannot see.
+The third option, degrading to the screenshot engine, is **not worth building
+for this**: the screenshot engine reads the same black display. Measuring
+before building is what saved that work.
+
+What remains open is smaller and better shaped: a wedged simulator is a
+simulator bug, and simframe's job is to name it fast. `doctor` now runs a
+screenshot probe on a published stall and says whether the display is black
+(the simulator) or readable by simctl while the daemon cannot read the surface
+(a simframe bug, worth reporting). What would improve further: notice the black
+screen *before* the stall — every frame is already decoded, so an all-black
+frame is nearly free to spot — and tell `sim_do` to wait for a likely
+self-recovery instead of failing the flow.
 
 ### HPI is not gated on hosted CI, and the reason is simctl
 The `bench` job runs on every push and cannot yet fail a build for a

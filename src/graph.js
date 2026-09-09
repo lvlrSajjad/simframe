@@ -9,10 +9,74 @@ import path from 'node:path';
 import { hashDistance } from './analyze.js';
 import { informative } from './refs.js';
 import * as fingerprint from './fingerprint.js';
+import * as metrics from './metrics.js';
 import * as matching from './matching.js';
 import * as store from './store.js';
 
 const GRAPH_VERSION = 3;
+
+/**
+ * How many observed settle durations an edge remembers. Research §7.
+ *
+ * Fifty is a window, not a history: an app that got faster after an update
+ * should stop being waited for at its old speed, and a mean over everything
+ * ever observed never forgets.
+ */
+export const TIMING_WINDOW = 50;
+/** Below this many samples an edge has no distribution worth trusting. */
+export const COLD_SAMPLES = 5;
+/**
+ * What a cold edge waits: exactly what every step waited before Phase 11.
+ *
+ * Deliberately unchanged, so the first traversal of an edge behaves as it
+ * always did and only a *measured* edge gets a tighter bound. A conservative
+ * default that is also the historical default cannot make anything worse.
+ */
+export const COLD_TIMEOUT_MS = 8000;
+/**
+ * The hard cap on waiting, from research §7: Nielsen's attention limit. Past
+ * ten seconds a person has stopped believing the screen is coming, and so
+ * should the agent — it escalates instead.
+ */
+export const HARD_CAP_MS = 10_000;
+
+/**
+ * How long to wait for a transition that has been measured.
+ *
+ * p95 plus a margin, where the margin is the larger of 150 ms and a fifth of
+ * p95. The floor matters for fast edges: a tab switch with a p95 of 90 ms
+ * would otherwise get a 108 ms budget, and one slow frame would call a
+ * perfectly ordinary transition a timeout.
+ */
+export function adaptiveTimeout({ p95, samples } = {}) {
+  if (!Number.isFinite(p95) || !Number.isFinite(samples) || samples < COLD_SAMPLES) {
+    return { timeoutMs: COLD_TIMEOUT_MS, cold: true, reason: `fewer than ${COLD_SAMPLES} samples` };
+  }
+  const margin = Math.max(150, Math.round(p95 * 0.2));
+  return { timeoutMs: Math.min(HARD_CAP_MS, p95 + margin), cold: false, reason: null, margin };
+}
+
+/**
+ * Is this transition taking longer than this edge usually does?
+ *
+ * Two different answers hide behind a slow transition, and §7 asks for both:
+ * a screen that is *working* (a spinner, a load) should be waited for up to
+ * the hard cap, while a screen that is doing nothing visible has already
+ * given its answer. The classifier's `loading` kind is what separates them.
+ */
+export function slowerThanUsual({ elapsedMs, p95, settled, kind } = {}) {
+  if (settled || !Number.isFinite(elapsedMs) || !Number.isFinite(p95)) return { slower: false };
+  if (elapsedMs <= p95) return { slower: false };
+  const working = kind === 'loading';
+  return {
+    slower: true,
+    working,
+    keepWaiting: working && elapsedMs < HARD_CAP_MS,
+    note: working
+      ? `slower than usual (${elapsedMs}ms against a p95 of ${p95}ms) and still loading`
+      : `slower than usual (${elapsedMs}ms against a p95 of ${p95}ms) with nothing visibly happening`,
+  };
+}
 
 /**
  * Which fingerprint produced the hashes in these files.
@@ -276,7 +340,44 @@ export function findScreen(udid, query) {
 }
 
 /** Remember that doing `action` on `from` led to `to`. */
-export function record(udid, { from, action, to, kind }) {
+/**
+ * Add one observed settle duration to an edge's rolling window.
+ *
+ * Kept on the edge rather than in a separate store because it is a property of
+ * this transition on this screen — the same tap costs 90 ms on a tab bar and
+ * 2.4 s on a screen that fetches — and because the graph is already persisted,
+ * versioned and pruned.
+ */
+function noteSettle(edge, settleMs) {
+  if (!Number.isFinite(settleMs) || settleMs < 0) return;
+  edge.settles = [...(edge.settles ?? []), Math.round(settleMs)].slice(-TIMING_WINDOW);
+}
+
+/** What this edge's observed settle durations say, or that it has none. */
+export function timingOf(edge) {
+  const samples = edge?.settles ?? [];
+  return {
+    samples: samples.length,
+    p50: metrics.percentile(samples, 50),
+    p95: metrics.percentile(samples, 95),
+  };
+}
+
+/**
+ * How long to wait for `step` on `screen`, from what it has cost before.
+ *
+ * Returns the cold default when this screen or this action has not been
+ * measured, and says which — a timeout nobody can explain is how a fixed sleep
+ * gets reintroduced as a constant with a comment.
+ */
+export function timingFor(udid, screen, step) {
+  const node = screen?.hash ? nearestScreen(udid, screen)?.node : null;
+  const edge = node?.edges?.find((e) => e.action === actionSignature(step));
+  const stats = timingOf(edge);
+  return { ...stats, ...adaptiveTimeout(stats), known: Boolean(edge) };
+}
+
+export function record(udid, { from, action, to, kind, settleMs }) {
   const fromKey = typeof from === 'string' ? { hash: from } : from;
   const toHash = typeof to === 'string' ? to : to?.hash;
   if (!fromKey?.hash || !toHash) return null;
@@ -343,6 +444,7 @@ export function record(udid, { from, action, to, kind }) {
         save(udid, target);
         existing.count += 1;
         existing.lastSeen = Date.now();
+        noteSettle(existing, settleMs);
         save(udid, node);
         return node;
       }
@@ -354,6 +456,7 @@ export function record(udid, { from, action, to, kind }) {
     existing.kind = kind ?? existing.kind;
     existing.count += 1;
     existing.lastSeen = Date.now();
+    noteSettle(existing, settleMs);
   } else {
     node.edges.push({
       action: signature,
@@ -364,6 +467,7 @@ export function record(udid, { from, action, to, kind }) {
       kind,
       count: 1,
       lastSeen: Date.now(),
+      settles: Number.isFinite(settleMs) && settleMs >= 0 ? [Math.round(settleMs)] : [],
     });
   }
   save(udid, node);

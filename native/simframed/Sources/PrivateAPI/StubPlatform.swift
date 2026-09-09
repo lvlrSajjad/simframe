@@ -33,6 +33,10 @@ public final class StubPlatform: SimulatorPlatform {
     /// Counted so a test can assert the capture loop actually tries to recover
     /// rather than logging the same failure forever.
     public private(set) var reattachCount = 0
+    /// Full rebinds, counted separately: the escalation is a different act
+    /// from re-resolving a port and a test that cannot tell them apart cannot
+    /// assert the escalation happened.
+    public private(set) var rebindCount = 0
     private var attachedUdid: String?
 
     /// Counted, so a test can assert that a dead input path is actually retried.
@@ -47,6 +51,13 @@ public final class StubPlatform: SimulatorPlatform {
     public func reattachDisplay() throws -> DeviceInfo {
         reattachCount += 1
         if failReattach { throw PrivateAPIError.noDisplayPort }
+        return DeviceInfo(udid: attachedUdid ?? "STUB-0000", name: "Stub Device", runtime: "iOS 26.0")
+    }
+
+    public func reattachDevice(udid: String?) throws -> DeviceInfo {
+        rebindCount += 1
+        if failReattach { throw PrivateAPIError.noDisplayPort }
+        attachedUdid = udid ?? attachedUdid
         return DeviceInfo(udid: attachedUdid ?? "STUB-0000", name: "Stub Device", runtime: "iOS 26.0")
     }
 

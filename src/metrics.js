@@ -324,6 +324,20 @@ export function quartiles(xs) {
   return { min: s[0], p25, p50: median(s), p75, max: s[s.length - 1], iqr: p75 - p25, n: s.length };
 }
 
+/**
+ * The p-th percentile, by nearest-rank on the sorted sample.
+ *
+ * Nearest-rank rather than interpolation: with the 5-50 samples a graph edge
+ * carries, an interpolated p95 invents a value between two observations, and
+ * every number here is supposed to be one that actually happened.
+ */
+export function percentile(xs, p) {
+  const s = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+  if (!s.length) return null;
+  const rank = Math.ceil((p / 100) * s.length);
+  return s[Math.min(s.length - 1, Math.max(0, rank - 1))];
+}
+
 /** The mean that punishes one slow flow, which is why §1 asks for it. */
 export function harmonicMean(xs) {
   const s = xs.filter((x) => Number.isFinite(x) && x > 0);

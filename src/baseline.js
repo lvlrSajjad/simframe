@@ -33,7 +33,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as api from './index.js';
 import * as input from './input.js';
-import { terminateApp } from './platform/index.js';
+import { launchApp, terminateApp } from './platform/index.js';
 import * as metrics from './metrics.js';
 import * as store from './store.js';
 
@@ -155,6 +155,37 @@ export function runFrom({ flow, startedAt, endedAt, history, oldestHistoryAt = n
 export async function resetFor(udid, flow) {
   const reset = flow.reset ?? {};
   const failures = [];
+  // Put the app back on its own root screen before killing it.
+  //
+  // iOS restores an app to the screen you left it on, and terminating it does
+  // not clear that: `settings-larger-text` failed 3 of 4 runs with
+  // `unexpected-screen` because Settings reopened on Larger Text — its own
+  // destination — so step 1 tapped "Accessibility" on a screen that has no
+  // such row. A human hits this too: one of the five recorded human runs
+  // measured 2.2 s with zero transitions, and it is the run that had to be
+  // excluded.
+  //
+  // Navigating back is reset work and is never timed, so it costs the
+  // measurement nothing and buys every run the same starting screen. Bounded,
+  // and it gives up quietly: a reset that cannot reach root reports it, and a
+  // failing run says more than a reset that loops.
+  if (reset.rootMarker && reset.launch) {
+    try {
+      await launchApp(udid, reset.launch, { terminateFirst: true });
+      for (let attempt = 0; attempt <= (reset.maxBack ?? 4); attempt += 1) {
+        await api.waitFor(udid, { mode: 'stable', stableMs: 350, timeoutMs: 3000 });
+        try {
+          await api.locate(udid, reset.rootMarker, { refresh: attempt > 0 });
+          break;
+        } catch {
+          const back = await api.locate(udid, 'back', { refresh: true });
+          await input.tapPoint(udid, back.target.x, back.target.y);
+        }
+      }
+    } catch (err) {
+      failures.push(`could not return ${reset.launch} to its root screen: ${err.message}`);
+    }
+  }
   for (const bundle of reset.terminate ?? []) {
     try {
       await terminateApp(udid, bundle);

@@ -2198,3 +2198,66 @@ anywhere in the capture loop (only in `AccessibilityBridge`), which is the
 usual cause of a working set that size in a Darwin capture loop. Whether that
 pressure is what invalidates the surface is unproven, and saying so is the
 point — filed in `docs/DEFERRED.md` with what it would take to settle it.
+
+## The capture wedge, diagnosed
+
+Two candidate mechanisms were filed for it. Both were built and both are now
+falsified, and the answer turned out to be neither.
+
+### What was tried
+
+**Choose the display port by evidence, not by its own claim.** The resolver
+accepted any port reporting a nonzero `displaySize`, which is why the daemon
+could log `re-resolved the display port after 6 failed reads` and then fail six
+more, forever: a torn-down port keeps reporting a size while
+`framebufferSurface` returns nil. It now validates a candidate by taking a
+surface from it, and escalates to rebinding the device — a fresh device object
+from a fresh `devices()` call — when two re-resolves have not helped.
+
+**An `autoreleasepool` per capture, and RSS in the log every second.** There was
+no pool anywhere in the capture loop, which is the standard way to get the
+working set this daemon had.
+
+### What they measured
+
+| | |
+|---|---|
+| port re-resolves in one session's log | **223** |
+| device rebinds, after the escalation landed | **6** |
+| wedges cured by either | **0** |
+| `capture recovered on its own` lines in the same log | **9** |
+| `simctl io screenshot` on a wedged device | **succeeds** — 16.2 s, and **0** non-black pixels of 3,162,132 |
+
+So the display pipeline stops rendering, and simframe's failed read is an
+accurate report of that. Apple's own screenshot path agrees: it returns a valid
+PNG that is entirely black. Nothing about the handle is stale — which is why
+223 re-resolves and 6 rebinds changed nothing — and a screenshot-engine
+fallback, the third option on the table, would have captured the same black
+frames. Measuring first is what stopped that one being built.
+
+It also frequently recovers by itself. simframe had been telling users the
+opposite: `only restarting the device is known to cure it`, in the same daemon
+whose log contained nine self-recoveries. Corrected.
+
+### What changed as a result
+
+The port validation and the rebind escalation stay: selecting a port by whether
+it produces a surface is better than trusting a size claim whether or not it
+cures anything, and the escalation is bounded at two attempts per episode.
+Neither is now described as a cure.
+
+`simframe doctor` runs a screenshot probe when capture publishes a stall and
+distinguishes the two faults it could be: *the device's display is rendering
+black — this is the simulator*, or *simctl can see lit pixels while the daemon
+cannot read the surface at all — that is a simframe bug, worth reporting with
+this line*. Telling those apart by hand took an hour.
+
+### Memory, exonerated
+
+RSS is logged every second now, and the shape is a sawtooth rather than a leak:
+202 MB climbing to 306 MB under a flow suite, then 313 MB falling to 265 MB
+while idle. Peak was 303 MB over 957 frames against 732 MB over 2831 frames
+before the pool — roughly the same per-frame accumulation, so the pool did not
+change the profile materially. It stays as hygiene. And a few hundred megabytes
+on a machine with tens of gigabytes cannot exhaust anything, so memory pressure
+is not the wedge either. That is the value of the number: it removed a suspect.

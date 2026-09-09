@@ -315,10 +315,24 @@ function stallNote(health) {
   const parts = [`capture: stalled — the display surface has been unreadable for ${Math.round(forMs / 1000)}s`];
   if (health.reattaches) parts.push(`${health.reattaches} re-attach${health.reattaches === 1 ? '' : 'es'} did not help`);
   if (health.reason) parts.push(String(health.reason).slice(0, 120));
-  // The cure is the user's to apply. Saying so is the difference between an
-  // agent that reports "the simulator is wedged" and one that retries a tap
-  // twenty times because nothing appeared to change.
-  parts.push('only restarting the device is known to cure it');
+  // What to do about it, and this line has been wrong until now.
+  //
+  // It said "only restarting the device is known to cure it". Then the same
+  // daemon's log turned out to contain nine "capture recovered on its own"
+  // lines, and a wedge that had survived 223 port re-resolves and 6 device
+  // rebinds cleared by itself while nobody touched it. Meanwhile Apple's own
+  // `simctl io screenshot` on a wedged device returns a valid PNG whose every
+  // pixel is black, in 16 s — so the display pipeline has stopped rendering
+  // and simframe's read is an accurate report of that, not a bug in it.
+  //
+  // So: it is the simulator, it often comes back, and restarting the device
+  // also cures it. `simframe doctor` runs a screenshot probe when this is
+  // published and says which of the two faults it is.
+  parts.push(
+    "this is the simulator's display, not simframe's read of it: Apple's own screenshot path "
+    + 'returns an all-black image on a wedged device. It frequently recovers on its own; '
+    + 'restarting the device also cures it, and `simframe doctor` will confirm which fault this is',
+  );
   return parts.join('; ');
 }
 

@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { runDaemon, DEFAULTS } from './daemon.js';
-import { bootedDevices, capabilitiesFor, listDevices, PLATFORMS, resolveDevice, toolchainChecks } from './platform/index.js';
+import { bootedDevices, capabilitiesFor, listDevices, PLATFORMS, resolveDevice, screenshot, toolchainChecks } from './platform/index.js';
 import * as actions from './actions.js';
 import * as api from './index.js';
 import * as input from './input.js';
 import * as baseline from './baseline.js';
 import * as metrics from './metrics.js';
 import * as navigate from './navigate.js';
+import { decodePng } from './png.js';
 import * as store from './store.js';
 import * as view from './view.js';
 
@@ -1014,6 +1016,52 @@ async function main() {
  * removed, and a fresh machine without it has not degraded from anything.
  * Strict fails on warn and fail, never on optional.
  */
+/**
+ * Is the device's display black, or is it only simframe that cannot read it?
+ *
+ * Two very different faults with one symptom, and telling them apart by hand
+ * took an hour: `simctl io screenshot` on a wedged device wrote a valid PNG
+ * whose 3.16 million pixels were all black, in 16.2 s. So the display pipeline
+ * had failed and simframe's read was an accurate report of it.
+ *
+ * Slow on purpose-built-in: this runs once, only when capture has already
+ * declared itself stalled, and 16 s of certainty beats an hour of guessing.
+ */
+async function blackScreenProbe(udid) {
+  const file = path.join(os.tmpdir(), `simframe-probe-${Date.now()}.png`);
+  const startedAt = Date.now();
+  try {
+    await screenshot(udid, file);
+    const png = decodePng(fs.readFileSync(file));
+    let lit = 0;
+    for (let i = 0; i < png.data.length; i += 4) {
+      if (png.data[i] > 12 || png.data[i + 1] > 12 || png.data[i + 2] > 12) lit += 1;
+    }
+    const ms = Date.now() - startedAt;
+    const pixels = png.data.length / 4;
+    if (lit === 0) {
+      return {
+        value: 'black',
+        detail: `the device's display is rendering black — every one of ${pixels.toLocaleString()} pixels, `
+          + `confirmed through Apple's own screenshot path in ${ms}ms. This is the simulator, not simframe: `
+          + 'it often recovers on its own, and restarting the device also cures it. Re-resolving the '
+          + 'display port and rebinding the device have both been tried — 223 and 6 times — and neither '
+          + 'makes any difference, because there is nothing wrong with the handle.',
+      };
+    }
+    return {
+      value: 'readable-by-simctl',
+      detail: `simctl can see ${lit.toLocaleString()} lit pixels of ${pixels.toLocaleString()} in ${ms}ms `
+        + 'while the daemon cannot read the surface at all. That is a simframe bug, not a wedged simulator — '
+        + 'worth reporting with this line.',
+    };
+  } catch (err) {
+    return { value: 'unreadable', detail: `even simctl could not screenshot this device: ${err.message}` };
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+}
+
 async function doctor({ json = false, strict = false, device } = {}) {
   const checks = [];
   // `level` is 'ok' | 'warn' | 'fail'. A warn means it works but not the way it
@@ -1147,6 +1195,26 @@ async function doctor({ json = false, strict = false, device } = {}) {
           driver.available ? `${driver.name}: ${driver.version}` : driver.reason,
           { key: 'input.driver', value: driver.available ? driver.name : null });
       }
+      // When capture is wedged, say whose fault it is.
+      //
+      // Established the hard way: on a wedged device, Apple's own
+      // `simctl io screenshot` still succeeds — and returns an image with zero
+      // non-black pixels, in 16 seconds instead of one. The simulator's
+      // display pipeline is rendering black; simframe's IOSurface read is not
+      // the thing that broke. Re-resolving the port does not help, and neither
+      // does rebinding the device: both were tried, the second six times.
+      //
+      // That distinction is the whole value of this check. "simframe cannot
+      // read the display" invites someone to debug simframe; "the device's
+      // display is black and Apple's screenshot agrees" tells them to restart
+      // the device. The probe costs one screenshot and only runs when capture
+      // has already given up.
+      const wedged = store.captureHealth(d.udid)?.stalled;
+      if (wedged) {
+        const probe = await blackScreenProbe(d.udid);
+        add(`display (${d.name})`, 'fail', probe.detail, { key: 'display.probe', value: probe.value });
+      }
+
       // Reported next to the driver it is about. A driver that is present and
       // working is still useless if it holds a session for a device session
       // that no longer exists, and that state was invisible: taps were

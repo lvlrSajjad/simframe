@@ -14,7 +14,10 @@
       "terminate": [
         "com.apple.Preferences"
       ],
-      "home": true
+      "home": true,
+      "launch": "com.apple.Preferences",
+      "rootMarker": "Accessibility",
+      "maxBack": 4
     },
     "steps": [
       {
@@ -47,7 +50,10 @@
       "terminate": [
         "com.apple.MobileAddressBook"
       ],
-      "home": true
+      "home": true,
+      "launch": "com.apple.MobileAddressBook",
+      "rootMarker": "Kate Bell",
+      "maxBack": 3
     },
     "steps": [
       {

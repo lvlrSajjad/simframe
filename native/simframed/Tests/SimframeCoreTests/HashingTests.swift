@@ -332,6 +332,46 @@ final class CaptureRecoveryTests: XCTestCase {
         XCTAssertEqual(recovery.reattaches, 0)
     }
 
+    func testTwoDeadReResolvesEscalateToRebindingTheDevice() {
+        // The cure that used to require a human. Two successful re-resolves
+        // with no frame between them says the port was never the problem, so
+        // the next attempt rebinds the device itself — which is what
+        // restarting the daemon did, and it was the only known cure for four
+        // wedges in one afternoon.
+        let platform = StubPlatform()
+        _ = try? platform.attach(udid: "STUB-1")
+        var recovery = CaptureRecovery(threshold: 1)
+
+        XCTAssertFalse(recovery.needsRebind, "a healthy loop rebinds nothing")
+        _ = recovery.captureFailed()
+        _ = recovery.reattach(platform: platform, onDamage: {})
+        XCTAssertFalse(recovery.needsRebind, "one re-resolve deserves the benefit of the doubt")
+        _ = recovery.captureFailed()
+        _ = recovery.reattach(platform: platform, onDamage: {})
+        XCTAssertTrue(recovery.needsRebind, "two is enough")
+
+        var damaged = false
+        let outcome = recovery.rebind(platform: platform, udid: "STUB-1") { damaged = true }
+        guard case .success = outcome else { return XCTFail("rebind should succeed on a live stub") }
+        XCTAssertEqual(platform.rebindCount, 1, "it rebound the device, not the port")
+        XCTAssertEqual(platform.reattachCount, 2, "and did not re-resolve a third time")
+        XCTAssertEqual(recovery.consecutiveFailures, 0)
+
+        // Still stalled: a rebind is an attempt, not evidence. Only a frame is.
+        XCTAssertTrue(recovery.isStalled, "the reattach count is untouched by an attempt")
+        platform.simulateChange()
+        XCTAssertTrue(damaged, "the damage callback was re-armed on the new port")
+
+        // Bounded, so a wedged device is not rebound every half second forever.
+        _ = recovery.rebind(platform: platform, udid: "STUB-1", onDamage: {})
+        XCTAssertFalse(recovery.needsRebind, "two attempts per stall episode is the cap")
+
+        // And a real frame resets everything, including the rebind budget.
+        recovery.captureSucceeded()
+        XCTAssertFalse(recovery.isStalled)
+        XCTAssertEqual(recovery.rebinds, 0)
+    }
+
     func testAReattachThatKeepsFailingIsAlsoAStall() {
         // The other direction: when the re-resolve itself fails the count does
         // keep growing, because nothing resets it.

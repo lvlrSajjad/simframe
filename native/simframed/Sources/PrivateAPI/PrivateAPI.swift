@@ -84,6 +84,13 @@ public protocol SimulatorPlatform: AnyObject {
     /// perfectly visible, and a daemon restart fixed it instantly. Without a
     /// way to re-resolve, a restart is the only cure.
     func reattachDisplay() throws -> DeviceInfo
+    /// Rebind from scratch: a fresh device object as well as a fresh port.
+    ///
+    /// The escalation for when re-resolving the port has demonstrably not
+    /// helped. `reattachDisplay` re-walks the cached device's ports, which
+    /// re-finds the same dead descriptors when it is the device binding that
+    /// is stale.
+    func reattachDevice(udid: String?) throws -> DeviceInfo
     /// Borrow the current framebuffer. The pointer is only valid inside `body`.
     func withFrame<T>(_ body: (RawFrame) throws -> T) throws -> T
     /// Called whenever the display reports damage — the per-redraw signal, so a

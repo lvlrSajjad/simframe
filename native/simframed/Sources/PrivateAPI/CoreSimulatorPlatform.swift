@@ -157,6 +157,21 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
         return try resolveDisplay(on: device, warmInput: true)
     }
 
+    /// Rebind to the device from scratch: a fresh device object, a fresh port.
+    ///
+    /// `reattachDisplay` reuses the cached `device`, which is right for a port
+    /// that was rebuilt under a living device and wrong for everything else —
+    /// the device object itself can be stale after a restart, and re-walking
+    /// its `ioPorts` then re-finds the same dead descriptors. This asks
+    /// CoreSimulator for the device list again, so nothing from the previous
+    /// session survives. Input is warmed too, because a session that outlived
+    /// its device is dead anyway.
+    public func reattachDevice(udid: String?) throws -> DeviceInfo {
+        device = nil
+        display = nil
+        return try attach(udid: udid)
+    }
+
     /// Re-resolve the display port on the device we are already bound to.
     ///
     /// Input is deliberately left alone: the HID session is independent of the
@@ -180,15 +195,36 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
         let sizeSel = NSSelectorFromString("displaySize")
         typealias SizeFn = @convention(c) (AnyObject, Selector) -> CGSize
 
+        // Two passes, because a size is a claim and a surface is evidence.
+        //
+        // A torn-down port keeps reporting a real `displaySize` while
+        // `framebufferSurface` returns nil for the rest of the device's life.
+        // Selecting on size alone therefore reattached to the dead port and
+        // declared success: the daemon logged "re-resolved the display port
+        // after 6 failed reads" and then failed six more, in a loop, until the
+        // device was restarted. That is the pathology CaptureRecovery's
+        // `stalledAfterReattaches` exists to *notice*; this is what fixes it.
+        //
+        // The size check stays as the cheap pre-filter. The second pass is the
+        // one that decides, and if no candidate yields a surface the first
+        // plausible one is used anyway — during boot the port is real and the
+        // surface has simply not arrived yet, and refusing to attach then
+        // would trade a recoverable wedge for a daemon that never starts.
+        var candidates: [NSObject] = []
         for port in ports {
             guard port.responds(to: descriptorSel),
                   let descriptor = port.perform(descriptorSel)?.takeUnretainedValue() as? NSObject,
                   descriptor.conforms(to: proto),
                   descriptor.responds(to: sizeSel),
                   let sizeImp = descriptor.method(for: sizeSel) else { continue }
-            // Several ports conform; only the live one reports a real size.
             let size = unsafeBitCast(sizeImp, to: SizeFn.self)(descriptor, sizeSel)
             guard size.width > 0, size.height > 0 else { continue }
+            candidates.append(descriptor)
+        }
+        let live = candidates.first(where: Self.yieldsSurface) ?? candidates.first
+        for descriptor in candidates where descriptor === live {
+            let sizeImp = descriptor.method(for: sizeSel)!
+            let size = unsafeBitCast(sizeImp, to: SizeFn.self)(descriptor, sizeSel)
             display = descriptor
             // The bridge captures one device's token and installs itself on a
             // process-wide translator, so it belongs to the device it was built
@@ -257,6 +293,18 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
             accessibilityFailure = "\(error)"
             throw error
         }
+    }
+
+    /// Does this display descriptor actually produce a framebuffer?
+    ///
+    /// The single question that separates a live port from a torn-down one, and
+    /// it is not the one the resolver used to ask. Cheap: one selector call and
+    /// a cast, no lock, no pixels read.
+    static func yieldsSurface(_ descriptor: NSObject) -> Bool {
+        guard descriptor.responds(to: NSSelectorFromString("framebufferSurface")),
+              let raw = descriptor.perform(NSSelectorFromString("framebufferSurface"))?.takeUnretainedValue()
+        else { return false }
+        return raw is IOSurface
     }
 
     public func withFrame<T>(_ body: (RawFrame) throws -> T) throws -> T {

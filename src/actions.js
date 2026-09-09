@@ -191,13 +191,27 @@ export async function runScript(
     const prediction = verify && beforeScreen?.hash ? graph.predict(udid, beforeScreen, step) : null;
     try {
       let detail = await runStep(deviceQuery, udid, step, { screen, options, frames });
+      // How long this transition has cost before, on this screen, for this
+      // action. A cold edge gets the old fixed default and says so; a measured
+      // one gets p95 plus a margin. Research §7.
+      const stillness = step.stableMs ?? stableMs;
+      const learned = verify && beforeScreen?.hash ? graph.timingFor(udid, beforeScreen, step) : null;
+      // A settle is not satisfied until the screen has held still for
+      // `stillness`, so a budget below that can never be met — and the learned
+      // p95 is measured from waits that include the stillness window, which
+      // makes it self-consistent but not self-evidently so. A tab switch with
+      // a p95 of 90ms would get a 240ms budget and then time out at 240ms
+      // waiting for 500ms of quiet, turning every fast edge into a failure.
+      const floorMs = stillness + 250;
+      const budgetMs = step.timeoutMs
+        ?? (learned && !learned.cold ? Math.max(learned.timeoutMs, floorMs) : timeoutMs);
       const settleFor = async () => {
         if (!autoSettle || !ACTION_STEPS.has(step.action)) return null;
         const w = await api.waitFor(deviceQuery, {
           mode: 'settle',
           since: before,
-          stableMs: step.stableMs ?? stableMs,
-          timeoutMs: step.timeoutMs ?? timeoutMs,
+          stableMs: stillness,
+          timeoutMs: budgetMs,
           options,
         });
         return {
@@ -206,6 +220,13 @@ export async function runScript(
           sawChange: w.sawChange,
           stalled: Boolean(w.stalled),
           noVisibleChange: Boolean(w.noVisibleChange),
+          // What this wait was allowed, and where the number came from. A
+          // timeout nobody can explain is how a fixed sleep comes back as a
+          // constant with a comment.
+          budgetMs,
+          timing: learned
+            ? { p50: learned.p50, p95: learned.p95, samples: learned.samples, cold: learned.cold }
+            : null,
         };
       };
       let settled = await settleFor();
@@ -253,7 +274,14 @@ export async function runScript(
         // nothing at all.
         endScreen = afterScreen;
         if (afterScreen.confirmed && afterScreen.hash) {
-          graph.record(udid, { from: beforeScreen, action: step, to: afterScreen, kind });
+          // The observed cost of this transition, which is what makes the next
+          // one adaptive. Only from a settle that was actually satisfied: a
+          // timeout is not a measurement of how long the screen takes, it is a
+          // measurement of how long we were prepared to wait.
+          graph.record(udid, {
+            from: beforeScreen, action: step, to: afterScreen, kind,
+            settleMs: settled?.ok ? settled.waitedMs : undefined,
+          });
           carriedScreen = afterScreen;
         }
       }

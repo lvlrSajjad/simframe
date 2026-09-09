@@ -3,6 +3,25 @@ import Foundation
 import PrivateAPI
 import SimframeCore
 
+/// Resident size of this process, in bytes, or 0 if the kernel will not say.
+///
+/// Logged with throughput because the capture wedge has no established cause
+/// and memory pressure is one of two candidates. A number in the log every
+/// second is what lets the next wedge be correlated with a spike — or clear
+/// memory of suspicion, which is just as useful.
+func residentBytes() -> UInt64 {
+    var info = mach_task_basic_info()
+    var count = mach_msg_type_number_t(
+        MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size
+    )
+    let result = withUnsafeMutablePointer(to: &info) { pointer in
+        pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rebound in
+            task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), rebound, &count)
+        }
+    }
+    return result == KERN_SUCCESS ? info.resident_size : 0
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 func flag(_ name: String) -> String? {
     guard let a = args.first(where: { $0.hasPrefix("--\(name)=") }) else { return nil }
@@ -417,80 +436,103 @@ case "run":
             if due {
                 lock.lock(); dirty = false; lock.unlock()
                 let t0 = DispatchTime.now().uptimeNanoseconds
-                do {
-                    // One grab produces both sizes; the surface pointer is only
-                    // valid inside this call, so nothing may be deferred out of it.
-                    let wantFull = store.wantsFullFrame()
-                    let (bmp, full) = try platform.withFrame { frame -> (Bitmap, Bitmap?) in
-                        let scaled = CoreGraphicsScaler.bitmap(from: frame, targetLongEdge: longEdge)
-                            ?? Bitmap.from(frame, targetLongEdge: longEdge)
-                        let native = wantFull
-                            ? CoreGraphicsScaler.bitmap(from: frame, targetLongEdge: max(frame.width, frame.height))
-                            : nil
-                        return (scaled, native)
-                    }
-                    let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6
-                    try store.record(bmp, fullBitmap: full, captureMs: ms)
-                    latencies.append(Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6)
-                    frames += 1
-                    lastCapture = now
-                    let wasStalled = recovery.isStalled
-                    recovery.captureSucceeded()
-                    if wasStalled {
-                        // A frame after a stall is the only thing that clears
-                        // it, and it is worth saying out loud: the device came
-                        // back on its own, which nobody would otherwise know.
-                        try? store.writeCaptureHealth(nil)
-                        stalledSince = nil
-                        FileHandle.standardError.write(
-                            "simframed: capture recovered on its own\n".data(using: .utf8)!)
-                    }
-                } catch {
-                    let due = recovery.captureFailed()
-                    FileHandle.standardError.write(
-                        "simframed: capture failed: \(error) (\(recovery.consecutiveFailures) in a row)\n".data(using: .utf8)!)
-                    // The display port can be torn down and rebuilt under a
-                    // running daemon, and every read on the old descriptor
-                    // returns nil from then on. Observed on a device that was
-                    // awake and visible the whole time: six minutes of
-                    // "the display surface could not be read", cured instantly
-                    // by restarting the daemon. Reporting a failure loudly is
-                    // right; never recovering from it is not, so re-resolve the
-                    // port and re-arm the damage callback.
-                    if due {
-                        switch recovery.reattach(platform: platform, onDamage: {
-                            lock.lock(); dirty = true; lock.unlock()
-                        }) {
-                        case .success(let after):
-                            lock.lock(); dirty = true; lock.unlock()
-                            FileHandle.standardError.write(
-                                "simframed: re-resolved the display port after \(after) failed reads\n"
-                                    .data(using: .utf8)!)
-                        case .failure(let error):
-                            FileHandle.standardError.write(
-                                "simframed: could not re-resolve the display port: \(error)\n".data(using: .utf8)!)
+                // One pool per capture.
+                //
+                // There was none anywhere in this loop, and on Darwin that is
+                // the standard way to get the working set this daemon had:
+                // 732 MB resident after eleven minutes and 2831 frames, for a
+                // process that holds one frame at a time. CoreGraphics scaling
+                // and IOSurface access both produce autoreleased temporaries,
+                // and a `while true` loop with no pool of its own drains
+                // nothing. Whether that pressure is what wedges capture is
+                // unproven — the RSS also *fell* 200 MB in 25 s, so nothing is
+                // leaking monotonically — but a frame grabber should not hold
+                // half a gigabyte either way.
+                autoreleasepool {
+                    do {
+                        // One grab produces both sizes; the surface pointer is only
+                        // valid inside this call, so nothing may be deferred out of it.
+                        let wantFull = store.wantsFullFrame()
+                        let (bmp, full) = try platform.withFrame { frame -> (Bitmap, Bitmap?) in
+                            let scaled = CoreGraphicsScaler.bitmap(from: frame, targetLongEdge: longEdge)
+                                ?? Bitmap.from(frame, targetLongEdge: longEdge)
+                            let native = wantFull
+                                ? CoreGraphicsScaler.bitmap(from: frame, targetLongEdge: max(frame.width, frame.height))
+                                : nil
+                            return (scaled, native)
                         }
+                        let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6
+                        try store.record(bmp, fullBitmap: full, captureMs: ms)
+                        latencies.append(Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6)
+                        frames += 1
+                        lastCapture = now
+                        let wasStalled = recovery.isStalled
+                        recovery.captureSucceeded()
+                        if wasStalled {
+                            // A frame after a stall is the only thing that clears
+                            // it, and it is worth saying out loud: the device came
+                            // back on its own, which nobody would otherwise know.
+                            try? store.writeCaptureHealth(nil)
+                            stalledSince = nil
+                            FileHandle.standardError.write(
+                                "simframed: capture recovered on its own\n".data(using: .utf8)!)
+                        }
+                    } catch {
+                        let due = recovery.captureFailed()
+                        FileHandle.standardError.write(
+                            "simframed: capture failed: \(error) (\(recovery.consecutiveFailures) in a row)\n".data(using: .utf8)!)
+                        // The display port can be torn down and rebuilt under a
+                        // running daemon, and every read on the old descriptor
+                        // returns nil from then on. Observed on a device that was
+                        // awake and visible the whole time: six minutes of
+                        // "the display surface could not be read", cured instantly
+                        // by restarting the daemon. Reporting a failure loudly is
+                        // right; never recovering from it is not, so re-resolve the
+                        // port and re-arm the damage callback.
+                        if due {
+                            let onDamage = { lock.lock(); dirty = true; lock.unlock() }
+                            // Escalate rather than repeat. Two successful re-resolves
+                            // with no frame between them means the port was never the
+                            // problem, so try the thing that until now needed a human:
+                            // rebind to the device, which is what restarting the
+                            // daemon did.
+                            let rebinding = recovery.needsRebind
+                            let outcome = rebinding
+                                ? recovery.rebind(platform: platform, udid: device.udid, onDamage: onDamage)
+                                : recovery.reattach(platform: platform, onDamage: onDamage)
+                            let what = rebinding ? "rebound to the device" : "re-resolved the display port"
+                            switch outcome {
+                            case .success(let after):
+                                lock.lock(); dirty = true; lock.unlock()
+                                FileHandle.standardError.write(
+                                    "simframed: \(what) after \(after) failed reads\n".data(using: .utf8)!)
+                            case .failure(let error):
+                                FileHandle.standardError.write(
+                                    "simframed: could not \(rebinding ? "rebind to the device" : "re-resolve the display port"): \(error)\n".data(using: .utf8)!)
+                            }
+                        }
+                        // Say that capture is wedged rather than merely slow.
+                        //
+                        // The loop now tries two things — re-resolve the port, then
+                        // rebind the device — and stops there. Restarting the device
+                        // remains the user's to make: a capture loop that rebooted
+                        // the device it was watching would be a tool reaching for
+                        // the mains because a reading looked wrong. So it is published, `doctor` grades it and
+                        // `simframe state` prints it, and an agent reads "the
+                        // simulator is wedged" instead of "nothing changed".
+                        if recovery.isStalled {
+                            if stalledSince == nil { stalledSince = FrameStore.nowMs() }
+                            try? store.writeCaptureHealth([
+                                "stalled": true,
+                                "since": stalledSince ?? FrameStore.nowMs(),
+                                "at": FrameStore.nowMs(),
+                                "consecutiveFailures": recovery.consecutiveFailures,
+                                "reattaches": recovery.reattaches,
+                                "reason": "\(error)",
+                            ])
+                        }
+                        Thread.sleep(forTimeInterval: 0.5)
                     }
-                    // Say that capture is wedged rather than merely slow, and
-                    // then do nothing about it. The cure for this state is a
-                    // device restart, which is the user's to make: a capture
-                    // loop that rebooted the device it was watching would be a
-                    // tool reaching for the mains because a reading looked
-                    // wrong. So it is published, `doctor` grades it and
-                    // `simframe state` prints it, and an agent reads "the
-                    // simulator is wedged" instead of "nothing changed".
-                    if recovery.isStalled {
-                        if stalledSince == nil { stalledSince = FrameStore.nowMs() }
-                        try? store.writeCaptureHealth([
-                            "stalled": true,
-                            "since": stalledSince ?? FrameStore.nowMs(),
-                            "at": FrameStore.nowMs(),
-                            "consecutiveFailures": recovery.consecutiveFailures,
-                            "reattaches": recovery.reattaches,
-                            "reason": "\(error)",
-                        ])
-                    }
-                    Thread.sleep(forTimeInterval: 0.5)
                 }
             }
 
@@ -499,8 +541,12 @@ case "run":
                 let sorted = latencies.sorted()
                 let median = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
                 FileHandle.standardError.write(
-                    String(format: "simframed: %.1f fps, median %.2fms\n", Double(frames) / (wall - lastReport), median)
-                        .data(using: .utf8)!)
+                    String(
+                        format: "simframed: %.1f fps, median %.2fms, rss %.0fMB\n",
+                        Double(frames) / (wall - lastReport),
+                        median,
+                        Double(residentBytes()) / 1_048_576
+                    ).data(using: .utf8)!)
                 frames = 0; latencies.removeAll(); lastReport = wall
             }
 

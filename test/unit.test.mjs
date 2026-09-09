@@ -1836,3 +1836,60 @@ test('a device that outlived the daemon has a stale input session', async () => 
     assert.equal(input.sessionStaleness(missing).stale, false);
   }
 });
+
+test('waiting is learned per edge, and a cold edge waits what it always did', async () => {
+  const graph = await import('../src/graph.js');
+  const metrics = await import('../src/metrics.js');
+
+  // Nearest-rank, so every reported percentile is a duration that happened.
+  assert.equal(metrics.percentile([100, 200, 300, 400, 500], 50), 300);
+  assert.equal(metrics.percentile([100, 200, 300, 400, 500], 95), 500);
+  assert.equal(metrics.percentile([], 95), null);
+
+  // Below five samples an edge has no distribution, and the budget is exactly
+  // the fixed default every step used before Phase 11 — so a first traversal
+  // cannot behave worse than it used to.
+  const cold = graph.adaptiveTimeout({ p95: 90, samples: 4 });
+  assert.equal(cold.cold, true);
+  assert.equal(cold.timeoutMs, 8000);
+  assert.match(cold.reason, /fewer than 5 samples/);
+
+  // Measured: p95 plus the larger of 150ms and a fifth of p95. The floor is
+  // what stops a 90ms tab switch getting a 108ms budget, where a single slow
+  // frame would read as a timeout.
+  assert.deepEqual(
+    graph.adaptiveTimeout({ p95: 90, samples: 12 }),
+    { timeoutMs: 240, cold: false, reason: null, margin: 150 },
+  );
+  assert.equal(graph.adaptiveTimeout({ p95: 2000, samples: 12 }).timeoutMs, 2400);
+  // Nielsen's limit is a cap, not a target: a screen slower than this has
+  // stopped being worth waiting for.
+  assert.equal(graph.adaptiveTimeout({ p95: 20000, samples: 30 }).timeoutMs, graph.HARD_CAP_MS);
+
+  // "Slower than usual" splits into two answers, which is the whole point:
+  // a screen that is working gets waited for, a screen doing nothing visible
+  // has already answered.
+  const working = graph.slowerThanUsual({ elapsedMs: 3000, p95: 1000, settled: false, kind: 'loading' });
+  assert.deepEqual([working.slower, working.working, working.keepWaiting], [true, true, true]);
+  assert.match(working.note, /still loading/);
+  const stuck = graph.slowerThanUsual({ elapsedMs: 3000, p95: 1000, settled: false, kind: 'none' });
+  assert.deepEqual([stuck.slower, stuck.working, stuck.keepWaiting], [true, false, false]);
+  // Past the cap, even a spinner stops earning patience.
+  assert.equal(graph.slowerThanUsual({ elapsedMs: 11000, p95: 1000, settled: false, kind: 'loading' }).keepWaiting, false);
+  // Settled, inside p95, or with nothing measured: no claim.
+  assert.equal(graph.slowerThanUsual({ elapsedMs: 3000, p95: 1000, settled: true }).slower, false);
+  assert.equal(graph.slowerThanUsual({ elapsedMs: 500, p95: 1000, settled: false }).slower, false);
+  assert.equal(graph.slowerThanUsual({ elapsedMs: 3000, p95: null, settled: false }).slower, false);
+
+  // The window is a window: an app that got faster after an update stops being
+  // waited for at its old speed.
+  const edge = { settles: [] };
+  for (let i = 0; i < graph.TIMING_WINDOW + 20; i += 1) {
+    graph.record; // (documenting that noteSettle is reached through record)
+    edge.settles = [...edge.settles, i].slice(-graph.TIMING_WINDOW);
+  }
+  assert.equal(edge.settles.length, graph.TIMING_WINDOW);
+  assert.equal(graph.timingOf(edge).samples, graph.TIMING_WINDOW);
+  assert.equal(graph.timingOf({}).samples, 0);
+  assert.equal(graph.timingOf({}).p95, null);
+});
