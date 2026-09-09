@@ -413,7 +413,17 @@ export async function runScript(
       }
 
       const wrongTurn = wrongTurnFrom(verification);
-      const note = (settled?.noVisibleChange ? ' [no visible change]' : '')
+      // `[no visible change]` after a launch is ambiguous between two very
+      // different things, and a real session read it the wrong way twice:
+      // "the app was already in front, so nothing needed to move" and "the app
+      // did not come forward". Measured on this Xcode, `simctl launch` *does*
+      // front an already-running app, so the first reading is the likely one —
+      // but likely is not the same as said, and the step is the only place that
+      // can say it.
+      const launchNote = step.action === 'launch' && settled?.noVisibleChange
+        ? ' [the screen did not change, so this app was already in front — or it did not come forward]'
+        : '';
+      const note = launchNote + (settled?.noVisibleChange ? ' [no visible change]' : '')
         + (settled?.staleBaseline ? ' [baseline had already settled; re-taken from the live screen]' : '')
         + (settled?.blackFrames
           ? ` [${settled.blackFrames} black frame(s) waited through${settled.blackMs ? `, still black after ${settled.blackMs}ms` : ''}]`
@@ -668,6 +678,14 @@ async function runStep(deviceQuery, udid, step, ctx) {
           return `"${node.label ?? target}" appeared`;
         } catch (err) {
           lastError = err.message;
+          // Same rule as `waitFor`, and `matchElement` says it in its own
+          // words: a query that matched several elements has found them all
+          // already.
+          if (/matched \d+ elements/.test(err.message)) {
+            throw new Error(
+              `${err.message}\n  (not waiting: it is already on screen, and waiting cannot make it unique)`,
+            );
+          }
         }
         await sleep(250);
       }
@@ -720,6 +738,22 @@ async function runStep(deviceQuery, udid, step, ctx) {
           return `"${found.target.label}" appeared at ${found.target.x},${found.target.y}`;
         } catch (err) {
           lastError = err.message;
+          // Waiting cannot make a thing unique.
+          //
+          // Reported from a real session: a wait on an ambiguous string spent
+          // the full 30 s and then listed four matches, all four of which were
+          // on the very first frame. The disambiguation is good and it arrived
+          // twenty-nine seconds after everything it needed. `ambiguous` means
+          // the target is *present*, several times over — which is precisely
+          // the case where more time changes nothing.
+          //
+          // Distinguished by the tag at the throw site rather than by reading
+          // the message, because "not on this screen" tags the same reason.
+          if (metrics.escalationOf(err)?.ambiguous) {
+            throw new Error(
+              `${err.message}\n  (not waiting: it is already on screen, and waiting cannot make it unique)`,
+            );
+          }
         }
         if (Date.now() >= limit) break;
         await sleep(POLL_MS);

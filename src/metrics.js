@@ -119,9 +119,15 @@ export const readFlows = (udid, opts) => readJsonl(metricPaths(udid).flows, opts
  * matching error strings at the boundary — a regexed message is a reason that
  * silently becomes "unknown" the day somebody rewords it.
  */
-export function tag(err, reason, { candidates = [], tried = [] } = {}) {
+export function tag(err, reason, { candidates = [], tried = [], ambiguous = false } = {}) {
   if (!REASONS.includes(reason)) throw new Error(`not an escalation reason: ${reason}`);
-  err.escalation = { reason, candidates, tried };
+  // `ambiguous` is narrower than the reason, and that is the point. Two very
+  // different failures both tag `ambiguous_intent`: the target is on screen
+  // several times over, and the target is not on screen at all on a screen we
+  // thought we knew. Only the first is resolvable by *choosing*, and only the
+  // first tells a waiting caller that waiting is pointless — the thing it is
+  // waiting for has already arrived.
+  err.escalation = { reason, candidates, tried, ambiguous };
   return err;
 }
 

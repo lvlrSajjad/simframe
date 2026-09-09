@@ -90,15 +90,41 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    `Bold Text = 0` beside the OCR alias rather than instead of it, because when
    the two disagree that is the signal. `MAP_VERSION` 8 → 9.
 
-6. **Ambiguity is reported only after the full timeout.** A `waitFor` on an
-   ambiguous string spent 30 s and then listed four matches that were all on
-   the first frame. Ambiguity is knowable immediately.
+6. ~~**Ambiguity is reported only after the full timeout.**~~ **Done,
+   2026-09-10.** Measured live: 30 s+ before, **5 s** after, with the
+   disambiguation delivered at once and a sentence saying why waiting would not
+   have helped — `(not waiting: it is already on screen, and waiting cannot
+   make it unique)`.
+
+   The distinction had to be carried from the throw site, not read off a
+   message: two very different failures both tag `ambiguous_intent` — the
+   target is on screen several times over, and the target is absent from a
+   screen we thought we knew — and only the first means more time changes
+   nothing. `metrics.tag` takes an `ambiguous` flag now, and both wait loops
+   act on it. The harness encodes the contract as `expect.ambiguous`, which is
+   the other half of what `sim_find`'s description promises.
 
 7. **The nav-bar back chevron is undetectable** — absent from the map, from
    `all: true`, and from `sim_find` asked in plain language, while coordinates
    work every time. This is the SF Symbol template bank, filed since Phase 5.
 
-8. **`sim_launch` reports success without fronting an already-running app.**
+8. **`sim_launch` reports success without fronting an already-running app** —
+   **does not reproduce, and here is the measurement.** Both apps running,
+   Contacts fronted, then `simctl launch` on the other: the screen changed and
+   Settings came forward. So `simctl launch` *does* front a running app on
+   Xcode 26.0 / iOS 26.5.
+
+   The likelier explanation for what was seen is item 1, now fixed: the
+   settle's baseline was captured before the launch, the app fronts a few
+   hundred milliseconds later, and a settle satisfied by stillness that
+   predated the launch reported `settled` for a screen that had not arrived.
+   That would read exactly as "launched · settled" with the wrong app in front.
+
+   What is fixed regardless is the reporting, because `[no visible change]`
+   after a launch is ambiguous between two different things and a real session
+   read it the wrong way twice. The step now says which: *the screen did not
+   change, so this app was already in front — or it did not come forward.*
+   Likely is not the same as said.
 
 ### P1 — HPI_time, where the gap to the human median actually is
 

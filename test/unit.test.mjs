@@ -2272,3 +2272,29 @@ test('a row prints what a control contains, beside what OCR read', async () => {
   assert.ok(!/Larger Text, Off = Off/.test(rendered), 'must not repeat what the label already says');
   assert.match(rendered, /Plain/);
 });
+
+test('waiting for something already on screen stops immediately', async () => {
+  const metrics = await import('../src/metrics.js');
+  // Two very different failures tag the same reason, and only one of them
+  // means waiting is pointless. `ambiguous` carries that difference from the
+  // throw site, rather than a caller reading the message — which is the rule
+  // the escalation log is built on.
+  const present = metrics.tag(new Error('matches 4 things'), 'ambiguous_intent', { ambiguous: true });
+  const absent = metrics.tag(new Error('is not on this screen'), 'ambiguous_intent', {});
+  assert.equal(metrics.escalationOf(present).ambiguous, true);
+  assert.equal(metrics.escalationOf(absent).ambiguous, false);
+
+  // And both wait loops act on it. Asserted at the source because the
+  // behaviour is a *non*-event — thirty seconds that no longer pass.
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const waitFor = src.slice(src.indexOf("case 'waitFor'"), src.indexOf("case 'assert'"));
+  assert.match(waitFor, /escalationOf\(err\)\?\.ambiguous/);
+  assert.match(waitFor, /waiting cannot make it unique/);
+  const waitText = src.slice(src.indexOf("case 'waitText'"), src.indexOf("case 'assertText'"));
+  assert.match(waitText, /matched \\d\+ elements/);
+  assert.match(waitText, /waiting cannot make it unique/);
+
+  // A launch that changed nothing is ambiguous between "already in front" and
+  // "did not come forward", and the step is the only place that can say so.
+  assert.match(src, /already in front — or it did not come forward/);
+});

@@ -1078,7 +1078,11 @@ export async function locate(
           `"${query}" matches ${outcome.alternatives.length} things on this screen — say which, or pass index: ${list}`,
         ),
         'ambiguous_intent',
-        { candidates: outcome.alternatives },
+        // Present, several times over — as opposed to absent, which also tags
+        // ambiguous_intent when the screen was one we thought we knew. A
+        // waiting caller needs the difference: more time cannot make a thing
+        // unique, and it can make an absent thing arrive.
+        { candidates: outcome.alternatives, ambiguous: true },
       );
     }
     if (outcome.status === 'ok') {
