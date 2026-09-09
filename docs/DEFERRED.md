@@ -63,6 +63,19 @@ for. Each item is written up in full further down or in
    captured after the dispatch returned, not before the step began. See
    `docs/BENCHMARKS.md`, "Phase 11 step 4".
 
+**P1 — from a fresh-install session on a real third-party app**
+
+1c. **The rendered screen map drops state it already collected.** `value` and
+   `enabled` are on every element node and `src/view.js` prints neither, so a
+   text field appears as a bare label whether it is empty or holds a paragraph.
+   Verified in the code, not just reported. Every text verification in that
+   session fell back to a screenshot, and one `assert` against a field that did
+   contain the wanted string failed, prompted a retype, and produced a doubled
+   value and a validation error. Cheapest high-value fix on this list.
+
+1d. **Label resolution silently picks the wrong element**, three sightings that
+   are one bug. Full write-up below; it merges with 7.
+
 **P2 — CI worth trusting**
 
 5. The `bench` gate cannot gate: a hosted runner cannot `simctl launch`
@@ -1342,3 +1355,138 @@ stale-ref check has caught **zero** defects in the ref guard and **five** in
 itself. Every failure it has produced has been its own assumption or the
 device's health. It is not yet earning its place, and the next person to touch
 it should weigh deleting it against fixing it a sixth time.
+
+## What a fresh-install session on a real app found
+
+Nine findings from a separate 0.9.0 session driving a third-party app installed
+from scratch on a clean simulator, plus what I could verify of each from here.
+The app is not named anywhere in this repo and neither is its bundle id; nothing
+below needs either. Every observation is reproducible per the reporter.
+
+The session's own summary of the human comparison is worth keeping at the top:
+**much slower than the person doing it by hand.** That is HPI_time on an app
+nobody has a baseline for, and it agrees with the suite.
+
+### The map answers "which screen", and was asked "what state"
+
+**1. Text-field values are never reported.** *Verified in the code.*
+`input.elementToNode` sets `value: e.value ?? null` on every node, and
+`src/view.js` contains the string `value` exactly zero times. The data is
+collected and then dropped by the renderer. A field holding a long string and a
+field holding nothing render identically, so an `assert` on the contents of a
+field cannot pass no matter what the field contains — and the observed
+consequence was worse than a failed assert: the assert failed, the text was
+retyped, and the field ended up with a doubled value and a validation error.
+A character counter reading `0/1000` in the map read `56/1000` in the
+screenshot, from the same frame.
+
+**2. `enabled` goes stale right after typing.** Reported: the map said a
+primary button was disabled while the screenshot showed it enabled. `enabled`
+comes from the accessibility tree the same way `value` does, so this may be the
+tree lagging a keystroke rather than a simframe cache — unverified from here,
+and the reason it is worth its own line is that
+`{"assert": {"value": "…", "is": "enabled"}}` reads as a state check and cannot
+currently be trusted as one.
+
+**3. Twice the map came back showing the previous screen.** A tap on a login
+control reported `no-visible-change` *and* returned a map of the screen it had
+left, while the flow's own error text listed strings from the screen it had
+arrived at. Two sensors in one response disagreeing about which screen this is,
+with the error message right and the map wrong.
+
+Those three are one shape: identity is deliberately memory-first, because a
+list with new rows is the same screen and re-perceiving it per step is the cost
+Phase 13 exists to remove. State is the exact opposite — a field's contents and
+a button's enabled flag are what change *without* the screen changing. The map
+does not distinguish the two, and does not say which of what it printed was
+observed just now and which was remembered.
+
+### Waiting
+
+**4. `no-visible-change` fires on actions that did work.** Nearly every tap
+that started a network call, and taps that opened screens.
+
+**5. `settle` under-detects slow progress.** `mode: settle` timed out as
+"nothing moved" while a splash screen sat at 94% of a visible progress
+readout — a counter incrementing is motion by any definition a person would
+use. Afterwards `mode: change` returned instantly *every* time, usually with
+"the change had already happened before this call", which says the transition
+completed inside a wait that had reported nothing happening. Phase 11 gave
+edges a distribution and a `slower_than_usual`; this is the classifier under
+it, and it is the same family as the P0 above — a wait whose evidence is not
+tied to the action it is waiting on.
+
+**6. Ambiguity costs the entire timeout.** `waitFor` on an ambiguous string
+waited the full 30 s and then reported four matches, all four of which were on
+screen in the first frame. The disambiguation message is good — labels,
+coordinates, confidence — and arrives twenty-nine seconds after everything it
+needed. Ambiguity is knowable on the first frame and should be answered there.
+
+### Label resolution, which is the one that can do damage
+
+**7. A bottom tab was tapped into the wrong screen.** The tab's label was
+missing from the map, the resolver reached `memory d=6` into a *list row* whose
+text contained the query as a substring, tapped it, and opened an unrelated
+record. It did not report ambiguity. The only thing that caught it was the
+operator's own `assert` on the next line.
+
+**8. The nav-bar back chevron is invisible.** Absent from the map, absent with
+`all: true`, and `sim_find` on a plain-language description of it returned "not
+on this screen". `@29,91` worked first try, every time. Detection is
+inconsistent rather than absent: a send-arrow glyph was picked up as OCR text
+`>`, and one later map did list a bare `<`.
+
+**9. And `type into "Search"` typed into a section-index letter** — found here,
+same session as Phase 11 step 4, mechanism in 7 above.
+
+`sim_find`'s own description promises, in one sentence: `"the Assets tab"`,
+`"back"`, "icon-only controls by their common name", and "when two things
+answer equally well it says so and lists them rather than guessing — a wrong
+tap is worse than a question". Findings 7, 8 and 9 are counterexamples to all
+four, and two of them are the description's own examples. Either the resolver
+grows into the promise or the description stops making it; a tool description
+is the only contract an agent reads before acting.
+
+The practical rule the session arrived at — *for bottom-tab navigation use
+coordinates or `#N`, never the label* — is itself the bug report. A tool whose
+users learn to avoid its main interface has a working alternative and a broken
+primary.
+
+### The clean-device dialogs, which Phase 12 anticipated
+
+**10.** A fresh install adds two OS dialogs a pre-warmed device does not have.
+The pasteboard consent alert **swallowed the first paste entirely** — `type`
+pastes, so this hits the most common step there is — and the notifications
+prompt sat over the home screen and blocked a `waitFor` on content behind it.
+Neither appears on the device the suite runs on, which is why the suite has
+never seen them. This is exactly `simframe prep` plus the reflex table from
+Phase 12, now measured rather than anticipated, and it argues for `prep`
+running by default on a device simframe has not seen before.
+
+**11. `sim_launch` on an already-running app reports success without fronting
+it.** Twice returned "launched · settled" with a different app in the
+foreground. One of the two was before any other session touched the device, so
+contention does not explain it.
+
+### OCR, minor but worth the note
+
+`(All)` reads back as `(AII)` and a section heading came through as `=x`.
+Capital-I against lowercase-l with language correction deliberately off, which
+is the right setting for labels and the wrong one for exactly this. A
+confusable-character pass on comparison — not on display — would cost nothing.
+
+### And the wedge, on a second device
+
+The reporter saw the screen black out after some steps on their own simulator.
+The capture wedge is therefore not specific to the bench device, which is
+consistent with it being the simulator's display pipeline rather than
+simframe's use of it. See P4 below.
+
+### What worked
+
+Recorded because a findings list with nothing in this section is not a report,
+it is a complaint: index disambiguation once passed explicitly, `waitFor` on a
+real string, coordinate selectors, `sim_look` at high detail (readable every
+time), and the flow-level abort — a failed assert on an empty field is the only
+reason the session did not tap a disabled control and then chase a phantom bug
+in the app.
