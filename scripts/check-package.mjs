@@ -15,6 +15,7 @@
 // Swift source or a new module here and it becomes required automatically.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -83,8 +84,34 @@ function requiredFiles() {
 }
 
 const required = requiredFiles();
-const packed = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: ROOT, encoding: 'utf8' }));
-const shipped = new Set(packed[0].files.map((f) => f.path));
+// Read the tarball, not npm's description of it.
+//
+// This used to parse `npm pack --dry-run --json` as `packed[0].files`, which is
+// npm 10's shape. npm 12 reports something else, and the check died with
+// "Cannot read properties of undefined (reading 'files')" — a check that exists
+// to catch a silently broken package, itself silently broken by the tool it
+// asks. It had only ever run under the npm bundled with Node 18–22; the release
+// job runs a newer one.
+//
+// `tar -tzf` on the artifact npm actually produces has no shape to change, and
+// it answers the stronger question: what is *in* the file people download.
+const out = fs.mkdtempSync(path.join(os.tmpdir(), 'simframe-pack-'));
+const name = execFileSync('npm', ['pack', '--silent', '--pack-destination', out], { cwd: ROOT, encoding: 'utf8' })
+  .trim()
+  .split('\n')
+  .pop();
+const listing = execFileSync('tar', ['-tzf', path.join(out, name)], { encoding: 'utf8' });
+fs.rmSync(out, { recursive: true, force: true });
+const shipped = new Set(
+  listing
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    // Every path in an npm tarball is prefixed `package/`, and directories
+    // arrive with a trailing slash.
+    .filter((line) => line.startsWith('package/') && !line.endsWith('/'))
+    .map((line) => line.slice('package/'.length)),
+);
 const missing = required.filter((f) => !shipped.has(f));
 
 console.log(`${required.length} build inputs required, ${shipped.size} files in the tarball`);
