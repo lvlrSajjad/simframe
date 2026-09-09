@@ -17,7 +17,7 @@ import * as regions from './regions.js';
 import { informative } from './refs.js';
 import * as store from './store.js';
 
-const MAP_VERSION = 8; // an OCR reading contained in a labelled ax element merges into it
+const MAP_VERSION = 9; // ax targets carry value, selected and focused
 
 function mapDir(udid) {
   return path.join(store.deviceDir(udid), 'screens');
@@ -185,11 +185,30 @@ export async function build(udid, {
         if (!n.frame || !n.label || isContainer(n)) continue;
         targets.push({
           label: n.label,
+          // What the control *contains*, whether it is on, and whether it has
+          // focus. All three come off the accessibility tree, the daemon has
+          // asked for all three since 0.6.0, and all three were dropped before
+          // this — `value` here and the other two one layer up in
+          // `normalizeNode` — so nothing above this line ever saw them.
+          //
+          // The cost was not theoretical. A real session could not verify the
+          // contents of a text field at all: they reached a row only as the OCR
+          // alias, which made them as old as the map and unauthoritative. An
+          // assert failed against a field that did contain the string, the
+          // operator retyped, and the field ended up with a doubled value and a
+          // validation error.
+          //
+          // `focused` is worth naming separately: it is a direct answer to "did
+          // this field take focus", which the focus wait in actions.js infers
+          // from elapsed time because it had nothing better to use.
+          value: n.value ?? undefined,
           x: input.centerOf(n).x,
           y: input.centerOf(n).y,
           frame: n.frame,
           type: n.type,
           enabled: n.enabled,
+          selected: n.selected ?? undefined,
+          focused: n.focused ?? undefined,
           source: 'ax',
         });
       }

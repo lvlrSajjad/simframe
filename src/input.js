@@ -248,6 +248,11 @@ export function elementToNode(e) {
     type: e.role ?? null,
     identifier: e.identifier ?? null,
     enabled: e.state?.enabled ?? null,
+    // The daemon batches AXSelected and AXFocused alongside AXEnabled and has
+    // since 0.6.0. This converter took one of the three, and it is the one on
+    // the path that actually runs — `normalizeNode` below is the idb fallback.
+    selected: e.state?.selected ?? null,
+    focused: e.state?.focused ?? null,
     frame: e.frame ?? null,
     raw: e,
   };
@@ -273,6 +278,12 @@ function normalizeNode(node) {
     type: node.type ?? node.AXType ?? null,
     identifier: node.AXUniqueId ?? node.identifier ?? null,
     enabled: node.AXEnabled ?? node.enabled ?? null,
+    // The daemon has asked the tree for AXSelected and AXFocused since 0.6.0 —
+    // they are two of the eight attributes in its batched round trip — and this
+    // function dropped both. `view.renderRow` has printed `selected` for as
+    // long as it has existed, against a field nobody set.
+    selected: node.AXSelected ?? node.selected ?? null,
+    focused: node.AXFocused ?? node.focused ?? null,
     frame: frame
       ? {
           x: frame.x ?? frame.X ?? 0,

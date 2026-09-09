@@ -94,7 +94,31 @@ export function nameScore(name, query) {
   if (distance > cap) return 0;
   const longest = Math.max(n.length, q.length);
   const similarity = 1 - distance / longest;
-  return similarity >= 0.7 ? similarity * 0.72 : 0;
+  if (similarity >= 0.7) return similarity * 0.72;
+  // Last tier: OCR read a confusable character.
+  //
+  // Language correction is deliberately off, which is right for labels and
+  // wrong for exactly this. Measured on a real app, `(All)` reads back as
+  // `(AII)` and would fail an assert against the string it is; capital-I,
+  // lowercase-l, the digit one and a pipe are one shape in most UI fonts, as
+  // are capital-O and zero.
+  //
+  // Deliberately the *last* tier and discounted, not part of `norm`. Folding
+  // in `norm` would make it change what an exact match means — "Log in" and
+  // "1og in" would become the same string everywhere — and identity is not
+  // something to be fuzzy about. Here it only ever rescues a comparison that
+  // had already scored zero.
+  const foldedScore = confusableFold(n) === confusableFold(q) ? 0.62 : 0;
+  return foldedScore;
+}
+
+/** One shape per glyph family, for comparison only. Never for identity. */
+export function confusableFold(s) {
+  return String(s ?? '')
+    .replace(/[il1|!]/gi, '1')
+    .replace(/[o0]/gi, '0')
+    .replace(/[s5]/gi, '5')
+    .replace(/[b8]/gi, '8');
 }
 
 function synonymGroup(query) {

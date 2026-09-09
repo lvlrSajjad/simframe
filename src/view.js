@@ -232,9 +232,39 @@ export function recalledNote(identity, now = Date.now()) {
   return `elements recalled from ${ago} ago — pass refresh for what is there now`;
 }
 
+/**
+ * What a control *contains*, from the sensor that actually knows.
+ *
+ * A field's text reached a row only as the OCR alias, which means it was as old
+ * as the map and had no authoritative source at all. Reported from a real
+ * session: an `assert` on a field's contents failed against a field that did
+ * contain the string, the operator retyped, and the field ended up with a
+ * doubled value and a validation error. A character counter read `0/1000` in
+ * the map and `56/1000` in a screenshot of the same frame.
+ *
+ * The accessibility tree carries `value` and always has —
+ * `input.elementToNode` sets it on every node — and the renderer simply never
+ * printed it. Printed as `= <value>` and *alongside* the OCR alias rather than
+ * instead of it, so when the two disagree that is visible instead of resolved
+ * by whichever one the renderer preferred. Disagreement is the signal.
+ *
+ * Skipped when the label already says it, which is most switches and rows: iOS
+ * labels a settings row "Larger Text, Off" and printing `= Off` after that is
+ * noise.
+ */
+function valueNote(r) {
+  if (r.value == null || r.value === '') return null;
+  const v = trim(String(r.value));
+  if (!v) return null;
+  const said = alnum(r.label);
+  if (said && alnum(v) && said.includes(alnum(v))) return null;
+  return `= ${v}`;
+}
+
 function renderRow(r) {
   const name = [
     trim(r.label) || (matching.isAxTarget(r) ? '(unlabelled)' : '(no text)'),
+    valueNote(r),
     aliasNote(r),
   ].filter(Boolean).join(' ');
   const state = [

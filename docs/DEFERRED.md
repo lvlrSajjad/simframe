@@ -75,10 +75,20 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    already scales by coverage. Looks like one line; it is a ranking change, so
    it needs 2. Worst outcome on this list — it acts, and reports success.
 
-5. **A field's contents have no authoritative source.** They reach a row only
-   as the OCR alias, so they are exactly as old as the map. Partly addressed:
-   the header now says how old a recalled map is. The fix is to render AX
-   `value` beside the alias and let the two disagree visibly.
+5. ~~**A field's contents have no authoritative source.**~~ **Done,
+   2026-09-10** — and the diagnosis was wrong twice before it was right. Not
+   "the renderer drops `value`" (it did, and that was not the cause) and not
+   "the contents are merely stale" (they were, and that was not the cause
+   either). Measured: **zero** of the elements across fourteen recorded screens
+   carried a value at all, including eight switches and a text field. The
+   daemon has asked the tree for `AXValue`, `AXSelected` and `AXFocused` since
+   0.6.0 — three of the eight attributes in its batched round trip — and *two*
+   boundaries each dropped a different subset. `elementToNode` took `value` and
+   dropped the other two; `screenmap` took `enabled` and dropped `value`. So
+   `view.renderRow` has printed `selected` for as long as it has existed,
+   against a field nobody set. All three now survive, and a row prints
+   `Bold Text = 0` beside the OCR alias rather than instead of it, because when
+   the two disagree that is the signal. `MAP_VERSION` 8 → 9.
 
 6. **Ambiguity is reported only after the full timeout.** A `waitFor` on an
    ambiguous string spent 30 s and then listed four matches that were all on
@@ -243,6 +253,31 @@ install has optimised the wrong number.
 and **9**, the Tier-2 local model, still deferred. Phase 13 is where HPI_time
 moves; Phase 12 is where the real-app failures are.
 
+### Found while fixing item 5: a switch is tapped where it cannot be flipped
+
+Filed rather than fixed, because it is a tap-geometry change and this run was
+scoped to the route above.
+
+A `Switch` element's frame is the whole row — measured on
+`settings/display-text`, `Bold Text` is `x: 36, width: 330` — so its centre is
+`x: 201`, which is the *label*. The control itself sits at the right end of the
+row. Three taps at the centre left the switch off, the screenshot confirms it,
+and the newly-carried AX value agrees at `= 0`.
+
+What made this findable is item 5. Before it, a toggle tap that did nothing
+reported `no visible change` and there was no second opinion: the change
+detector cannot see a switch flip (item 3, eight times below threshold) and the
+map had no state to contradict it. Now the value is a witness, and the two
+agree that nothing happened.
+
+The fix is not "tap the frame's centre" for this role: for a `Switch` in a
+left-to-right layout the actionable point is the trailing end of the frame.
+That is a role-specific tap point, which means it belongs with a review of
+`centerOf` rather than a patch at one call site — and it wants a case in the
+perception harness, which currently checks *which element* a query resolves to
+and not *where* the element is tapped. Extending it to tap points is the same
+day's work.
+
 ### P3 — known product gaps, all filed below
 
 17. The default-device *preference* helper above the platform boundary.
@@ -250,10 +285,15 @@ moves; Phase 12 is where the real-app failures are.
 19. `getPasteboard` has no dispatch wrapper.
 20. English-only confirm vocabulary; the iOS/Android permission-name mismatch;
     pinch and the unverified iOS hardware buttons.
-21. OCR confusables: `(All)` reads back as `(AII)` and a heading came through
-    as `=x`. Language correction is deliberately off, which is right for labels
-    and wrong for exactly this — a confusable-character pass on *comparison*,
-    never on display, would cost nothing.
+21. ~~OCR confusables.~~ **Done, 2026-09-10.** `matching.confusableFold` folds
+    `i l 1 | !` to one shape, and `o 0`, `s 5`, `b 8`, so `(AII)` matches
+    `(All)`. Deliberately the **last** tier in `nameScore` and discounted to
+    0.62, not part of `norm`: folding in `norm` would change what an *exact*
+    match means — "Log in" and "1og in" would become the same string
+    everywhere — and identity is not something to be fuzzy about. Here it only
+    ever rescues a comparison that had already scored zero, and it fires only
+    when the folded strings are equal, which is why "Delete" still scores 0
+    against "Remove".
 
 ### P4 — the wedge, which is the simulator's bug and not ours
 

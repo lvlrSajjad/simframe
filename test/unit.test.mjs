@@ -2219,3 +2219,56 @@ test('a prefix match is worth the share it covers, in both directions', async ()
   // And a fuller match beats a shorter one from the same direction.
   assert.ok(m.nameScore('Accessibility', 'Accessibilit') > m.nameScore('Accessibility', 'Ac'));
 });
+
+test('a control\'s value, selection and focus survive to the screen map', async () => {
+  const { elementToNode } = await import('../src/input.js');
+  // The daemon has asked the tree for AXValue, AXSelected and AXFocused since
+  // 0.6.0 — three of the eight attributes in its batched round trip — and two
+  // boundaries each dropped a different subset, so nothing above them ever saw
+  // any of it. Measured: zero of the elements across fourteen recorded screens
+  // carried a value, including eight switches and a text field.
+  // The daemon's element shape, which is the path that actually runs —
+  // `normalizeNode` is the idb fallback and carries the same three.
+  const node = elementToNode({
+    label: 'Bold Text', value: '1', role: 'Switch',
+    state: { enabled: true, selected: false, focused: true },
+    frame: { x: 36, y: 147, width: 330, height: 28 },
+  });
+  assert.equal(node.value, '1');
+  assert.equal(node.selected, false);
+  assert.equal(node.focused, true);
+
+  // And the other boundary, asserted at the source because a dropped field is
+  // invisible in behaviour — it reads as a control that has no state.
+  const src = fs.readFileSync(new URL('../src/screenmap.js', import.meta.url), 'utf8');
+  const target = src.slice(src.indexOf("        targets.push({\n          label: n.label,"));
+  const head = target.slice(0, target.indexOf("source: 'ax'"));
+  for (const field of ['value', 'selected', 'focused', 'enabled']) {
+    assert.match(head, new RegExp(`\\b${field}:`), `an ax target must carry ${field}`);
+  }
+});
+
+test('a row prints what a control contains, beside what OCR read', async () => {
+  const view = await import('../src/view.js');
+  // Printed alongside the OCR alias rather than instead of it: when the two
+  // disagree that is the signal, and resolving it in the renderer would hide
+  // exactly the case a person needs to see.
+  const rendered = view.render({
+    device: { name: 'iPhone' },
+    identity: { hash: 'abc123def456', entry: { at: Date.now() } },
+    screen: { width: 402, height: 874 },
+    rows: [
+      { ref: 1, type: 'TextField', x: 201, y: 816, label: 'Address', value: 'example.com', region: 'content' },
+      { ref: 2, type: 'Switch', x: 201, y: 161, label: 'Bold Text', value: '0', region: 'content' },
+      // The label already says it, which is most iOS settings rows. Printing
+      // `= Off` after "Larger Text, Off" is noise.
+      { ref: 3, type: 'Button', x: 201, y: 216, label: 'Larger Text, Off', value: 'Off', region: 'content' },
+      { ref: 4, type: 'Text', x: 10, y: 10, label: 'Plain', region: 'content' },
+    ],
+    exits: 1,
+  });
+  assert.match(rendered, /Address = example\.com/);
+  assert.match(rendered, /Bold Text = 0/);
+  assert.ok(!/Larger Text, Off = Off/.test(rendered), 'must not repeat what the label already says');
+  assert.match(rendered, /Plain/);
+});
