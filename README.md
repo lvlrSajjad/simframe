@@ -129,6 +129,43 @@ breaks the host-side path.
 brew tap facebook/fb && brew install idb-companion && pipx install fb-idb
 ```
 
+## Android
+
+simframe's second backend is real, and honest about being partial: **Android
+looks but does not touch yet.** Everything above the platform boundary — the
+frame store, settle, the structural fingerprint, the screen map, refs and the
+transition graph — runs on an Android emulator unmodified, because the boundary
+hands it frames and nothing above it knows what a simulator is.
+
+| Capability | Android | How |
+| --- | --- | --- |
+| Watch the screen, wait, recall | yes | frames at **21 ms** through the emulator console, host-side |
+| Read labels + coordinates from pixels | yes | the same Vision OCR + CV, off the same PNG |
+| Screen map, refs, screen memory, the graph | yes | unchanged above the boundary |
+| List/resolve devices, launch, terminate, open a URL, permissions | yes | `adb`, with the permission state read back off the device |
+| Tap, type, swipe | **no** | measured and unwired — the console's `event mouse` puts a real down/move/up on the touch screen in ~20 ms |
+| Accessibility tree | **not available (OCR + CV only)** | `uiautomator dump` costs **2,012 ms** a read, against 45 ms for the iOS tree. See [`docs/DEFERRED.md`](docs/DEFERRED.md) |
+
+The tree is a deliberate omission, not an oversight. Making it fast needs a
+resident instrumentation APK on the device — the shape uiautomator2, Maestro and
+Appium all converged on — and that would be simframe's first runtime artifact
+installed onto your device. The perception ladder was built so a missing tier
+degrades rather than fails, and this is exactly that case: OCR and CV yield
+labels and coordinates on Android today. `simframe doctor` reports the tier as
+`optional` with that number, so the gap is visible rather than silent. The
+criteria for revisiting it are written down in `docs/DEFERRED.md` under
+**Phase 8b**.
+
+The emulator's own gRPC surface was checked for anything tree-shaped and has
+nothing: 43 RPCs for sensors, input, screenshots and VM state, and no notion of
+a view. That question is settled, not open.
+
+```bash
+# an emulator is found the same way a simulator is
+simframe devices          # ● Small_Phone_API_36  Android 16 (API 36)  emulator-5554
+simframe ui --device=emulator-5554
+```
+
 ## The tools
 
 Read first, act in batches, and look at pixels only when the question is about
@@ -397,7 +434,10 @@ an Xcode upgrade that moves something is a bounded fix rather than an
 archaeology project. If a layer breaks, simframe degrades to the layer below
 and `doctor` says which.
 
-Run `simframe start --engine=simctl` to use the original loop instead.
+Run `simframe start --engine=screenshot` to use the one-frame-at-a-time loop
+instead — it is also the only capture engine on Android, where it reaches the
+emulator console rather than any simulator tool. `--engine=simctl` is still
+accepted as the name that loop used to have.
 
 - **Files are the IPC for reads.** The daemon renames completed frames into
   place; readers just read them. A rename is atomic, so a reader can never see a
@@ -511,12 +551,14 @@ said a word — the exact failure shape, found by the thing built to catch it.
 
 ## Limitations
 
-- Simulators only. Neither the framebuffer nor `simctl` can reach a physical
-  device.
+- Simulators and Android emulators only. Neither the framebuffer nor `simctl`
+  nor the emulator console can reach a physical device.
+- Android observes but cannot act: no input path and no accessibility tree yet.
+  See [Android](#android) above.
 - The daemon depends on private frameworks. They are stable enough to build on —
   capture and accessibility survived the iOS 26 transition — but an Xcode
   upgrade can move a symbol. `doctor` reports each layer separately so a break
-  is visible rather than mysterious, and `--engine=simctl` still works.
+  is visible rather than mysterious, and `--engine=screenshot` still works.
 - Hardware buttons: only `home` is implemented. The other Indigo codes are
   unverified, and a wrong one can crash `backboardd` or lock the device, so they
   return an error rather than a guess.
@@ -532,9 +574,13 @@ said a word — the exact failure shape, found by the thing built to catch it.
 
 ## Roadmap
 
-- **Android, as a second backend.** Everything above the platform boundary is
-  already platform-agnostic; nothing above it imports a simulator framework.
+- **Android input.** The backend reads today; the console's `event mouse` and
+  `event text` are measured and need wiring as one gesture vocabulary, so that
+  `sim_tap` never exists on a platform where `swipe` does not.
 - **Extend the confirm vocabulary beyond English.**
+- **Phase 8b, conditionally:** an instrumentation APK for the Android
+  accessibility tree, with the criteria for doing it stated in
+  `docs/DEFERRED.md` rather than left to enthusiasm.
 
 ## Releasing
 

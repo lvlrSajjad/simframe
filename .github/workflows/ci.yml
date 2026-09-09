@@ -65,7 +65,9 @@ jobs:
   # layer has quietly degraded.
   integration:
     runs-on: macos-15
-    timeout-minutes: 25
+    # 25 was the bound before the fingerprint distributions were measured here;
+    # eighteen cold perception passes on a runner with no GPU need the rest.
+    timeout-minutes: 40
     env:
       SIMFRAME_STRICT: '1'
     steps:
@@ -207,6 +209,44 @@ jobs:
         # Both perception layers are live here now that the tree is read
         # in-process, so this covers the merged map rather than OCR alone.
         run: node scripts/ci-memory.mjs --device="$DEVICE"
+
+      - name: The fingerprint distributions, measured and bounded
+        # The threshold that decides whether two readings are the same screen is
+        # a measured artifact, and it was being re-measured by a person noticing
+        # that a number had moved. It moved from 0.65 to 0.42 in one afternoon
+        # and the cause was not the fingerprint at all — one reading taken on the
+        # wrong screen, plus same-screen pairs whose sensors differed, which the
+        # graph absorbs by design. Both are now named as themselves and neither
+        # can be reported as drift.
+        #
+        # This fails on two conditions rather than on `gap > 0`: every
+        # same-screen revisit must clear the threshold by 0.10, and every
+        # different-screen pair must stay 0.10 below it. A gap can be wide while
+        # the threshold sits at the edge of it, and the edge is where a screen
+        # gets misclassified.
+        #
+        # Three rounds, not four: 18 same-screen pairs is enough to catch a
+        # regression, and every reading is a cold perception pass on a runner
+        # with no GPU. When this fails it is worth reading which of the two
+        # conditions failed — a tour that went somewhere unintended says so
+        # explicitly, and that is a tour fix, not a threshold fix.
+        #
+        # Deliberately not piped. An earlier local run of this sent its output
+        # through `tail` and got tail's exit code, so a run whose distributions
+        # had overlapped completely reported success.
+        run: node scripts/eval-fingerprint.mjs --tour=test/tours/device-native.json --rounds=3 --device="$DEVICE" --out=/tmp/fingerprint-distributions.json --label="ci-${{ github.sha }}"
+
+      - name: Keep the distributions
+        # Recorded every run, so the two distributions can be read as a series
+        # rather than as today's number. The file carries every reading's tokens
+        # and elements, which is what makes a narrowing diagnosable after the
+        # fact instead of only while it is happening.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fingerprint-distributions
+          path: /tmp/fingerprint-distributions.json
+          if-no-files-found: warn
 
       - name: Daemon log, on failure
         if: failure()

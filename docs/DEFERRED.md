@@ -102,6 +102,54 @@ driven hard, which makes a shared cause in CoreSimulator more likely than two
 coincidences. The next step is not more recovery code; recovery already runs and
 already fails. It is finding out what a restart resets.
 
+### Phase 8b — the instrumentation APK, and when to build it
+**Decided 2026-09-09: Android ships OCR + CV only.** Not because the tree is
+worthless but because of where the pain is. Android is the second proof of the
+platform boundary; the perception ladder was built so that a missing tier
+degrades rather than fails, and this is precisely that case; and an npm package
+that does what it says is worth more than one that quietly installs an APK.
+`simframe doctor` reports the tier as `optional` with the 2,012 ms number, so
+the absence is visible rather than silent.
+
+**Do it when one of these is true, and not before:**
+
+1. A real Android user hits a screen class OCR and CV cannot serve — a custom
+   canvas surface, an icon-only control with no text anywhere near it, a
+   WebView whose text OCR reads but whose roles it cannot infer.
+2. The iOS a11y tier's hit rate is measured and shows what Android is losing.
+   Phase 2a has already landed, so this is a measurement waiting to be taken
+   rather than a phase waiting to happen: instrument how often the tree
+   contributes an element OCR+CV missed, per screen, across the tours. If that
+   number is small on iOS, Android is losing little.
+
+**The shape, when the time comes**, is the one every serious Android driver
+converged on — uiautomator2, Maestro and Appium all do the same thing: a tiny
+instrumentation APK, built from source in `native/android/`, debug-signed,
+installed by the daemon over `adb` on first use, holding a `UiAutomation`
+connection open and serving the tree over a local socket. It is a runtime
+artifact, but it is ours, it is built from source in this repo, and it is
+automatic. The promise change is "simframe puts a helper on your emulator" —
+an honest sentence to add to the README on the day it is true, and not before.
+
+### The emulator's gRPC surface has nothing tree-shaped — confirmed
+Asked and answered so nobody asks again. The emulator ships its own service
+definitions in `$ANDROID_HOME/emulator/lib/*.proto`, which is the authoritative
+list, and `emulator_controller.proto` has 43 RPCs: sensors, physical model,
+battery, GPS, fingerprint, key/touch/mouse/wheel input, phone and SMS, status,
+`getScreenshot`/`streamScreenshot`, logcat, VM state, display configuration,
+notifications, virtual scene camera, posture, brightness, display mode, XR
+options. `ui_controller_service.proto` adds four, all about the emulator's own
+window chrome. Grepping every proto in that directory for `accessib`,
+`hierarch`, `uiautomat`, `viewnode`, `nodeinfo`, `widget` or `element` returns
+nothing but a comment in `adb_service.proto` about making adb *accessible*.
+
+The emulator can hand over pixels and take input. It has no idea what a view is,
+and it is not going to.
+
+Two things in that list are worth remembering rather than rediscovering:
+`streamScreenshot` is the streaming capture path if 21 ms per frame ever stops
+being enough, and `setClipboard` is the answer to the entry below.
+
 ### Android's accessibility tree costs 2 seconds a read
 `uiautomator dump` is 2,012 ms on this machine (`docs/BENCHMARKS.md`), against
 45 ms for the iOS tree after Phase 2a. It is not the same kind of cost and it
@@ -123,7 +171,7 @@ list, so neither substitutes for perception — OCR does, and does it today.
 Until this is settled, Android reports its accessibility layer as `optional`
 with the reason, which is the state doctor exists to make visible.
 
-### There is no adb path to the Android clipboard
+### There is no *adb* path to the Android clipboard — but there is a gRPC one
 `cmd clipboard` does not exist on API 36 — the shell answers "No shell command
 implementation" — and `service call clipboard` depends on transaction numbers
 that move between platform versions. So `setPasteboard` throws on Android with
@@ -132,8 +180,28 @@ the reason, rather than appearing to work.
 This matters more than it sounds: on iOS the pasteboard is how simframe types a
 long string exactly, because key events follow the active keyboard layout and a
 device with a non-Latin layout installed types the wrong characters. Android's
-`input text` has the same class of problem. The honest options are an APK (see
-above) or accepting slower, layout-sensitive typing.
+`input text` has the same class of problem.
+
+**Correction, same day: the emulator gRPC surface has it.**
+`emulator_controller.proto` declares `setClipboard(ClipData)`,
+`getClipboard(Empty)` and `streamClipboard(Empty)`, and `ClipData` is the
+simplest message protobuf can express:
+
+```
+message ClipData { string text = 1; }   // → 0x0A <varint len> <utf-8 bytes>
+```
+
+A unary gRPC call is an HTTP/2 POST to
+`/android.emulation.control.EmulatorController/setClipboard` with
+`content-type: application/grpc` and a five-byte length prefix. Node has `http2`
+built in, so this is reachable in about forty lines with **no npm dependency**
+and no APK — which makes it the cheapest real capability left on the Android
+side, and it should not stay filed under "not possible".
+
+Two things to settle first: whether the gRPC endpoint wants a token (there is an
+`emulator_access.json` beside the protos), and whether the port is discoverable
+without parsing `lsof` — 8554 is the documented default and is what this machine
+uses, but a second emulator will not be on it.
 
 ### Android input is measured and unwired
 The emulator console's `event mouse <x> <y> 0 1` / `... 0 0` puts a real

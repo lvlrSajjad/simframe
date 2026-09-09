@@ -31,6 +31,24 @@ const arg = (name, fallback) => {
 const tourFile = arg('tour');
 const rounds = Number(arg('rounds', 3));
 /**
+ * How much room the threshold must have on each side.
+ *
+ * `gap > 0` was the only bar until the margin narrowed, and a gap can be wide
+ * while the threshold sits at the edge of it — which is the state that actually
+ * misclassifies a screen. So the bar is stated as clearance around the
+ * threshold itself: every same-screen revisit must score at least
+ * `threshold + CLEARANCE`, and every different-screen pair at most
+ * `threshold - CLEARANCE`.
+ *
+ * 0.10 is chosen against measurement, not taste. Clean runs on this machine
+ * put same-min at 0.67-0.75 and different-max at 0.05, so the clearance in
+ * hand is roughly 0.3 either way; requiring 0.10 fails well before a
+ * misclassification and does not fire on ordinary variation. Raise it when the
+ * recorded distributions say it can be raised.
+ */
+const CLEARANCE = 0.1;
+
+/**
  * Above this, two consecutive tour screens are the same screen and the
  * navigation between them failed. Deliberately well above the identity
  * threshold: this is not "might be the same screen", it is "obviously is".
@@ -103,6 +121,20 @@ for (let round = 1; round <= rounds; round += 1) {
       tokens: id.tokens ?? [],
       count: (id.tokens ?? []).length,
       settled: id.settled,
+      // The elements the tokens were computed from, and the screen they were
+      // measured in. Kept so a candidate change to the token rules can be
+      // simulated against recorded readings by re-running the real tokeniser,
+      // instead of by transforming its output and hoping that is equivalent.
+      targets: id.entry?.targets ?? [],
+      screen: id.points,
+      // Which sensors answered. Two readings of one screen taken with
+      // different sensors are *known* not to agree — the tree and OCR share
+      // 0.33-0.47 of a screen's structural tokens (docs/DEFERRED.md) — and
+      // absorbing that is the graph's job, through aliasing, not the
+      // fingerprint's. So the distributions below are split by sensor mix
+      // rather than averaged over it, which is what made a mixed pair look
+      // like fingerprint drift.
+      sources: id.entry?.sources ?? [],
     });
     process.stdout.write(
       `  round ${round}  ${screen.name.padEnd(14)} ${String(id.hash).slice(0, 10)}  ${String((id.tokens ?? []).length).padStart(3)} tokens${id.settled ? '' : '  (never settled)'}\n`,
@@ -120,14 +152,68 @@ if (arrivalFailures.length) {
   process.exit(1);
 }
 
+/**
+ * A reading taken somewhere other than where the tour meant to be.
+ *
+ * The arrival check above compares each reading with the one before it, which
+ * catches "the navigation did not happen" and misses "the navigation went
+ * somewhere else". It missed exactly that: a reading labelled
+ * settings-accessibility was in fact the Settings root list, and being unlike
+ * its own screen at one end and like a different screen at the other, it alone
+ * moved the same-screen minimum to 0.00 and the different-screen maximum to
+ * 0.40 across 30 pairs. Both distributions were then measuring the tour.
+ *
+ * So each reading is also checked against its own siblings: a reading that
+ * resembles no other reading of its own screen, while resembling some other
+ * screen at least as much, was not where it says it was. That needs at least
+ * two siblings to be an outlier test rather than a coin toss, so it only
+ * applies from three rounds up.
+ */
+function findStrays(all) {
+  const strays = [];
+  const byName = new Map();
+  for (const r of all) byName.set(r.name, [...(byName.get(r.name) ?? []), r]);
+  for (const r of all) {
+    const siblings = byName.get(r.name).filter((o) => o !== r);
+    if (siblings.length < 2) continue;
+    const bestSelf = Math.max(...siblings.map((o) => fingerprint.similarity(r.tokens, o.tokens)));
+    const others = all.filter((o) => o.name !== r.name);
+    const bestOther = others.length
+      ? Math.max(...others.map((o) => fingerprint.similarity(r.tokens, o.tokens)))
+      : 0;
+    if (bestSelf < graph.SIMILARITY_THRESHOLD && bestOther >= bestSelf) {
+      strays.push({ reading: r, bestSelf, bestOther });
+    }
+  }
+  return strays;
+}
+
+const strays = findStrays(readings);
+if (strays.length) {
+  console.error(`\nFAIL ${strays.length} reading(s) were taken on a screen other than the one named:`);
+  for (const { reading, bestSelf, bestOther } of strays) {
+    console.error(`       ${reading.name} r${reading.round}: resembles its own screen ${bestSelf.toFixed(2)}, `
+      + `another screen ${bestOther.toFixed(2)} (${reading.count} tokens, sources ${reading.sources.join('+') || 'none'})`);
+  }
+  console.error('\nThat is the tour going somewhere unintended, not the fingerprint drifting, and');
+  console.error('measuring it as either distribution poisons both ends. Fix the tour — a tap that');
+  console.error('missed, or a screen that needs longer than its pause — and re-run.');
+  process.exit(1);
+}
+
+/** Which sensors produced a reading, as a comparable key. */
+const mixOf = (r) => (r.sources ?? []).join('+') || 'unknown';
+
 const same = [];
+const mixed = [];
 const different = [];
 for (let i = 0; i < readings.length; i += 1) {
   for (let j = i + 1; j < readings.length; j += 1) {
     const s = fingerprint.similarity(readings[i].tokens, readings[j].tokens);
-    (readings[i].name === readings[j].name ? same : different).push({
-      a: readings[i], b: readings[j], similarity: s,
-    });
+    const pair = { a: readings[i], b: readings[j], similarity: s };
+    if (readings[i].name !== readings[j].name) different.push(pair);
+    else if (mixOf(readings[i]) === mixOf(readings[j])) same.push(pair);
+    else mixed.push(pair);
   }
 }
 
@@ -143,6 +229,7 @@ const stats = (rows) => {
 };
 
 const s = stats(same);
+const m = stats(mixed);
 const d = stats(different);
 const gap = s && d ? s.min - d.max : null;
 const threshold = graph.SIMILARITY_THRESHOLD;
@@ -150,7 +237,13 @@ const threshold = graph.SIMILARITY_THRESHOLD;
 const f = (x) => (x == null ? '—' : x.toFixed(2));
 console.log(`\n${'distribution'.padEnd(26)} ${'n'.padStart(4)} ${'min'.padStart(6)} ${'median'.padStart(7)} ${'max'.padStart(6)}`);
 console.log(`${'same screen, revisited'.padEnd(26)} ${String(s?.n ?? 0).padStart(4)} ${f(s?.min).padStart(6)} ${f(s?.median).padStart(7)} ${f(s?.max).padStart(6)}`);
+console.log(`${'same screen, mixed sensors'.padEnd(26)} ${String(m?.n ?? 0).padStart(4)} ${f(m?.min).padStart(6)} ${f(m?.median).padStart(7)} ${f(m?.max).padStart(6)}`);
 console.log(`${'different screens'.padEnd(26)} ${String(d?.n ?? 0).padStart(4)} ${f(d?.min).padStart(6)} ${f(d?.median).padStart(7)} ${f(d?.max).padStart(6)}`);
+if (m) {
+  console.log('\nthe mixed-sensor row is not a fingerprint failure: the tree and OCR see a screen');
+  console.log('differently by design, and the graph absorbs it by aliasing. It is here so that');
+  console.log('it cannot be mistaken for drift, which is what happened when the rows were one.');
+}
 console.log(`\ngap (same-min − different-max): ${f(gap)}`);
 console.log(`threshold in use: ${threshold}`);
 
@@ -169,6 +262,51 @@ if (worstDifferent) {
   console.log(`closest different-screen pair: ${worstDifferent.a.name} vs ${worstDifferent.b.name} = ${f(worstDifferent.similarity)}`);
 }
 
+/**
+ * Why a pair is as far apart as it is, token by token.
+ *
+ * A distribution is not actionable and neither is a similarity: 0.42 says the
+ * margin narrowed and nothing about what moved. The token grammar is
+ * `role:region[:@slot]:w:h["label"]:x:y#count`, so a diff of two token sets
+ * names the cause directly — a label that changed is a label token, a role that
+ * flipped is the same geometry under two roles, a bucket that straddled is the
+ * same key with `#1` against `#many`, and a shifted anchor is the same key at a
+ * different `x`/`y`.
+ */
+function explainPair(pair) {
+  const a = new Set(pair.a.tokens);
+  const b = new Set(pair.b.tokens);
+  const onlyA = [...a].filter((t) => !b.has(t)).sort();
+  const onlyB = [...b].filter((t) => !a.has(t)).sort();
+  const shared = [...a].filter((t) => b.has(t)).length;
+  console.log(`
+  shared ${shared}, only in r${pair.a.round} ${onlyA.length}, only in r${pair.b.round} ${onlyB.length}`);
+  // The same structural key under two different tails is a drift; a key present
+  // on one side only is an element that came or went. Telling those apart is
+  // the whole diagnosis, so they are printed apart.
+  const keyOf = (t) => t.replace(/:x-?\d+:y-?\d+#(1|many)$/, '');
+  const tailOf = (t) => t.slice(keyOf(t).length);
+  const keysA = new Map(onlyA.map((t) => [keyOf(t), tailOf(t)]));
+  const keysB = new Map(onlyB.map((t) => [keyOf(t), tailOf(t)]));
+  const drifted = [...keysA.keys()].filter((k) => keysB.has(k));
+  if (drifted.length) {
+    console.log('  same structure, moved or re-counted:');
+    for (const k of drifted) console.log(`    ${k}   r${pair.a.round}${keysA.get(k)}   r${pair.b.round}${keysB.get(k)}`);
+  }
+  const goneA = onlyA.filter((t) => !keysB.has(keyOf(t)));
+  const goneB = onlyB.filter((t) => !keysA.has(keyOf(t)));
+  if (goneA.length) {
+    console.log(`  only in r${pair.a.round}:`);
+    for (const t of goneA) console.log(`    ${t}`);
+  }
+  if (goneB.length) {
+    console.log(`  only in r${pair.b.round}:`);
+    for (const t of goneB) console.log(`    ${t}`);
+  }
+}
+
+if (worstSame) explainPair(worstSame);
+
 // Chrome labels are the only text in a fingerprint, so which of them got in is
 // the thing a band change actually moves.
 const labels = new Set();
@@ -182,11 +320,28 @@ console.log(`\n${labels.size} distinct chrome label(s) entered identity: ${[...l
 if (outFile) {
   fs.writeFileSync(outFile, JSON.stringify({
     label, device: dev.name, runtime: dev.runtime, rounds, at: Date.now(),
-    threshold, same: s, different: d, gap, separated, thresholdInGap,
+    threshold, same: s, mixed: m, different: d, gap, separated, thresholdInGap,
     labels: [...labels].sort(),
-    readings: readings.map(({ tokens, ...r }) => ({ ...r, tokenCount: tokens.length })),
+    // Tokens are kept. They were stripped here, and the first time the margin
+    // narrowed the run could not be diagnosed from its own output.
+    readings,
   }, null, 2));
   console.log(`\nwrote ${outFile}`);
 }
 
-process.exit(separated ? 0 : 1);
+// The stated margin, checked rather than eyeballed. A person noticing that a
+// number moved is not a test; this is the machine that re-measures it.
+const floor = threshold + CLEARANCE;
+const ceiling = threshold - CLEARANCE;
+const sameOk = s != null && s.min >= floor;
+const differentOk = d != null && d.max <= ceiling;
+console.log(`${sameOk ? 'ok  ' : 'FAIL'} every same-screen revisit scores at least ${floor.toFixed(2)} (worst ${f(s?.min)})`);
+console.log(`${differentOk ? 'ok  ' : 'FAIL'} every different-screen pair scores at most ${ceiling.toFixed(2)} (worst ${f(d?.max)})`);
+if (!sameOk || !differentOk) {
+  console.error('\nThe threshold no longer has the clearance this bar states. Diagnose before');
+  console.error('moving it: `node scripts/analyse-fingerprint.mjs <the --out file>` classifies every');
+  console.error('divergent token by cause, and the causes have different fixes. A threshold moved to');
+  console.error('make a run pass is a threshold that means nothing.');
+}
+
+process.exit(separated && sameOk && differentOk ? 0 : 1);
