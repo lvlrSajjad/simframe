@@ -602,7 +602,7 @@ question becomes whether `openUrl` can be made *checkable* — open, then confir
 the frontmost app changed — which is a retry with evidence rather than a retry
 with hope, and is the only version of it that belongs in the product.
 
-### `doctor` was fixed and the default device was not — fixed, 0.7.3
+### `doctor` was fixed and the default device was not — fixed, 0.8.0
 The 0.7.2 guard stopped `doctor` fanning out across every booted device. It did
 not touch the thing that chose the device in the first place, and a clean-room
 review of the published 0.7.2 found the rest of it in minutes.
@@ -621,7 +621,12 @@ picked the colleague's. That is the signature of a fix applied to a command
 instead of to a default.
 
 Both backends now refuse, marked `ambiguous` so a clean match on the other
-platform cannot override it, and name the devices plus `SIMFRAME_DEVICE`.
+platform cannot override it, and name the devices plus `SIMFRAME_DEVICE`. This
+is why 0.8.0 is a minor and not a patch: a bare command on a multi-device host
+used to act and now errors, and that is user-visible behaviour even though the
+old behaviour was the bug. The MCP server's default is the same path, so an
+agent that never named a device now gets an error telling it to — verified
+against the running server.
 Refusing rather than preferring, for a reason that is a boundary constraint and
 not timidity: the seam cannot see which device simframe is already driving,
 because that is store state above the boundary, and a backend must not guess
@@ -634,14 +639,14 @@ every call site uses instead of importing `resolveDevice` from the seam directly
 which is seven call sites across `cli.js` and `index.js`. Worth doing; not worth
 folding into a fix for a wrong-device hazard.
 
-### `stop` exited 0 after refusing to stop anything — fixed, 0.7.3
+### `stop` exited 0 after refusing to stop anything — fixed, 0.8.0
 `stop --device=X` against a daemon another client holds printed "stopped 0
 daemons; left 1 in use by another client" and exited **0**. The text was honest
 and the exit code was not, so a script could not tell the difference. An
 explicit device that was refused now exits non-zero; `--all` still exits 0 when
 it skips a device somebody else holds, because there it is informational.
 
-### Three README claims that were not true — fixed, 0.7.3
+### Three README claims that were not true — fixed, 0.8.0
 Found by the same review, and all three are the kind of small dishonesty this
 project says it cares about:
 
