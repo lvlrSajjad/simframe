@@ -43,6 +43,8 @@ export { resize } from './host.js';
  * @property {(query?: string, opts?: object) => Promise<Device>} resolveDevice
  * @property {(udid: string) => boolean} isBootedSync
  * @property {(udid: string) => boolean} ownsUdid   sync, no I/O — see ios.js
+ * @property {Function} geometry     the device's real point size, or null if this backend cannot say
+ * @property {Function} inputDriver  this backend's own input path, or null if input comes from above
  * @property {Function} screenshot
  * @property {Function} launchApp
  * @property {Function} terminateApp
@@ -58,6 +60,7 @@ export { resize } from './host.js';
 export const PLATFORM_SURFACE = Object.freeze([
   'id', 'deviceNoun',
   'listDevices', 'bootedDevices', 'resolveDevice', 'isBootedSync', 'ownsUdid',
+  'geometry', 'inputDriver',
   'screenshot', 'launchApp', 'terminateApp', 'openUrl',
   'setPermission', 'setPasteboard', 'permissionServices', 'capabilities', 'toolchain',
 ]);
@@ -208,6 +211,24 @@ export function permissionServices(udid) {
   }
   return all;
 }
+
+/**
+ * The device's real point size and scale, or null when the backend cannot say
+ * and something above the boundary has to.
+ *
+ * Android's only source for this is the backend, and without it the geometry
+ * fell through to a guess derived from the capture image — an emulator reported
+ * "393x700pt", which is the ring size and not any coordinate space the device
+ * knows. Tap points computed from that are wrong, and nothing says so.
+ */
+export const geometryFor = (udid) => platformFor(udid).geometry(udid);
+
+/**
+ * The backend's own input path, or null when input comes from above the
+ * boundary. iOS is null: Indigo HID lives in the daemon, which is simframe's
+ * engine rather than the platform's. Android is the emulator console.
+ */
+export const inputDriverFor = (udid) => platformFor(udid).inputDriver(udid);
 
 /**
  * What a device's platform can currently do: which capture engines it has, and

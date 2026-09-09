@@ -3,6 +3,7 @@
 // even available?" before it answers anything else.
 import { execFile } from 'node:child_process';
 import * as control from './control.js';
+import { geometryFor, inputDriverFor } from './platform/index.js';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -20,6 +21,12 @@ let driverCache = null;
  * iOS. idb remains the fallback so a machine without the daemon still works.
  */
 export async function driverFor(udid) {
+  // A platform that carries its own input path answers first: there is no
+  // daemon to ask and no idb to fall back to, and reporting either for an
+  // Android emulator is how doctor came to claim "input driver: idb" about a
+  // tool that has never spoken to one.
+  const own = udid ? inputDriverFor(udid) : null;
+  if (own) return { name: own.id, available: true, version: own.detail, reason: null, viaSocket: false };
   if (udid && control.available(udid)) {
     try {
       const status = await control.status(udid);
@@ -140,6 +147,15 @@ export async function screenInfo(udid, { refresh = false } = {}) {
 }
 
 async function readScreenInfo(udid) {
+  // The platform first, where it can answer at all: on Android it is the only
+  // source, and the alternative is `deviceGeometry`'s last-resort guess, which
+  // is an iPhone's numbers and silently wrong for everything else.
+  try {
+    const geo = await geometryFor(udid);
+    if (geo?.pointWidth && geo?.pointHeight) return geo;
+  } catch {
+    /* the backend could not say; the daemon or idb may still be able to */
+  }
   // Ask the daemon first. It holds the device's own point size and scale, which
   // makes it both authoritative and free — and it means geometry no longer
   // needs idb at all. Going to idb first meant a machine without idb could
@@ -300,6 +316,11 @@ export function centerOf(node) {
 
 export async function tapPoint(udid, x, y, { durationMs } = {}) {
   const point = { x: Math.round(x), y: Math.round(y) };
+  const own = inputDriverFor(udid);
+  if (own) {
+    await own.tap(udid, point.x, point.y, durationMs ? { durationMs } : {});
+    return point;
+  }
   if (control.available(udid)) {
     await control.tap(udid, point.x, point.y, durationMs ? { durationMs } : {});
     return point;
@@ -318,6 +339,15 @@ export async function tapLabel(udid, query, { index, durationMs } = {}) {
 }
 
 export async function typeText(udid, value) {
+  const own = inputDriverFor(udid);
+  if (own) {
+    // No pasteboard on Android (docs/DEFERRED.md), so exact text goes through
+    // the same keystroke path as everything else. `event text` carries
+    // characters rather than key positions, so a non-Latin host layout does not
+    // reinterpret them — which is the reason the pasteboard exists on iOS.
+    await own.text(udid, String(value));
+    return;
+  }
   if (control.available(udid)) {
     // The daemon's paste path carries characters rather than key positions, so
     // it is not reinterpreted by the device's keyboard layout.
@@ -329,6 +359,11 @@ export async function typeText(udid, value) {
 
 /** Key events rather than text: for shortcuts and search-as-you-type. */
 export async function typeKeys(udid, value) {
+  const own = inputDriverFor(udid);
+  if (own) {
+    await own.text(udid, String(value));
+    return;
+  }
   if (control.available(udid)) {
     await control.type(udid, String(value));
     return;
@@ -337,6 +372,11 @@ export async function typeKeys(udid, value) {
 }
 
 export async function pressKey(udid, keycode) {
+  const own = inputDriverFor(udid);
+  if (own) {
+    await own.key(udid, keycode);
+    return;
+  }
   await idb(['ui', 'key', '--udid', udid, String(keycode)]);
 }
 
@@ -363,6 +403,13 @@ export async function resetSession(udid) {
 }
 
 export async function pressButton(udid, name) {
+  const own = inputDriverFor(udid);
+  if (own) {
+    // Android's whole key vocabulary is safe to offer: `input keyevent` takes
+    // names through a public API, so unlike Indigo there is nothing to guess.
+    await own.key(udid, name);
+    return;
+  }
   if (control.available(udid)) {
     try {
       await control.press(udid, String(name).toLowerCase());
@@ -376,6 +423,11 @@ export async function pressButton(udid, name) {
 }
 
 export async function swipe(udid, from, to, { durationMs = 300 } = {}) {
+  const own = inputDriverFor(udid);
+  if (own) {
+    await own.swipe(udid, from, to, { durationMs });
+    return;
+  }
   if (control.available(udid)) {
     await control.swipe(udid, from, to, { durationMs });
     return;

@@ -230,6 +230,30 @@ function toolchain() {
 }
 
 /**
+ * iOS geometry does not come from here.
+ *
+ * The daemon holds the device's own point size and scale and is both
+ * authoritative and free, and idb can answer when the daemon cannot. Both sit
+ * above this boundary, so this backend has nothing to add — and returning null
+ * says that, where a guess would have been believed.
+ */
+function geometry() {
+  return null;
+}
+
+/**
+ * Nor does iOS input.
+ *
+ * It is Indigo HID inside `simframed`, reached over the control socket: that is
+ * simframe's own engine, not something the platform provides. Android's input
+ * *is* the platform's — the emulator console — which is why this is a question
+ * a backend gets asked at all.
+ */
+function inputDriver() {
+  return null;
+}
+
+/**
  * What this backend can currently do, so nothing above the boundary has to
  * assume. iOS has both capture engines, input through Indigo HID and the
  * accessibility tree through AXPTranslator — which is to say, everything, and
@@ -239,7 +263,7 @@ function toolchain() {
 function capabilities() {
   return {
     captureEngines: ['simframed', 'screenshot'],
-    input: { supported: true },
+    input: { supported: true, via: 'daemon' },
     ax: { supported: true },
   };
 }
@@ -253,6 +277,8 @@ export const platform = {
   resolveDevice,
   isBootedSync,
   ownsUdid,
+  geometry,
+  inputDriver,
   screenshot,
   launchApp,
   terminateApp,

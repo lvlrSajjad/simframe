@@ -537,7 +537,16 @@ export async function waitFor(
       // a button changing state. Waiting the full timeout for a change that
       // will never be visible turns a 100ms action into a 12s one, so give up
       // early and say so, rather than silently burning the clock.
-      if (!sawChange && Date.now() - startedAt > reactionMs && state.stableForMs >= stableMs) {
+      //
+      // But "nothing changed" is a claim about something observed, and with no
+      // frame captured since this call began, nothing has been. The screenshot
+      // engine idles at 1.5 fps, so a 500 ms reaction window expired before the
+      // first new frame existed: a tap that opened a whole activity was
+      // reported as having no visible effect, and the text meant for the field
+      // it opened was typed into nothing. Damage-driven capture on iOS hid this
+      // by being fast.
+      const observedSomething = state.seq - startSeq >= 1;
+      if (!sawChange && observedSomething && Date.now() - startedAt > reactionMs && state.stableForMs >= stableMs) {
         return done(false, { noVisibleChange: true });
       }
 

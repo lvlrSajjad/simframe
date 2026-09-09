@@ -10,8 +10,29 @@ import { launchApp, openUrl, setPasteboard, setPermission, terminateApp } from '
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MAX_PAUSE_MS = 5000;
-/** How long a text field needs after being tapped before it holds the keyboard focus. */
-const FOCUS_SETTLE_MS = 150;
+/**
+ * A tapped field is typed into once the screen has settled, not after a fixed
+ * wait.
+ *
+ * It was 150 ms, which is enough for a keyboard to rise over the screen you are
+ * already on and nowhere near enough for a tap that opens a whole activity.
+ * Measured on Android: tapping Settings' search box starts a separate search
+ * screen, the text went before its field had focus, and the step reported
+ * success while nothing had been typed — the worst shape a failure can take.
+ *
+ * `settle` needs a change before it will report stillness, so a tap that
+ * visibly does nothing (a field that already had focus) cannot satisfy it and
+ * falls out at `reaction` instead. That bounds the cost of the honest case
+ * rather than the broken one.
+ */
+const FOCUS_STABLE_MS = 250;
+/**
+ * Long enough for a slow capture loop to produce a frame or two. The screenshot
+ * engine idles at 1.5 fps — 667 ms between frames — so anything under that is a
+ * verdict reached before there was anything to look at.
+ */
+const FOCUS_REACTION_MS = 900;
+const FOCUS_TIMEOUT_MS = 3000;
 const POLL_MS = 250;
 /** A list that has not produced the target in this many screens does not contain it. */
 const MAX_SCROLLS = 20;
@@ -282,9 +303,19 @@ async function runStep(deviceQuery, udid, step, ctx) {
         // (`#4`, `@x,y`) meant nothing here.
         const found = await api.locate(deviceQuery, step.into, { index: step.index, refresh: step.refresh });
         await input.tapPoint(udid, found.target.x, found.target.y);
-        await sleep(FOCUS_SETTLE_MS);
+        const focused = await api.waitFor(deviceQuery, {
+          mode: 'settle',
+          stableMs: FOCUS_STABLE_MS,
+          reactionMs: FOCUS_REACTION_MS,
+          timeoutMs: FOCUS_TIMEOUT_MS,
+          options: ctx.options,
+        });
         await input.typeText(udid, step.text ?? step.value);
-        return `typed into "${found.target.label}" at ${found.target.x},${found.target.y}`;
+        // Say when the field never visibly took focus. It is usually fine — a
+        // field that was already focused does not move — but it is also what a
+        // tap that missed looks like, and the caller should be able to tell.
+        const quiet = focused.satisfied ? '' : ' [the field did not visibly take focus]';
+        return `typed into "${found.target.label}" at ${found.target.x},${found.target.y}${quiet}`;
       }
       await input.typeText(udid, step.text ?? step.value);
       return 'typed text';

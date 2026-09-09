@@ -846,7 +846,13 @@ async function doctor({ json = false, strict = false, device } = {}) {
       if (!caps.input.supported) {
         add(`input driver (${d.name})`, 'optional', caps.input.note, { key: 'input.driver', value: null });
       } else {
-        add(`input driver (${d.name})`, driver.available ? (driver.name === 'simframed' ? 'ok' : 'warn') : 'warn',
+        // `warn` means this machine could be doing better and silently is not —
+        // which is true of idb on a simulator and false of the platform's own
+        // driver. The console is not a downgrade on Android; it is the only
+        // input path there is, and grading it a downgrade made `--strict` fail
+        // on a device that was working perfectly.
+        const best = driver.name === 'simframed' || driver.name === caps.input.via;
+        add(`input driver (${d.name})`, driver.available ? (best ? 'ok' : 'warn') : 'warn',
           driver.available ? `${driver.name}: ${driver.version}` : driver.reason,
           { key: 'input.driver', value: driver.available ? driver.name : null });
       }

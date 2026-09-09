@@ -221,44 +221,137 @@ function consoleToken() {
 }
 
 /**
- * Run a short script on the console and resolve when it has all been answered.
+ * The emulator console, held open per device.
  *
- * The console is a line protocol that answers every command with OK or KO, so
- * the next line is sent when the previous one has been answered rather than on
- * a timer.
+ * The console is a line protocol: every command is answered with `OK` or `KO`,
+ * and the greeting is itself terminated by an `OK`, so the handshake is two
+ * responses — the greeting, then the answer to `auth` — after which it is
+ * strictly request/response.
+ *
+ * Held open rather than opened per command, for two reasons. The capture loop
+ * asks for a frame several times a second, and a connect plus an auth was
+ * costing more than the screenshot: 21 ms per frame became 47 ms when a
+ * short-lived session was introduced, which is how this was noticed. And a
+ * gesture is not one command — a tap is a down, a hold and an up, a swipe is a
+ * run of moves with time between them — and paying for a handshake between the
+ * down and the up would make the timing a fiction.
+ *
+ * Commands are serialised on the session. Two callers sharing one socket
+ * interleaving their writes would each read the other's `OK`.
  */
-function consoleScript(udid, lines, { timeoutMs = 10_000 } = {}) {
-  const port = consolePort(udid);
-  if (!port) return Promise.reject(new Error(`${udid} is not an emulator serial`));
-  return new Promise((resolve, reject) => {
-    const script = [`auth ${consoleToken()}`, ...lines, 'quit'];
-    const transcript = [];
-    const sock = net.connect(port, '127.0.0.1');
-    const timer = setTimeout(() => {
-      sock.destroy();
-      reject(new Error(`emulator console on ${port} did not answer within ${timeoutMs}ms`));
-    }, timeoutMs);
-    let buf = '';
+class ConsoleSession {
+  constructor(sock, port) {
+    this.sock = sock;
+    this.port = port;
+    this.buf = '';
+    this.waiting = null;
+    this.tail = Promise.resolve();
+    this.dead = null;
     sock.setEncoding('utf8');
     sock.on('data', (chunk) => {
-      buf += chunk;
-      if (!/OK\r?\n|KO/.test(buf)) return;
-      transcript.push(buf);
-      const next = script.shift();
-      buf = '';
-      if (next) sock.write(`${next}\n`);
+      this.buf += chunk;
+      const done = /(OK|KO)([^\n]*)\r?\n/.exec(this.buf);
+      if (!done || !this.waiting) return;
+      const text = this.buf;
+      this.buf = '';
+      const settle = this.waiting;
+      this.waiting = null;
+      if (done[1] === 'KO') settle.reject(new Error(`emulator console refused: ${done[2].trim() || 'KO'}`));
+      else settle.resolve(text);
     });
-    sock.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
+    const die = (err) => {
+      this.dead = err ?? new Error(`emulator console on ${port} closed`);
+      // A close with a command outstanding is that command failing, not it
+      // succeeding. Anything else is nobody's error to hear about: a session
+      // closed on purpose must not surface as an unhandled rejection, which is
+      // exactly what a stored `close` promise did.
+      if (this.waiting) {
+        const settle = this.waiting;
+        this.waiting = null;
+        settle.reject(this.dead);
+      }
+    };
+    sock.on('error', die);
+    sock.on('close', () => die());
+  }
+
+  get usable() {
+    return !this.dead && !this.sock.destroyed;
+  }
+
+  /** Wait for one OK/KO. Used for the greeting, and by `send`. */
+  answer({ timeoutMs = 10_000 } = {}) {
+    if (this.dead) return Promise.reject(this.dead);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waiting = null;
+        this.sock.destroy();
+        reject(new Error(`emulator console on ${this.port} did not answer within ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.waiting = {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      };
     });
-    sock.on('close', () => {
-      clearTimeout(timer);
-      const text = transcript.join('');
-      if (/KO/.test(text)) reject(new Error(`emulator console refused: ${/KO:?\s*(.*)/.exec(text)?.[1] || 'KO'}`));
-      else resolve(text);
+  }
+
+  /** One command, queued behind anything already in flight on this socket. */
+  send(line, opts) {
+    const mine = this.tail.then(async () => {
+      if (!this.usable) throw this.dead ?? new Error('emulator console is closed');
+      const answer = this.answer(opts);
+      this.sock.write(`${line}\n`);
+      return answer;
     });
-  });
+    // The queue must survive a failed command, or one refusal wedges the
+    // session for every caller behind it.
+    this.tail = mine.then(() => undefined, () => undefined);
+    return mine;
+  }
+
+  close() {
+    try {
+      this.sock.write('quit\n');
+    } catch {
+      /* already gone */
+    }
+    this.sock.destroy();
+  }
+}
+
+const sessions = new Map();
+
+/** The open session for a device, reconnected if the last one went away. */
+async function sessionFor(udid, { timeoutMs = 10_000 } = {}) {
+  const existing = sessions.get(udid);
+  if (existing) {
+    const session = await existing;
+    if (session.usable) return session;
+    sessions.delete(udid);
+  }
+  const opening = (async () => {
+    const port = consolePort(udid);
+    if (!port) throw new Error(`${udid} is not an emulator serial`);
+    const session = new ConsoleSession(net.connect(port, '127.0.0.1'), port);
+    await session.answer({ timeoutMs });
+    await session.send(`auth ${consoleToken()}`, { timeoutMs });
+    return session;
+  })();
+  sessions.set(udid, opening);
+  try {
+    return await opening;
+  } catch (err) {
+    sessions.delete(udid);
+    throw err;
+  }
+}
+
+/** Run commands on the device's console, in order. */
+async function consoleScript(udid, lines, { timeoutMs = 10_000 } = {}) {
+  const session = await sessionFor(udid, { timeoutMs });
+  const out = [];
+  for (const line of lines) out.push(await session.send(line, { timeoutMs }));
+  return out.join('');
 }
 
 /** A PNG that has not been written all the way to its IEND chunk is a truncated read. */
@@ -330,6 +423,188 @@ async function screenshot(udid, outFile, { mask: _mask = 'ignored' } = {}) {
 }
 
 /**
+ * The device's real geometry.
+ *
+ * Without this, `deviceGeometry` fell through to a guess derived from the ring
+ * image — an Android emulator reported "393x700pt", which is the capture size
+ * and not a coordinate space anything on the device has ever heard of. Every
+ * tap point derived from it would have been wrong, silently, which is the worst
+ * available outcome for an input path.
+ *
+ * `wm size` is physical pixels and `wm density` is dpi; Android's density
+ * independent pixel is 1/160th of an inch, so the scale factor is dpi/160 and
+ * the point size is the pixel size divided by it. Both in one shell hop.
+ */
+const geometryCache = new Map();
+
+async function geometry(udid) {
+  const cached = geometryCache.get(udid);
+  if (cached && Date.now() - cached.at < DEVICE_CACHE_MS) return cached.geo;
+  const { stdout } = await adb(udid, ['shell', 'wm size; wm density']);
+  const text = stdout.replace(/\r/g, '');
+  const size = /Physical size:\s*(\d+)x(\d+)/.exec(text);
+  const dpi = /Physical density:\s*(\d+)/.exec(text);
+  if (!size || !dpi) throw new Error(`could not read the screen geometry: ${text.trim() || 'no answer'}`);
+  const density = Number(dpi[1]) / 160;
+  const geo = {
+    pixelWidth: Number(size[1]),
+    pixelHeight: Number(size[2]),
+    density,
+    pointWidth: Math.round(Number(size[1]) / density),
+    pointHeight: Math.round(Number(size[2]) / density),
+  };
+  geometryCache.set(udid, { at: Date.now(), geo });
+  return geo;
+}
+
+// --- input ------------------------------------------------------------------
+//
+// `event mouse <x> <y> <device> <buttonstate>` with device 0 is the touch
+// screen, and buttonstate 1 and 0 are down and up. It takes **device pixels**,
+// which was settled by watching the kernel rather than by reading the help
+// text: sending (360, 640) on a 720x1280 screen makes the touch driver report
+// 0x3fff on both axes, exactly half of its 0-32767 range. In device-independent
+// pixels 360 would have been the full width and reported the maximum.
+//
+// Everything above the boundary works in points, so the conversion happens
+// here, at the only place that knows the density.
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Points to device pixels, clamped to the screen so a bad point cannot be silently off-device. */
+function toPixels(geo, x, y) {
+  const px = Math.round(x * geo.density);
+  const py = Math.round(y * geo.density);
+  if (px < 0 || py < 0 || px > geo.pixelWidth || py > geo.pixelHeight) {
+    throw new Error(
+      `${Math.round(x)},${Math.round(y)}pt is off a ${geo.pointWidth}x${geo.pointHeight}pt screen`,
+    );
+  }
+  return { x: px, y: py };
+}
+
+/**
+ * A tap: down, a hold, up.
+ *
+ * The hold is not decoration. A down and an up in the same millisecond is not
+ * something a finger can do, and Android's own gesture detectors time
+ * touches — a tap with no duration is exactly the "teleporting tap" this
+ * project rules out on iOS. 60 ms is a short human tap; anything over 500 ms is
+ * a long press, and that is the same code path.
+ */
+async function tap(udid, x, y, { durationMs = 60 } = {}) {
+  const geo = await geometry(udid);
+  const p = toPixels(geo, x, y);
+  const session = await sessionFor(udid);
+  await session.send(`event mouse ${p.x} ${p.y} 0 1`);
+  await sleep(Math.max(1, durationMs));
+  await session.send(`event mouse ${p.x} ${p.y} 0 0`);
+}
+
+/** How many moves a swipe is made of. Enough to be a gesture, few enough to keep the timing. */
+const SWIPE_STEPS = 12;
+
+/**
+ * A swipe: down, a run of moves with time between them, up.
+ *
+ * Eased rather than linear, because a real finger accelerates and decelerates
+ * and Android's fling detector reads velocity off the last few moves. A linear
+ * drag that stops dead reads as a drag; an eased one that is still moving at
+ * the end reads as a fling, and which of those you get changes where a list
+ * lands.
+ */
+async function swipe(udid, from, to, { durationMs = 300 } = {}) {
+  const geo = await geometry(udid);
+  const start = toPixels(geo, from.x, from.y);
+  const end = toPixels(geo, to.x, to.y);
+  const session = await sessionFor(udid);
+  const gap = Math.max(1, Math.round(durationMs / SWIPE_STEPS));
+  await session.send(`event mouse ${start.x} ${start.y} 0 1`);
+  for (let step = 1; step < SWIPE_STEPS; step += 1) {
+    const t = step / SWIPE_STEPS;
+    // Ease in-out: slow at both ends, quickest in the middle.
+    const eased = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
+    const x = Math.round(start.x + (end.x - start.x) * eased);
+    const y = Math.round(start.y + (end.y - start.y) * eased);
+    await sleep(gap);
+    await session.send(`event mouse ${x} ${y} 0 1`);
+  }
+  await sleep(gap);
+  await session.send(`event mouse ${end.x} ${end.y} 0 0`);
+}
+
+/**
+ * Type text as keystrokes.
+ *
+ * `event text` takes the rest of the line, so a newline cannot be sent through
+ * it and is refused rather than silently dropped — `key enter` is the way to
+ * send one, and a caller that meant a line break should say so.
+ */
+async function text(udid, value) {
+  const string = String(value);
+  if (/[\r\n]/.test(string)) {
+    throw new Error('a newline cannot be typed through the emulator console — send an `enter` key instead');
+  }
+  const session = await sessionFor(udid);
+  await session.send(`event text ${string}`);
+}
+
+/**
+ * The hardware and system keys, by name.
+ *
+ * Through `adb shell input keyevent`, not through raw kernel codes. On iOS the
+ * unverified Indigo button codes are refused outright because a wrong one can
+ * crash `backboardd` — here the public API takes names, so there is nothing to
+ * guess at and the whole vocabulary is safe to offer. It costs about 35 ms.
+ */
+const KEYS = {
+  home: 'KEYCODE_HOME',
+  back: 'KEYCODE_BACK',
+  recents: 'KEYCODE_APP_SWITCH',
+  appswitch: 'KEYCODE_APP_SWITCH',
+  power: 'KEYCODE_POWER',
+  lock: 'KEYCODE_POWER',
+  volumeup: 'KEYCODE_VOLUME_UP',
+  volumedown: 'KEYCODE_VOLUME_DOWN',
+  enter: 'KEYCODE_ENTER',
+  tab: 'KEYCODE_TAB',
+  escape: 'KEYCODE_ESCAPE',
+  backspace: 'KEYCODE_DEL',
+  delete: 'KEYCODE_DEL',
+  menu: 'KEYCODE_MENU',
+  search: 'KEYCODE_SEARCH',
+};
+
+async function key(udid, name) {
+  const wanted = String(name).toLowerCase().replace(/[\s_-]+/g, '');
+  const keycode = KEYS[wanted]
+    ?? (/^keycode_[a-z0-9_]+$/i.test(String(name)) ? String(name).toUpperCase() : null)
+    ?? (/^\d+$/.test(String(name)) ? String(name) : null);
+  if (!keycode) {
+    throw new Error(`unknown key "${name}" on Android — one of: ${Object.keys(KEYS).join(', ')}`);
+  }
+  await adb(udid, ['shell', 'input', 'keyevent', keycode]);
+}
+
+/**
+ * This backend's own input path, or null if it has none.
+ *
+ * iOS returns null here: its input is Indigo HID inside the daemon, which is
+ * simframe's own engine rather than anything the platform provides. Android's
+ * is the emulator console, host-side, with no adb in the gesture path at all.
+ */
+function inputDriver() {
+  return {
+    id: 'console',
+    detail: 'emulator console (event mouse/text), host-side',
+    tap,
+    swipe,
+    text,
+    key,
+  };
+}
+
+/**
  * Launch a package's launcher activity.
  *
  * `am start` needs a component, not a package, so the launcher activity is
@@ -344,13 +619,6 @@ async function launchApp(udid, bundleId, { args = [], env = {}, terminateFirst =
         '(use intent extras from the app side, or drop them for this platform)',
     );
   }
-  if (terminateFirst) {
-    try {
-      await terminateApp(udid, bundleId);
-    } catch {
-      /* not running; that is the state we wanted */
-    }
-  }
   let component;
   try {
     const { stdout } = await adb(udid, ['shell', 'cmd', 'package', 'resolve-activity', '--brief', bundleId]);
@@ -361,7 +629,14 @@ async function launchApp(udid, bundleId, { args = [], env = {}, terminateFirst =
   if (!component || !component.includes('/')) {
     throw new Error(`could not launch ${bundleId}: no launcher activity (is the package installed?)`);
   }
-  const { stdout, stderr } = await adb(udid, ['shell', 'am', 'start', '-W', '-n', component]);
+  // Relaunching means starting at the app's root, and on Android
+  // `force-stop` then `am start` does not: the platform restores the task's
+  // saved activity stack, so a "relaunched" Settings came back on the search
+  // screen a previous step had left it on — a flow testing the screen it was
+  // already on, which is the exact bug `relaunch` exists to prevent on iOS.
+  // `-S` stops the app and `--activity-clear-task` drops the restored stack.
+  const fresh = terminateFirst ? ['-S', '--activity-clear-task'] : [];
+  const { stdout, stderr } = await adb(udid, ['shell', 'am', 'start', '-W', ...fresh, '-n', component]);
   const said = `${stdout}${stderr}`;
   // `am start` reports its failures on stdout and exits 0 — the same silent
   // success `pm grant` has, and the reason setPermission below reads back.
@@ -508,10 +783,7 @@ function toolchain() {
 function capabilities() {
   return {
     captureEngines: ['screenshot'],
-    input: {
-      supported: false,
-      note: 'not built for Android yet — the emulator console `event mouse` path is measured but unwired',
-    },
+    input: { supported: true, via: 'console' },
     ax: {
       supported: false,
       note: 'not built for Android yet — `uiautomator dump` costs ~2s a read; see docs/DEFERRED.md',
@@ -528,6 +800,8 @@ export const platform = {
   resolveDevice,
   isBootedSync,
   ownsUdid,
+  geometry,
+  inputDriver,
   screenshot,
   launchApp,
   terminateApp,
