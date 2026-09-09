@@ -336,7 +336,11 @@ test('the MCP server reports the real package version', async () => {
   const pkg = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')));
   const source = await import('node:fs').then((fs) => fs.readFileSync(new URL('../src/mcp.js', import.meta.url), 'utf8'));
   assert.ok(!/version: '\d+\.\d+\.\d+'/.test(source), 'version must not be hardcoded in mcp.js');
-  assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
+  // Semver, prerelease and build metadata included. The narrower pattern that
+  // was here rejected `0.6.0-rc.0` and so failed the release job for the first
+  // release candidate this project ever cut — a test that permitted only the
+  // versions nobody needed a check for.
+  assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);
 });
 
 // --- intent matching: the rules that keep a wrong tap from happening ---
