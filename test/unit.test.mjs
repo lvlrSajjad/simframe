@@ -1079,6 +1079,10 @@ test('the platform surface is satisfiable by something that is not a simulator',
     ownsUdid: (udid) => String(udid).startsWith('fake-'),
     geometry: () => ({ pixelWidth: 100, pixelHeight: 200, density: 1, pointWidth: 100, pointHeight: 200 }),
     inputDriver: () => null,
+    // A backend that cannot tell when its device booted returns null and says
+    // nothing more: the layer above then makes no staleness claim at all,
+    // rather than inventing one from the other platform's vocabulary.
+    bootedAt: async () => null,
     screenshot: async () => {},
     launchApp: async () => {},
     terminateApp: async () => {},
@@ -1801,4 +1805,34 @@ test('changing what feeds identity discards stored hashes', async () => {
   const graph = await import('../src/graph.js');
   assert.ok(fingerprint.TOKEN_RULES_VERSION >= 4);
   assert.equal(graph.FINGERPRINT_VERSION, fingerprint.TOKEN_RULES_VERSION);
+});
+
+test('a device that outlived the daemon has a stale input session', async () => {
+  const input = await import('../src/input.js');
+  // The failure this detects: a device restart kills the HID session inside a
+  // daemon that stays perfectly healthy, and every tap afterwards is
+  // dispatched successfully and moves nothing. Measured five runs in a row on
+  // the correct coordinates for the correct element.
+  const rebooted = input.sessionStaleness({ bootedAt: 5_000_000, sessionSince: 1_000_000 });
+  assert.equal(rebooted.stale, true);
+  assert.match(rebooted.reason, /no longer exists/);
+  assert.match(rebooted.reason, /4000s after/);
+
+  // A daemon started after the boot is fine, which is the ordinary case.
+  assert.equal(input.sessionStaleness({ bootedAt: 1_000_000, sessionSince: 5_000_000 }).stale, false);
+  // And so is a daemon started within the grace window in either order: those
+  // two timestamps land milliseconds apart when a daemon follows a boot.
+  assert.equal(input.sessionStaleness({ bootedAt: 1_001_500, sessionSince: 1_000_000 }).stale, false);
+  assert.equal(input.sessionStaleness({ bootedAt: 1_003_000, sessionSince: 1_000_000 }).stale, true);
+
+  // No claim without evidence. A backend that cannot answer must not produce a
+  // staleness verdict — it produces no verdict. And the two unknowns are
+  // different sentences: the first version reported a missing daemon start
+  // time as "cannot tell when the device booted", so doctor named the wrong
+  // cause about a device whose boot time it had just read.
+  assert.match(input.sessionStaleness({ bootedAt: null, sessionSince: 1 }).reason, /when the device booted/);
+  assert.match(input.sessionStaleness({ bootedAt: 1, sessionSince: undefined }).reason, /no capture daemon/);
+  for (const missing of [{ bootedAt: null, sessionSince: 1 }, { bootedAt: 1, sessionSince: undefined }, {}]) {
+    assert.equal(input.sessionStaleness(missing).stale, false);
+  }
 });

@@ -2,8 +2,11 @@
 // capability layered on top, so every entry point here has to answer "is this
 // even available?" before it answers anything else.
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import * as control from './control.js';
-import { capabilitiesFor, geometryFor, inputDriverFor, setPasteboard } from './platform/index.js';
+import * as store from './store.js';
+import { bootedAtFor, capabilitiesFor, geometryFor, inputDriverFor, setPasteboard } from './platform/index.js';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -323,6 +326,7 @@ export function centerOf(node) {
 }
 
 export async function tapPoint(udid, x, y, { durationMs } = {}) {
+  await ensureFreshSession(udid);
   const point = { x: Math.round(x), y: Math.round(y) };
   const own = inputDriverFor(udid);
   if (own) {
@@ -347,6 +351,7 @@ export async function tapLabel(udid, query, { index, durationMs } = {}) {
 }
 
 export async function typeText(udid, value) {
+  await ensureFreshSession(udid);
   const own = inputDriverFor(udid);
   if (own) {
     // No pasteboard on Android (docs/DEFERRED.md), so exact text goes through
@@ -379,6 +384,7 @@ export async function typeText(udid, value) {
  * to say so; `type` still works on every device.
  */
 export async function pasteText(udid, value) {
+  await ensureFreshSession(udid);
   const own = inputDriverFor(udid);
   if (own?.key) {
     // The clipboard goes over gRPC; KEYCODE_PASTE is what puts it in the field.
@@ -413,6 +419,7 @@ export async function typeKeys(udid, value) {
 }
 
 export async function pressKey(udid, keycode) {
+  await ensureFreshSession(udid);
   const own = inputDriverFor(udid);
   if (own) {
     await own.key(udid, keycode);
@@ -433,10 +440,111 @@ export async function pressKey(udid, keycode) {
  *
  * @returns {Promise<boolean>} whether a session was actually reset.
  */
+/**
+ * Is the daemon's HID session older than the device it talks to?
+ *
+ * Pure, so the comparison is testable without a device. `graceMs` covers the
+ * ordinary case where a daemon is started immediately after a boot and the two
+ * timestamps land within milliseconds of each other in either order.
+ */
+export function sessionStaleness({ bootedAt, sessionSince, graceMs = 2000 }) {
+  if (!Number.isFinite(bootedAt)) {
+    return { stale: false, reason: 'cannot tell when the device booted' };
+  }
+  if (!Number.isFinite(sessionSince)) {
+    return { stale: false, reason: 'no capture daemon has recorded a start time, so there is no session to compare against' };
+  }
+  if (bootedAt <= sessionSince + graceMs) return { stale: false, reason: null };
+  return {
+    stale: true,
+    reason: `the device booted ${Math.round((bootedAt - sessionSince) / 1000)}s after the capture daemon started, `
+      + 'so the daemon holds an HID session for a device session that no longer exists',
+    bootedAt,
+    sessionSince,
+  };
+}
+
+/**
+ * What state the input path is in, for doctor and sim_state.
+ *
+ * Reads two timestamps off disk — the device's boot marker and the daemon's
+ * own `startedAt` — and costs a stat each. No input is dispatched to find out,
+ * because the whole failure being detected is input that reports success and
+ * does nothing.
+ */
+const bootCache = new Map();
+/**
+ * Boot time, cached for a moment.
+ *
+ * iOS answers with a stat; Android runs `adb shell cat /proc/uptime`, a
+ * subprocess of 20-40 ms, and `getState` runs twice per flow step. A few
+ * seconds of staleness in the staleness detector costs nothing — a device that
+ * rebooted three seconds ago is still rebooted at the next check.
+ */
+async function bootedAtCached(udid, ttlMs = 3000) {
+  const hit = bootCache.get(udid);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.value;
+  const value = await bootedAtFor(udid);
+  bootCache.set(udid, { at: Date.now(), value });
+  return value;
+}
+
+export async function sessionHealth(udid) {
+  if (!udid || !control.available(udid)) return { stale: false, reason: null };
+  let bootedAt = null;
+  try {
+    bootedAt = await bootedAtCached(udid);
+  } catch (err) {
+    return { stale: false, reason: `cannot tell when the device booted: ${err.message}` };
+  }
+  const meta = store.readJson(store.paths(udid).meta);
+  const rebuilt = store.readJson(sessionFile(udid))?.rebuiltAt;
+  // The newer of the two: the daemon starting creates a session, and rebuilding
+  // it replaces one. Either makes the session current as of that moment.
+  const sessionSince = Math.max(meta?.startedAt ?? 0, rebuilt ?? 0) || undefined;
+  return sessionStaleness({ bootedAt, sessionSince });
+}
+
+/**
+ * Rebuild the session if the device outlived it. Once per process, per device.
+ *
+ * Rebuild, and retry nothing: this runs *before* the action, so the action is
+ * delivered on a session known to be current. Retrying afterwards is how an
+ * action fires twice, which is the hazard the verify barrier exists to
+ * prevent — and it is why the existing recovery covers hardware buttons only.
+ */
+const freshened = new Set();
+export async function ensureFreshSession(udid) {
+  if (!udid || freshened.has(udid)) return null;
+  freshened.add(udid);
+  const health = await sessionHealth(udid);
+  if (!health.stale) return null;
+  const rebuilt = await resetSession(udid);
+  return { ...health, rebuilt };
+}
+
+/**
+ * When the HID session was last rebuilt, if it has been.
+ *
+ * The daemon's `startedAt` is the wrong clock on its own: rebuilding the
+ * session makes it current again without restarting the daemon, so comparing
+ * against the daemon's start left `doctor` reporting `stale` about a session
+ * that had just been rebuilt and was demonstrably working. It is a file rather
+ * than a variable because every CLI command is a new process and the daemon
+ * holding the session outlives all of them.
+ */
+const sessionFile = (udid) => path.join(store.deviceDir(udid), 'input-session.json');
+
 export async function resetSession(udid) {
   if (!control.available(udid)) return false;
   try {
     await control.resetInput(udid);
+    try {
+      fs.mkdirSync(store.deviceDir(udid), { recursive: true });
+      store.writeAtomic(sessionFile(udid), JSON.stringify({ rebuiltAt: Date.now() }));
+    } catch {
+      /* the rebuild happened; failing to write it down only costs a stale report */
+    }
     return true;
   } catch {
     return false;
@@ -444,6 +552,7 @@ export async function resetSession(udid) {
 }
 
 export async function pressButton(udid, name) {
+  await ensureFreshSession(udid);
   const own = inputDriverFor(udid);
   if (own) {
     // Android's whole key vocabulary is safe to offer: `input keyevent` takes
@@ -464,6 +573,7 @@ export async function pressButton(udid, name) {
 }
 
 export async function swipe(udid, from, to, { durationMs = 300 } = {}) {
+  await ensureFreshSession(udid);
   const own = inputDriverFor(udid);
   if (own) {
     await own.swipe(udid, from, to, { durationMs });

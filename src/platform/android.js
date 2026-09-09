@@ -974,6 +974,16 @@ function toolchain() {
  * driver's name. `uiautomator dump` costs 2,012 ms a read, which is why it is
  * not the answer; see docs/DEFERRED.md for the shape of the one that would be.
  */
+async function bootedAt(serial) {
+  try {
+    const out = await adb(serial, ['shell', 'cat', '/proc/uptime']);
+    const seconds = Number(String(out.stdout ?? out).trim().split(/\s+/)[0]);
+    return Number.isFinite(seconds) ? Date.now() - seconds * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 function capabilities() {
   return {
     captureEngines: ['screenshot'],
@@ -1004,6 +1014,11 @@ export const platform = {
   setPasteboard,
   getPasteboard,
   permissionServices: () => PERMISSION_SERVICES,
+  // Uptime, because there is no CoreSimulator directory to stat. `/proc/uptime`
+  // is seconds since boot, so boot is now minus that — and it is a real
+  // answer rather than the other platform's vocabulary, which is the rule a
+  // backend that cannot answer has to follow.
+  bootedAt,
   capabilities,
   toolchain,
 };

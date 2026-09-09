@@ -69,7 +69,20 @@ let hardFailures = 0;
  * is worse than no number.
  */
 const WEDGED = /display surface could not be read|did not produce a frame/;
-let wedged = null;
+/**
+ * The host could not do the thing, as distinct from simframe doing it slowly.
+ *
+ * A hosted runner takes 47-55 s to fail `simctl launch com.apple.Preferences`
+ * and then fails it again, three runs in a row — the same class of fault this
+ * repo already records for `simctl openurl`, which returns "Operation timed
+ * out" on a loaded runner. Six of those is nine minutes of CI spent measuring
+ * the runner's patience, and the resulting HPI describes nothing.
+ */
+const ENVIRONMENT = /could not launch|Command failed: xcrun simctl (launch|terminate)|Operation timed out|timed out/i;
+/** Two environmental failures of the same flow is the environment, not a flake. */
+const ENV_GIVE_UP = 2;
+let abort = null;
+const envFailures = new Map();
 
 const passSets = [];
 outer: for (let pass = 1; pass <= passes; pass += 1) {
@@ -99,8 +112,16 @@ outer: for (let pass = 1; pass <= passes; pass += 1) {
       hardFailures += 1;
       console.log(`FAIL ${flow.name} run ${run}: ${err.message}`);
       if (WEDGED.test(err.message)) {
-        wedged = err.message;
+        abort = { kind: 'capture is wedged', message: err.message };
         break outer;
+      }
+      if (ENVIRONMENT.test(err.message)) {
+        const n = (envFailures.get(flow.name) ?? 0) + 1;
+        envFailures.set(flow.name, n);
+        if (n >= ENV_GIVE_UP) {
+          abort = { kind: `the host cannot run "${flow.name}"`, message: err.message.split('\n')[0] };
+          break outer;
+        }
       }
       continue;
     }
@@ -171,13 +192,17 @@ if (out) {
 const escalations = metrics.breakdown(metrics.readEscalations(dev.udid));
 console.log(`\nescalations in this device's log: ${escalations.total} (${Object.entries(escalations.by_reason).filter(([, n]) => n).map(([r, n]) => `${r} ${n}`).join(', ') || 'none'})`);
 
-if (wedged) {
-  console.error(`\ncapture is wedged: ${wedged}`);
-  console.error('Only restarting the device is known to cure this. No HPI was measured —');
-  console.error('what is above is a partial suite and must not be adopted as a baseline.');
-  console.error(`  xcrun simctl shutdown ${dev.udid} && xcrun simctl boot ${dev.udid}`);
-  // 2, not 1: a wedged device is a different answer from a regression, and a
-  // CI job that cannot tell them apart teaches people to ignore it.
+if (abort) {
+  console.error(`\n${abort.kind}: ${abort.message}`);
+  console.error('No comparable HPI was measured — what is above is a partial suite and');
+  console.error('must not be adopted as a baseline or read as a regression.');
+  if (/wedged/.test(abort.kind)) {
+    console.error('Only restarting the device is known to cure a wedge:');
+    console.error(`  xcrun simctl shutdown ${dev.udid} && xcrun simctl boot ${dev.udid}`);
+  }
+  // 2, not 1. "I could not measure" and "it got worse" are different answers,
+  // and a job that reports them with the same exit code teaches people to
+  // ignore both. The workflow treats 2 as a loud warning and 1 as a failure.
   process.exit(2);
 }
 

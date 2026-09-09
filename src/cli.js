@@ -362,13 +362,16 @@ async function main() {
     }
 
     case 'state': {
-      const res = await api.getState(device, { since: flags.since, options });
+      const res = await api.getState(device, { since: flags.since, options, inputHealth: true });
       if (flags.json) {
         console.log(JSON.stringify({ ...res.state, history: undefined, ageMs: res.ageMs, since: res.since, live: res.live }, null, 2));
       } else {
         const s = res.state;
         const out = [];
         if (!res.live.ok) out.push(`WARNING: ${res.live.note}`);
+        // A cause, rather than five silent no-ops. Every tap on a stale
+        // session is dispatched successfully and moves nothing.
+        if (res.input?.stale) out.push(`input: stale — ${res.input.reason}`);
         out.push(`${res.device.name}  frame #${s.seq}  age ${res.ageMs}ms  ${s.width}x${s.height}`);
         out.push(`hash ${s.hash}  stable ${s.stableForMs}ms`);
         if (res.since?.kind === 'history') {
@@ -1143,6 +1146,18 @@ async function doctor({ json = false, strict = false, device } = {}) {
         add(`input driver (${d.name})`, driver.available ? (best ? 'ok' : 'warn') : 'warn',
           driver.available ? `${driver.name}: ${driver.version}` : driver.reason,
           { key: 'input.driver', value: driver.available ? driver.name : null });
+      }
+      // Reported next to the driver it is about. A driver that is present and
+      // working is still useless if it holds a session for a device session
+      // that no longer exists, and that state was invisible: taps were
+      // dispatched successfully and moved nothing, five runs in a row.
+      const session = await input.sessionHealth(d.udid);
+      if (session.stale) {
+        add(`input session (${d.name})`, 'warn', `stale — ${session.reason}. The next action rebuilds it automatically; simframe stop && simframe start does it now`,
+          { key: 'input.session', value: 'stale' });
+      } else if (caps.input.supported) {
+        add(`input session (${d.name})`, 'ok', session.reason ?? 'current with this device session',
+          { key: 'input.session', value: 'current' });
       }
       add(`text recognition (${d.name})`, 'ok',
         daemon ? 'simframed (in-process, off the framebuffer)' : 'sips + helper binary');

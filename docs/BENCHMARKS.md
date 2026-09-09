@@ -2137,16 +2137,21 @@ tests, including the tab-bar negative and the exact frames measured here.
 | escalations added by a 5-run contacts measurement | 5 | **0** |
 | weakest same-screen fingerprint pair (local, 3 rounds) | 0.33 on CI | **0.67** |
 
-The last row is the one to read carefully. CI's fingerprint gate was already
-failing before any of this work — `FAIL every same-screen revisit scores at
-least 0.46 (worst 0.33)` — and its own diagnosis was two readings of Settings
-disagreeing about token roles: `only in r1: text:…` against `only in r2:
-button:…, heading:…`. That is this bug, seen from the identity side: the same
-row entering identity as OCR text in one reading and as an ax element in the
-other. Locally the weakest pair is now 0.67 against a 0.46 bar. It is not proof
-— that run was on different hardware, and the browser tour's pause was raised
-from 1400 ms to 3000 ms in the same change because Safari read one token before
-it had loaded — but the merge removes exactly the class of token that differed.
+The last row needs a correction to how it was first written here. CI's
+fingerprint gate failed on the 0.8.0 push — `FAIL every same-screen revisit
+scores at least 0.46 (worst 0.33)` — and its own diagnosis was two readings of
+Settings disagreeing about token roles: `only in r1: text:…` against `only in
+r2: button:…, heading:…`, which is this bug seen from the identity side. But
+the very next push **passed that gate with none of this work in it**, so the
+gate is intermittent, not broken, and this fix cannot be credited with
+repairing it. What can be said: the failing run's own diagnosis names the token
+class this merge removes, and locally the weakest same-screen pair is 0.67
+against a 0.46 bar. Whether that raises the floor on CI is a claim for several
+runs to settle, not one.
+
+The browser tour's pause moved from 1400 ms to 3000 ms in the same change, for
+an unrelated reason the eval refused to measure past: Safari read one token,
+from OCR alone, before the page had arrived.
 
 Changing what feeds identity changes identity, so `TOKEN_RULES_VERSION` and
 `MAP_VERSION` both move and every stored map and graph node is discarded. The

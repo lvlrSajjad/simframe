@@ -336,12 +336,37 @@ jobs:
       - name: Run the flow suite and gate on HPI
         # No pipe. `node script.mjs | tee` reports tee's exit status, and this
         # project has already shipped one check that could not fail because of
-        # exactly that. The gate IS this step's exit code.
+        # exactly that.
+        #
+        # Three exit codes, three different answers:
+        #   0  measured, and no regression
+        #   1  measured, and it got worse — the gate fires
+        #   2  could not measure: a wedged capture loop, or a host that cannot
+        #      launch the app at all
+        #
+        # 2 is a warning rather than a failure, and that is a deliberate,
+        # documented weakness. The first bench run on a hosted runner spent
+        # nine minutes failing `simctl launch com.apple.Preferences` — 47 to
+        # 55 s per attempt — which is the same fault this repo already records
+        # for `simctl openurl` on a loaded runner. A gate that goes red for the
+        # runner's simctl timeouts is a gate people switch off. So it says so
+        # loudly, uploads what it has, and stays green; docs/DEFERRED.md
+        # records that HPI is therefore not yet gated on hosted CI, and what it
+        # would take to be.
         #
         # With no committed baseline the gate prints GATE INACTIVE and exits 0 —
         # loudly inactive rather than quietly passing, because a gate with
         # nothing to compare against cannot detect a regression.
-        run: node scripts/bench-hpi.mjs --device="$DEVICE" --runs=3 --passes=3 --out=/tmp/hpi.json --gate
+        run: |
+          set +e
+          node scripts/bench-hpi.mjs --device="$DEVICE" --runs=3 --passes=3 --out=/tmp/hpi.json --gate
+          code=$?
+          set -e
+          if [ "$code" = 2 ]; then
+            echo "::warning title=HPI not measured::The suite could not run on this host (see the log). Not a regression, and not a passing gate either."
+            exit 0
+          fi
+          exit "$code"
 
       - name: Keep the measurement
         # Recorded every run so HPI can be read as a series. This is the file

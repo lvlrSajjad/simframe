@@ -474,7 +474,7 @@ function pngSize(png) {
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 }
 
-export async function getState(deviceQuery, { since, options } = {}) {
+export async function getState(deviceQuery, { since, options, inputHealth = false } = {}) {
   const { device, state } = await ensureDaemon(deviceQuery, options);
   return {
     device,
@@ -483,6 +483,11 @@ export async function getState(deviceQuery, { since, options } = {}) {
     map: regionMap(state.regions || [], REGION_COLS),
     since: compareToBaseline(state, resolveBaseline(state, since)),
     live: liveness(device.udid, state),
+    // Off by default and asked for by the state commands only. A flow step
+    // calls getState twice, and the fix for a stale session runs before every
+    // action anyway (input.ensureFreshSession) — this is the report, not the
+    // repair.
+    input: inputHealth ? await input.sessionHealth(device.udid) : undefined,
   };
 }
 

@@ -480,7 +480,7 @@ async function look(target, args, options) {
 async function state(target, args, options) {
   const { device } = await api.ensureDaemon(target, options);
   const requested = baselineFor(device.udid, args.since);
-  const res = await api.getState(target, { since: requested, options });
+  const res = await api.getState(target, { since: requested, options, inputHealth: true });
   const s = res.state;
   const lines = [
     header(res.device, s, res.ageMs),
@@ -500,6 +500,10 @@ async function state(target, args, options) {
   }
   const warn = livenessLine(res.live);
   if (warn) lines.unshift(warn);
+  // An agent that cannot see this spends five turns wondering why a correct
+  // tap on a correct element did nothing. The repair happens before the next
+  // action either way; this is so the cause is visible when it does.
+  if (res.input?.stale) lines.unshift(`input: stale — ${res.input.reason}`);
   remember(device.udid, s);
   return { content: [text(lines.filter(Boolean).join('\n'))] };
 }

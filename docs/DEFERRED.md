@@ -889,7 +889,7 @@ inside the recorder, one scope too deep to help. Three escalation records in
 this device's log carry that message and are artifacts; `docs/ESCALATIONS.md`
 names them so they cannot steer a phase.
 
-**A device restart leaves a live daemon's HID session dead for taps** — open.
+**A device restart leaves a live daemon's HID session dead for taps** — fixed.
 After the simulator was restarted mid-session, every tap dispatched
 successfully and moved nothing: `tapped "Accessibility" at 201,380 (memory
 d=0, via ax) [no visible change]`, correct coordinates, correct element, five
@@ -902,6 +902,36 @@ and a slow one. What would fix it without retrying anything: notice that the
 device's boot session changed and rebuild the HID session before the next
 action, which is a cheap check against `simctl`'s boot time rather than a
 guess about a tap.
+
+**Implemented exactly that, and it needed no `simctl` call at all.** The boot
+marker is a `stat`: CoreSimulator writes `data/var/run/syslog.pid` when the
+device's syslogd starts and touches `device.plist` on every state change, and
+both read the boot second. Android answers the same question from
+`/proc/uptime`, so it is a `bootedAt` member on the platform protocol rather
+than an iOS special case — and a backend that cannot tell returns null, which
+makes the layer above decline to claim staleness at all instead of borrowing
+the other platform's vocabulary.
+
+Stale means the device booted after the session was created, where "created" is
+the newer of the daemon's `startedAt` and the last recorded rebuild. That
+second clock is not decoration: comparing against the daemon's start alone left
+`doctor` reporting `stale` about a session it had just rebuilt and that was
+demonstrably working, so `resetSession` now writes `input-session.json`.
+
+The session is rebuilt *before* the action and nothing is retried, which is the
+whole point: the action is delivered on a session known to be current, where a
+retry afterwards is how an action fires twice. Verified by restarting the device
+under a running daemon — same pid — then running the four-step Settings flow
+that had failed five times in a row: 4/4 steps. `doctor` reports `input session:
+stale` with the cause and the manual cure, and `sim_state`/`simframe state`
+print `input: stale — …` so an agent sees a cause instead of five silent
+no-ops.
+
+One flaw worth knowing: a command that never dispatches input never rebuilds.
+`simframe tap "General"` on a screen without a General row throws in `locate`,
+before any input, so the session stays stale and the next real action fixes it.
+That is the correct order — perception before input — and it means `doctor` can
+report stale immediately after a failed command.
 
 Also observed twice in one afternoon: the capture wedge already filed as "only
 restarting the device is known to cure it". Both occurrences followed heavy
@@ -956,6 +986,33 @@ prescribe and capture does not yet do: **degrade rather than fail** — fall bac
 to the screenshot engine when the framebuffer path is wedged, and say so in
 `doctor` and `sim_state`. A wedge currently takes the whole tool down for a
 cause the agent cannot see.
+
+### HPI is not gated on hosted CI, and the reason is simctl
+The `bench` job runs on every push and cannot yet fail a build for a
+regression. Its first run spent nine minutes failing `simctl launch
+com.apple.Preferences` — 47 to 55 s per attempt, three attempts, then the same
+for Contacts — on a `macos-15` runner with iOS 26.2. That is the fault this
+repo already records for `simctl openurl`: simctl operations time out on a
+loaded hosted runner, internally, so simframe never sees a failure it could
+report.
+
+So `bench-hpi` now exits 2 for "could not measure" and 1 for "got worse", and
+the workflow turns 2 into a `::warning` rather than a red build. That is a
+weakness stated out loud, not a fix: a gate that only ever warns is not
+protecting anything.
+
+Three ways out, in increasing order of cost. Retry the launch inside the bench
+script only (never inside simframe — a retried launch is an action that fires
+twice, which the verify barrier exists to prevent). Or build the suite out of
+actions the integration job has already proven survive a runner: `openUrl`
+launches Safari, which every simulator has, and `home` always leaves an app —
+but a new flow needs a new human baseline, and the human is the denominator, so
+that is a person's afternoon and not a refactor. Or run `bench` on a
+self-hosted macOS box, where the device is not shared with a build farm and the
+wedge is diagnosable.
+
+Until one of those, HPI is a number this project measures deliberately, on a
+known device, and reads as a trend — which is what research §1 said it was for.
 
 ### The eval harness this project keeps needing does not exist
 Phase 5's perception eval harness — fifteen screens, three apps — is still

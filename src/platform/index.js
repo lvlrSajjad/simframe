@@ -63,6 +63,7 @@ export const PLATFORM_SURFACE = Object.freeze([
   'geometry', 'inputDriver',
   'screenshot', 'launchApp', 'terminateApp', 'openUrl',
   'setPermission', 'setPasteboard', 'permissionServices', 'capabilities', 'toolchain',
+  'bootedAt',
 ]);
 
 /** @type {Record<string, Platform>} */
@@ -237,6 +238,8 @@ export function permissionServices(udid) {
  * knows. Tap points computed from that are wrong, and nothing says so.
  */
 export const geometryFor = (udid) => platformFor(udid).geometry(udid);
+/** When the device last booted, epoch ms, or null. Both backends answer; neither guesses. */
+export const bootedAtFor = (udid) => platformFor(udid).bootedAt(udid);
 
 /**
  * The backend's own input path, or null when input comes from above the

@@ -5,6 +5,9 @@
 // and reachable only through the `platform` object at the bottom — the
 // JavaScript counterpart of the `SimulatorPlatform` protocol in Swift.
 import { execFile, execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -272,6 +275,42 @@ function geometry() {
  * *is* the platform's — the emulator console — which is why this is a question
  * a backend gets asked at all.
  */
+/**
+ * When this device last booted, in epoch ms, or null if it cannot be told.
+ *
+ * Why it matters: the HID session lives in the daemon, and a device restart
+ * kills it while leaving the daemon perfectly healthy. Every tap after that is
+ * dispatched successfully and moves nothing — measured, five runs in a row,
+ * on the correct coordinates for the correct element. Only hardware buttons
+ * recover on their own, deliberately, because retrying a tap can act twice.
+ *
+ * The signal is a stat, not a `simctl` call: CoreSimulator writes
+ * `data/var/run/syslog.pid` when the device's syslogd starts, and touches
+ * `device.plist` on every state change. Both read 21:21:26 on a device booted
+ * at 21:21:26. A stat costs microseconds, which matters because this is
+ * checked before input.
+ *
+ * A false positive costs one session rebuild and no action, so the ordering
+ * prefers the most boot-specific marker and falls back rather than guessing.
+ */
+function bootedAt(udid) {
+  const dir = path.join(
+    os.homedir(), 'Library', 'Developer', 'CoreSimulator', 'Devices', udid,
+  );
+  for (const marker of [
+    path.join(dir, 'data', 'var', 'run', 'syslog.pid'),
+    path.join(dir, 'data', 'var', 'run'),
+    path.join(dir, 'device.plist'),
+  ]) {
+    try {
+      return fs.statSync(marker).mtimeMs;
+    } catch {
+      /* try the next marker */
+    }
+  }
+  return null;
+}
+
 function inputDriver() {
   return null;
 }
@@ -301,6 +340,7 @@ export const platform = {
   isBootedSync,
   ownsUdid,
   geometry,
+  bootedAt,
   inputDriver,
   screenshot,
   launchApp,
