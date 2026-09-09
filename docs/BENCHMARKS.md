@@ -1948,3 +1948,65 @@ One caveat, stated because it bounds the whole table: these are Apple's own
 apps, which have unusually complete accessibility. A third-party app with poor
 labelling shifts the tree's contribution down, and an app with icon-only
 navigation shifts it up.
+
+## Phase 10 — instrumentation: the first HPI numbers
+
+Apple M2 Pro, Xcode 26.6, iPhone 17 Pro on iOS 26.5, capture/input/OCR/tree all
+`simframed`. Flows are `flows/hpi-suite.json` — stock apps only, because these
+numbers get committed to a public repo. N=3 per flow, medians, and the full
+quartiles because with N=3 a median alone hides the spread.
+
+Phase 10 changed no perception and no action behaviour, so this is a
+measurement of 0.8.0 and not of anything new. It is the denominator every later
+phase is compared against.
+
+### The agent side
+
+| flow | min steps | runs | p50 | IQR | min–max | ms/step | model turns | escalations |
+|---|---|---|---|---|---|---|---|---|
+| `settings-larger-text` | 4 | 3 | 14211 ms | 2109 | 12279–14388 | 3553 | 1 | 0 |
+| `contacts-kate-bell` | 2 | 3 | 11230 ms | 1484 | 11207–12691 | 5615 | 2 | 3 |
+
+`step_ratio` is 1.0 on both: the agent takes exactly the authored minimum
+number of steps. Whatever is wrong here is not wandering — it is per-step cost.
+
+**HPI_accuracy 0.5.** `contacts-kate-bell` fails on all three runs, refusing
+rather than guessing, on the already-filed ambiguity between a contact row and
+its own text (`docs/DEFERRED.md`, and quantified in `docs/ESCALATIONS.md`).
+`settings-larger-text` completes cleanly on all three.
+
+**HPI_time and HPI are null**, not 1.0 and not absent: no human baseline
+existed when these were measured, and a ratio with no denominator is reported
+as null. That is a deliberate property of `metrics.hpi` and has a test.
+
+### Where 3.5 s per step goes
+
+Not measured per-component in this phase — that would have meant instrumenting
+perception, which the phase prompt forbids. What is known from the existing
+numbers in this file: each action step pays a settle wait plus **two**
+structural-identity readings (before and after), and the before-reading is
+already carried forward from the previous step's after-reading, so the marginal
+cost per step is one settle plus one perception pass. A human tapping four rows
+in Settings does not pay either.
+
+This is the number Phase 11 (adaptive waiting) is aimed at, and it is aimed
+there on this evidence rather than on the default phase order: no escalation in
+the log blames waiting, so the time is going somewhere the escalation log
+cannot see, and only HPI_time can.
+
+### The human side
+
+Not yet recorded. `simframe baseline record <flow>` exists and works; five runs
+per flow by a person on this same simulator is the remaining input, and
+`baseline summarize` refuses under three. Until those land, `simframe hpi`
+prints HPI_accuracy and step_ratio and says plainly that HPI_time needs a human.
+
+One limitation of that recorder, recorded here because the research assumed
+otherwise: §1 calls human baseline collection "essentially free" because HID
+events are already logged. That holds for events simframe *injects*. A person
+tapping the Simulator window leaves no host-readable HID log, so wall time is
+measured between an explicit start and stop, while the step count is derived
+from screen transitions in the frame history and is a lower bound — two taps
+inside one 400 ms animation window read as one. The recorder labels it
+`source: screen-transitions` rather than calling them taps, and `min_steps`
+comes from the flow definition instead.

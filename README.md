@@ -541,6 +541,9 @@ simframe recall --ago=15000    # the frame from 15s ago
 simframe frame --out=now.png   # newest frame, native resolution, to a file
 simframe strip --count=6       # contact sheet, for an animation
 simframe doctor --strict       # any degraded layer is a non-zero exit
+simframe escalations           # why simframe still needs a model, by reason
+simframe hpi                   # speed and accuracy against a human baseline
+simframe baseline record settings-larger-text --runs=5   # record the human
 simframe start / status / stop [--force] / devices
 simframe ui --device=emulator-5554      # or export SIMFRAME_DEVICE once
 ```

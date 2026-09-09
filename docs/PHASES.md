@@ -43,9 +43,12 @@ Index, not a latency in milliseconds.
 | 8 — Android | steps 0-3 done — the seam exists, dispatch is device-keyed, and Android both reads and acts: frames at 41 ms, a screen map, the graph, taps, typing, keys and the clipboard. No accessibility tree (Phase 8b, conditional) |
 | 8b — Android accessibility APK | **deferred**, with criteria and numbers in `docs/DEFERRED.md`. `uiautomator dump` costs 2,012 ms; the fast path needs an instrumentation APK on the device, which would be simframe's first installed artifact |
 | 9 — tier-2 local model | **deferred, and not merely unstarted.** Its own gate — the Phase 5 eval harness — does not exist, and the measured gap it would address (83% icon-only elements) has a cheaper tool in Phase 16 |
-| 10-16 — human parity | not started. See [`PHASES-HUMAN-PARITY.md`](PHASES-HUMAN-PARITY.md). Phase 10 is mandatory and first; after it the escalation log, not the file, decides the order |
+| 10 — instrumentation | **code done, one input outstanding.** Escalation log with the five reasons, per-flow metrics, `simframe baseline / hpi / escalations`, and a `bench` CI job. First numbers in `docs/BENCHMARKS.md`, first breakdown in `docs/ESCALATIONS.md`. `HPI_time` is null until a human records five runs per flow — the denominator is a person, not a build step |
+| 11-16 — human parity | not started. See [`PHASES-HUMAN-PARITY.md`](PHASES-HUMAN-PARITY.md). The escalation log, not the file, decides the order — and it already argues for the contact-row de-duplication ahead of Phase 11 |
 
-**Pick up here: Phase 10** — instrumentation, in
+**Pick up here: the contact-row de-duplication, then Phase 11** — read
+`docs/ESCALATIONS.md` first, which derives that order from the escalation log
+rather than from the default in
 [`PHASES-HUMAN-PARITY.md`](PHASES-HUMAN-PARITY.md). Phase 8 landed; what
 follows in this section is the record of how its boundary was built, kept
 because the reasoning is still what governs adding a third backend. It read

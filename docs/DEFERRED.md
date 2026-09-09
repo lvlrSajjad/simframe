@@ -261,6 +261,19 @@ the same judgement the screen map already makes when it files OCR text as an
 alias — but the two paths reach it differently and that is worth understanding
 before changing either.
 
+**Phase 10 update (2026-09-09): this is now the most expensive open item here,
+and it has a number.** It is the only escalation the instrumented flow suite
+produces — three of three runs of `contacts-kate-bell`, all `ambiguous_intent`,
+all on one screen fingerprint — and it is the whole reason `HPI_accuracy` is
+0.5 rather than 1.0. The log's candidate list closes the diagnosis left open
+above: the AX row is `x=2 w=384`, the OCR text is `x=67 w=71` wholly inside it,
+and both score exactly 1.00. One more fact worth having: `simframe ui` renders
+**one** "Kate Bell" for that screen, so the display path already collapses the
+pair and the matcher that acts on it does not — two representations of one
+element list, disagreeing, with the acting one wrong. Do it before Phase 11;
+`docs/ESCALATIONS.md` argues that ordering from the data rather than from the
+default phase order.
+
 ### The emulator's gRPC surface has nothing tree-shaped — confirmed
 Asked and answered so nobody asks again. The emulator ships its own service
 definitions in `$ANDROID_HOME/emulator/lib/*.proto`, which is the authoritative
@@ -831,6 +844,43 @@ structurally sparse. The fix is a structural settle gate — sample the token se
 twice a short interval apart and only key on it once it stops growing — which
 costs a second perception pass and so needs measuring before it is adopted.
 Which of the four tabs produced the extra node has not been isolated.
+
+### Phase 10 left three things open, all of them inputs rather than code
+**The human baseline.** `simframe baseline record` works and no human has run
+it yet, so `HPI_time` and `HPI` are null — reported as null, deliberately, not
+as 1.0. Five runs per flow on the same simulator is the whole remaining input;
+`baseline summarize` refuses under three. Until then `simframe hpi` reports
+`HPI_accuracy` and `step_ratio` only, and says why.
+
+**The committed gate baseline.** The `bench` CI job runs on every push and
+prints `GATE INACTIVE` because `docs/research/hpi-baseline.json` does not
+exist. It is loudly inactive rather than quietly green, which is the right
+failure, but it is not a gate until a measured run is adopted as the baseline.
+That should happen once the human side exists, so the first committed baseline
+has an `HPI_time` in it to regress against.
+
+**Where 3.5 s per step goes.** Measured: four steps take 14.2 s and two take
+11.2 s, at `step_ratio` 1.0 — the agent takes exactly the authored minimum
+number of steps, so the cost is per step and not wandering. Not measured: the
+split between the settle wait and the structural-identity pass, because
+instrumenting perception is precisely what Phase 10's prompt forbids. No
+escalation blames waiting, so this is invisible to the escalation log and only
+`HPI_time` can see it. It is Phase 11's target and its evidence.
+
+### The escalation log has two fields that cannot be filled honestly
+`tokens_spent` is always null: simframe is on the far side of the model from
+whatever counts tokens, and a number derived from output length would be a
+guess presented as a measurement. `model_turns_spent` is real — one per
+escalation the agent must answer — and `docs/ESCALATIONS.md` states the
+definition rather than leaving it to be inferred.
+
+`avoidable_escalation_rate` is 1.0 by construction until a faculty exists: §8
+defines avoidable as mapping to a not-yet-built *or under-performing* faculty,
+and everything in Phases 11–15 is unbuilt. The only term that moves it is
+`outcome: resolved_locally`, which nothing produces before Phase 12. Shipped as
+defined, with the degeneracy stated in the doc, rather than redefined to look
+meaningful — but it means the per-reason breakdown is the number that decides
+phase order, and the rate is decoration until Phase 12 lands.
 
 ## Product
 
