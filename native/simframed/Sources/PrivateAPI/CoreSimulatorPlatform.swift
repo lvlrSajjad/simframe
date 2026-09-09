@@ -28,6 +28,7 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     // machine where the translation framework is missing must still capture.
     private var accessibility: AccessibilityBridge?
     private var accessibilityFailure: String?
+    private let bridgeLock = NSLock()
     private var simulatorKitHandle: UnsafeMutableRawPointer?
     // Read once at attach: spawning simctl per status call cost 300ms.
     private var cachedKeyboardWarning: [String]?
@@ -193,8 +194,10 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
             // process-wide translator, so it belongs to the device it was built
             // for. Binding to a different one must not inherit it.
             if self.device !== device {
+                bridgeLock.lock()
                 accessibility = nil
                 accessibilityFailure = nil
+                bridgeLock.unlock()
             }
             self.device = device
             let resolved = info(for: device)
@@ -229,7 +232,18 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
         try bridge().tree()
     }
 
+    /// Serialised, because building a bridge installs a delegate on a
+    /// **process-global** translator that holds it weakly.
+    ///
+    /// Two constructions racing both install; the loser's delegate is released
+    /// and the survivor is left holding a translator whose delegate has
+    /// deallocated, which answers nil for everything and sets no failure — the
+    /// exact silent-nil this file's header warns about. The control socket is
+    /// serial, but the capture loop's rebind path clears these same two fields,
+    /// so there is a genuine second writer.
     private func bridge() throws -> AccessibilityBridge {
+        bridgeLock.lock()
+        defer { bridgeLock.unlock() }
         if let accessibility { return accessibility }
         // A framework that is missing stays missing; re-probing it on every
         // screen read would cost a dlopen per call to learn the same thing.

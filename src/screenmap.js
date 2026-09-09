@@ -13,6 +13,7 @@ import * as fingerprint from './fingerprint.js';
 import * as input from './input.js';
 import * as ocr from './ocr.js';
 import * as regions from './regions.js';
+import { informative } from './refs.js';
 import * as store from './store.js';
 
 const MAP_VERSION = 6; // dates, prices and phone numbers no longer contribute labels
@@ -60,6 +61,12 @@ function loadAll(udid) {
  */
 export function recallNearest(udid, layoutHash, { tolerance = DEFAULT_TOLERANCE } = {}) {
   if (!layoutHash) return null;
+  // A hash of almost no set bits is a dark or uniform screen, and two of them
+  // are within any tolerance of each other while being evidence of nothing.
+  // `refs.js` documents this and guards for it; this function fed that one's
+  // `screenKnown` and `structuralHash` inputs without a guard of its own, so a
+  // near-uniform screen could hand back a different screen's element map.
+  if (!informative(layoutHash)) return null;
   let best = null;
   let bestDistance = Infinity;
   for (const entry of loadAll(udid)) {

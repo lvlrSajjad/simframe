@@ -39,8 +39,14 @@ public final class StubPlatform: SimulatorPlatform {
     public private(set) var resetInputCount = 0
     public func resetInput() throws { resetInputCount += 1 }
 
+    /// Test hook: make re-resolving the port fail, which is the case a real
+    /// device only reaches when something is badly wrong and therefore the one
+    /// hardest to observe.
+    public var failReattach = false
+
     public func reattachDisplay() throws -> DeviceInfo {
         reattachCount += 1
+        if failReattach { throw PrivateAPIError.noDisplayPort }
         return DeviceInfo(udid: attachedUdid ?? "STUB-0000", name: "Stub Device", runtime: "iOS 26.0")
     }
 

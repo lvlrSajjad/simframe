@@ -350,10 +350,27 @@ export function forget(udid) {
 export function route(udid, fromHash, toHash, { maxDepth = 8 } = {}) {
   const start = nearestScreen(udid, fromHash);
   if (!start) return null;
-  const goal = (h) => h === toHash;
-  if (goal(start.node.hash)) return [];
+  if (start.node.hash === toHash) return [];
 
-  const byHash = new Map(allNodes(udid).map((n) => [n.hash, n]));
+  // Variants have to resolve here the same way they resolve everywhere else.
+  //
+  // A screen may wear more than one structure, and an edge records whichever
+  // one it arrived on — so an edge whose `to` is a variant hash was a dead end
+  // in this search while `nearestScreen` was perfectly happy to say that hash
+  // *is* the node. The graph then had a route it could not find, `goto`
+  // answered `no-route` for somewhere it had been, and a flow that should have
+  // replayed from memory was re-explored instead. That is at least one
+  // mechanical cause of the convergence flakiness in DEFERRED.
+  const byHash = new Map();
+  for (const node of allNodes(udid)) {
+    byHash.set(node.hash, node);
+    for (const variant of node.variants ?? []) if (!byHash.has(variant.hash)) byHash.set(variant.hash, node);
+  }
+  // Canonical identity, so a variant and its screen are one place in the search
+  // rather than two, and reaching either counts as reaching the goal.
+  const canonical = (h) => byHash.get(h)?.hash ?? h;
+  const goalHash = canonical(toHash);
+  const reached = (h) => canonical(h) === goalHash;
   const seen = new Set([start.node.hash]);
   const queue = [{ hash: start.node.hash, path: [] }];
   while (queue.length) {
@@ -361,11 +378,12 @@ export function route(udid, fromHash, toHash, { maxDepth = 8 } = {}) {
     if (taken.length >= maxDepth) continue;
     const node = byHash.get(hash);
     for (const edge of node?.edges ?? []) {
-      if (seen.has(edge.to)) continue;
+      const to = canonical(edge.to);
+      if (seen.has(to)) continue;
       const next = [...taken, edge];
-      if (goal(edge.to)) return next;
-      seen.add(edge.to);
-      queue.push({ hash: edge.to, path: next });
+      if (reached(edge.to)) return next;
+      seen.add(to);
+      queue.push({ hash: to, path: next });
     }
   }
   return null;

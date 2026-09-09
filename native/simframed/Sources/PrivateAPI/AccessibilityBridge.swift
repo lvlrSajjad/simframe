@@ -130,6 +130,17 @@ public final class AccessibilityBridge {
             ? device.value(forKey: "accessibilityPlatformTranslationToken")
             : nil
 
+        // Guarded like its neighbours below, and for a sharper reason than
+        // tidiness: `setValue(_:forKey:)` on a key the class does not have
+        // raises `NSUnknownKeyException`, which is an Objective-C exception and
+        // therefore uncatchable from Swift. An Xcode that renames this property
+        // would not degrade the accessibility layer, it would crash the daemon
+        // — capture, input and OCR with it — which is the degrade-rather-than-
+        // fail rule exactly inverted, in the one file most likely to be
+        // invalidated by an upgrade.
+        guard shared.responds(to: NSSelectorFromString("setBridgeTokenDelegate:")) else {
+            throw AccessibilityError.unavailable("AXPTranslator has no bridgeTokenDelegate to install onto")
+        }
         shared.setValue(delegate, forKey: "bridgeTokenDelegate")
         if shared.responds(to: NSSelectorFromString("setSupportsDelegateTokens:")) {
             shared.setValue(true, forKey: "supportsDelegateTokens")
@@ -156,7 +167,16 @@ public final class AccessibilityBridge {
             .takeUnretainedValue() as? NSObject else {
             throw AccessibilityError.unavailable("the frontmost application did not translate to an element")
         }
-        delegate.resetTimeouts()
+        // A ticket per read rather than one counter reset per read.
+        //
+        // The caller bounds how long it will *wait*, not how long this runs, so
+        // an abandoned read can still be walking when the next one starts. With
+        // a single shared counter, one call's reset cleared timeouts the other
+        // had already accumulated — and a tree that had lost subtrees came back
+        // claiming to be whole, which is precisely the failure this reporting
+        // exists to prevent.
+        let ticket = delegate.beginRead()
+        defer { delegate.endRead(ticket) }
         var out: [AXNode] = []
         var cut: String?
         let deadline = Date().addingTimeInterval(budget)
@@ -164,7 +184,7 @@ public final class AccessibilityBridge {
         // A guest that missed the deadline answers `emptyResponse`, which makes
         // the subtree below it look genuinely childless. Nothing in the nodes
         // can show that, so the count has to.
-        let missed = delegate.timeouts
+        let missed = delegate.timeouts(for: ticket)
         if cut == nil, missed > 0 {
             cut = "\(missed) request(s) to the device timed out, so part of the tree is missing"
         }
@@ -192,6 +212,7 @@ public final class AccessibilityBridge {
     /// The pid of the app currently frontmost, or nil when the bridge cannot say.
     public func frontmostPid() -> Int32? {
         guard let app = frontmostApplication() else { return nil }
+        guard app.responds(to: NSSelectorFromString("pid")) else { return nil }
         return (app.value(forKey: "pid") as? NSNumber)?.int32Value
     }
 
@@ -318,27 +339,40 @@ private final class BridgeDelegate: NSObject {
     private let timeout: TimeInterval
     private let queue = DispatchQueue(label: "simframe.accessibility.bridge")
     private let counter = NSLock()
-    private var timedOut = 0
+    /// Timeouts per in-flight read, so two overlapping reads cannot clear or
+    /// inherit each other's count. A timeout with no read in flight belongs to
+    /// an abandoned one and is dropped rather than charged to a stranger.
+    private var timedOut: [Int: Int] = [:]
+    private var nextTicket = 0
 
     init(device: NSObject, timeout: TimeInterval) {
         self.device = device
         self.timeout = timeout
     }
 
-    /// How many requests the device failed to answer since the last reset.
-    var timeouts: Int {
+    func beginRead() -> Int {
         counter.lock(); defer { counter.unlock() }
-        return timedOut
+        nextTicket += 1
+        timedOut[nextTicket] = 0
+        return nextTicket
     }
 
-    func resetTimeouts() {
+    /// How many requests the device failed to answer during this read.
+    func timeouts(for ticket: Int) -> Int {
         counter.lock(); defer { counter.unlock() }
-        timedOut = 0
+        return timedOut[ticket] ?? 0
+    }
+
+    func endRead(_ ticket: Int) {
+        counter.lock(); defer { counter.unlock() }
+        timedOut.removeValue(forKey: ticket)
     }
 
     fileprivate func recordTimeout() {
         counter.lock(); defer { counter.unlock() }
-        timedOut += 1
+        // Charged to every read currently in flight: a request that timed out
+        // while two reads were walking cost both of them a subtree.
+        for key in timedOut.keys { timedOut[key, default: 0] += 1 }
     }
 
     @objc(accessibilityTranslationDelegateBridgeCallbackWithToken:)

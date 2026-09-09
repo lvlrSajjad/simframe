@@ -260,6 +260,7 @@ AXPTranslator                                   (/System/Library/PrivateFramewor
 
 AXPMacPlatformElement
   +platformElementWithTranslationObject:        -> an element answering NSAccessibility
+    -accessibilityMultipleAttributes:           -> several attributes in ONE guest hop
     -accessibilityAttributeValue:               -> AXChildren, AXRole, AXValue, AXIdentifier…
     -accessibilityLabel, -accessibilityFrame
 
@@ -307,6 +308,23 @@ asked for.
 selectors and is what Simulator.app uses — but it wants an `NSView` through
 `addWithDisplayView:`, which is exactly what a daemon does not have. Reading its
 selector list is useful; instantiating it is not.
+
+### Ask for attributes in batches, not one at a time
+
+`accessibilityMultipleAttributes:` takes an `NSArray` of attribute names and
+returns a dictionary keyed by them. Every `accessibilityAttributeValue:` is a
+synchronous hop into the guest, so the cost of a walk is round trips rather than
+work: eight attributes per node is eight hops, and on a machine where a hop is
+slow the round trips *are* the read. A hosted CI runner spent 28 s inside one
+read and returned nothing.
+
+Measured on the same fourteen nodes: **112 calls / 25 ms one at a time, 14
+calls / 10 ms batched**, identical values. The win on this machine is 2.5×; the
+win where it matters is eight times fewer round trips.
+
+Batching does not cover everything. `accessibilityLabel` is a direct accessor
+rather than an attribute name, and `AXChildren` is fetched on its own, so a node
+costs **three** hops — one batch, one label, one children — not one.
 
 ### What it costs
 

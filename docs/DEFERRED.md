@@ -75,18 +75,23 @@ Worth revisiting if it starts happening inside a single test session rather than
 after hours, because then it stops being an operational annoyance and starts
 being a correctness problem for long flows.
 
-### The capture loop's recovery path has no test
+### The capture loop's recovery path has no test — fixed
 A display port torn down under a live daemon left capture dead for six minutes
 until the process was restarted (see `docs/BENCHMARKS.md`). The fix re-resolves
 the port after six consecutive failed reads, and it is unverified: a teardown
 cannot be induced on demand, and the loop is inline in `main.swift` rather than
 factored into a function a stub platform can drive.
 
-`StubPlatform` already counts `reattachDisplay()` calls, so the missing piece is
-extracting the loop body — a `captureOnce(platform:store:) -> Result` — and
-driving it with a stub whose `withFrame` throws on demand. Worth doing the next
-time that file is opened, because the recovery path only ever runs in the
-situation nobody is watching.
+Extracted to `CaptureRecovery` in SimframeCore and tested three ways: a
+momentary hiccup does not reattach, a sustained run reattaches *and re-arms the
+damage callback*, and a reattach that fails stays due rather than waiting for
+another six. The callback half is the one worth a test of its own — a fresh
+descriptor with nothing registered on it gives a daemon that has recovered and
+will never notice another change, which looks exactly like the failure it just
+recovered from.
+
+The teardown itself still cannot be induced on demand, so what is covered is the
+decision and the act, not the event.
 
 ### Fixed sleeps in `actions.js`
 `sim_wait` and the settle gate defer to the daemon's real settle detector, but
@@ -208,43 +213,56 @@ halting enabled:
 | runs 2–6 | 10/10 | 10/10 |
 | converged to all-`ok` by | run 2, then oscillated | **run 3, and stayed** |
 
-### Still open, from the same review
+### Fixed since, from the same review
 
-Not fixed here, in roughly the reviewer's order of severity:
+Everything the reviewer raised is now closed except where noted:
 
-- **`AccessibilityBridge.swift`: one KVC call is unguarded.** Setting
-  `bridgeTokenDelegate` uses `setValue(_:forKey:)` without the
-  `responds(to:)` check its neighbours have. If Apple renames that property the
-  daemon raises `NSUnknownKeyException`, which Swift cannot catch — a crash
-  instead of "accessibility unavailable", in the file this release calls its
-  riskiest, and the exact inversion of the degrade-rather-than-fail rule.
-- **The lazy `bridge()` accessor is unsynchronised** while the capture loop's
-  rebind path can clear it. Two constructions racing both install a delegate on
-  the process-global translator; the loser's deallocates, and because the
-  translator holds it weakly the survivor can be left with a nil delegate — the
-  silent-nil failure that file's own header warns about.
-- **The 12-second bound abandons the wait, not the work.** `tree()` is not
-  reentrant: `resetTimeouts()` and the timeout count share one counter, so an
-  abandoned read overlapping the next one can clear timeouts the other has
-  accumulated — a truncated tree reported with `truncated: nil`, which is the
-  class of bug this release claims to have removed.
-- **`recallNearest` has no `informative()` guard** on the layout hash, though
-  `refs.js` documents why one is needed and applies it. It feeds the guarded
-  function's inputs.
-- **`release.yml` pins Node and leaves `npm@latest` floating** — the same moving
-  dependency that killed v0.5.1, still moving.
-- **`workflow_dispatch` skips the tag/version agreement check but still
-  publishes**, so a manual run ships whatever `package.json` says from whatever
-  ref, straight to `latest` and the MCP Registry.
-- **`mcp-publisher` is fetched from `releases/latest` with no pin or checksum**
-  and executed in a job holding `id-token: write`.
-- **`ci.yml` does not run on tags**, so `check:package` and the tarball build —
-  the checks written to catch a broken package — never run on the commit that
-  actually ships.
-- **`route()` and `nearestScreen()` disagree about variants**: BFS keys on
-  canonical hashes only, so an edge whose destination is a variant hash is a
-  dead end even though `nearestScreen` says that hash *is* the node. At least
-  one mechanical cause of the convergence flakiness recorded below.
+- **The unguarded KVC call.** Both `setValue(_:forKey:)` on
+  `bridgeTokenDelegate` and the `pid` read are guarded by `responds(to:)`. An
+  Xcode that renames either degrades the accessibility layer instead of raising
+  `NSUnknownKeyException`, which is an Objective-C exception and therefore
+  uncatchable from Swift — a crash taking capture, input and OCR with it.
+- **The unsynchronised `bridge()` accessor.** Behind a lock, and the capture
+  loop's rebind path takes the same lock. Two constructions can no longer race
+  and leave the survivor holding a translator whose weakly-held delegate has
+  deallocated.
+- **The 12-second bound abandoning work rather than the wait.** Timeouts are
+  counted per read against a ticket rather than in one shared counter, so an
+  abandoned read cannot clear or inherit a live one's count. A tree that lost
+  subtrees can no longer come back claiming to be whole.
+- **`recallNearest` without an `informative()` guard.** Guarded. A near-uniform
+  screen no longer hands back a different screen's element map, and it no longer
+  feeds a guarded function unguarded inputs.
+- **`route()` blind to variants.** The search now resolves variants the way
+  `nearestScreen` does, and a goal may be named by any of a screen's faces. An
+  edge whose destination was a variant hash used to be a dead end, so the graph
+  had routes it could not find and `goto` answered `no-route` for somewhere it
+  had been.
+- **`npm@latest` in the release pipeline.** Pinned to `>=11.5.1 <13`. Pinning
+  Node alone fixed one instance and left the mechanism intact.
+- **`workflow_dispatch` publishing with the version check skipped.** The check
+  now runs on manual runs too, comparing `package.json` and `server.json` with
+  each other — which is the half that protects a publish — and against the tag
+  only when there is one.
+- **`mcp-publisher` floating on `releases/latest`** in a job holding
+  `id-token: write`. Pinned to `v1.8.1`, with a failure message that says to
+  bump it deliberately.
+- **`ci.yml` never running on tags.** `check:package` and the tarball build now
+  run in the release job, so the commit that actually ships is checked by the
+  two things written to catch a broken package.
+- **The already-published test.** `npm view <pkg>@<version>` 404s during npm's
+  review window, so a re-run inside it took the publish branch and hard-failed
+  on `EPUBLISHCONFLICT` — the promise that an existing version is a skip held
+  only after review completed, which is the opposite of when a re-run happens.
+  It reads the versions list now and tolerates losing a race to itself.
+- **Documentation.** `accessibilityMultipleAttributes:` is documented with its
+  measurements. Two of my own claims were overstated and are corrected: "one
+  bridge call per node" is really three (batch, label, children), and 2.7 s
+  measured against 2.2 s predicted is the same order, not agreement.
+
+**Not fixed:** no `autoreleasepool` in the tree walk — up to 4000 nodes of
+autoreleased objects accumulate until the read returns. Memory pressure only,
+and free to fix whenever that file is next open.
 
 ## Known and unresolved
 
@@ -518,13 +536,15 @@ It now pins both ends by name — refs read in one app, then a different app, so
 they cannot be the same screen — treats a degenerate hash as evidence of
 nothing, and separates "could this be tested" from "was the claim broken".
 
-**Still open: a green end-to-end run.** Every attempt since the fixes has been
-cut short by the device rather than by a check failing on its merits — two
-blackouts, a SpringBoard crash, and finally capture stopping altogether
-("the display surface could not be read", the re-resolve firing and the port
-dying again immediately). Best runs so far: **32/33 on iOS 18.0** and **32/33 on
-iOS 26.5**, with the single failure in each case a device fault the harness
-correctly reported as a device fault.
+**Green.** `33/33, exit 0` on a healthy device, which is the first time every
+check has passed in one run. Getting there took the harness fixes above *and*
+the graph fixes that came out of the 0.6.0 review — a single-observation miss no
+longer halts, so the transition-graph section stopped being a coin flip.
+
+The runs before it were all cut short by the device rather than by a check
+failing on its merits — two blackouts, a SpringBoard crash, and capture stopping
+altogether. Best of those: 32/33 on iOS 18.0 and 32/33 on iOS 26.5, the single
+failure each time a device fault the harness correctly reported as one.
 
 That last part is the one thing here that is verified: on the final run the new
 precondition check said `FAIL the novel action ran at all — [did not run:

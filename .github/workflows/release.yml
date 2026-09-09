@@ -47,19 +47,51 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      # setup-node cannot pin an npm version, so upgrade it here.
+      # setup-node cannot pin an npm version, so upgrade it here — to a
+      # RANGE, not to `@latest`.
+      #
+      # `@latest` is a clock in the release pipeline. It went off once already:
+      # npm 12 shipped between two releases a day apart, required Node 22, and
+      # killed v0.5.1 on a runner pinned to Node 20. Pinning Node alone fixes
+      # that instance and leaves the mechanism intact — the next npm major to
+      # raise its floor does it again, on tag day, just as silently.
       - name: Upgrade npm for Trusted Publishing
         run: |
-          npm install -g npm@latest
+          npm install -g 'npm@>=11.5.1 <13'
           npm --version
 
       - run: npm ci
       - run: npm test
 
-      - name: Tag, package.json and server.json must agree
-        if: startsWith(github.ref, 'refs/tags/v')
+      # `ci.yml` triggers on `branches: [main]`, which a tag push does not
+      # match — so `check:package` and the tarball build, the two checks written
+      # precisely to catch a broken package, never ran on the commit that ships.
+      # Cheaper to run them here than to widen a workflow that boots simulators.
+      - name: The package a user would install is not broken
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
+          npm run check:package
+          PKG=$(npm pack --silent)
+          mkdir -p /tmp/tarball && tar -xzf "$PKG" -C /tmp/tarball
+          swift build -c release --package-path /tmp/tarball/package/native/simframed
+          echo "the tarball's own sources build a daemon"
+
+      # This used to be gated on `startsWith(github.ref, 'refs/tags/v')`, so a
+      # `workflow_dispatch` run skipped it and published whatever was on disk
+      # to `latest` and to the MCP Registry with nothing checked at all.
+      - name: Tag, package.json and server.json must agree
+        run: |
+          # Two halves. That package.json and server.json agree with each
+          # other is checkable always, and it is the half that actually
+          # protects a publish — a manual run used to skip it entirely and ship
+          # whatever was on disk. That they agree with the *tag* is only
+          # meaningful when there is one.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            echo "checking against tag $TAG"
+          else
+            TAG=$(node -p "require('./package.json').version")
+            echo "manual run: no tag, checking the two files against each other at $TAG"
+          fi
           node -e '
             const tag = process.argv[1];
             const pkg = require("./package.json");
@@ -76,7 +108,12 @@ jobs:
             console.log(`version ${tag} is consistent across package.json and server.json`);
           ' "$TAG"
 
+      # Pinned, not `releases/latest`. This binary is executed in a job holding
+      # `id-token: write`, so "whatever they shipped this morning" is both a
+      # fragility and a supply-chain exposure. Bump it deliberately.
       - name: Install mcp-publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.1
         run: |
           ARCH=$(uname -m)
           case "$ARCH" in
@@ -84,8 +121,13 @@ jobs:
             x86_64) ASSET_ARCH=amd64 ;;
             *) echo "unsupported arch $ARCH"; exit 1 ;;
           esac
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_darwin_${ASSET_ARCH}.tar.gz" \
-            | tar -xz mcp-publisher
+          BASE="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          if ! curl -fsSL "$BASE/mcp-publisher_darwin_${ASSET_ARCH}.tar.gz" | tar -xz mcp-publisher; then
+            echo "mcp-publisher ${MCP_PUBLISHER_VERSION} could not be fetched."
+            echo "Check the tag at https://github.com/modelcontextprotocol/registry/releases"
+            echo "and update MCP_PUBLISHER_VERSION above — deliberately, not by floating to latest."
+            exit 1
+          fi
           ./mcp-publisher --version
 
       - name: Validate server.json
@@ -123,10 +165,25 @@ jobs:
             DIST_TAG=latest
           fi
           echo "publishing simframe@$VERSION under dist-tag $DIST_TAG"
-          if npm view "simframe@$VERSION" version >/dev/null 2>&1; then
+          # `npm view simframe@<version>` is not a reliable "already published"
+          # test, by this file's own argument two steps down: npm's review queue
+          # makes a just-published version 404 for a while. A re-run inside that
+          # window therefore took the else branch and hard-failed on
+          # EPUBLISHCONFLICT — so the promise that an existing version is a skip
+          # held only *after* review completed, which is the opposite of when a
+          # re-run is likely.
+          if npm view simframe versions --json | grep -q "\"$VERSION\""; then
             echo "simframe@$VERSION is already on npm — skipping"
+          elif npm publish --provenance --access public --tag "$DIST_TAG"; then
+            echo "published simframe@$VERSION"
           else
-            npm publish --provenance --access public --tag "$DIST_TAG"
+            status=$?
+            # Racing our own earlier run is not a failure; anything else is.
+            if npm view simframe versions --json | grep -q "\"$VERSION\""; then
+              echo "simframe@$VERSION was published by a concurrent run — treating as done"
+            else
+              exit $status
+            fi
           fi
 
       # npm does not make a version resolvable the instant `npm publish` exits.

@@ -1001,3 +1001,31 @@ test('one observation is not enough to call an arrival a wrong turn', () => {
 
   assert.equal(CONFIDENT_OBSERVATIONS, 2, 'the threshold is a decision, not an accident');
 });
+
+test('a route through a screen wearing its second face is still a route', () => {
+  // An edge records whichever structure the screen was wearing when it arrived.
+  // Keying the search on canonical hashes only made such an edge a dead end,
+  // while `nearestScreen` was perfectly happy to say that hash *is* the node —
+  // so the graph had a route it could not find, `goto` answered `no-route` for
+  // somewhere it had been, and a flow that should have replayed from memory got
+  // re-explored.
+  const UDID = freshDevice('route-variant');
+  const A = { hash: 'a'.repeat(32), tokens: tok(6, 'a') };
+  const B = { hash: 'b'.repeat(32), tokens: tok(6, 'b') };
+  const C = { hash: 'c'.repeat(32), tokens: tok(6, 'c') };
+  // B has to be a screen we have read before it can wear a second face.
+  graphmod.record(UDID, { from: B, action: { tap: 'stay' }, to: B, kind: 'none' });
+  graphmod.record(UDID, { from: A, action: { tap: 'to-b' }, to: B, kind: 'push' });
+  // B arrives wearing a recognisable second face, which becomes a variant.
+  const Bface = { hash: 'd'.repeat(32), tokens: face(6, 'b') };
+  graphmod.record(UDID, { from: A, action: { tap: 'to-b' }, to: Bface, kind: 'push' });
+  graphmod.record(UDID, { from: Bface, action: { tap: 'to-c' }, to: C, kind: 'push' });
+
+  const path = graphmod.route(UDID, A, C.hash);
+  assert.ok(path, 'A reaches C even though the middle hop is a second face of B');
+  assert.deepEqual(path.map((e) => e.action), ['tap:to-b', 'tap:to-c']);
+
+  // And the goal itself may be named by either face.
+  assert.ok(graphmod.route(UDID, A, B.hash), 'reaching B by its canonical hash');
+  assert.ok(graphmod.route(UDID, A, Bface.hash), 'reaching B by its variant hash');
+});

@@ -268,3 +268,54 @@ final class AccessibilityElementTests: XCTestCase {
         XCTAssertNil(element.json["identifier"], "an absent identifier is absent, not null")
     }
 }
+
+/// The recovery path that only ever runs when nobody is watching.
+///
+/// A display teardown cannot be induced on demand, which is why this went
+/// untested through two releases. The decision and the act can both be driven
+/// with a stub, and that covers everything except the teardown itself.
+final class CaptureRecoveryTests: XCTestCase {
+    func testAMomentaryHiccupDoesNotReattach() {
+        var recovery = CaptureRecovery(threshold: 6)
+        for _ in 0..<5 { XCTAssertFalse(recovery.captureFailed(), "five failures is a hiccup") }
+        XCTAssertEqual(recovery.consecutiveFailures, 5)
+        recovery.captureSucceeded()
+        XCTAssertEqual(recovery.consecutiveFailures, 0, "one good frame clears the run")
+        for _ in 0..<5 { XCTAssertFalse(recovery.captureFailed()) }
+    }
+
+    func testASustainedRunReattachesAndRearmsTheCallback() {
+        let platform = StubPlatform()
+        _ = try? platform.attach(udid: "STUB-1")
+        var recovery = CaptureRecovery(threshold: 3)
+        XCTAssertFalse(recovery.captureFailed())
+        XCTAssertFalse(recovery.captureFailed())
+        XCTAssertTrue(recovery.captureFailed(), "the third failure is due a re-resolve")
+
+        var damaged = false
+        let outcome = recovery.reattach(platform: platform) { damaged = true }
+        guard case .success(let after) = outcome else { return XCTFail("reattach should succeed on a live stub") }
+        XCTAssertEqual(after, 3, "it reports how many reads it lost")
+        XCTAssertEqual(platform.reattachCount, 1)
+        XCTAssertEqual(recovery.consecutiveFailures, 0)
+
+        // The callback half is the one that is easy to forget: a fresh
+        // descriptor with nothing registered on it gives a daemon that has
+        // recovered and will never notice another change.
+        platform.simulateChange()
+        XCTAssertTrue(damaged, "the damage callback was re-armed on the new descriptor")
+    }
+
+    func testAFailedReattachStaysDueRatherThanWaitingForAnotherSix() {
+        let platform = StubPlatform()
+        platform.failReattach = true
+        var recovery = CaptureRecovery(threshold: 2)
+        _ = recovery.captureFailed()
+        XCTAssertTrue(recovery.captureFailed())
+        guard case .failure = recovery.reattach(platform: platform, onDamage: {}) else {
+            return XCTFail("a stub told to fail should fail")
+        }
+        XCTAssertEqual(recovery.consecutiveFailures, 2, "the run is not cleared by an attempt that did not work")
+        XCTAssertTrue(recovery.captureFailed(), "so the next failure tries again immediately")
+    }
+}

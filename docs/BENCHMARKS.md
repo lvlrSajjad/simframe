@@ -1465,7 +1465,9 @@ path, so this is the same tour, same device, same session.
 | host-side | 4 | **17.3 s** | 16.9–18.0 s |
 
 **2.7 s**, non-overlapping. The tour makes 14 tree reads cold, and 14 × 158 ms
-is 2.2 s, so the flow-level number and the per-read number agree.
+predicts 2.2 s — the same order, 23% under. Close enough to say the flow-level
+saving is the tree reads and not something else; not close enough to call the
+two numbers agreement, which an earlier draft of this line did.
 
 The first attempt at this measurement did not. A ten-step tour built out of app
 launches gave 40.0 s against 45.2 s with a warm spread of 20.4–29.9 s — a
@@ -1612,3 +1614,61 @@ project cares most about not having.
 
 `no-visible-change` on the cold `launch` step is honest rather than wrong: the
 app was already frontmost from the `doctor` run before it.
+
+---
+
+## 0.6.1 — what the review changed
+
+Every item an independent review of 0.6.0 raised, closed. The measurements that
+moved:
+
+### The first install stopped being worse on its second run
+
+Six consecutive runs of a ten-step flow from a cleared graph, halting enabled:
+
+| | before | after |
+| --- | --- | --- |
+| run 1 | **halted 3/10** | 10/10 |
+| runs 2–6 | 10/10 | 10/10 |
+| converged to all-`ok` by | run 2, then oscillated | **run 3, and stayed** |
+
+The cause was a policy error rather than a perception one: `verdict` returned
+`unexpected-screen` whether an edge had been seen once or fifty times, and any
+`unexpected-screen` halts a run. Run one learns every edge at count 1 and cannot
+contradict itself; run two has an expectation for every step and stops on the
+first screen whose identity wobbles. A single-observation miss now reports
+`unverified`, and so does a miss on an edge that has already reached more than
+one destination — which the graph had been recording as `changedOutcomes` while
+nothing read it.
+
+### The memory harness went green for the first time
+
+`33/33, exit 0`. Every previous attempt was cut short by the device rather than
+by a check failing on its merits, and the best before this was 32/33. Two things
+were needed: the harness fixes, and the graph fix above — the transition-graph
+section had been asserting convergence within three passes, which was a coin
+flip while one observation could halt a run.
+
+### Two wrong-action paths, reproduced and closed
+
+Neither was a performance problem, and the DEFERRED entries had described both
+as costing convergence:
+
+- A reading sharing **zero** tokens with an edge's destination was merged into it
+  as a second face, after which arriving there returned `ok` — "matches the
+  outcome seen 3x before" — so nothing halted and a flow kept walking, tapping
+  real controls on a screen its plan never contained.
+- `hashTokens([])` was sha256 of the empty string, so every unreadable screen
+  shared one structural identity, and `similarity([], [])` returned 1, so two
+  unreadable reads agreed and promoted the non-identity to a confirmed screen.
+  That defeats all three `resolveRef` guards at once, and a ref numbered on one
+  screen resolves onto another and taps it.
+
+### Tree reads, restated honestly
+
+`accessibilityMultipleAttributes:` batches eight attributes into one guest hop:
+**112 calls / 25 ms one at a time against 14 calls / 10 ms batched** on the same
+fourteen nodes, identical values. The commit that introduced it claimed one call
+per node; it is three — one batch, one `accessibilityLabel`, one `AXChildren`.
+The eight-fold reduction in round trips is what matters on a slow machine, and
+that part stands.
