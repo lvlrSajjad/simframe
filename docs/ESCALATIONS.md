@@ -132,3 +132,36 @@ One caveat on this breakdown, stated because it bounds every conclusion above:
 two flows on Apple's own apps, one device, one afternoon. The reason
 distribution from a third-party app with poorer labelling will not look like
 this.
+
+## The log cannot say who wrote a line — 2026-09-09, after Phase 11 step 4
+
+The breakdown above bounds itself with "one device, one afternoon". It needs a
+second bound, found the hard way on the same device the same evening.
+
+`escalations.jsonl` is per-UDID, and a record carries `flow_id`, `step_index`,
+`screen_fingerprint` and `reason` — nothing that says which *session* produced
+it. Two Claude sessions with the simframe MCP server attached to one booted
+simulator therefore write into one log, interleaved, indistinguishably. That
+happened here: the bench device's log went from 57 to 81 entries across an
+evening in which a second session was driving the same device, and a third of
+the new entries name screens from an app the suite has never launched.
+
+The consequence is not a corrupted file, it is a corrupted instrument. CLAUDE.md
+says this log is the steering wheel and that its reason breakdown decides which
+faculty is built next. A breakdown that silently pools two sessions' work
+answers a question nobody asked — and it errs toward whichever session made
+more mistakes, which is not the same as whichever faculty is most missing.
+
+So: **the reason breakdown is only trustworthy on a device one session owns**,
+and the numbers above were collected under that condition while the ones from
+this evening were not. The fix is small and worth doing before the next
+breakdown is used to choose a phase — a session id and the flow's own name on
+each record, so a breakdown can be taken per session, per flow, or pooled *on
+purpose*. `flowRecordFrom` already carries `flowName`; the escalation record
+does not.
+
+Reading the same fact the other way: a shared device is the normal case, not
+the pathological one. Three MCP servers were attached to this machine's
+simulator while this was written, which is what a person with several agents
+open looks like. An instrument that only works when nothing else is running is
+an instrument with a precondition nobody will remember to check.
