@@ -1,0 +1,399 @@
+{
+  "app": "settings",
+  "screen": "display-text",
+  "note": null,
+  "recorded_at": "2026-09-09T22:23:56.203Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Accessibility",
+      "value": null,
+      "type": "Button",
+      "x": 38,
+      "y": 84,
+      "frame": {
+        "y": 62,
+        "height": 44,
+        "x": 16,
+        "width": 44
+      },
+      "region": "nav-bar",
+      "source": "ax|ocr",
+      "aliases": [
+        "<"
+      ],
+      "navSlot": "leading",
+      "enabled": true
+    },
+    {
+      "label": "Display & Text Size",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 84,
+      "frame": {
+        "x": 126,
+        "y": 72.66666666666666,
+        "width": 150,
+        "height": 22.66666666666667
+      },
+      "region": "nav-bar",
+      "source": "ax|ocr",
+      "aliases": [
+        "Display & Text Size"
+      ],
+      "navSlot": "title",
+      "enabled": true
+    },
+    {
+      "label": "Bold Text",
+      "value": null,
+      "type": "Switch",
+      "x": 201,
+      "y": 161,
+      "frame": {
+        "height": 28,
+        "x": 36,
+        "y": 147.3333282470703,
+        "width": 330
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Bold Text"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Larger Text, Off",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 216,
+      "frame": {
+        "y": 188.6666660308838,
+        "height": 55,
+        "width": 362,
+        "x": 20
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Larger Text"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Show Borders",
+      "value": null,
+      "type": "Switch",
+      "x": 201,
+      "y": 271,
+      "frame": {
+        "width": 330,
+        "x": 36,
+        "y": 257.3333435058594,
+        "height": 28
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Show Borders"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "On/Off Labels",
+      "value": null,
+      "type": "Switch",
+      "x": 201,
+      "y": 326,
+      "frame": {
+        "height": 54,
+        "y": 298.6666660308838,
+        "x": 20,
+        "width": 362
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "On/Off Labels"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "On/Off Labels",
+      "value": null,
+      "type": "Switch",
+      "x": 331,
+      "y": 326,
+      "frame": {
+        "height": 28,
+        "width": 63,
+        "x": 299,
+        "y": 311.6666660308838
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "What\u2019s new in Display & Text Size\u2026",
+      "value": null,
+      "type": "Link",
+      "x": 201,
+      "y": 376,
+      "frame": {
+        "height": 36,
+        "x": 35,
+        "width": 332,
+        "y": 357.6666666666667
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "What's new in Display & Text Size..."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Reduce Transparency",
+      "value": null,
+      "type": "Switch",
+      "x": 201,
+      "y": 449,
+      "frame": {
+        "x": 36,
+        "y": 435,
+        "width": 330,
+        "height": 28
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Reduce Transparency"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Improve contrast by reducing transparency and blurs on some backgrounds to increase legibility.",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 501,
+      "frame": {
+        "y": 476.33333079020184,
+        "x": 20,
+        "width": 362,
+        "height": 50.00000000000006
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Improve contrast by reducing transparency and blurs",
+        "on some backgrounds to increase legibility."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Increase Contrast",
+      "value": null,
+      "type": "Switch",
+      "x": 201,
+      "y": 572,
+      "frame": {
+        "x": 36,
+        "height": 28,
+        "y": 557.6666870117188,
+        "width": 330
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Increase Contrast"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Increase color contrast between app foreground and background colors.",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 624,
+      "frame": {
+        "width": 362,
+        "height": 50,
+        "x": 20,
+        "y": 598.999994913737
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Increase color contrast between app foreground and",
+        "background colors."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Differentiate Without Color",
+      "value": null,
+      "type": "Switch",
+      "x": 201,
+      "y": 694,
+      "frame": {
+        "x": 36,
+        "height": 28,
+        "y": 680.3333129882812,
+        "width": 330
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Differentiate Without Color"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Replaces user interface items that rely solely on color to convey information with alternatives.",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 747,
+      "frame": {
+        "width": 362,
+        "y": 721.6666590372721,
+        "x": 20,
+        "height": 50
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Replaces user interface items that rely solely on color",
+        "to convey information with alternatives."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Prefer Horizontal Text",
+      "value": null,
+      "type": "Switch",
+      "x": 201,
+      "y": 817,
+      "frame": {
+        "width": 330,
+        "y": 803,
+        "x": 36,
+        "height": 28
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Prefer Horizontal Text"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Prefer horizontal text in languages that support vertical text.",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 869,
+      "frame": {
+        "x": 20,
+        "height": 50,
+        "width": 362,
+        "y": 844.3333231608073
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Prefer horizontal text in languages that support"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "12:23",
+      "value": null,
+      "type": "Text",
+      "x": 72,
+      "y": 26,
+      "frame": {
+        "x": 45.65299797253724,
+        "y": 16.514535353296885,
+        "width": 51.993687947591155,
+        "height": 19.055231730143174
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "\u2022 Contacts",
+      "value": null,
+      "type": "Text",
+      "x": 42,
+      "y": 41,
+      "frame": {
+        "x": 11.394352911874114,
+        "y": 34.206655956418025,
+        "width": 62.176595052083336,
+        "height": 12.889013926188127
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "Off >",
+      "value": null,
+      "type": "Text",
+      "x": 340,
+      "y": 216,
+      "frame": {
+        "x": 318.3028398273394,
+        "y": 208.33333332895856,
+        "width": 44.384857177734396,
+        "height": 15.333333333333284
+      },
+      "region": "content",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "0f660efb33b89c6f6b987dcbca8689eb",
+      "tokens": [
+        "button:content:w15:h2:x1:y8#1",
+        "button:nav-bar:@leading:w2:h2:\"accessibility\":x1:y3#1",
+        "group:content:w15:h2:x1:y20#many",
+        "heading:nav-bar:@title:w6:h1:\"display & text size\":x5:y3#1",
+        "link:content:w14:h2:x1:y15#1",
+        "switch:content:w14:h1:x2:y6#many",
+        "switch:content:w15:h2:x1:y12#1",
+        "switch:content:w3:h1:x12:y13#1",
+        "text:content:w2:h1:x13:y9#1"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "Bold Text",
+        "label": "Bold Text"
+      },
+      {
+        "query": "Larger Text",
+        "label": "Larger Text, Off"
+      },
+      {
+        "query": "Reduce Transparency",
+        "label": "Reduce Transparency"
+      },
+      {
+        "query": "Increase Contrast",
+        "label": "Increase Contrast"
+      }
+    ],
+    "ambiguous": [],
+    "none": []
+  }
+}

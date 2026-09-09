@@ -1,0 +1,340 @@
+{
+  "app": "contacts",
+  "screen": "kate-bell",
+  "note": null,
+  "recorded_at": "2026-09-09T22:23:01.398Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Contacts",
+      "value": null,
+      "type": "Button",
+      "x": 38,
+      "y": 84,
+      "frame": {
+        "width": 44,
+        "height": 44,
+        "x": 16,
+        "y": 62
+      },
+      "region": "nav-bar",
+      "source": "ax",
+      "navSlot": "leading",
+      "enabled": true
+    },
+    {
+      "label": "Edit",
+      "value": null,
+      "type": "Button",
+      "x": 355,
+      "y": 84,
+      "frame": {
+        "x": 327.6666666666667,
+        "height": 36,
+        "width": 54.333333333333314,
+        "y": 66
+      },
+      "region": "nav-bar",
+      "source": "ax|ocr",
+      "aliases": [
+        "Edit"
+      ],
+      "navSlot": "trailing",
+      "enabled": true
+    },
+    {
+      "label": "PRODUCER \u2022 CREATIVE CONSULTING",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 388,
+      "frame": {
+        "x": 50.33333333333334,
+        "height": 22.333333333333314,
+        "y": 376.66666666666663,
+        "width": 301.33333333333326
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "PRODUCER \u2022 CREATIVE CONSULTING"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Kate Bell",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 429,
+      "frame": {
+        "width": 162.33333333333331,
+        "height": 48,
+        "x": 120,
+        "y": 404.99999999999994
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Kate Bell"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Message",
+      "value": null,
+      "type": "PopUpButton",
+      "x": 87,
+      "y": 503,
+      "frame": {
+        "x": 55,
+        "height": 64,
+        "y": 471,
+        "width": 64
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Call",
+      "value": null,
+      "type": "PopUpButton",
+      "x": 163,
+      "y": 503,
+      "frame": {
+        "y": 471,
+        "x": 131,
+        "width": 64,
+        "height": 64
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Video",
+      "value": null,
+      "type": "Image",
+      "x": 239,
+      "y": 503,
+      "frame": {
+        "x": 207,
+        "y": 471,
+        "width": 64,
+        "height": 64
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Mail",
+      "value": null,
+      "type": "PopUpButton",
+      "x": 315,
+      "y": 503,
+      "frame": {
+        "height": 64,
+        "x": 283,
+        "width": 64,
+        "y": 471
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Contact Photo & Poster",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 587,
+      "frame": {
+        "height": 74,
+        "width": 370,
+        "x": 16,
+        "y": 550
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Contact Photo & Poster"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "mobile, (555) 564-8583",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 672,
+      "frame": {
+        "height": 72.33333333333337,
+        "y": 636,
+        "x": 16,
+        "width": 370
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "mobile",
+        "(555) 564-8583"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "main, (415) 555-3695",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 745,
+      "frame": {
+        "width": 370,
+        "x": 16,
+        "y": 708.3333333333334,
+        "height": 72.33333333333337
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "main",
+        "(415) 555-3695"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "work, kate-bell@mac.com",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 817,
+      "frame": {
+        "y": 780.6666666666666,
+        "height": 72.33333333333337,
+        "width": 370,
+        "x": 16
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "work",
+        "kate-bell@mac.com"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "homepage, http://www.icloud.com",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 889,
+      "frame": {
+        "height": 72.33333333333337,
+        "x": 16,
+        "y": 853,
+        "width": 370
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Toolbar",
+      "value": null,
+      "type": "Group",
+      "x": 199,
+      "y": 106,
+      "frame": {
+        "height": 48,
+        "width": 387,
+        "y": 82,
+        "x": 5
+      },
+      "region": "nav-bar",
+      "source": "ax",
+      "navSlot": "title",
+      "enabled": true
+    },
+    {
+      "label": "12:23",
+      "value": null,
+      "type": "Text",
+      "x": 74,
+      "y": 33,
+      "frame": {
+        "x": 50.725551463037014,
+        "y": 25.40697651231476,
+        "width": 46.92113749186198,
+        "height": 15.24418640136721
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "\u041aB",
+      "value": null,
+      "type": "Text",
+      "x": 201,
+      "y": 245,
+      "frame": {
+        "x": 144.56782563089493,
+        "y": 209.60755790917588,
+        "width": 112.86434936523438,
+        "height": 69.86918640136722
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "\u041aB",
+      "value": null,
+      "type": "Text",
+      "x": 56,
+      "y": 587,
+      "frame": {
+        "x": 40.58044220546301,
+        "y": 578.0087213336093,
+        "width": 30.435330708821606,
+        "height": 17.784882863362718
+      },
+      "region": "content",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "2f05c6d211840578ba4642c8fb78491d",
+      "tokens": [
+        "button:content:w15:h3:x1:y23#many",
+        "button:content:w3:h3:x2:y20#many",
+        "button:nav-bar:@leading:w2:h2:\"contacts\":x1:y3#1",
+        "button:nav-bar:@trailing:w2:h2:\"edit\":x14:y3#1",
+        "image:content:w3:h3:x9:y20#1",
+        "text:content:w13:h1:x2:y16#1",
+        "text:content:w1:h1:x2:y24#1",
+        "text:content:w5:h3:x6:y9#1",
+        "text:content:w7:h2:x5:y17#1"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "Edit",
+        "label": "Edit"
+      },
+      {
+        "query": "Message",
+        "label": "Message"
+      },
+      {
+        "query": "Contact Photo & Poster",
+        "label": "Contact Photo & Poster"
+      }
+    ],
+    "ambiguous": [],
+    "none": []
+  }
+}

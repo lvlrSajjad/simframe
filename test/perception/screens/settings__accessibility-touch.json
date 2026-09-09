@@ -1,0 +1,417 @@
+{
+  "app": "settings",
+  "screen": "accessibility-touch",
+  "note": null,
+  "recorded_at": "2026-09-09T22:26:23.714Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Settings",
+      "value": null,
+      "type": "Button",
+      "x": 38,
+      "y": 84,
+      "frame": {
+        "x": 16,
+        "y": 62,
+        "width": 44,
+        "height": 44
+      },
+      "region": "nav-bar",
+      "source": "ax",
+      "navSlot": "leading",
+      "enabled": true
+    },
+    {
+      "label": "Accessibility",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 84,
+      "frame": {
+        "width": 100.33333333333334,
+        "y": 72.66666666666666,
+        "x": 150.66666666666666,
+        "height": 22.66666666666667
+      },
+      "region": "nav-bar",
+      "source": "ax|ocr",
+      "aliases": [
+        "Accessibility"
+      ],
+      "navSlot": "title",
+      "enabled": true
+    },
+    {
+      "label": "Accessibility",
+      "value": null,
+      "type": "Heading",
+      "x": 102,
+      "y": 238,
+      "frame": {
+        "width": 131,
+        "height": 28.333333333333314,
+        "x": 36,
+        "y": 224.16666857401532
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Accessibility"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Personalize iPhone in ways that work best for you with accessibility features for vision, mobility, hearing, speech, and cognition. Learn\u00a0more\u2026",
+      "value": null,
+      "type": "Heading",
+      "x": 197,
+      "y": 304,
+      "frame": {
+        "x": 36,
+        "height": 94.33333333333331,
+        "y": 256.50000190734863,
+        "width": 321.66666666666663
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Personalize iPhone in ways that work best",
+        "for you with accessibility features for",
+        "vision, mobility, hearing, speech, and"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Vision",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 403,
+      "frame": {
+        "y": 383.6666717529297,
+        "x": 20,
+        "width": 362,
+        "height": 38
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Vision"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Hover Text, Off",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 449,
+      "frame": {
+        "x": 20,
+        "y": 421.6666717529297,
+        "width": 362,
+        "height": 55
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Hover Text"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Display & Text Size",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 504,
+      "frame": {
+        "height": 55,
+        "x": 20,
+        "width": 362,
+        "y": 476.6666717529297
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Display & Text Size"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Motion",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 559,
+      "frame": {
+        "height": 55,
+        "width": 362,
+        "x": 20,
+        "y": 531.6666717529297
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Motion"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Spoken Content",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 614,
+      "frame": {
+        "y": 586.6666717529297,
+        "width": 362,
+        "x": 20,
+        "height": 55
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Spoken Content"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Physical and Motor",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 678,
+      "frame": {
+        "height": 38,
+        "y": 659.0000057220459,
+        "x": 20,
+        "width": 362
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Physical and Motor"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Face ID & Attention",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 725,
+      "frame": {
+        "y": 697.0000057220459,
+        "width": 362,
+        "x": 20,
+        "height": 55
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Face ID & Attention"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Control Nearby Devices",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 780,
+      "frame": {
+        "height": 55,
+        "x": 20,
+        "width": 362,
+        "y": 752.0000057220459
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Control Nearby Devices"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Hearing",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 843,
+      "frame": {
+        "height": 38,
+        "x": 20,
+        "width": 362,
+        "y": 824.3333396911621
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Hearing"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Subtitles & Captioning",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 890,
+      "frame": {
+        "height": 55,
+        "x": 20,
+        "width": 362,
+        "y": 862.3333396911621
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "12:26",
+      "value": null,
+      "type": "Text",
+      "x": 74,
+      "y": 33,
+      "frame": {
+        "x": 50.725550792735085,
+        "y": 25.406976621201768,
+        "width": 46.92113749186198,
+        "height": 15.24418640136721
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "T",
+      "value": null,
+      "type": "Text",
+      "x": 65,
+      "y": 182,
+      "frame": {
+        "x": 54.52996854296571,
+        "y": 170.22674384050802,
+        "width": 20.290220896402992,
+        "height": 22.86627960205082
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "cognition. Learn more...",
+      "value": null,
+      "type": "Text",
+      "x": 126,
+      "y": 342,
+      "frame": {
+        "x": 35.50789160646642,
+        "y": 333.99999970647445,
+        "width": 180.0757039388021,
+        "height": 15.345930099487328
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "A",
+      "value": null,
+      "type": "Text",
+      "x": 48,
+      "y": 450,
+      "frame": {
+        "x": 35.507886404729135,
+        "y": 440.8110462340539,
+        "width": 24.094637552897137,
+        "height": 17.784884134928316
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "Off >",
+      "value": null,
+      "type": "Text",
+      "x": 340,
+      "y": 448,
+      "frame": {
+        "x": 318.3028398669688,
+        "y": 440.6666669818644,
+        "width": 44.384857177734396,
+        "height": 15.388565699259415
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "AA",
+      "value": null,
+      "type": "Text",
+      "x": 48,
+      "y": 506,
+      "frame": {
+        "x": 35.50788640825175,
+        "y": 496.70639592162894,
+        "width": 24.09463755289713,
+        "height": 19.05523173014327
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": ">",
+      "value": null,
+      "type": "Text",
+      "x": 356,
+      "y": 559,
+      "frame": {
+        "x": 351.2744480572872,
+        "y": 552.6017439746727,
+        "width": 10.14511044820152,
+        "height": 12.703488667805914
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": ">",
+      "value": null,
+      "type": "Text",
+      "x": 356,
+      "y": 614,
+      "frame": {
+        "x": 351.2744479091845,
+        "y": 608.4970927758536,
+        "width": 8.87697156270348,
+        "height": 11.43313980102536
+      },
+      "region": "content",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "1a6cc1b500386a04c7f268a293343511",
+      "tokens": [
+        "button:content:w15:h2:x1:y18#many",
+        "button:nav-bar:@leading:w2:h2:\"settings\":x1:y3#1",
+        "heading:content:w13:h4:x2:y11#1",
+        "heading:content:w15:h2:x1:y16#many",
+        "heading:content:w5:h1:x2:y9#1",
+        "heading:nav-bar:@title:w4:h1:\"accessibility\":x6:y3#1",
+        "text:content:w0:h0:x15:y25#1",
+        "text:content:w0:h1:x15:y23#1",
+        "text:content:w1:h1:x2:y7#many",
+        "text:content:w2:h1:x13:y18#1",
+        "text:content:w8:h1:x1:y14#1"
+      ]
+    },
+    "resolutions": [],
+    "ambiguous": [],
+    "none": []
+  }
+}

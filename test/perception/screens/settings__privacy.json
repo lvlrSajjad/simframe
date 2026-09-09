@@ -1,0 +1,281 @@
+{
+  "app": "settings",
+  "screen": "privacy",
+  "note": null,
+  "recorded_at": "2026-09-09T22:24:44.489Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Settings",
+      "value": null,
+      "type": "Button",
+      "x": 38,
+      "y": 84,
+      "frame": {
+        "height": 44,
+        "x": 16,
+        "width": 44,
+        "y": 62
+      },
+      "region": "nav-bar",
+      "source": "ax",
+      "navSlot": "leading",
+      "enabled": true
+    },
+    {
+      "label": "Privacy & Security",
+      "value": null,
+      "type": "Heading",
+      "x": 126,
+      "y": 255,
+      "frame": {
+        "y": 241,
+        "width": 187.33333333333331,
+        "x": 32,
+        "height": 28.333333333333314
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Privacy & Security"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Control which apps can access your data, location, camera, and microphone, and manage safety protections. Learn\u00a0more\u2026",
+      "value": null,
+      "type": "Heading",
+      "x": 193,
+      "y": 309,
+      "frame": {
+        "height": 70.33333333333331,
+        "y": 273.3333333333333,
+        "x": 32,
+        "width": 321
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Control which apps can access your data,",
+        "location, camera, and microphone, ano",
+        "manage safety protections. Learn more..."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Location Services, 1 always",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 429,
+      "frame": {
+        "height": 70.66666666666669,
+        "width": 370,
+        "x": 16,
+        "y": 393.6666666666667
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Location Services",
+        "1 always"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Tracking, 0",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 491,
+      "frame": {
+        "height": 53.99999999999994,
+        "x": 16,
+        "width": 370,
+        "y": 464.3333333333333
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Tracking"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Calendars, None",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 589,
+      "frame": {
+        "x": 16,
+        "y": 553.3333333333333,
+        "width": 370,
+        "height": 70.66666666666663
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Calendars",
+        "None"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Contacts, None",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 659,
+      "frame": {
+        "y": 624,
+        "x": 16,
+        "width": 370,
+        "height": 70.66666666666663
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Contacts",
+        "None"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Files & Folders, 1 app",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 730,
+      "frame": {
+        "x": 16,
+        "height": 70.66666666666663,
+        "y": 694.6666666666666,
+        "width": 370
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Files & Folders",
+        "1 app"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Focus, None",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 801,
+      "frame": {
+        "width": 370,
+        "height": 70.66666666666663,
+        "x": 16,
+        "y": 765.3333333333334
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Focus",
+        "None"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Health, None",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 871,
+      "frame": {
+        "x": 16,
+        "height": 70.66666666666663,
+        "y": 836,
+        "width": 370
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Health"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "12:24",
+      "value": null,
+      "type": "Text",
+      "x": 74,
+      "y": 33,
+      "frame": {
+        "x": 50.72555389294185,
+        "y": 24.136628187553203,
+        "width": 46.92113240559896,
+        "height": 17.784882863362622
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "1",
+      "value": null,
+      "type": "Text",
+      "x": 44,
+      "y": 431,
+      "frame": {
+        "x": 31.703470601653635,
+        "y": 419.21511657040793,
+        "width": 25.362775166829426,
+        "height": 24.13662719726567
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": ") >",
+      "value": null,
+      "type": "Text",
+      "x": 356,
+      "y": 492,
+      "frame": {
+        "x": 344.93375422839244,
+        "y": 485.2732557169109,
+        "width": 22.82649739583336,
+        "height": 12.726744333903001
+      },
+      "region": "content",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "652a2e69df75e72886d69305b531970c",
+      "tokens": [
+        "button:content:w15:h2:x1:y19#1",
+        "button:content:w15:h3:x1:y16#many",
+        "button:nav-bar:@leading:w2:h2:\"settings\":x1:y3#1",
+        "heading:content:w13:h3:x1:y11#1",
+        "heading:content:w8:h1:x1:y10#1",
+        "text:content:w1:h1:x1:y17#many"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "Location Services",
+        "label": "Location Services, 1 always"
+      },
+      {
+        "query": "Tracking",
+        "label": "Tracking, 0"
+      },
+      {
+        "query": "Files & Folders",
+        "label": "Files & Folders, 1 app"
+      }
+    ],
+    "ambiguous": [],
+    "none": []
+  }
+}

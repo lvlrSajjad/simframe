@@ -1,0 +1,193 @@
+{
+  "app": "reminders",
+  "screen": "lists",
+  "note": null,
+  "recorded_at": "2026-09-09T22:26:00.546Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Enable iCloud Syncing?",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 375,
+      "frame": {
+        "width": 260,
+        "y": 363.6666666666667,
+        "height": 22.333333333333314,
+        "x": 71
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Enable iCloud Syncing?"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "To enjoy the latest features in Reminders, enable Reminders syncing for your Apple\u00a0Account in Settings.",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 436,
+      "frame": {
+        "height": 86,
+        "width": 260,
+        "y": 393,
+        "x": 71
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "To enjoy the latest features in",
+        "Reminders, enable Reminders",
+        "syncing for your Apple Account in",
+        "Settings."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Not Now",
+      "value": null,
+      "type": "Button",
+      "x": 127,
+      "y": 522,
+      "frame": {
+        "width": 140,
+        "y": 498,
+        "height": 48,
+        "x": 57
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Not Now"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Go to Settings",
+      "value": null,
+      "type": "Button",
+      "x": 275,
+      "y": 522,
+      "frame": {
+        "width": 140,
+        "x": 205,
+        "y": 498,
+        "height": 48
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Go to Settings"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "12:26",
+      "value": null,
+      "type": "Text",
+      "x": 74,
+      "y": 25,
+      "frame": {
+        "x": 49.45741243839624,
+        "y": 17.78488423009925,
+        "width": 48.18927510579427,
+        "height": 15.244185129801417
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "\u2039 Safari",
+      "value": null,
+      "type": "Text",
+      "x": 34,
+      "y": 41,
+      "frame": {
+        "x": 11.376556973737834,
+        "y": 35.40764561702923,
+        "width": 44.45824178059897,
+        "height": 10.487034479776979
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "\u2022 \u2022 \u2022",
+      "value": null,
+      "type": "Text",
+      "x": 363,
+      "y": 84,
+      "frame": {
+        "x": 352.5425864010842,
+        "y": 81.30232555510514,
+        "width": 21.558359781901032,
+        "height": 6.3643411000570005
+      },
+      "region": "nav-bar",
+      "source": "ocr",
+      "navSlot": "trailing"
+    },
+    {
+      "label": "Reminders",
+      "value": null,
+      "type": "Text",
+      "x": 99,
+      "y": 141,
+      "frame": {
+        "x": 16.485806476435908,
+        "y": 128.30523224427873,
+        "width": 164.85804239908856,
+        "height": 25.406977335612023
+      },
+      "region": "nav-bar",
+      "source": "ocr",
+      "navSlot": "leading"
+    },
+    {
+      "label": "+",
+      "value": null,
+      "type": "Text",
+      "x": 346,
+      "y": 823,
+      "frame": {
+        "x": 332.25236622801157,
+        "y": 810.4825583435364,
+        "width": 27.899052937825513,
+        "height": 24.13662719726567
+      },
+      "region": "content",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "56f02e8debbb169993f8314ff5ef03c2",
+      "tokens": [
+        "button:content:w6:h2:x2:y21#many",
+        "text:content:w11:h1:x3:y15#1",
+        "text:content:w11:h4:x3:y16#1",
+        "text:content:w1:h1:x14:y34#1",
+        "text:nav-bar:@leading:w7:h1:\"reminders\":x1:y5#1",
+        "text:nav-bar:@trailing:w1:h0:x15:y3#1"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "Not Now",
+        "label": "Not Now"
+      },
+      {
+        "query": "Go to Settings",
+        "label": "Go to Settings"
+      }
+    ],
+    "ambiguous": [],
+    "none": []
+  }
+}

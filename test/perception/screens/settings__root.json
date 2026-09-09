@@ -1,0 +1,269 @@
+{
+  "app": "settings",
+  "screen": "root",
+  "note": null,
+  "recorded_at": "2026-09-09T22:22:13.238Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Settings",
+      "value": null,
+      "type": "Heading",
+      "x": 83,
+      "y": 141,
+      "frame": {
+        "x": 16,
+        "y": 120,
+        "height": 42.66666666666666,
+        "width": 133
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Apple Account, Sign in to access your iCloud data, the App Store, Apple services, and more.",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 216,
+      "frame": {
+        "width": 370,
+        "y": 168,
+        "height": 96.33333333333331,
+        "x": 16
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "General",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 326,
+      "frame": {
+        "y": 299.33333333333337,
+        "width": 370,
+        "x": 16,
+        "height": 54
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Accessibility",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 380,
+      "frame": {
+        "height": 54,
+        "width": 370,
+        "y": 353.33333333333337,
+        "x": 16
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Action Button",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 434,
+      "frame": {
+        "height": 54,
+        "x": 16,
+        "y": 407.33333333333337,
+        "width": 370
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Apple Intelligence & Siri",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 488,
+      "frame": {
+        "height": 53.99999999999994,
+        "width": 370,
+        "y": 461.3333333333333,
+        "x": 16
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Camera",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 542,
+      "frame": {
+        "y": 515.3333333333333,
+        "height": 54,
+        "width": 370,
+        "x": 16
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Home Screen & App Library",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 596,
+      "frame": {
+        "width": 370,
+        "x": 16,
+        "y": 569.3333333333333,
+        "height": 54
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Search",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 650,
+      "frame": {
+        "height": 54,
+        "y": 623.3333333333333,
+        "x": 16,
+        "width": 370
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "StandBy",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 704,
+      "frame": {
+        "height": 54,
+        "width": 370,
+        "x": 16,
+        "y": 677.3333333333333
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Screen Time",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 793,
+      "frame": {
+        "height": 54,
+        "x": 16,
+        "width": 370,
+        "y": 766.3333333333334
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Passcode",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 882,
+      "frame": {
+        "x": 16,
+        "y": 855.3333333333334,
+        "width": 370,
+        "height": 54
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Dictate",
+      "value": null,
+      "type": "Button",
+      "x": 344,
+      "y": 822,
+      "frame": {
+        "width": 17.333333333333314,
+        "height": 22,
+        "x": 335.6666666666667,
+        "y": 811
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "12:22",
+      "value": null,
+      "type": "Text",
+      "x": 74,
+      "y": 33,
+      "frame": {
+        "x": 50.7255532018062,
+        "y": 25.40697725335508,
+        "width": 46.92113240559896,
+        "height": 15.244185129801417
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "946ff5485d8c03024ca76916413f5a69",
+      "tokens": [
+        "button:content:w15:h2:x1:y12#many",
+        "button:content:w15:h4:x1:y7#1",
+        "button:content:w1:h1:x14:y34#1",
+        "heading:content:w6:h2:x1:y5#1"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "Accessibility",
+        "label": "Accessibility"
+      },
+      {
+        "query": "General",
+        "label": "General"
+      },
+      {
+        "query": "Screen Time",
+        "label": "Screen Time"
+      },
+      {
+        "query": "tap Camera",
+        "label": "Camera"
+      }
+    ],
+    "ambiguous": [],
+    "none": [
+      "Bluetooth",
+      "Sign out of everything"
+    ]
+  }
+}

@@ -1,0 +1,387 @@
+{
+  "app": "settings",
+  "screen": "general-about",
+  "note": null,
+  "recorded_at": "2026-09-09T22:22:37.119Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "General",
+      "value": null,
+      "type": "Button",
+      "x": 38,
+      "y": 84,
+      "frame": {
+        "width": 44,
+        "x": 16,
+        "y": 62,
+        "height": 44
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "<"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "About",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 84,
+      "frame": {
+        "x": 176.66666666666666,
+        "height": 22.66666666666667,
+        "width": 48.33333333333334,
+        "y": 72.66666666666666
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "About"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Name, iPhone",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 161,
+      "frame": {
+        "width": 362,
+        "y": 133.6666660308838,
+        "x": 20,
+        "height": 55
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Name",
+        "iPhone"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "iOS Version, 26.5",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 216,
+      "frame": {
+        "x": 20,
+        "height": 55,
+        "y": 188.6666660308838,
+        "width": 362
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "iOS Version"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Model Name, iPhone 17 Pro",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 271,
+      "frame": {
+        "width": 362,
+        "height": 55,
+        "x": 20,
+        "y": 243.6666660308838
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Model Name",
+        "iPhone 17 Pro"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Model Number, A3256LL/A",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 326,
+      "frame": {
+        "x": 20,
+        "height": 55,
+        "y": 298.6666660308838,
+        "width": 362
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Model Number",
+        "A3256LL/A"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Serial Number, WWRN669KXC",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 381,
+      "frame": {
+        "y": 353.6666660308838,
+        "x": 20,
+        "width": 362,
+        "height": 55
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Serial Number",
+        "WWRN669KXC"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Songs, 0",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 471,
+      "frame": {
+        "x": 20,
+        "y": 443.6666660308838,
+        "width": 362,
+        "height": 55
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Songs"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Videos, 0",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 526,
+      "frame": {
+        "height": 55,
+        "x": 20,
+        "width": 362,
+        "y": 498.6666660308838
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Videos"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Photos, 6",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 581,
+      "frame": {
+        "height": 55,
+        "width": 362,
+        "x": 20,
+        "y": 553.6666660308838
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Photos"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Applications, 2",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 636,
+      "frame": {
+        "height": 55,
+        "y": 608.6666660308838,
+        "x": 20,
+        "width": 362
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Applications"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Capacity, 994.66 GB",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 691,
+      "frame": {
+        "width": 362,
+        "x": 20,
+        "y": 663.6666660308838,
+        "height": 55
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Capacity",
+        "994.66 GB"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Available, 327.9 GB",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 746,
+      "frame": {
+        "y": 718.6666660308838,
+        "height": 55,
+        "width": 362,
+        "x": 20
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Available",
+        "327.9 GB"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Certificate Trust Settings",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 871,
+      "frame": {
+        "height": 55,
+        "x": 20,
+        "y": 843.6666660308838,
+        "width": 362
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "12:22",
+      "value": null,
+      "type": "Text",
+      "x": 74,
+      "y": 34,
+      "frame": {
+        "x": 49.457412619106016,
+        "y": 24.13662837655262,
+        "width": 48.18927510579427,
+        "height": 19.05523173014327
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "26.5 >",
+      "value": null,
+      "type": "Text",
+      "x": 335,
+      "y": 217,
+      "frame": {
+        "x": 308.1577287938365,
+        "y": 207.00000017475406,
+        "width": 54.52996826171874,
+        "height": 20.39244143168125
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "6",
+      "value": null,
+      "type": "Text",
+      "x": 360,
+      "y": 581,
+      "frame": {
+        "x": 353.81072574536347,
+        "y": 574.1976741561492,
+        "width": 11.41324869791668,
+        "height": 13.973837534586659
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "2",
+      "value": null,
+      "type": "Text",
+      "x": 360,
+      "y": 636,
+      "frame": {
+        "x": 353.810725660974,
+        "y": 628.8226743046943,
+        "width": 12.681387583414718,
+        "height": 15.24418640136721
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "Cortifinsto Triict Cottinnc",
+      "value": null,
+      "type": "Text",
+      "x": 131,
+      "y": 868,
+      "frame": {
+        "x": 35.50788631007239,
+        "y": 863.8372095008382,
+        "width": 190.22082519531253,
+        "height": 8.892441431681311
+      },
+      "region": "content",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "5e470ca62b1657a6ad446910c6240a75",
+      "tokens": [
+        "button:content:w15:h2:x1:y8#many",
+        "button:content:w2:h2:x1:y3#1",
+        "heading:content:w2:h1:x7:y3#1",
+        "text:content:w0:h1:x15:y24#1",
+        "text:content:w15:h2:x1:y6#many",
+        "text:content:w1:h1:x15:y26#1",
+        "text:content:w2:h1:x13:y9#1",
+        "text:content:w8:h0:x1:y36#1"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "Certificate Trust Settings",
+        "label": "Certificate Trust Settings"
+      },
+      {
+        "query": "iOS Version",
+        "label": "iOS Version, 26.5"
+      },
+      {
+        "query": "Serial Number",
+        "label": "Serial Number, WWRN669KXC"
+      }
+    ],
+    "ambiguous": [],
+    "none": []
+  }
+}

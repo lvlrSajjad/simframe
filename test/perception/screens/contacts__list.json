@@ -1,0 +1,760 @@
+{
+  "app": "contacts",
+  "screen": "list",
+  "note": null,
+  "recorded_at": "2026-09-09T22:22:53.758Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Back",
+      "value": null,
+      "type": "Button",
+      "x": 38,
+      "y": 84,
+      "frame": {
+        "width": 44,
+        "x": 16,
+        "height": 44,
+        "y": 62
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Contacts",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 84,
+      "frame": {
+        "y": 72.66666666666666,
+        "height": 22.66666666666667,
+        "x": 164.66666666666666,
+        "width": 72.33333333333334
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Contacts"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "a",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 136,
+      "frame": {
+        "height": 40,
+        "y": 116,
+        "width": 402,
+        "x": 0
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "A"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Section index",
+      "value": null,
+      "type": "Slider",
+      "x": 395,
+      "y": 452,
+      "frame": {
+        "width": 15,
+        "y": 116,
+        "height": 672,
+        "x": 387
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "John Appleseed",
+      "value": null,
+      "type": "StaticText",
+      "x": 194,
+      "y": 186,
+      "frame": {
+        "y": 156,
+        "width": 384,
+        "height": 60,
+        "x": 2
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "John Appleseed"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "b",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 236,
+      "frame": {
+        "y": 216,
+        "width": 402,
+        "x": 0,
+        "height": 40
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "B"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Kate Bell",
+      "value": null,
+      "type": "StaticText",
+      "x": 194,
+      "y": 286,
+      "frame": {
+        "height": 60,
+        "width": 384,
+        "y": 256,
+        "x": 2
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Kate Bell"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "h",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 336,
+      "frame": {
+        "width": 402,
+        "x": 0,
+        "height": 40,
+        "y": 316
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "H"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Anna Haro",
+      "value": null,
+      "type": "StaticText",
+      "x": 194,
+      "y": 386,
+      "frame": {
+        "width": 384,
+        "height": 60,
+        "y": 356,
+        "x": 2
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Anna Haro"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Daniel Higgins Jr.",
+      "value": null,
+      "type": "StaticText",
+      "x": 194,
+      "y": 446,
+      "frame": {
+        "x": 2,
+        "height": 60,
+        "y": 416,
+        "width": 384
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Daniel Higgins Jr."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "t",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 496,
+      "frame": {
+        "width": 402,
+        "x": 0,
+        "y": 476,
+        "height": 40
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "T"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "David Taylor",
+      "value": null,
+      "type": "StaticText",
+      "x": 194,
+      "y": 546,
+      "frame": {
+        "width": 384,
+        "y": 516,
+        "height": 60,
+        "x": 2
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "David Taylor"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "z",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 596,
+      "frame": {
+        "height": 40,
+        "width": 402,
+        "y": 576,
+        "x": 0
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Z"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Hank M. Zakroff",
+      "value": null,
+      "type": "StaticText",
+      "x": 194,
+      "y": 646,
+      "frame": {
+        "height": 60,
+        "x": 2,
+        "width": 384,
+        "y": 616
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Hank M. Zakroff"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Toolbar",
+      "value": null,
+      "type": "Group",
+      "x": 201,
+      "y": 831,
+      "frame": {
+        "height": 86,
+        "x": 0,
+        "width": 402,
+        "y": 788
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "12:22",
+      "value": null,
+      "type": "Text",
+      "x": 72,
+      "y": 26,
+      "frame": {
+        "x": 46.92113618806016,
+        "y": 16.514535353296885,
+        "width": 50.725550333658866,
+        "height": 19.055231730143174
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "1 Settings",
+      "value": null,
+      "type": "Text",
+      "x": 41,
+      "y": 41,
+      "frame": {
+        "x": 11.413251183731148,
+        "y": 34.29941829800104,
+        "width": 58.334381103515625,
+        "height": 12.703488667806011
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "JA",
+      "value": null,
+      "type": "Text",
+      "x": 38,
+      "y": 186,
+      "frame": {
+        "x": 25.36277659534448,
+        "y": 177.84883695357146,
+        "width": 25.362775166829437,
+        "height": 16.514535268147764
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "A",
+      "value": null,
+      "type": "Text",
+      "x": 392,
+      "y": 274,
+      "frame": {
+        "x": 388.0504731563454,
+        "y": 268.0436044228158,
+        "width": 8.87697156270348,
+        "height": 11.43313980102536
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "\u041aB",
+      "value": null,
+      "type": "Text",
+      "x": 39,
+      "y": 286,
+      "frame": {
+        "x": 25.362775749364786,
+        "y": 278.2063952745847,
+        "width": 26.630915323893234,
+        "height": 16.514535268147764
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "AH",
+      "value": null,
+      "type": "Text",
+      "x": 39,
+      "y": 386,
+      "frame": {
+        "x": 24.094637036877106,
+        "y": 377.2936043806463,
+        "width": 29.167193094889317,
+        "height": 17.784884134928415
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "DH",
+      "value": null,
+      "type": "Text",
+      "x": 37,
+      "y": 447,
+      "frame": {
+        "x": 21.558360158812324,
+        "y": 438.27034934429616,
+        "width": 31.703468322753896,
+        "height": 16.514533996582067
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "DT",
+      "value": null,
+      "type": "Text",
+      "x": 39,
+      "y": 546,
+      "frame": {
+        "x": 25.362775586318367,
+        "y": 537.3575580108388,
+        "width": 26.63091532389323,
+        "height": 16.514535268147764
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "G",
+      "value": null,
+      "type": "Text",
+      "x": 393,
+      "y": 355,
+      "frame": {
+        "x": 389.3186120102932,
+        "y": 350.6162791359521,
+        "width": 7.608832677205398,
+        "height": 8.892441431681213
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "H",
+      "value": null,
+      "type": "Text",
+      "x": 392,
+      "y": 370,
+      "frame": {
+        "x": 388.0504731457775,
+        "y": 364.5901165331195,
+        "width": 8.876971562703437,
+        "height": 10.162790298461958
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "J",
+      "value": null,
+      "type": "Text",
+      "x": 393,
+      "y": 397,
+      "frame": {
+        "x": 389.31861211597135,
+        "y": 392.5377910232218,
+        "width": 7.608832677205398,
+        "height": 8.892441431681407
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "K",
+      "value": null,
+      "type": "Text",
+      "x": 393,
+      "y": 411,
+      "frame": {
+        "x": 388.0504730402525,
+        "y": 405.2412789843347,
+        "width": 10.14511044820152,
+        "height": 11.43313980102536
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "M",
+      "value": null,
+      "type": "Text",
+      "x": 393,
+      "y": 438,
+      "frame": {
+        "x": 388.05047325160905,
+        "y": 433.1889536244609,
+        "width": 10.145110448201475,
+        "height": 10.162790298461958
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "N",
+      "value": null,
+      "type": "Text",
+      "x": 392,
+      "y": 452,
+      "frame": {
+        "x": 388.0504731563454,
+        "y": 447.1627908125908,
+        "width": 8.87697156270348,
+        "height": 10.162790298461863
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "P",
+      "value": null,
+      "type": "Text",
+      "x": 393,
+      "y": 479,
+      "frame": {
+        "x": 389.31861195745404,
+        "y": 475.11046540897405,
+        "width": 7.608832677205442,
+        "height": 7.622092564900661
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "G",
+      "value": null,
+      "type": "Text",
+      "x": 393,
+      "y": 494,
+      "frame": {
+        "x": 389.3186119891575,
+        "y": 489.0843024658696,
+        "width": 7.608832677205442,
+        "height": 8.892441431681311
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "R",
+      "value": null,
+      "type": "Text",
+      "x": 392,
+      "y": 508,
+      "frame": {
+        "x": 388.05047327259143,
+        "y": 503.05813983611796,
+        "width": 8.876971562703437,
+        "height": 10.162790298461958
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "S",
+      "value": null,
+      "type": "Text",
+      "x": 393,
+      "y": 521,
+      "frame": {
+        "x": 389.3186121371071,
+        "y": 517.0319771067852,
+        "width": 7.608832677205398,
+        "height": 8.892441431681311
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "T",
+      "value": null,
+      "type": "Text",
+      "x": 394,
+      "y": 535,
+      "frame": {
+        "x": 390.5867509593513,
+        "y": 531.0058143160876,
+        "width": 6.340693791707359,
+        "height": 8.892441431681311
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "U",
+      "value": null,
+      "type": "Text",
+      "x": 394,
+      "y": 549,
+      "frame": {
+        "x": 390.58675083253746,
+        "y": 544.9796513157473,
+        "width": 6.340693791707359,
+        "height": 7.622092564900758
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "V",
+      "value": null,
+      "type": "Text",
+      "x": 393,
+      "y": 562,
+      "frame": {
+        "x": 389.31861200183886,
+        "y": 557.6831396603511,
+        "width": 7.608832677205398,
+        "height": 8.892441431681311
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "W",
+      "value": null,
+      "type": "Text",
+      "x": 392,
+      "y": 577,
+      "frame": {
+        "x": 386.78233454646755,
+        "y": 571.6569770073097,
+        "width": 11.41324869791668,
+        "height": 10.162790298461958
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "X",
+      "value": null,
+      "type": "Text",
+      "x": 393,
+      "y": 590,
+      "frame": {
+        "x": 388.05047309097813,
+        "y": 584.3604648688769,
+        "width": 10.14511044820152,
+        "height": 11.43313980102536
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "Y",
+      "value": null,
+      "type": "Text",
+      "x": 392,
+      "y": 604,
+      "frame": {
+        "x": 388.0504731457777,
+        "y": 598.3343020781792,
+        "width": 8.87697156270348,
+        "height": 11.43313980102536
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "Z",
+      "value": null,
+      "type": "Text",
+      "x": 393,
+      "y": 617,
+      "frame": {
+        "x": 389.31861200183886,
+        "y": 612.3081396603511,
+        "width": 7.608832677205398,
+        "height": 8.892441431681311
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "#",
+      "value": null,
+      "type": "Text",
+      "x": 393,
+      "y": 631,
+      "frame": {
+        "x": 388.05047329388026,
+        "y": 626.2819768802748,
+        "width": 10.145110448201475,
+        "height": 10.162790298461958
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "HZ",
+      "value": null,
+      "type": "Text",
+      "x": 38,
+      "y": 646,
+      "frame": {
+        "x": 24.094637413947385,
+        "y": 637.7151161503738,
+        "width": 27.899052937825513,
+        "height": 16.514535268147764
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "Q Search",
+      "value": null,
+      "type": "Text",
+      "x": 88,
+      "y": 821,
+      "frame": {
+        "x": 46.86378235543041,
+        "y": 812.7331180532724,
+        "width": 82.5437266031901,
+        "height": 17.094809850056958
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "+",
+      "value": null,
+      "type": "Text",
+      "x": 349,
+      "y": 823,
+      "frame": {
+        "x": 334.7886432635964,
+        "y": 807.9418602796408,
+        "width": 29.16719309488931,
+        "height": 30.48837280273442
+      },
+      "region": "content",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "c389bfc9fe2a9b95af49c20db57e9aac",
+      "tokens": [
+        "button:content:w2:h2:x1:y3#1",
+        "heading:content:w17:h2:x0:y5#many",
+        "heading:content:w3:h1:x7:y3#1",
+        "slider:content:w1:h28:x16:y5#1",
+        "text:content:w0:h0:x16:y11#many",
+        "text:content:w16:h3:x0:y7#many",
+        "text:content:w1:h1:x1:y7#many",
+        "text:content:w3:h1:x2:y34#1"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "Kate Bell",
+        "label": "Kate Bell"
+      },
+      {
+        "query": "Hank M. Zakroff",
+        "label": "Hank M. Zakroff"
+      },
+      {
+        "query": "back",
+        "label": "Back"
+      },
+      {
+        "query": "Search",
+        "label": "Q Search"
+      }
+    ],
+    "ambiguous": [],
+    "none": [
+      "Delete this contact"
+    ]
+  }
+}

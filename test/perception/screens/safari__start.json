@@ -1,0 +1,136 @@
+{
+  "app": "safari",
+  "screen": "start",
+  "note": null,
+  "recorded_at": "2026-09-09T22:25:22.490Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Back",
+      "value": null,
+      "type": "Button",
+      "x": 58,
+      "y": 816,
+      "frame": {
+        "height": 48,
+        "width": 48,
+        "y": 792,
+        "x": 34
+      },
+      "region": "tab-bar",
+      "source": "ax",
+      "enabled": false
+    },
+    {
+      "label": "Address",
+      "value": null,
+      "type": "TextField",
+      "x": 201,
+      "y": 816,
+      "frame": {
+        "x": 149,
+        "height": 22.33333333333337,
+        "y": 805,
+        "width": 104
+      },
+      "region": "tab-bar",
+      "source": "ax|ocr",
+      "aliases": [
+        "example.com .."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Close",
+      "value": null,
+      "type": "Button",
+      "x": 290,
+      "y": 816,
+      "frame": {
+        "width": 17.666666666666686,
+        "x": 281.33333333333337,
+        "y": 806,
+        "height": 20.33333333333337
+      },
+      "region": "tab-bar",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "More",
+      "value": null,
+      "type": "Button",
+      "x": 344,
+      "y": 816,
+      "frame": {
+        "width": 48,
+        "y": 792,
+        "height": 48,
+        "x": 320
+      },
+      "region": "tab-bar",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "12:25",
+      "value": null,
+      "type": "Text",
+      "x": 74,
+      "y": 25,
+      "frame": {
+        "x": 49.4574125187117,
+        "y": 17.784883607019932,
+        "width": 48.18927510579428,
+        "height": 15.244186401367115
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "\u2022 Reminders",
+      "value": null,
+      "type": "Text",
+      "x": 46,
+      "y": 40,
+      "frame": {
+        "x": 11.413248220978858,
+        "y": 34.29941854568397,
+        "width": 69.74763488769531,
+        "height": 11.433139801025456
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "b5af679ea6b0d4610a22e7b298b06aed",
+      "tokens": [
+        "button:tab-bar:w1:h1:\"close\":x12:y34#1",
+        "button:tab-bar:w2:h2:\"back\":x1:y33#1",
+        "button:tab-bar:w2:h2:\"more\":x13:y33#1",
+        "field:tab-bar:w4:h1:\"address\":x6:y34#1"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "back",
+        "label": "Back"
+      },
+      {
+        "query": "Address",
+        "label": "Address"
+      },
+      {
+        "query": "More",
+        "label": "More"
+      }
+    ],
+    "ambiguous": [],
+    "none": []
+  }
+}

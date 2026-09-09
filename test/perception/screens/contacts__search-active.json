@@ -1,0 +1,139 @@
+{
+  "app": "contacts",
+  "screen": "search-active",
+  "note": null,
+  "recorded_at": "2026-09-09T22:24:51.723Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Toolbar",
+      "value": null,
+      "type": "Group",
+      "x": 201,
+      "y": 831,
+      "frame": {
+        "width": 402,
+        "y": 788,
+        "height": 86,
+        "x": 0
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "12:24",
+      "value": null,
+      "type": "Text",
+      "x": 72,
+      "y": 25,
+      "frame": {
+        "x": 46.701228956063936,
+        "y": 15.868902939248661,
+        "width": 51.16536458333334,
+        "height": 19.076147715250617
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "1 Settings",
+      "value": null,
+      "type": "Text",
+      "x": 41,
+      "y": 41,
+      "frame": {
+        "x": 11.34957117232407,
+        "y": 34.00138553836218,
+        "width": 58.46174112955729,
+        "height": 13.299554189046212
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "Top Name Matches",
+      "value": null,
+      "type": "Text",
+      "x": 84,
+      "y": 83,
+      "frame": {
+        "x": 17.75394334392475,
+        "y": 76.22093016972909,
+        "width": 131.88643391927084,
+        "height": 14.112403233846061
+      },
+      "region": "nav-bar",
+      "source": "ocr",
+      "navSlot": "leading"
+    },
+    {
+      "label": "\u041aB",
+      "value": null,
+      "type": "Text",
+      "x": 39,
+      "y": 132,
+      "frame": {
+        "x": 25.362775586318378,
+        "y": 123.22383746023728,
+        "width": 26.630915323893234,
+        "height": 17.784882863362622
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "Kate Bell",
+      "value": null,
+      "type": "Text",
+      "x": 103,
+      "y": 133,
+      "frame": {
+        "x": 68.43222856587329,
+        "y": 124.2929414321959,
+        "width": 69.84216817220053,
+        "height": 16.91702397664393
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "Q Kate",
+      "value": null,
+      "type": "Text",
+      "x": 79,
+      "y": 824,
+      "frame": {
+        "x": 46.2652635396413,
+        "y": 812.9349333184541,
+        "width": 65.78435770670572,
+        "height": 21.53050231933592
+      },
+      "region": "tab-bar",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "0f739da13e061171ca45e9b780c4d309",
+      "tokens": [
+        "group:content:w17:h4:x0:y33#1",
+        "text:content:w1:h1:x1:y5#1",
+        "text:content:w3:h1:x3:y5#1",
+        "text:nav-bar:@leading:w5:h1:\"top name matches\":x1:y3#1",
+        "text:tab-bar:w3:h1:\"q kate\":x2:y34#1"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "Kate Bell",
+        "label": "Kate Bell"
+      }
+    ],
+    "ambiguous": [],
+    "none": []
+  }
+}

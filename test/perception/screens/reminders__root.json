@@ -1,0 +1,206 @@
+{
+  "app": "reminders",
+  "screen": "root",
+  "note": null,
+  "recorded_at": "2026-09-09T22:25:03.158Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Welcome to Reminders",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 155,
+      "frame": {
+        "height": 28.333333333333343,
+        "width": 326,
+        "y": 140.66666666666669,
+        "x": 38
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Welcome to Reminders"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Quick Creation, Simply type in your list, ask Siri, or add a reminder from your Calendar app.",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 242,
+      "frame": {
+        "width": 326,
+        "height": 94.33333333333334,
+        "y": 194.99999999999997,
+        "x": 38
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Quick Creation",
+        "N 1 Simply type in your list, ask Siri, or",
+        "add a reminder from your",
+        "Calendar app."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Grocery Shopping, Create a Grocery List that automatically sorts items you add by category.",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 353,
+      "frame": {
+        "width": 326,
+        "x": 38,
+        "height": 94.33333333333331,
+        "y": 305.3333333333333
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Grocery Shopping",
+        "Create a Grocery List that",
+        "automatically sorts items you add",
+        "by category."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Easy Sharing, Collaborate on a list, and even assign individual tasks.",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 451,
+      "frame": {
+        "x": 38,
+        "height": 70.33333333333331,
+        "y": 415.66666666666663,
+        "width": 326
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Easy Sharing",
+        "Collaborate on a list, and even",
+        "assign individual tasks."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Powerful Organization, Create new lists to match your needs, categorize reminders with tags, and manage reminders around your work flow with Smart Lists.",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 573,
+      "frame": {
+        "width": 326,
+        "x": 38,
+        "y": 502,
+        "height": 142.33333333333337
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "\u2022 Create new lists to match your",
+        "needs, categorize reminders with",
+        "tags, and manage reminders",
+        "around your work flow with Smart",
+        "Lists."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Continue",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 810,
+      "frame": {
+        "width": 326,
+        "y": 784,
+        "height": 52,
+        "x": 38
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Continue"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "12:25",
+      "value": null,
+      "type": "Text",
+      "x": 73,
+      "y": 25,
+      "frame": {
+        "x": 48.099633919278936,
+        "y": 17.489922942467285,
+        "width": 49.6366933186849,
+        "height": 15.834107716878307
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "\u2022 Contacts",
+      "value": null,
+      "type": "Text",
+      "x": 42,
+      "y": 40,
+      "frame": {
+        "x": 12.681388437103514,
+        "y": 35.569767603321154,
+        "width": 59.60252380371094,
+        "height": 8.892441431681311
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "\u2022 Powertul Organ\u0131zation",
+      "value": null,
+      "type": "Text",
+      "x": 174,
+      "y": 515,
+      "frame": {
+        "x": 77.35647366652529,
+        "y": 508.00000003998207,
+        "width": 194.02522786458334,
+        "height": 13.000000000000007
+      },
+      "region": "content",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "daacea58ebab6fd957bfb8afc8d8a622",
+      "tokens": [
+        "button:content:w14:h2:x2:y33#1",
+        "group:content:w14:h3:x2:y17#1",
+        "group:content:w14:h4:x2:y8#many",
+        "group:content:w14:h6:x2:y21#1",
+        "heading:content:w14:h1:x2:y6#1",
+        "text:content:w8:h1:x3:y21#1"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "Continue",
+        "label": "Continue"
+      }
+    ],
+    "ambiguous": [],
+    "none": [
+      "Sign out"
+    ]
+  }
+}

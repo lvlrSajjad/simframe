@@ -1,0 +1,332 @@
+{
+  "app": "settings",
+  "screen": "general",
+  "note": null,
+  "recorded_at": "2026-09-09T22:22:30.586Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Settings",
+      "value": null,
+      "type": "Button",
+      "x": 38,
+      "y": 84,
+      "frame": {
+        "width": 44,
+        "height": 44,
+        "y": 62,
+        "x": 16
+      },
+      "region": "nav-bar",
+      "source": "ax",
+      "navSlot": "leading",
+      "enabled": true
+    },
+    {
+      "label": "General",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 84,
+      "frame": {
+        "x": 170,
+        "height": 22.66666666666667,
+        "y": 72.66666666666666,
+        "width": 62
+      },
+      "region": "nav-bar",
+      "source": "ax|ocr",
+      "aliases": [
+        "General"
+      ],
+      "navSlot": "title",
+      "enabled": true
+    },
+    {
+      "label": "General",
+      "value": null,
+      "type": "Heading",
+      "x": 76,
+      "y": 238,
+      "frame": {
+        "width": 80,
+        "y": 224.16666857401532,
+        "height": 28.333333333333314,
+        "x": 36
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "General"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 304,
+      "frame": {
+        "height": 94.33333333333331,
+        "width": 330,
+        "y": 256.50000190734863,
+        "x": 36
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Manage your overall setup and preferences",
+        "for iPhone, such as software updates,",
+        "device language, CarPlay, AirDrop, and",
+        "more."
+      ],
+      "enabled": true
+    },
+    {
+      "label": "About",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 429,
+      "frame": {
+        "height": 55,
+        "x": 20,
+        "width": 362,
+        "y": 401.3333326975504
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "About"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Screen Capture",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 484,
+      "frame": {
+        "height": 55,
+        "x": 20,
+        "width": 362,
+        "y": 456.3333326975504
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Screen Capture"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "AutoFill & Passwords",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 574,
+      "frame": {
+        "height": 55,
+        "x": 20,
+        "width": 362,
+        "y": 546.3333326975504
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "AutoFill & Passwords"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Dictionary",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 629,
+      "frame": {
+        "y": 601.3333326975504,
+        "width": 362,
+        "x": 20,
+        "height": 55
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Dictionary"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Fonts",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 684,
+      "frame": {
+        "width": 362,
+        "x": 20,
+        "height": 55,
+        "y": 656.3333326975504
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Fonts"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Keyboard",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 739,
+      "frame": {
+        "x": 20,
+        "y": 711.3333326975504,
+        "width": 362,
+        "height": 55
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Keyboard"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Language & Region",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 794,
+      "frame": {
+        "y": 766.3333326975504,
+        "height": 55,
+        "x": 20,
+        "width": 362
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Language & Region"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "VPN & Device Management",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 884,
+      "frame": {
+        "x": 20,
+        "y": 856.3333326975504,
+        "width": 362,
+        "height": 55
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "12:22",
+      "value": null,
+      "type": "Text",
+      "x": 74,
+      "y": 33,
+      "frame": {
+        "x": 50.72555385067056,
+        "y": 24.136628483967915,
+        "width": 46.92113240559895,
+        "height": 17.784882863362622
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": ">",
+      "value": null,
+      "type": "Text",
+      "x": 358,
+      "y": 429,
+      "frame": {
+        "x": 351.27444809166354,
+        "y": 419.2151165569591,
+        "width": 12.681387583414718,
+        "height": 19.05523173014327
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": ">",
+      "value": null,
+      "type": "Text",
+      "x": 357,
+      "y": 573,
+      "frame": {
+        "x": 350.0063094602439,
+        "y": 564.0348840226792,
+        "width": 13.949526468912756,
+        "height": 17.784882863362622
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "Aa",
+      "value": null,
+      "type": "Text",
+      "x": 49,
+      "y": 684,
+      "frame": {
+        "x": 36.77602531307824,
+        "y": 675.8255818008078,
+        "width": 24.09463755289713,
+        "height": 16.514533996582067
+      },
+      "region": "content",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "74091512a0b9908f410f5afa168bae2a",
+      "tokens": [
+        "button:content:w15:h2:x1:y17#many",
+        "button:nav-bar:@leading:w2:h2:\"settings\":x1:y3#1",
+        "heading:content:w14:h4:x2:y11#1",
+        "heading:content:w3:h1:x2:y9#1",
+        "heading:nav-bar:@title:w3:h1:\"general\":x7:y3#1",
+        "text:content:w1:h1:x15:y17#many"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "About",
+        "label": "About"
+      },
+      {
+        "query": "Keyboard",
+        "label": "Keyboard"
+      },
+      {
+        "query": "Language & Region",
+        "label": "Language & Region"
+      },
+      {
+        "query": "AutoFill & Passwords",
+        "label": "AutoFill & Passwords"
+      }
+    ],
+    "ambiguous": [],
+    "none": []
+  }
+}

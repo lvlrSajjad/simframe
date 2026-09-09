@@ -1,0 +1,336 @@
+{
+  "app": "contacts",
+  "screen": "john-appleseed",
+  "note": null,
+  "recorded_at": "2026-09-09T22:23:08.452Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Contacts",
+      "value": null,
+      "type": "Button",
+      "x": 38,
+      "y": 84,
+      "frame": {
+        "width": 44,
+        "height": 44,
+        "y": 62,
+        "x": 16
+      },
+      "region": "nav-bar",
+      "source": "ax",
+      "navSlot": "leading",
+      "enabled": true
+    },
+    {
+      "label": "Edit",
+      "value": null,
+      "type": "Button",
+      "x": 355,
+      "y": 84,
+      "frame": {
+        "width": 54.333333333333314,
+        "x": 327.6666666666667,
+        "height": 36,
+        "y": 66
+      },
+      "region": "nav-bar",
+      "source": "ax|ocr",
+      "aliases": [
+        "Edit"
+      ],
+      "navSlot": "trailing",
+      "enabled": true
+    },
+    {
+      "label": "John Appleseed",
+      "value": null,
+      "type": "StaticText",
+      "x": 201,
+      "y": 401,
+      "frame": {
+        "width": 370,
+        "y": 367.66666666666663,
+        "height": 66,
+        "x": 16
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "John Appleseed"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Message",
+      "value": null,
+      "type": "PopUpButton",
+      "x": 87,
+      "y": 475,
+      "frame": {
+        "height": 64,
+        "width": 64,
+        "y": 442.6666666666667,
+        "x": 55
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Call",
+      "value": null,
+      "type": "PopUpButton",
+      "x": 163,
+      "y": 475,
+      "frame": {
+        "height": 64,
+        "x": 131,
+        "width": 64,
+        "y": 442.6666666666667
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Video",
+      "value": null,
+      "type": "Image",
+      "x": 239,
+      "y": 475,
+      "frame": {
+        "height": 64,
+        "x": 207,
+        "width": 64,
+        "y": 442.6666666666667
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Mail",
+      "value": null,
+      "type": "PopUpButton",
+      "x": 315,
+      "y": 475,
+      "frame": {
+        "height": 64,
+        "x": 283,
+        "width": 64,
+        "y": 442.6666666666667
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true
+    },
+    {
+      "label": "Contact Photo & Poster",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 559,
+      "frame": {
+        "x": 16,
+        "y": 521.6666666666667,
+        "width": 370,
+        "height": 74
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "Contact Photo & Poster"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "mobile, (888) 555-5512",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 644,
+      "frame": {
+        "y": 607.6666666666667,
+        "height": 72.33333333333337,
+        "x": 16,
+        "width": 370
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "mobile",
+        "(888) 555-5512"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "home, (888) 555-1212",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 716,
+      "frame": {
+        "x": 16,
+        "y": 680,
+        "width": 370,
+        "height": 72.33333333333337
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "home",
+        "(888) 555-1212"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "work, John-Appleseed@mac.com",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 789,
+      "frame": {
+        "height": 72.33333333333337,
+        "width": 370,
+        "y": 752.3333333333334,
+        "x": 16
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "work",
+        "John-Appleseed@mac.com"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "work, 3494 Kuhl Avenue\nAtlanta GA 30303\nUSA",
+      "value": null,
+      "type": "Button",
+      "x": 201,
+      "y": 885,
+      "frame": {
+        "height": 120.33333333333337,
+        "x": 16,
+        "y": 824.6666666666666,
+        "width": 370
+      },
+      "region": "content",
+      "source": "ax|ocr",
+      "aliases": [
+        "work"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "Toolbar",
+      "value": null,
+      "type": "Group",
+      "x": 199,
+      "y": 106,
+      "frame": {
+        "y": 82,
+        "height": 48,
+        "width": 387,
+        "x": 5
+      },
+      "region": "nav-bar",
+      "source": "ax",
+      "navSlot": "title",
+      "enabled": true
+    },
+    {
+      "label": "12:23",
+      "value": null,
+      "type": "Text",
+      "x": 74,
+      "y": 33,
+      "frame": {
+        "x": 50.72555406202701,
+        "y": 25.40697650324087,
+        "width": 46.92113240559895,
+        "height": 15.244186401367115
+      },
+      "region": "status-bar",
+      "source": "ocr"
+    },
+    {
+      "label": "JA",
+      "value": null,
+      "type": "Text",
+      "x": 199,
+      "y": 245,
+      "frame": {
+        "x": 144.56782343627228,
+        "y": 208.33721055744456,
+        "width": 109.05993652343751,
+        "height": 72.40988159179692
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "JA",
+      "value": null,
+      "type": "Text",
+      "x": 54,
+      "y": 559,
+      "frame": {
+        "x": 40.58044155019849,
+        "y": 550.0610470886191,
+        "width": 26.63091532389323,
+        "height": 17.784882863362622
+      },
+      "region": "content",
+      "source": "ocr"
+    },
+    {
+      "label": "2/0/ kuhl Avonio",
+      "value": null,
+      "type": "Text",
+      "x": 101,
+      "y": 868,
+      "frame": {
+        "x": 31.703476043204887,
+        "y": 863.8372095008382,
+        "width": 139.4952596028646,
+        "height": 8.892441431681311
+      },
+      "region": "content",
+      "source": "ocr"
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "8549f9e1d467a3d928a4206333ca17dc",
+      "tokens": [
+        "button:content:w15:h3:x1:y22#many",
+        "button:content:w15:h5:x1:y34#1",
+        "button:content:w3:h3:x2:y18#many",
+        "button:nav-bar:@leading:w2:h2:\"contacts\":x1:y3#1",
+        "button:nav-bar:@trailing:w2:h2:\"edit\":x14:y3#1",
+        "image:content:w3:h3:x9:y18#1",
+        "text:content:w15:h3:x1:y15#1",
+        "text:content:w1:h1:x2:y23#1",
+        "text:content:w5:h3:x6:y9#1",
+        "text:content:w6:h0:x1:y36#1"
+      ]
+    },
+    "resolutions": [
+      {
+        "query": "Edit",
+        "label": "Edit"
+      },
+      {
+        "query": "Call",
+        "label": "Call"
+      }
+    ],
+    "ambiguous": [],
+    "none": []
+  }
+}
