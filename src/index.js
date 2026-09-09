@@ -398,6 +398,22 @@ export function resolveBaseline(state, since) {
   return { kind: 'unmatched', requested: key };
 }
 
+/**
+ * Is the baseline describing a screen that had already finished moving?
+ *
+ * Pure, so the rule can be argued with in a test rather than only observed on
+ * a device. The full reasoning is at the call site in `waitFor`; the short
+ * version is that stillness cannot accumulate in the milliseconds between a
+ * dispatch returning and a wait beginning, so a screen that already differs
+ * from the baseline *and* has already been at rest for the whole stillness
+ * window changed for some earlier reason.
+ */
+export function baselineAlreadySettled({ mode, changedAtStart, stableForMs, stableMs } = {}) {
+  if (mode === 'stable' || !changedAtStart) return false;
+  if (!Number.isFinite(stableForMs) || !Number.isFinite(stableMs)) return false;
+  return stableForMs >= stableMs;
+}
+
 function compareToBaseline(state, baseline) {
   if (!baseline) return null;
   if (baseline.kind === 'history') {
@@ -568,7 +584,7 @@ export async function waitFor(
   const p = store.paths(device.udid);
   const requested = since ?? baselineHash;
   const resolved = resolveBaseline(first, requested);
-  const baselineHashValue =
+  let baselineHashValue =
     resolved?.kind === 'history' ? resolved.entry.hash : (requested ?? first.hash);
   const baselineResolved = resolved?.kind === 'history' || requested == null;
 
@@ -594,6 +610,44 @@ export async function waitFor(
   let sawChange = mode === 'stable' || first.hash !== baselineHashValue;
   const changedAtStart = sawChange && mode !== 'stable';
 
+  /**
+   * The baseline describes a screen that has already finished moving.
+   *
+   * `since` means "the screen as it was before the action", and the whole
+   * reliability of these scripts rests on it being captured *before* rather
+   * than after — a baseline sampled afterwards is the commonest way to wait for
+   * a change that already happened. What was missing is the other end of it:
+   * time also passes between capturing the baseline and dispatching the action,
+   * and in a flow step that gap holds a `locate`, a perception pass and a
+   * settle wait — hundreds of milliseconds, not microseconds.
+   *
+   * So a transition can begin *and finish* in that gap, and then `sawChange` is
+   * true at wait start because of the previous action's animation. Measured:
+   * `tap Accessibility` returned `settled 124ms` against a 500 ms stillness
+   * window, the screen had never left the Settings root, and the graph recorded
+   * `root -> root` as a verified edge — count 11, changedOutcomes 5, flipping
+   * between the real destination and itself all day.
+   *
+   * The test is unambiguous rather than clever: the screen differs from the
+   * baseline *and has already been at rest for the full stillness window*.
+   * Stillness cannot have accumulated in the milliseconds between a dispatch
+   * returning and this call starting, so whatever changed, changed and settled
+   * before we looked, and it is not this action's doing. Re-baseline to what is
+   * actually on screen and wait for a further change — which is what the caller
+   * asked for and what a stale hash prevented.
+   *
+   * A screen that differs and is *still moving* is left alone: that is
+   * genuinely ambiguous, and after an action the usual reading is the right
+   * one.
+   */
+  const staleBaseline = baselineAlreadySettled({
+    mode, changedAtStart, stableForMs: first.stableForMs, stableMs,
+  });
+  if (staleBaseline) {
+    baselineHashValue = first.hash;
+    sawChange = false;
+  }
+
   const done = (satisfied, extra = {}) => ({
     device,
     state: last,
@@ -602,6 +656,7 @@ export async function waitFor(
     quietGapMs,
     sawChange,
     changedBeforeWait: changedAtStart,
+    staleBaseline,
     baselineHash: baselineHashValue,
     baselineResolved,
     waitedMs: Date.now() - startedAt,

@@ -2066,3 +2066,43 @@ test('the private-string guard reports where, never what', async () => {
   const printed = JSON.stringify(hits);
   assert.ok(!printed.includes('com.example.client'), 'a finding must not restate the string it found');
 });
+
+test('a settle will not accept stillness that predates the action', async () => {
+  const api = await import('../src/index.js');
+  const settled = api.baselineAlreadySettled;
+
+  // The measured failure: the screen already differs from the baseline and has
+  // already been at rest for the whole stillness window. Stillness cannot
+  // accumulate in the milliseconds between a dispatch returning and the wait
+  // starting, so this change belongs to something earlier — the previous step's
+  // animation, finishing during this step's locate and perception pass.
+  assert.equal(settled({ mode: 'settle', changedAtStart: true, stableForMs: 900, stableMs: 500 }), true);
+  assert.equal(settled({ mode: 'change', changedAtStart: true, stableForMs: 500, stableMs: 500 }), true);
+
+  // Differs but still moving: genuinely ambiguous, and after an action the
+  // ordinary reading is the right one. Left alone on purpose.
+  assert.equal(settled({ mode: 'settle', changedAtStart: true, stableForMs: 120, stableMs: 500 }), false);
+
+  // Nothing had changed at wait start, which is the healthy case.
+  assert.equal(settled({ mode: 'settle', changedAtStart: false, stableForMs: 4000, stableMs: 500 }), false);
+
+  // `stable` asks a question about now and has no baseline to be stale.
+  assert.equal(settled({ mode: 'stable', changedAtStart: true, stableForMs: 4000, stableMs: 500 }), false);
+
+  // No stillness reading at all: no claim. The simctl engine reports none.
+  assert.equal(settled({ mode: 'settle', changedAtStart: true, stableForMs: undefined, stableMs: 500 }), false);
+});
+
+test('an action with no observed effect records no edge', async () => {
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  // The recorder used to ask only whether the *reading* was confirmed, so a tap
+  // that moved nothing still wrote an edge — which is how `root -> root` became
+  // a verified transition the graph then predicted.
+  const guard = src.slice(src.indexOf('const noEvidence'), src.indexOf('graph.record(udid, {'));
+  assert.match(guard, /noVisibleChange/);
+  assert.match(guard, /!noEvidence/);
+  // And where we are is still known even when what got us here is not worth
+  // remembering, so the next step must not pay for another perception pass.
+  const after = src.slice(src.indexOf('graph.record(udid, {'));
+  assert.match(after.slice(0, 1400), /else if \(afterScreen\.confirmed && afterScreen\.hash\) \{[\s\S]{0,300}carriedScreen = afterScreen/);
+});

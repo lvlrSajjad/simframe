@@ -2541,3 +2541,61 @@ a window too short produces disagreeing samples, which lengthens it.
 Self-correcting rather than self-reinforcing. It still waits on the perception
 eval harness, because "the two samples agreed" is only evidence the window was
 long enough if the readings themselves can be trusted.
+
+## Gate A, item 1: a settle that will not accept stillness older than its action
+
+M4 Max, Xcode 26.0, iOS 26.5, iPhone 17 Pro (`326464A4-…`).
+
+The defect, restated from the Phase 11 step 4 A/B where it was found: `since`
+means "the screen as it was before the action", and time also passes between
+capturing that baseline and dispatching the action. In a flow step that gap
+holds a `locate`, a perception pass and a settle wait — hundreds of
+milliseconds. A transition can begin *and finish* inside it, so `sawChange` is
+already true when the wait starts, because of the **previous** action's
+animation.
+
+Two fixes, and the second is the one that stops the damage.
+
+1. `waitFor` re-baselines when the screen already differs from the baseline
+   *and has already been at rest for the full stillness window*. That test is
+   unambiguous rather than clever: stillness cannot accumulate in the
+   milliseconds between a dispatch returning and a wait beginning. A screen
+   that differs and is still *moving* is left alone, because after an action
+   the ordinary reading is the right one.
+2. The graph records no edge for an action with no observed effect. The
+   recorder used to ask only whether the *reading* was confirmed, so a tap that
+   moved nothing still wrote an edge.
+
+### Measured
+
+Six runs, two rounds of three, graph deleted before each round.
+
+| | run 1 | run 2 | run 3 | passed |
+|---|---|---|---|---|
+| round 1 | 16967 ms 4/4 | 11747 ms 4/4 | 6841 ms **2/4** | 2/3 |
+| round 2 | 14946 ms 4/4 | 12178 ms 4/4 | 13520 ms 4/4 | 3/3 |
+
+**Self-edges in the resulting graph: 0, of 4 edges across 4 nodes.** That is the
+number this was for. The same six runs before this change left
+`tap:accessibility → itself` with `count: 11` and `changedOutcomes: 5`,
+oscillating between the real destination and the screen it never left.
+
+The pass rate is unchanged at 5/6, and the **failure mode is not**. It was
+`"Display & Text Size" is not on this screen` at step 2 — the flow walking on,
+believing step 1 had worked. It is now `unexpected-screen: expected the screen
+this action reached 2x before, and landed somewhere else`, at the step that
+made the wrong turn, and the run halts there. A caught wrong turn and a silent
+one are the same line in an accuracy column and not the same thing at all: the
+first is the verify barrier doing its job, and it is what an agent can act on.
+
+`HPI_accuracy` 0.667 and 1.0 over the two rounds; `HPI_time` 0.664 and 0.577.
+Unmoved, as expected — none of this makes a passing flow faster.
+
+### One real case is now temporarily invisible
+
+A control that genuinely returns to the same screen — a toggle — reads as
+`no-visible-change`, because the change detector sits eight times above what a
+switch flip produces (Gate A/B item 3). So its edge is no longer recorded. That
+is the right trade while the detector cannot see it: a missing true edge costs
+a perception pass, and a false self-edge costs a wrong prediction on every
+later visit. It comes back on its own when item 3 lands.

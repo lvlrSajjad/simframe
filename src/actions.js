@@ -281,6 +281,10 @@ export async function runScript(
           budgetMs,
           stillnessMs: stillness,
           quietGapMs: w.quietGapMs,
+          // The baseline had already finished moving when the wait began, so it
+          // was re-taken from the live screen. Surfaced because it means the
+          // step before this one had not finished when this one started.
+          staleBaseline: Boolean(w.staleBaseline),
           timing: learned
             ? {
               p50: learned.p50,
@@ -367,7 +371,23 @@ export async function runScript(
         // for. Requiring both meant a screen that settled slowly recorded
         // nothing at all.
         endScreen = afterScreen;
-        if (afterScreen.confirmed && afterScreen.hash) {
+        // An action with no observed effect teaches the graph nothing, and
+        // recording it teaches something false.
+        //
+        // This is the second half of the same bug. A settle that returned on a
+        // stale baseline reported `ok` for a tap that moved nothing, and the
+        // recorder asked only whether the *reading* was confirmed — so
+        // `root -> root` went in as a verified edge and started being
+        // predicted. Re-baselining stops the settle lying; this stops the
+        // graph learning from a step that has no evidence behind it either way.
+        //
+        // It does cost a real case for now: a control that genuinely returns to
+        // the same screen — a toggle — is invisible to the change detector at
+        // eight times below its threshold, so it reads as no-visible-change and
+        // its edge is no longer recorded. That is the right trade while the
+        // detector cannot see it, and it comes back on its own once it can.
+        const noEvidence = Boolean(settled?.noVisibleChange);
+        if (afterScreen.confirmed && afterScreen.hash && !noEvidence) {
           // The observed cost of this transition, which is what makes the next
           // one adaptive. Only from a settle that was actually satisfied: a
           // timeout is not a measurement of how long the screen takes, it is a
@@ -385,11 +405,16 @@ export async function runScript(
             focusMs: focus.observedMs ?? undefined,
           });
           carriedScreen = afterScreen;
+        } else if (afterScreen.confirmed && afterScreen.hash) {
+          // Where we are is still known; only what got us here is not worth
+          // remembering. Carrying it saves the next step a perception pass.
+          carriedScreen = afterScreen;
         }
       }
 
       const wrongTurn = wrongTurnFrom(verification);
-      const note = settled?.noVisibleChange ? ' [no visible change]' : '';
+      const note = (settled?.noVisibleChange ? ' [no visible change]' : '')
+        + (settled?.staleBaseline ? ' [baseline had already settled; re-taken from the live screen]' : '');
       results.push({
         index: i,
         action: step.action,
