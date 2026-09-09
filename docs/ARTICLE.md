@@ -197,7 +197,35 @@ What I'd claim as mine is the framing and the seams: perception as an always-on 
 
 It is the hardest sandbox. There is no public input API, the capture path runs through private frameworks that change between Xcode versions, and the accessibility tree is a promise apps don't always keep — in a real production app the custom tab bar published no children, icon buttons carried private-use glyphs, and React Native text inputs were absent from the tree entirely. If observer-relative perception with local memory works here, it works on a browser, a desktop, an Android emulator, or a game.
 
-The daemon is built behind a platform boundary for that reason. Frames in, accessibility tree out, gestures in; everything above that line — history, settle, transitions, memory, graph, escalation — has never heard of `simctl`. An Android backend is the next proof, and it will be easier: every primitive it needs is a public API.
+The daemon is built behind a platform boundary for that reason. Frames in, accessibility tree out, gestures in; everything above that line — history, settle, transitions, memory, graph, escalation — has never heard of `simctl`. An Android backend was the next proof, and I claimed it would be easier because every primitive it needs is a public API.
+
+## The second platform, which mostly proved the point and partly embarrassed me
+
+The claim to test was narrow: if perception is observer-relative and memory is local, none of it should know what platform it is on. So the test is not "does Android work" but **how much had to change above the boundary**, and the answer is nothing. `simframe ui` produced a full screen map of an Android emulator — elements with points, numbered refs, a structural identity — with no edit to the frame store, the settle detector, the dHash, the fingerprint, the screen map, refs, or the transition graph. Then a tap by label landed on it: `tapped "Notifications" at 138,207 (memory d=0, via ocr)`, on a platform with **no accessibility tree at all**.
+
+What did have to change, twice, was a layer above the boundary quietly speaking the first platform's language. Engine selection asked for the Swift daemon on every device, so starting capture on an emulator failed with a message about CoreSimulator. And `doctor`, asked about an emulator, reported *"input driver: idb"* — a claim about a tool that has never spoken to an Android device in its life. Both were invisible while there was one backend. That is what a second backend is actually for: not the platform, the audit.
+
+The prediction about public APIs was right and my guess about *which* ones was wrong in a way worth admitting. The plan said capture would be the emulator's gRPC streaming endpoint with a scrcpy-style fallback. It isn't: the emulator *console* — a plain TCP line protocol you can speak with a socket and no library — has a `screenrecord screenshot <dir>` command that makes the emulator write the PNG onto the host filesystem itself, with no device-to-host transfer at all. 41 ms, no dependency. Input is the same socket: `event mouse` puts a real down, move and up on the touch screen, which is how you get gestures with honest timing instead of teleporting taps. And the clipboard, which I had written up as *impossible* because adb has no path to it, turned out to be one gRPC call — reachable with Node's built-in `http2` in about forty lines, because a unary gRPC call is just an HTTP/2 POST with a five-byte header.
+
+That 41 ms was published as 21 ms, and the story of how is the most useful thing in this section. I measured that number four times. The first said 2,400 ms and was a real bug: my "is this PNG complete" check looked for the `IEND` marker four bytes from the end of the file, which is the checksum and never spells anything, so every frame fell through to the slow path. The second said 67 ms, almost all of it a poll interval waiting for a file that had already arrived. The third said 21 ms and was not a measurement of a screenshot at all — the console emits an extra `OK` after authentication, so my script sent `quit` one response early, closed the socket while the emulator was still writing, and read the *previous* run's file out of a shared directory. Five consecutive runs reporting byte-identical file sizes was the tell, and I explained it away as a static screen. The fourth timed the phases separately and said 41 ms.
+
+The lesson is not "be careful". It is that a measurement must never be allowed to be the sum of one thing finishing and another thing not having started, and the only structural defence is to time the phases apart.
+
+## What the ladder is actually worth
+
+Android has no accessibility tree — `uiautomator dump` costs two seconds a read, and making it fast means shipping an instrumentation app onto someone's device, which is a different promise from shipping a package. So the perception ladder's central bet got tested for real: does a missing tier degrade, or fail?
+
+Measured on iOS, reading every screen twice from the same frame, once with the tree and once without:
+
+- **Every interactive element came from the tree.** All 72 of 72. OCR and classical CV produce text, and nothing in that pipeline infers a button from a rectangle confidently enough to say so.
+- **83% of those controls have no text at all.** They are icons. There is nothing for OCR to read even in principle.
+- **And screen memory did not need the tree.** Every revisit was recognised either way, 6 of 6, with the weakest similarity barely moving.
+
+That last line is the one I did not expect, and it splits the ladder cleanly: the accessibility tier earns its place in *acting*, not in *recognising*. Knowing where you are is a question about layout, which pixels answer. Knowing what a thing is and what it is called is a question about semantics, which pixels do not answer and a tree does.
+
+Intent resolution went from 26 of 28 to 22 of 28 without it, and the shape of the four failures matters more than the count. Two were refusals: `refresh` and the address field resolve to *nothing*, because they are icons and there is no text to match. The third was worse — asked for `Back`, the OCR-only reading returned `"B"`, the section-index letter sitting next to it. A refusal tells the caller to look again. A confident wrong answer taps the wrong thing, and there is no verdict, no diff and no graph that can rescue an action already taken. One in fourteen, on Apple's own unusually well-labelled apps.
+
+Android also found the sharpest version of a bug this project has now hit four times. Chrome's address bar is chrome by every structural test there is — a short row at the top with a gap under it — so the URL went into the screen's *identity*. A URL in a fingerprint does not degrade recognition, it inverts it: every visit to a new page mints a new screen, the memory fills with screens that will never recur, and every learned route through the browser breaks the moment the page changes. The rule now is that a label has to be a name before it can be an identity — two letters at minimum, and not an address.
 
 ## What I'd want someone else to take from this
 

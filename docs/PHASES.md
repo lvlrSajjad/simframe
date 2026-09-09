@@ -33,7 +33,7 @@ open work is in `docs/DEFERRED.md`.
 | CI — packaging + integration gates | done. `integration` boots a simulator on `macos-15` and asserts every layer under `--strict`; required on `main` with an admin bypass |
 | CI — the memory layer | done. `scripts/ci-memory.mjs` drives the real CLI over the screen map, refs, graph, verdicts, flows and `goto`, OCR-only. Four bugs found writing it, one of them a capture loop that could not recover a lost display port |
 | 7 — compact agent state, skill | done. A ten-step flow is **1 tool call, 0 images, ~1,650 characters**. Every action returns the numbered text screen map; `sim_look` is the only image path and is capped at 1024 px |
-| 8 — Android | steps 0-2 done — the seam exists, dispatch is device-keyed, and Android reads and acts: frames at 41 ms, a screen map, the graph, taps, typing and the clipboard |
+| 8 — Android | steps 0-3 done — the seam exists, dispatch is device-keyed, and Android both reads and acts: frames at 41 ms, a screen map, the graph, taps, typing, keys and the clipboard. No accessibility tree (Phase 8b, conditional) |
 
 **Pick up here: Phase 8, and here is what is actually in the way.**
 
@@ -532,12 +532,34 @@ Android the same loop reaches the emulator console. A "downgrade" warning is
 now only printed where a faster engine actually exists, because the screenshot
 loop is the whole of Android's capture rather than a fallback from anything.
 
-**So step 3 is input**, and it is the step where Android starts being able to
-act rather than only look: the console's `event mouse` puts a real down/move/up
-on the touch screen in ~20 ms and `event text` types, both measured (see
-`docs/DEFERRED.md`). Do the whole gesture vocabulary in one step — tap, swipe,
-type, key — rather than half of it, so `sim_tap` never exists on a platform
-where `swipe` does not.
+**Step 3 is done: Android acts.** The whole gesture vocabulary in one step, as
+this said it should be — tap, swipe, type, keys — over the emulator console's
+`event mouse` and `event text`, so `sim_tap` never existed on a platform where
+`swipe` did not. `tapped "Notifications" at 138,207 (memory d=0, via ocr)` is
+the shape of the result: driven by label, off OCR and screen memory, with no
+accessibility tree in the loop.
+
+Four things that step found, all of them recorded where they belong rather than
+here: the coordinate space is device pixels and was settled by watching the
+kernel report `0x3fff` for a point at half the screen; geometry had been falling
+through to a guess derived from the capture image, so every Android tap point
+would have been wrong; `waitFor` could report "no visible change" without having
+observed a single frame, because the screenshot engine idles slower than the
+reaction window; and `relaunch` did not mean a fresh start, because Android
+restores a task's activity stack unless told not to.
+
+The clipboard came with it, and it corrected a "not possible" note: adb has no
+path to the Android clipboard, and the emulator's gRPC endpoint does —
+`setClipboard`, reachable through Node's built-in `http2` in about forty lines,
+because a unary gRPC call is an HTTP/2 POST with a five-byte header. No
+dependency and no helper app.
+
+**What is left on Android is the accessibility tree, and it is deliberately
+conditional.** `docs/DEFERRED.md` has the criteria under Phase 8b, and the
+measurement that informs them: every interactive element on six iOS screens came
+from the tree, 83% of those controls carry no text at all, and yet screen
+memory did not need the tree — 6/6 revisits recognised without it. The tier
+earns its place in acting, not in recognising.
 
 Two smaller things Android meets immediately, both in `docs/DEFERRED.md`: the
 confirm vocabulary is hardcoded English, and `PERMISSION_SERVICES` is a list of
