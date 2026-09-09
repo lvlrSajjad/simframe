@@ -1844,3 +1844,86 @@ weak in three specific ways rather than vaguely:
 That third one is the region-bands bug, on a second platform, doing more damage
 than it does on the first. It is also a cheap partial: a label of one
 punctuation character is not a name and `isVolatileLabel` should say so.
+
+## What the accessibility tier is actually worth
+
+Measured 2026-09-09, because two decisions rested on it and neither had a
+number: how hard to push the tree on iOS, and whether Android's missing tree
+justifies shipping an APK (`docs/DEFERRED.md`, Phase 8b).
+`scripts/eval-ax-tier.mjs` walks a tour and reads every screen **twice from the
+same frame** — once with the tree and once without — persisting neither.
+
+iPhone 17, iOS 26.5, six screens across four Apple apps, two rounds, 12
+readings, 334 elements.
+
+### Where a screen's elements come from
+
+| | Count | Share |
+| --- | --- | --- |
+| From the tree, OCR saw nothing there | 90 | 27% |
+| From OCR/CV alone | 204 | 61% |
+| From the tree, with OCR text inside it | 40 | 12% |
+| **Interactive elements** | **72** | |
+| …of which the tree supplied | 72 | **100%** |
+| …of which have no text at all (icons) | 60 | **83%** |
+
+The first three rows are a partition and the way they are counted matters:
+agreement between the sensors is not recorded in an element's `source`. When
+OCR text falls inside an accessibility element the map keeps the element and
+files the text as an *alias*, so `source` stays `ax` — counting sources alone
+reports that the two sensors never see the same thing, which was this
+harness's first, wrong answer.
+
+**Every interactive element came from the tree.** Not most — all 72. OCR and CV
+produce text, and nothing in that pipeline infers a button from a rectangle
+confidently enough to say so, which is why an OCR-only reading of these screens
+has zero elements with an actionable role. And 83% of those controls carry no
+text at all: they are icons, so there is nothing for OCR to read even in
+principle.
+
+### Tier on, tier off
+
+| | tree + OCR | OCR/CV only |
+| --- | --- | --- |
+| elements per reading | 27.8 | 21.3 |
+| screens recognised on revisit | 6/6 | 6/6 |
+| weakest revisit similarity | 0.71 | 0.67 |
+| intents resolved correctly | **26/28 (93%)** | **22/28 (79%)** |
+
+**Screen memory does not need the tree.** Every revisit was recognised either
+way, and the weakest similarity barely moved. That is worth knowing on its own:
+the tier earns its place in *acting*, not in *recognising*, which is exactly the
+half Android is missing and exactly why Android reads well and acts with less
+certainty.
+
+**Intent resolution is where it shows, and the failure modes differ.** Without
+the tree: `refresh` and `Address` on the browser resolve to *nothing* — both are
+icon-only, so OCR has nothing to match — and `Back` on Contacts resolves to
+`"B"`, the section-index letter. That last one is the dangerous shape. A refusal
+tells a caller to look again; a confident wrong answer taps the wrong thing, and
+that is one in fourteen of these intents.
+
+With the tree, the two failures are both `"Kate Bell"` reported as *ambiguous*,
+because a contact row arrives as a row and as its own text and the two score
+within the ambiguity margin. Filed in `docs/DEFERRED.md`; a refusal that asks
+for an index is the safe failure, but it is still a failure.
+
+### What this settles
+
+**On iOS:** the tree is not an optimisation, it is the whole of role
+information. Any change that risks it — an Xcode upgrade moving a private
+symbol, say — costs 100% of interactive-role knowledge and 14 points of intent
+accuracy, and `SIMFRAME_AX_DRIVER=idb` exists for exactly that reason.
+
+**On Android:** what an APK would buy is now a number rather than an intuition.
+83% of the interactive controls on these screens have no text, so on a platform
+with no tree they cannot be named at all; the OCR-only condition is a fair model
+of Android, and it resolved 79% of intents with one mis-resolution in fourteen.
+That is the cost of Phase 8b staying unbuilt, and it is a real cost rather than
+a theoretical one — but it also shows Android is not blind: 79% is a working
+tool, and screen memory is unaffected.
+
+One caveat, stated because it bounds the whole table: these are Apple's own
+apps, which have unusually complete accessibility. A third-party app with poor
+labelling shifts the tree's contribution down, and an app with icon-only
+navigation shifts it up.

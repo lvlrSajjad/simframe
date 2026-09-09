@@ -139,11 +139,22 @@ the absence is visible rather than silent.
 1. A real Android user hits a screen class OCR and CV cannot serve — a custom
    canvas surface, an icon-only control with no text anywhere near it, a
    WebView whose text OCR reads but whose roles it cannot infer.
-2. The iOS a11y tier's hit rate is measured and shows what Android is losing.
-   Phase 2a has already landed, so this is a measurement waiting to be taken
-   rather than a phase waiting to happen: instrument how often the tree
-   contributes an element OCR+CV missed, per screen, across the tours. If that
-   number is small on iOS, Android is losing little.
+2. ~~The iOS a11y tier's hit rate is measured and shows what Android is
+   losing.~~ **Measured 2026-09-09 — see `docs/BENCHMARKS.md`.** It is not
+   small. On six iOS screens, **every** interactive element came from the tree
+   (72 of 72) and **83%** of them have no text at all, so OCR cannot see them
+   even in principle. Intent resolution went 26/28 with the tree to 22/28
+   without, and one of those failures was a *wrong* answer rather than a
+   refusal: `Back` resolved to `"B"`, the section-index letter next to it.
+
+   What it does not cost is recognition: every revisit was recognised either
+   way. So the tier earns its place in acting, not in looking, and Android's
+   missing tree makes it less certain about controls rather than blind.
+
+   That is the number for this decision, and it does not settle it on its own:
+   79% with one mis-resolution in fourteen is a working tool, and these are
+   Apple's own unusually well-labelled apps. Criterion 1 is still the trigger —
+   a real Android screen class that OCR cannot serve.
 
 **The shape, when the time comes**, is the one every serious Android driver
 converged on — uiautomator2, Maestro and Appium all do the same thing: a tiny
@@ -153,6 +164,21 @@ connection open and serving the tree over a local socket. It is a runtime
 artifact, but it is ours, it is built from source in this repo, and it is
 automatic. The promise change is "simframe puts a helper on your emulator" —
 an honest sentence to add to the README on the day it is true, and not before.
+
+### A contact row is ambiguous with its own name
+Found while measuring the a11y tier: `"Kate Bell"` on the Contacts list resolves
+as *ambiguous* with the tree present, because the row arrives as a row and as
+its own text element and the two score within `AMBIGUITY_MARGIN`. Two of 28
+intents, and only with the tree — OCR-only has one element there and resolves
+it.
+
+The safe failure, since the caller is asked for an index rather than given a
+guess, but still a failure: a list of contacts is exactly the screen where
+tapping a name should be the easy case. The fix is probably in
+`collapseSamePlace` — a text element wholly inside a row *is* that row, which is
+the same judgement the screen map already makes when it files OCR text as an
+alias — but the two paths reach it differently and that is worth understanding
+before changing either.
 
 ### The emulator's gRPC surface has nothing tree-shaped — confirmed
 Asked and answered so nobody asks again. The emulator ships its own service

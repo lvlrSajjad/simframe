@@ -1,7 +1,7 @@
 [
   {
     "name": "settings",
-    "note": "A long list under a nav bar \u2014 the shape most likely to have content misfiled as chrome.",
+    "note": "A long list under a nav bar — the shape most likely to have content misfiled as chrome.",
     "steps": [
       {
         "launch": {
@@ -12,6 +12,11 @@
       {
         "pause": 1400
       }
+    ],
+    "intents": [
+      "General",
+      "Accessibility",
+      "Camera"
     ]
   },
   {
@@ -24,6 +29,11 @@
       {
         "pause": 1400
       }
+    ],
+    "intents": [
+      "Example Domain",
+      "refresh",
+      "Address"
     ]
   },
   {
@@ -39,11 +49,15 @@
       {
         "pause": 1600
       }
+    ],
+    "intents": [
+      "Continue",
+      "Welcome to Reminders"
     ]
   },
   {
     "name": "contacts",
-    "note": "An indexed list with a search field \u2014 a nav bar with two rows in it.",
+    "note": "An indexed list with a search field — a nav bar with two rows in it.",
     "steps": [
       {
         "launch": {
@@ -54,6 +68,10 @@
       {
         "pause": 1600
       }
+    ],
+    "intents": [
+      "Kate Bell",
+      "Back"
     ]
   },
   {
@@ -75,6 +93,10 @@
       {
         "pause": 1500
       }
+    ],
+    "intents": [
+      "About",
+      "Language & Region"
     ]
   },
   {
@@ -96,6 +118,10 @@
       {
         "pause": 1500
       }
+    ],
+    "intents": [
+      "Display & Text Size",
+      "Spoken Content"
     ]
   }
 ]

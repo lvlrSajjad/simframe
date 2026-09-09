@@ -768,6 +768,31 @@ export async function settledState(udid, { settleMs = MEMORY_SETTLE_MS, timeoutM
   return { state, settled: false };
 }
 
+/**
+ * Read the screen with the perception layers pinned, and keep nothing.
+ *
+ * Every other path decides for itself which layers to read, which is right for
+ * doing work and useless for measuring: the question "what is the accessibility
+ * tier worth" needs the same frame read twice, once with it and once without.
+ * `persist: false` so measuring teaches the graph nothing.
+ */
+export async function readScreenWith(deviceQuery, { useAx = true, useOcr = true, options } = {}) {
+  const { device, state } = await ensureDaemon(deviceQuery, options);
+  const udid = device.udid;
+  const geo = await deviceGeometry(udid, state);
+  const entry = await screenmap.build(udid, {
+    hash: state.hash,
+    layoutHash: state.layoutHash,
+    fullFrame: await fullFrameFor(udid, state),
+    density: geo.density,
+    screen: { width: geo.pointWidth, height: geo.pointHeight },
+    useAx,
+    useOcr,
+    persist: false,
+  });
+  return { device, entry, points: { width: geo.pointWidth, height: geo.pointHeight } };
+}
+
 export async function locate(
   deviceQuery,
   query,
