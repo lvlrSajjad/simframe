@@ -332,7 +332,7 @@
   pre code { background: transparent; border: 0; padding: 0; white-space: pre; font-size: inherit; }
 
   /* ---- lists ---- */
-  ol.contract, ul.asks {
+  ol.contract, ul.asks, ul.findings {
     margin: 1.4em 0;
     padding: 0;
     list-style: none;
@@ -340,34 +340,38 @@
     gap: 14px;
   }
   ol.contract { counter-reset: cond; }
-  ol.contract li {
-    counter-increment: cond;
-    display: grid;
-    grid-template-columns: 2.4em 1fr;
-    gap: 4px;
-    align-items: baseline;
+  /* A marker in a gutter, positioned rather than laid out as a grid column.
+     It was `display: grid` with two columns, which works only while an item's
+     content is a single text run: `<li><strong>Heading.</strong> Body text</li>`
+     is three grid items — the marker, the strong, and the trailing text — so
+     the body wrapped into row two of a 1.6em column and rendered one word per
+     line. Reported from the published page. */
+  ol.contract li,
+  ul.asks li,
+  ul.findings li {
+    display: block;
+    position: relative;
+  }
+  ol.contract li { counter-increment: cond; padding-left: 2.8em; }
+  ul.asks li, ul.findings li { padding-left: 2em; }
+  ol.contract li::before,
+  ul.asks li::before,
+  ul.findings li::before {
+    position: absolute;
+    left: 0;
+    font-family: var(--mono);
+    font-weight: 600;
+    color: var(--trace);
   }
   ol.contract li::before {
     content: counter(cond, decimal-leading-zero);
-    font-family: var(--mono);
     font-size: 12px;
-    font-weight: 600;
-    color: var(--trace);
     letter-spacing: 0.04em;
   }
-  ul.asks li {
-    display: grid;
-    grid-template-columns: 1.6em 1fr;
-    gap: 4px;
-    align-items: baseline;
-  }
-  ul.asks li::before {
-    content: "?";
-    font-family: var(--mono);
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--trace);
-  }
+  /* The question mark belongs to the list that asks questions. The findings
+     list was reusing this class and getting it, which read as a broken glyph. */
+  ul.asks li::before { content: "?"; font-size: 15px; }
+  ul.findings li::before { content: "\2014"; font-size: 15px; }
 
   /* ---- close ---- */
   .colophon {
@@ -794,7 +798,7 @@ tab-bar:
     <div class="track">
       <p>Android has no accessibility tree &mdash; <code>uiautomator dump</code> costs two seconds a read, and making it fast means shipping an instrumentation app onto someone&rsquo;s device, which is a different promise from shipping a package. So the perception ladder&rsquo;s central bet got tested for real: does a missing tier degrade, or fail?</p>
       <p>Measured on iOS, reading every screen twice from the same frame, once with the tree and once without:</p>
-      <ul class="asks">
+      <ul class="findings">
         <li><strong>Every interactive element came from the tree.</strong> All 72 of 72. OCR and classical CV produce text, and nothing in that pipeline infers a button from a rectangle confidently enough to say so.</li>
         <li><strong>83% of those controls have no text at all.</strong> They are icons. There is nothing for OCR to read even in principle.</li>
         <li><strong>And screen memory did not need the tree.</strong> Every revisit was recognised either way, 6 of 6, with the weakest similarity barely moving.</li>
