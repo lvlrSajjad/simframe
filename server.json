@@ -3,7 +3,7 @@
   "name": "io.github.lvlrSajjad/simframe",
   "title": "simframe",
   "description": "Always-warm iOS Simulator frames: agents read the screen in ~20ms instead of screenshotting",
-  "version": "0.6.0-rc.0",
+  "version": "0.6.0-rc.1",
   "websiteUrl": "https://lvlrsajjad.github.io/simframe/",
   "repository": {
     "url": "https://github.com/lvlrSajjad/simframe",
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "simframe",
-      "version": "0.6.0-rc.0",
+      "version": "0.6.0-rc.1",
       "transport": {
         "type": "stdio"
       }
