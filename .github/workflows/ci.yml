@@ -36,6 +36,13 @@ jobs:
       # the repo is a puzzle that solves itself. Without the secret this step
       # says it checked nothing and passes, which is what keeps it alive on
       # forks instead of being switched off.
+      # Offline by construction: the element lists are recorded, and everything
+      # downstream of them — resolution, identity, the change detector — is a
+      # pure function. So the harness that gates every threshold in this project
+      # runs in the check job, in a second, with no simulator.
+      - name: Perception expectations still hold
+        run: node scripts/eval-perception.mjs
+
       - name: Nothing private entered the repo
         env:
           SIMFRAME_PRIVATE_STRINGS: ${{ secrets.SIMFRAME_PRIVATE_STRINGS }}

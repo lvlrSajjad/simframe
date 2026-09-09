@@ -2186,3 +2186,36 @@ test('a black frame is noticed, and is never called a diagnosis', async () => {
   const wait = src.slice(src.indexOf('const black = isBlackFrame'));
   assert.match(wait.slice(0, 260), /blackFrames \+= 1[\s\S]*continue;/);
 });
+
+test('a prefix match is worth the share it covers, in both directions', async () => {
+  const m = await import('../src/matching.js');
+
+  // The bug, and it is worth stating as a comparison rather than a number:
+  // "S" is a section-index letter and "Q Search" is the search field's own
+  // label. simframe tapped the scrubber and typed into it, because
+  // q.startsWith(n) returned a flat 0.86 however little of the query the name
+  // covered, while its sibling n.includes(q) already scaled by coverage.
+  assert.ok(m.nameScore('Q Search', 'Search') > m.nameScore('S', 'Search'),
+    'the whole label must outrank a one-character fragment of the query');
+  assert.ok(m.nameScore('S', 'Search') < m.MINIMUM_SCORE,
+    'one character of a six-letter query should not resolve at all');
+
+  // The other direction is the ordinary one — a prefix of a name is how people
+  // abbreviate — and it keeps most of its score.
+  assert.ok(m.nameScore('Screen Time', 'Screen') > 0.7);
+  assert.ok(m.nameScore('Accessibility', 'Acce') > m.MINIMUM_SCORE);
+
+  // The floor is tied to MINIMUM_SCORE, not chosen. At 0.5 the shortest useful
+  // abbreviation scored 0.433 and fell below the threshold to resolve at all,
+  // turning a ranking fix into a feature removal. Asserted as a relationship so
+  // the cliff cannot come back by someone tuning either number alone.
+  assert.ok(0.86 * m.PREFIX_FLOOR > m.MINIMUM_SCORE,
+    'the worst-case prefix match must still be resolvable');
+  assert.ok(m.nameScore('Accessibility', 'Ac') > m.MINIMUM_SCORE);
+
+  // Exact still wins outright, and case and spacing still do not matter.
+  assert.equal(m.nameScore('Search', 'Search'), 1);
+  assert.equal(m.nameScore('Back', 'back'), 1);
+  // And a fuller match beats a shorter one from the same direction.
+  assert.ok(m.nameScore('Accessibility', 'Accessibilit') > m.nameScore('Accessibility', 'Ac'));
+});

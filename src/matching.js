@@ -59,7 +59,25 @@ export function nameScore(name, query) {
   const q = norm(query);
   if (!n || !q) return 0;
   if (n === q) return 1;
-  if (n.startsWith(q) || q.startsWith(n)) return 0.86;
+  // A prefix match is only as good as the share it covers, and this branch had
+  // to be taught that twice.
+  //
+  // `n.startsWith(q)` — the name begins with the query, "Acce" for
+  // "Accessibility" — is the ordinary case and keeps most of its score: a
+  // prefix of a name is how people abbreviate. `q.startsWith(n)` is the
+  // opposite direction, where the *name* is a fragment of the query, and it
+  // returned the same flat 0.86 no matter how little of the query it was. So
+  // the section-index letter "S" scored 0.86 against the query "Search" and
+  // beat the search field's own label "Q Search" at 0.585 — and simframe
+  // tapped a scrubber and typed into it.
+  //
+  // The sibling branch below already carries this lesson in a comment about
+  // "back" matching a list row. Only one of the two had learned it. Both scale
+  // now, and the floor differs by direction on purpose: a query that is a
+  // prefix of a name is usually deliberate, while a name that is a fragment of
+  // the query is usually a coincidence, and one character is always one.
+  if (n.startsWith(q)) return 0.86 * Math.max(PREFIX_FLOOR, Math.min(1, q.length / n.length + 0.35));
+  if (q.startsWith(n)) return 0.8 * Math.max(0.15, n.length / q.length);
   // A substring match is only as good as the share of the name it covers.
   // Without this, "back" scores 0.78 against a two-hundred-character list row
   // that happens to contain "Back of House", and beats the actual back button.
@@ -159,6 +177,17 @@ export function rank(targets, intent, { screen } = {}) {
 export const AMBIGUITY_MARGIN = 0.08;
 /** Below this, no candidate is worth acting on. */
 export const MINIMUM_SCORE = 0.45;
+/**
+ * How much of a name's score survives scaling a prefix by its coverage.
+ *
+ * Tied to `MINIMUM_SCORE` rather than chosen: at 0.5 the shortest useful
+ * abbreviation — "Ac" for "Accessibility" — scored 0.433 and fell *below* the
+ * threshold to resolve at all, which would have turned a ranking fix into a
+ * feature removal. 0.6 puts the worst case at 0.516, comfortably resolvable and
+ * still well under a fuller match. The unit test asserts the relationship so
+ * the cliff cannot come back by someone tuning one of the two numbers.
+ */
+export const PREFIX_FLOOR = 0.6;
 
 /**
  * How close two tap points have to be to mean the same control.
