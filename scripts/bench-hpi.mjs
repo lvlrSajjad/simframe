@@ -35,6 +35,16 @@ const only = arg('flow');
 const out = arg('out');
 const baselineFile = arg('baseline', path.join(ROOT, 'docs', 'research', 'hpi-baseline.json'));
 const gate = has('gate');
+/**
+ * How many times to measure the whole suite.
+ *
+ * Three when gating, because one measurement is mostly noise: identical code
+ * measured three times the same afternoon gave HPI_time 0.475, 0.413 and
+ * 0.371. The gate reads the median of the passes, which is what lets the time
+ * band stay as tight as 25% instead of being widened to cover a single run's
+ * spread.
+ */
+const passes = Math.max(1, Number(arg('passes', gate ? '3' : '1')));
 
 const suite = baseline.loadSuite(arg('suite', baseline.SUITE_FILE)).filter((f) => !only || f.name === only);
 if (!suite.length) {
@@ -44,13 +54,30 @@ if (!suite.length) {
 
 const { device: dev } = await api.ensureDaemon(device);
 console.log(`device: ${dev.name} (${dev.udid})`);
-console.log(`suite: ${suite.map((f) => f.name).join(', ')} × ${runs} run(s)\n`);
+console.log(`suite: ${suite.map((f) => f.name).join(', ')} × ${runs} run(s) × ${passes} pass(es)\n`);
 
 const ids = new Set();
 let hardFailures = 0;
+/**
+ * A wedged capture loop is not a slow flow, and every run after it is doomed.
+ *
+ * Measured four times in one session: the display surface stops being readable
+ * mid-suite, the daemon re-resolves the display port and still gets nothing,
+ * and only restarting the device cures it. Grinding through the remaining runs
+ * produced three identical "could not run at all" lines and an HPI computed
+ * from whatever happened to finish first — a number with a hole in it, which
+ * is worse than no number.
+ */
+const WEDGED = /display surface could not be read|did not produce a frame/;
+let wedged = null;
 
-for (const flow of suite) {
-  for (let run = 1; run <= runs; run += 1) {
+const passSets = [];
+outer: for (let pass = 1; pass <= passes; pass += 1) {
+  const thisPass = new Set();
+  passSets.push(thisPass);
+  if (passes > 1) console.log(`pass ${pass}/${passes}`);
+  for (const flow of suite) {
+    for (let run = 1; run <= runs; run += 1) {
     // The same start state the human baseline was recorded from: app not
     // running, on the home screen. Not part of the timed flow, and
     // deliberately not expressed as flow steps — see baseline.resetFor.
@@ -71,9 +98,14 @@ for (const flow of suite) {
       // counted.
       hardFailures += 1;
       console.log(`FAIL ${flow.name} run ${run}: ${err.message}`);
+      if (WEDGED.test(err.message)) {
+        wedged = err.message;
+        break outer;
+      }
       continue;
     }
     ids.add(res.flowId);
+    thisPass.add(res.flowId);
     const verdicts = res.results.map((r) => r.verification?.verdict).filter(Boolean);
     console.log(
       `${res.ok ? 'ok  ' : 'FAIL'} ${flow.name.padEnd(24)} run ${run}/${runs}  ` +
@@ -81,6 +113,7 @@ for (const flow of suite) {
         `${verdicts.filter((v) => v !== 'ok').length ? `verdicts: ${verdicts.join(',')}` : 'all ok'}`,
     );
     if (!res.ok) console.log(`     ${res.results.filter((r) => !r.ok).map((r) => r.error).join('; ')}`);
+    }
   }
 }
 
@@ -89,11 +122,22 @@ for (const flow of suite) {
 // somebody's local runs from last week is not this commit's number.
 const flows = metrics.readFlows(dev.udid).filter((f) => ids.has(f.flow_id));
 const humans = baseline.readBaselines();
+// Each pass measured on its own, so the gate can take a median over them
+// rather than trusting one. Accuracy is pooled over every run instead: one
+// wrong action in thirty is a wrong action, and a median would hide it.
+const allFlows = metrics.readFlows(dev.udid);
+const passReports = passSets
+  .map((set) => metrics.hpi({ flows: allFlows.filter((f) => set.has(f.flow_id)), baselines: humans }))
+  .filter((r) => r.overall.runs > 0);
+const passTimes = passReports.map((r) => r.overall.hpi_time).filter((t) => Number.isFinite(t));
+
 const report = {
   ...metrics.hpi({ flows, baselines: humans }),
   measured_at: new Date().toISOString(),
   device: { udid: dev.udid, name: dev.name, runtime: dev.runtime },
   runs_per_flow: runs,
+  passes,
+  pass_hpi_time: passTimes,
   hard_failures: hardFailures,
   human_baselines: Object.fromEntries(
     Object.entries(humans).map(([k, v]) => [k, { runs: v.runs, p50: v.wall_time_ms?.p50 ?? null }]),
@@ -108,8 +152,12 @@ for (const f of report.flows) {
       `${String(f.hpi_time ?? '—').padStart(8)}  ${String(f.step_ratio ?? '—').padStart(10)}`,
   );
 }
+report.overall.hpi_time_median_of_passes = passTimes.length ? Number(metrics.median(passTimes).toFixed(3)) : null;
 const o = report.overall;
 console.log(`\nHPI_accuracy ${o.hpi_accuracy}   HPI_time ${o.hpi_time ?? '—'}   HPI ${o.hpi ?? '—'}   step_ratio ${o.step_ratio ?? '—'}`);
+if (passTimes.length > 1) {
+  console.log(`HPI_time per pass: ${passTimes.join(', ')} — median ${o.hpi_time_median_of_passes} (what the gate reads)`);
+}
 if (o.hpi_time == null) {
   console.log(`no human baseline for any measured flow — HPI_time and HPI are null, not 1.0.`);
   console.log(`record one: simframe baseline record <flow> --device=${dev.udid} --runs=5`);
@@ -122,6 +170,16 @@ if (out) {
 
 const escalations = metrics.breakdown(metrics.readEscalations(dev.udid));
 console.log(`\nescalations in this device's log: ${escalations.total} (${Object.entries(escalations.by_reason).filter(([, n]) => n).map(([r, n]) => `${r} ${n}`).join(', ') || 'none'})`);
+
+if (wedged) {
+  console.error(`\ncapture is wedged: ${wedged}`);
+  console.error('Only restarting the device is known to cure this. No HPI was measured —');
+  console.error('what is above is a partial suite and must not be adopted as a baseline.');
+  console.error(`  xcrun simctl shutdown ${dev.udid} && xcrun simctl boot ${dev.udid}`);
+  // 2, not 1: a wedged device is a different answer from a regression, and a
+  // CI job that cannot tell them apart teaches people to ignore it.
+  process.exit(2);
+}
 
 if (hardFailures) {
   console.error(`\n${hardFailures} flow run(s) could not run at all.`);
@@ -146,6 +204,7 @@ const failures = metrics.gateAgainst(committed, report);
 
 console.log(`\ngate vs ${path.relative(ROOT, baselineFile)} (measured ${committed.measured_at ?? '?'})`);
 console.log(`  HPI_accuracy ${base.hpi_accuracy ?? '—'} -> ${o.hpi_accuracy ?? '—'}`);
-console.log(`  HPI_time     ${base.hpi_time ?? '—'} -> ${o.hpi_time ?? '—'}`);
+console.log(`  HPI_time     ${metrics.gateTime(base) ?? '—'} -> ${metrics.gateTime(o) ?? '—'}`);
+console.log(`  band         ${metrics.TIME_REGRESSION * 100}% (median of ${passTimes.length || 1} pass(es))`);
 for (const f of failures) console.log(`FAIL ${f}`);
 process.exit(failures.length ? 1 : 0);

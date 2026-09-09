@@ -12,11 +12,12 @@ import * as control from './control.js';
 import * as fingerprint from './fingerprint.js';
 import * as input from './input.js';
 import * as ocr from './ocr.js';
+import * as matching from './matching.js';
 import * as regions from './regions.js';
 import { informative } from './refs.js';
 import * as store from './store.js';
 
-const MAP_VERSION = 7; // footprintless elements and containers no longer enter identity
+const MAP_VERSION = 8; // an OCR reading contained in a labelled ax element merges into it
 
 function mapDir(udid) {
   return path.join(store.deviceDir(udid), 'screens');
@@ -232,22 +233,43 @@ export async function build(udid, {
         const point = { x: w.centerX, y: w.centerY };
         // If an accessibility element already covers this text, it is the same
         // control: keep the element and record the visible text as an alias.
-        // Containing text is not the same as being that control. A tab bar
-        // encloses all five tab labels but is not any of them, so only merge
-        // when the element is close to the text's own size.
+        //
+        // Two rules, and the second one cost 16 escalations and half of
+        // HPI_accuracy. The first is a size test: an element close to the
+        // text's own size, containing it, is that text. It exists to stop a
+        // tab bar from swallowing all five of its tab labels — containing text
+        // is not the same as being that control.
+        //
+        // But a full-width list row is 19× the area of the words printed in
+        // it, so the size test could never fire for the shape it matters most
+        // on: every Contacts and Settings row arrived as an ax element AND as
+        // an OCR text box, both scoring 1.00 for the same query, and `tap
+        // "Kate Bell"` refused as ambiguous on all five runs of the
+        // instrumented flow suite. The second rule is the one the size test
+        // was standing in for: near-total containment AND the same text. A tab
+        // bar contains "Assets" but is not labelled "Assets", so it is still
+        // refused; a row labelled "Kate Bell" containing OCR's "Kate Bell" is
+        // one element that two sensors saw.
         const textArea = Math.max(1, w.width * w.height);
+        const box = { x: w.x, y: w.y, width: w.width, height: w.height };
+        const eligible = (t) =>
+          matching.isAxTarget(t) &&
+          t.frame &&
+          !/^(Group|Application|ScrollView|Table|Collection)$/i.test(t.type || '');
         const covering = targets
-          .filter(
-            (t) =>
-              t.source === 'ax' &&
-              t.frame &&
-              inside(point, t.frame) &&
-              !/^(Group|Application|ScrollView|Table|Collection)$/i.test(t.type || '') &&
-              area(t.frame) <= textArea * 8,
-          )
-          .sort((a, b) => area(a.frame) - area(b.frame))[0];
+          .filter((t) => eligible(t) && inside(point, t.frame) && area(t.frame) <= textArea * 8)
+          .sort((a, b) => area(a.frame) - area(b.frame))[0]
+          ?? targets
+            .filter((t) => eligible(t) && matching.sameElementSeenTwice(t, { ...w, frame: box, label: w.text }))
+            .sort((a, b) => area(a.frame) - area(b.frame))[0];
         if (covering) {
           covering.aliases = [...(covering.aliases || []), w.text];
+          // Keep the ax role and frame — it is the hit target — and record that
+          // both sensors saw it. Anything asking "is this the tree's element?"
+          // must ask matching.isAxTarget, not `=== 'ax'`.
+          if (!String(covering.source ?? '').includes('ocr')) {
+            covering.source = `${covering.source ?? 'ax'}|ocr`;
+          }
           continue;
         }
         targets.push({
@@ -323,7 +345,7 @@ export function rank(entry, query) {
     ? exact
     : entry.targets.filter((t) => names(t).some((n) => n.includes(q)));
   return pool
-    .map((t) => ({ target: t, score: (isInteractive(t) ? 2 : 0) + (t.source === 'ax' ? 1 : 0) }))
+    .map((t) => ({ target: t, score: (isInteractive(t) ? 2 : 0) + (matching.isAxTarget(t) ? 1 : 0) }))
     .sort((a, b) => b.score - a.score)
     .map((r) => r.target);
 }

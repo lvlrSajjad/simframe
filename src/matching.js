@@ -182,6 +182,77 @@ export const SAME_CONTROL_POINTS = 12;
  */
 const INTERACTIVE_ROLE = /button|field|cell|row|link|switch|slider|tab|menu|segment|checkbox/i;
 
+/**
+ * Is this target the accessibility tree's reading of a control?
+ *
+ * A merged target carries `ax|ocr`, because both sensors saw it. Every
+ * comparison against the string `'ax'` had to become this: an element does not
+ * stop being the tree's element because OCR agreed with it, and treating
+ * `ax|ocr` as "not ax" would have quietly demoted exactly the elements the
+ * merge is most confident about.
+ */
+export const isAxTarget = (t) => /(^|\|)ax(\||$)/.test(t?.source ?? '');
+
+/** How much of `inner` lies inside `outer`, as a fraction of inner's own area. */
+export function containedFraction(inner, outer) {
+  if (!inner || !outer) return 0;
+  const iw = Math.max(0, inner.width ?? 0);
+  const ih = Math.max(0, inner.height ?? 0);
+  const innerArea = iw * ih;
+  if (innerArea <= 0) return 0;
+  const x = Math.max(inner.x, outer.x);
+  const y = Math.max(inner.y, outer.y);
+  const right = Math.min(inner.x + iw, outer.x + (outer.width ?? 0));
+  const bottom = Math.min(inner.y + ih, outer.y + (outer.height ?? 0));
+  const overlap = Math.max(0, right - x) * Math.max(0, bottom - y);
+  // Clamped: float arithmetic on sub-pixel OCR frames put a fully contained
+  // box at 1.0000000000000007, and a fraction of an area cannot exceed 1.
+  return Math.min(1, overlap / innerArea);
+}
+
+/**
+ * How much of the smaller box must sit inside the larger one to be the same
+ * element. OCR boxes sit a pixel or two outside the row they are printed on
+ * often enough that 1.0 would miss them.
+ */
+export const CONTAINMENT = 0.9;
+
+/**
+ * Do these two strings name the same thing?
+ *
+ * The discriminator that makes containment safe. A tab bar contains all five
+ * of its tab labels, and merging a container with its contents is the failure
+ * the old size cap was defending against — but a tab bar's own label is not
+ * "Assets", so the text test refuses that merge while allowing a row labelled
+ * "Kate Bell" to absorb OCR's reading of "Kate Bell".
+ *
+ * Substring counts because iOS labels carry state the printed text does not:
+ * a row reads "Larger Text" on screen and publishes "Larger Text, Off".
+ */
+export function sameText(a, b) {
+  const x = norm(a);
+  const y = norm(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  if (x.includes(y) || y.includes(x)) return Math.min(x.length, y.length) >= 3;
+  // Fuzzy, because OCR misreads a letter or two — measured: "Location (AII)"
+  // for "Location (All)", and a Cyrillic К for a K in a monogram.
+  return nameScore(x, y) >= 0.5;
+}
+
+/**
+ * The same element, seen by both sensors.
+ *
+ * `ax` is the tree's element, `ocr` a text box. True when the text sits
+ * (almost) wholly inside the element AND says the same thing as its label or
+ * value.
+ */
+export function sameElementSeenTwice(ax, ocr) {
+  if (!ax?.frame || !ocr?.frame) return false;
+  if (containedFraction(ocr.frame, ax.frame) < CONTAINMENT) return false;
+  return sameText(ax.label, ocr.label ?? ocr.text) || sameText(ax.value, ocr.label ?? ocr.text);
+}
+
 const contains = (frame, target) =>
   Boolean(frame)
   && target.x >= frame.x && target.x <= frame.x + (frame.width ?? 0)
@@ -205,6 +276,14 @@ function sameControl(a, b) {
   // tab bar from absorbing its own tabs.
   if (INTERACTIVE_ROLE.test(a.type ?? '') && contains(a.frame, b)) return true;
   if (INTERACTIVE_ROLE.test(b.type ?? '') && contains(b.frame, a)) return true;
+  // And a labelled accessibility element that is not an interactive role —
+  // a list row published as StaticText — with OCR's reading of its own label
+  // inside it. This is the pair that made `tap "Kate Bell"` refuse on every
+  // Contacts list: 16 escalations in the first instrumented run, all one
+  // screen. Defence in depth: the screen map now merges this pair at fusion,
+  // and a map built before that still resolves.
+  if (isAxTarget(a) && !isAxTarget(b) && sameElementSeenTwice(a, b)) return true;
+  if (isAxTarget(b) && !isAxTarget(a) && sameElementSeenTwice(b, a)) return true;
   return false;
 }
 
@@ -219,8 +298,8 @@ function collapseSamePlace(ranked) {
     // Prefer the real hit target: an accessibility element over OCR's reading of
     // it, and an interactive role over a caption sitting inside it.
     const better = (candidate, incumbent) => {
-      if (candidate.target.source === 'ax' && incumbent.target.source !== 'ax') return true;
-      if (candidate.target.source !== 'ax' && incumbent.target.source === 'ax') return false;
+      if (isAxTarget(candidate.target) && !isAxTarget(incumbent.target)) return true;
+      if (!isAxTarget(candidate.target) && isAxTarget(incumbent.target)) return false;
       return INTERACTIVE_ROLE.test(candidate.target.type ?? '')
         && !INTERACTIVE_ROLE.test(incumbent.target.type ?? '');
     };

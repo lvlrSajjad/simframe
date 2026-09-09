@@ -109,7 +109,16 @@ between `HPI_accuracy` 0.5 and 1.0.
 **First, and it is not a faculty:** de-duplicate same-element entries in the
 fused list. One bounded change in perception, worth half of `HPI_accuracy` on
 this suite, cheaper than anything in Phases 11–16. Phase 10 forbids perception
-changes, so it is not done here. Do it before Phase 11.
+changes, so it was not done in that phase.
+
+**Done, immediately after Phase 10.** An OCR reading ≥90% inside a labelled ax
+element whose text matches its label is that element. `contacts-kate-bell` went
+from 0 of 5 runs completing to 5 of 5, `HPI_accuracy` from 0.5 to 1.0, and a
+fresh 5-run measurement of that flow added **zero** escalations where the
+previous one added five. Numbers and the two rules that could not see it are in
+`docs/BENCHMARKS.md`. The refusal itself was never the bug: ambiguity should
+escalate rather than guess, and it still does — what was wrong sat upstream of
+the decision, in the element list the decision was made from.
 
 **Then Phase 11 (adaptive waiting)**, on evidence the escalation log cannot
 see: `HPI_time` is 0.475 — the agent takes about twice a human's time — at

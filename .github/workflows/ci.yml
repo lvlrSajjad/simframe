@@ -341,7 +341,7 @@ jobs:
         # With no committed baseline the gate prints GATE INACTIVE and exits 0 —
         # loudly inactive rather than quietly passing, because a gate with
         # nothing to compare against cannot detect a regression.
-        run: node scripts/bench-hpi.mjs --device="$DEVICE" --runs=3 --out=/tmp/hpi.json --gate
+        run: node scripts/bench-hpi.mjs --device="$DEVICE" --runs=3 --passes=3 --out=/tmp/hpi.json --gate
 
       - name: Keep the measurement
         # Recorded every run so HPI can be read as a series. This is the file

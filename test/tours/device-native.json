@@ -27,7 +27,7 @@
         "openUrl": "https://example.com"
       },
       {
-        "pause": 1400
+        "pause": 3000
       }
     ],
     "intents": [

@@ -14,6 +14,7 @@
 import * as api from './index.js';
 import * as graph from './graph.js';
 import { writeRefs } from './refs.js';
+import * as matching from './matching.js';
 
 /** Reading order. Chrome frames the screen, so it reads first and last. */
 const REGION_ORDER = ['nav-bar', 'content', 'tab-bar', 'keyboard', 'status-bar'];
@@ -78,7 +79,7 @@ function isHost(t) {
   // An accessibility element the app gave a label to is a unit the app itself
   // considers one thing — a dashboard tile reading "WOs past ETA, 1910" is one
   // tap target whose parts OCR happens to read separately.
-  return t.source === 'ax' && Boolean(t.label);
+  return matching.isAxTarget(t) && Boolean(t.label);
 }
 
 /**
@@ -152,7 +153,7 @@ function dropContainers(targets, screen) {
  * an ellipsis menu, a chevron it decided was a period. Nothing can be tapped by
  * that name, so listing it is pure cost.
  */
-const isNoise = (t) => t.source === 'ocr' && !alnum(t.label);
+const isNoise = (t) => !matching.isAxTarget(t) && t.source === 'ocr' && !alnum(t.label);
 
 const trim = (text) => {
   const one = String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -203,7 +204,7 @@ export function rowsFor(entry, { screen, filter, interactive, all = false, limit
 
 function renderRow(r) {
   const name = [
-    trim(r.label) || (r.source === 'ax' ? '(unlabelled)' : '(no text)'),
+    trim(r.label) || (matching.isAxTarget(r) ? '(unlabelled)' : '(no text)'),
     aliasNote(r),
   ].filter(Boolean).join(' ');
   const state = [

@@ -2099,3 +2099,97 @@ launched an app whose launch animation and whose content arrived more than a
 window apart. It is an estimate, not a bound. Nothing numeric rests on it:
 `min_steps` comes from the flow definition and `step_ratio` uses that, so
 `steps_observed` stays a shape-of-the-run signal with the label it deserves.
+
+## The de-duplication the escalation log asked for
+
+Same machine and device as Phase 10. The escalation log said 16 of 19
+escalations were one pair of elements on one screen; this is what fixing them
+was worth.
+
+### What the existing rules were and why neither could see it
+
+| rule | where | why it missed |
+|---|---|---|
+| a container within 8× the text's own area, containing the text's centre | `screenmap.build` | a full-width list row is **18.8×** the area of the words printed in it |
+| centres within 12 pt | `matching.collapseSamePlace` | the row's centre is (194,286), the text's is (103,286) — 91 pt apart |
+| containment, when the container is an interactive role | `matching.sameControl` | the row is published as `StaticText`, not a button or a cell |
+
+For the record, since it was the first guess: an IoU test could not have caught
+it either. The OCR box is 1227 pt² inside a 23040 pt² row, so IoU is **0.053** —
+far below any usable threshold. Containment is 1.000. The discriminating
+measurement is which of those two numbers you take.
+
+### The rule now
+
+An OCR reading whose frame is ≥90% inside a labelled accessibility element,
+**and** whose text matches that element's label or value, is that element:
+merged, keeping the tree's role and frame, marked `source: ax|ocr`. The text
+test is what keeps the old size cap's job — a tab bar contains all five of its
+tab labels and is not labelled "Assets", so it still refuses. Both halves have
+tests, including the tab-bar negative and the exact frames measured here.
+
+### What it bought
+
+| | before | after |
+|---|---|---|
+| `contacts-kate-bell` runs completing | 0 of 5 | **5 of 5** |
+| `HPI_accuracy` (suite) | 0.5 | **1.0** |
+| escalations added by a 5-run contacts measurement | 5 | **0** |
+| weakest same-screen fingerprint pair (local, 3 rounds) | 0.33 on CI | **0.67** |
+
+The last row is the one to read carefully. CI's fingerprint gate was already
+failing before any of this work — `FAIL every same-screen revisit scores at
+least 0.46 (worst 0.33)` — and its own diagnosis was two readings of Settings
+disagreeing about token roles: `only in r1: text:…` against `only in r2:
+button:…, heading:…`. That is this bug, seen from the identity side: the same
+row entering identity as OCR text in one reading and as an ax element in the
+other. Locally the weakest pair is now 0.67 against a 0.46 bar. It is not proof
+— that run was on different hardware, and the browser tour's pause was raised
+from 1400 ms to 3000 ms in the same change because Safari read one token before
+it had loaded — but the merge removes exactly the class of token that differed.
+
+Changing what feeds identity changes identity, so `TOKEN_RULES_VERSION` and
+`MAP_VERSION` both move and every stored map and graph node is discarded. The
+first run after that is cold by construction: `settings-larger-text` measured
+21.0 s on its first post-bump run against 11.6 s warm, and four `unverified`
+verdicts where a warm graph would have predicted. Any HPI_time compared across
+a version bump is comparing a cold run with a warm one.
+
+## What the gate is set to, and why
+
+Three measurements of **identical code** on the same device the same afternoon:
+
+| measurement | HPI_time | `settings` p50 | `contacts` p50 |
+|---|---|---|---|
+| A (5 runs/flow, warm) | 0.475 | 13977 ms | 10407 ms |
+| B (3 runs/flow, after a device restart) | 0.413 | 15376 ms | 12325 ms |
+| C (5 runs/flow, cold after the version bump) | 0.371 | 17630 ms | 13491 ms |
+
+A→B is a 13% move in HPI_time with nothing changed but the device's mood, and
+per flow the medians moved up to 18%. Research §1 proposed a 10% band, which
+these numbers would have tripped roughly half the time on noise alone — and a
+gate that cries wolf gets ignored, which costs more than having no gate.
+
+So the band is **25%**, and two things keep it from being slack: the gate reads
+the **median of three passes** rather than a single measurement, and
+`HPI_accuracy` stays strict — any drop at all fails. C is also a reminder that
+the band has to cover a cold-cache run, because a version bump produces one
+legitimately.
+
+## The capture wedge, measured rather than described
+
+Four times in one session, capture stopped: `the display surface could not be
+read`, the daemon re-resolved the display port, and every subsequent read
+failed the same way until the device was restarted. It cost three flow runs of
+one measurement and four of another, and it is why `scripts/bench-hpi.mjs` now
+aborts the suite with exit 2 on a wedge instead of reporting a partial HPI.
+
+What is known: it is the failure documented in `src/index.js` as curable only
+by restarting the device, and re-resolving the display port does not help. What
+is measured but not yet explained: the daemon's RSS was **732 MB** after 11
+minutes and 2831 frames — and then fell to **530 MB** over the next 25 seconds,
+so it is not a monotonic leak. What is missing: there is no `autoreleasepool`
+anywhere in the capture loop (only in `AccessibilityBridge`), which is the
+usual cause of a working set that size in a Darwin capture loop. Whether that
+pressure is what invalidates the surface is unproven, and saying so is the
+point — filed in `docs/DEFERRED.md` with what it would take to settle it.

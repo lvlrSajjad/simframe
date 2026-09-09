@@ -246,7 +246,7 @@ One observation, so no diagnosis. What would settle it is `dumpsys window`'s
 focused activity recorded alongside a verdict, which is 27 ms and would say
 "the app never came to the front" instead of "the screen did not change".
 
-### A contact row is ambiguous with its own name
+### A contact row is ambiguous with its own name — fixed
 Found while measuring the a11y tier: `"Kate Bell"` on the Contacts list resolves
 as *ambiguous* with the tree present, because the row arrives as a row and as
 its own text element and the two score within `AMBIGUITY_MARGIN`. Two of 28
@@ -273,6 +273,16 @@ pair and the matcher that acts on it does not — two representations of one
 element list, disagreeing, with the acting one wrong. Do it before Phase 11;
 `docs/ESCALATIONS.md` argues that ordering from the data rather than from the
 default phase order.
+
+**Fixed the same day.** An OCR reading whose frame is ≥90% inside a labelled ax
+element, and whose text matches that element's label or value, is that element:
+merged at fusion, keeping the tree's role and frame, marked `source: ax|ocr`.
+Neither existing rule could have caught it and the numbers say why — the row is
+18.8× the area of its own text, so the 8× size cap could not fire; the centres
+are 91 pt apart, so the 12 pt rule could not; and the row is `StaticText`, so
+the interactive-role containment rule could not. IoU, the first thing tried,
+would have been 0.053. `contacts-kate-bell`: 0 of 5 runs completing to 5 of 5,
+`HPI_accuracy` 0.5 to 1.0, zero escalations added by a fresh measurement.
 
 ### The emulator's gRPC surface has nothing tree-shaped — confirmed
 Asked and answered so nobody asks again. The emulator ships its own service
@@ -912,6 +922,50 @@ and everything in Phases 11–15 is unbuilt. The only term that moves it is
 defined, with the degeneracy stated in the doc, rather than redefined to look
 meaningful — but it means the per-reason breakdown is the number that decides
 phase order, and the rate is decoration until Phase 12 lands.
+
+### The capture wedge: measured four times, cause still unproven
+Capture stops with `the display surface could not be read`, the daemon
+re-resolves the display port, and every read after that fails identically until
+the **device** is restarted. Four occurrences in one session, all during flow
+runs that relaunch an app repeatedly. It cost seven flow runs across two
+measurements before `scripts/bench-hpi.mjs` learned to abort on it (exit 2, a
+different code from a regression, so a CI job can tell them apart).
+
+Two candidate mechanisms, and the honest state of each:
+
+**Memory pressure.** The daemon's RSS was 732 MB after 11 minutes and 2831
+frames, which is absurd for a process that holds one frame at a time — and then
+it fell to 530 MB over 25 seconds, so it is *not* a monotonic leak. There is no
+`autoreleasepool` anywhere in the capture loop; the only ones in the package are
+in `AccessibilityBridge`. On Darwin, a tight loop creating CF/ObjC temporaries
+with no pool of its own is the standard way to get a working set this shape.
+Worth fixing on its own merits whether or not it causes the wedge.
+
+**A surface handle that is invalid for the rest of the boot session.** Fits the
+evidence better: re-resolving the display port does not help, and only
+restarting the device does. That would mean the fix is a full
+re-registration of the IOSurface callback with a fresh UUID, not a port
+re-resolve.
+
+What would settle it: log RSS and peak footprint every N frames, so a wedge can
+be correlated with a spike or exonerated; then try full re-registration on N
+consecutive failures and see whether it recovers without a device restart.
+
+Regardless of cause, the mitigation is the one this project's own rules
+prescribe and capture does not yet do: **degrade rather than fail** — fall back
+to the screenshot engine when the framebuffer path is wedged, and say so in
+`doctor` and `sim_state`. A wedge currently takes the whole tool down for a
+cause the agent cannot see.
+
+### The eval harness this project keeps needing does not exist
+Phase 5's perception eval harness — fifteen screens, three apps — is still
+unbuilt, and the de-duplication fix wanted it. What that fix got instead: unit
+tests carrying the exact frames measured on the Contacts list, the tab-bar
+negative case that the old size cap existed to protect, and a re-run of
+`scripts/eval-fingerprint.mjs`, which is the nearest thing that exists.
+`scripts/eval-ax-tier.mjs` already measures intent resolution over the same
+tour and already reported this exact ambiguity as one of its two failures, so
+the case is in the data — it is the harness that is missing, not the case.
 
 ## Product
 

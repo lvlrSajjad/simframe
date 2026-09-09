@@ -24,8 +24,14 @@ import * as regions from './regions.js';
  *     browser's address bar put "== example.com" into a screen's identity, so
  *     a different page read as a different screen, and OCR's ":" and "+" read
  *     off icons were identities of their own.
+ * 4 — not a token-rule change at all, and bumped anyway: the screen map now
+ *     merges an OCR reading that sits inside a labelled ax element into that
+ *     element, so the target list these rules run over is shorter on every
+ *     list screen. Same rules, different input, therefore different hashes —
+ *     and a stored hash that can never match again is the quietest kind of
+ *     wrong, which is what this counter exists to prevent.
  */
-export const TOKEN_RULES_VERSION = 3;
+export const TOKEN_RULES_VERSION = 4;
 
 /** Frames are quantised to this, so sub-pixel drift and a nudged row do not matter. */
 export const GRID = 24;
