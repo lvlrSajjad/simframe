@@ -2157,3 +2157,32 @@ test('an escalation breakdown says when it is pooling more than one agent', asyn
   // records mean rather than how many there are.
   assert.ok(metrics.BUILT_FACULTIES.has(metrics.FACULTY.verification_failed));
 });
+
+test('a black frame is noticed, and is never called a diagnosis', async () => {
+  const a = await import('../src/analyze.js');
+  // The wedge: `simctl io screenshot` succeeds and returns 0 non-black pixels
+  // of 3,162,132, and simframe's frames go the same way while every layer
+  // reports success.
+  assert.equal(a.isBlackFrame('00'.repeat(32)), true);
+  assert.equal(a.isBlackFrame('04'.repeat(32)), true);
+
+  // The threshold is on the maximum, not the mean: one cell with anything in
+  // it means the display is rendering. A dark-mode screen, a video, or a
+  // splash on black are legitimately near-zero nearly everywhere, and calling
+  // those a fault would make the check worse than nothing.
+  assert.equal(a.isBlackFrame('00'.repeat(31) + '09'), false);
+  // Measured on this device's Settings root the 32 bytes ran 191-245.
+  assert.equal(a.isBlackFrame('bf'.repeat(32)), false);
+
+  // No signature is not a black frame, it is no answer.
+  assert.equal(a.isBlackFrame(''), false);
+  assert.equal(a.isBlackFrame(null), false);
+  assert.equal(a.isBlackFrame([]), false);
+
+  // The wait rides through black rather than reading it as a change and then
+  // as stillness, which is how it used to return `ok` for an action whose
+  // result nobody could see.
+  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  const wait = src.slice(src.indexOf('const black = isBlackFrame'));
+  assert.match(wait.slice(0, 260), /blackFrames \+= 1[\s\S]*continue;/);
+});

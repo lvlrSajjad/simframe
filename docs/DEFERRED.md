@@ -21,7 +21,16 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 
 ### P0 — the engine is learning wrong things, and everything else measures on top
 
-1. **A settle can be satisfied by stillness older than the action it waits on.**
+1. ~~**A settle can be satisfied by stillness older than the action it waits
+   on.**~~ **Done, 2026-09-10.** `waitFor` re-baselines when the screen already
+   differs *and* has already been at rest for the whole stillness window, and
+   the graph records no edge for an action with no observed effect. Six runs,
+   two rounds, clean graph each: **zero self-edges**, against `count: 11` and
+   `changedOutcomes: 5` before. Pass rate unchanged at 5/6; the failure mode is
+   now a caught `unexpected-screen` at the step that made the wrong turn rather
+   than a silent walk-on. `docs/BENCHMARKS.md`, "Gate A, item 1".
+
+   The original diagnosis, kept because it is the instructive half:
    `tap Accessibility` reports `settled 124ms` against a 500 ms stillness
    window and the screen never left the Settings root. The baseline hash is
    taken at the top of the step; if it lands mid-animation it already differs
@@ -109,12 +118,17 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 
 ### P2 — the instruments
 
-14. **The escalation log pools sessions and cannot say so.** It is per-UDID and
-   a record names no session, so two agents on one simulator write one
-   interleaved log — 57 to 81 entries in an evening, a third of the new ones
-   naming an app the suite never launched. CLAUDE.md makes that breakdown the
-   thing that picks the next phase. Cheap: a session id and the flow's own name
-   per record. Worth doing before the next breakdown is used to choose.
+14. ~~**The escalation log pools sessions and cannot say so.**~~ **Done,
+   2026-09-10.** Records carry `session_id` and `client`; flow escalations and
+   `goto` refusals carry `flow_name`. `simframe escalations` narrows with
+   `--session`, `--session=<id>` and `--flow=<name>`, and warns *before* the
+   counts whenever it might be pooling. The 92 records already in the bench log
+   stay unattributable and it says so every time. `docs/ESCALATIONS.md`.
+
+   One thing fell out of it: `BUILT_FACULTIES` was empty "until Phase 11 lands
+   the first one", and Phase 11 landed. So the 34 `verification_failed` records
+   are not a queue waiting on a phase — they are evidence the phase that
+   shipped is not sufficient, and the breakdown now says `not removed by`.
 15. The `bench` gate cannot gate — a hosted runner cannot `simctl launch`
    Settings (47–55 s per failed attempt), so it only warns.
 16. The fingerprint gate is intermittent: failed on the 0.8.0 push, passed on
@@ -243,10 +257,26 @@ moves; Phase 12 is where the real-app failures are.
 
 ### P4 — the wedge, which is the simulator's bug and not ours
 
-22. Spot an all-black frame early — frames are already decoded, so it is nearly
-    free — and let `sim_do` wait for the likely self-recovery instead of
-    failing the flow. Now seen on a second device, in another person's session,
-    which supports the diagnosis.
+22. ~~Spot an all-black frame early.~~ **Done, 2026-09-10.**
+    `analyze.isBlackFrame` costs 32 integer comparisons on a signature already
+    computed. A wait now rides *through* black frames instead of reading them
+    first as a change (the hash differs from anything) and then as stillness
+    (nothing moves), which is how it used to return `ok` for an action whose
+    result nobody could see. `doctor` warns, `getState` reports `black`, and a
+    step says how many black frames it waited through.
+
+    The threshold is on the **maximum** cell, not the mean: one cell with
+    anything in it means the display is rendering, so a dark-mode screen, a
+    video and a splash on black are not faults. And it reports "the frames are
+    black", never "the simulator is wedged" — a screen can be black because the
+    app drew black, and what makes it the wedge is staying black while input is
+    delivered, which only the caller knows.
+
+    **Unverified against a live wedge**, and it cannot be: the wedge is not
+    inducible on demand, and the button that would blank the screen on purpose
+    is one of the unverified Indigo codes that can take `backboardd` down. What
+    is covered is the detection and the decision, not the event — the same
+    disposition as `CaptureRecovery`.
 23. Worth an Apple feedback report: rapid app relaunch cycling kills the
     simulator's display pipeline in about six cycles, reproducibly, and
     `simctl io screenshot` confirms it from outside simframe.

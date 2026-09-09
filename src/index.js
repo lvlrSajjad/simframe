@@ -9,6 +9,7 @@ import { decodePng, encodePng, scaleBitmap } from './png.js';
 import {
   REGION_COLS,
   hexToSignature,
+  isBlackFrame,
   regionDeltas,
   regionMap,
   signatureDiff,
@@ -408,6 +409,14 @@ export function resolveBaseline(state, since) {
  * from the baseline *and* has already been at rest for the whole stillness
  * window changed for some earlier reason.
  */
+/** The newest frame's region signature, which the state already carries. */
+function currentSig(state) {
+  const h = state?.history;
+  if (!h?.length) return null;
+  const newest = h.find((x) => x.seq === state.seq) ?? h[h.length - 1];
+  return newest?.sig ?? null;
+}
+
 export function baselineAlreadySettled({ mode, changedAtStart, stableForMs, stableMs } = {}) {
   if (mode === 'stable' || !changedAtStart) return false;
   if (!Number.isFinite(stableForMs) || !Number.isFinite(stableMs)) return false;
@@ -513,6 +522,10 @@ export async function getState(deviceQuery, { since, options, inputHealth = fals
     map: regionMap(state.regions || [], REGION_COLS),
     since: compareToBaseline(state, resolveBaseline(state, since)),
     live: liveness(device.udid, state),
+    // Costs 32 integer comparisons on a signature already computed, and it is
+    // the difference between "the screen is calm" and "the display stopped
+    // rendering" — which looked identical to everything above this line.
+    black: isBlackFrame(currentSig(state)),
     // Off by default and asked for by the state commands only. A flow step
     // calls getState twice, and the fix for a stale session runs before every
     // action anyway (input.ensureFreshSession) — this is the report, not the
@@ -606,6 +619,9 @@ export async function waitFor(
    */
   let quietGapMs = 0;
   let quietRun = 0;
+  /** Frames the display was not rendering at all. See `isBlackFrame`. */
+  let blackFrames = 0;
+  let blackSinceStart = null;
   let lastHash = first.hash;
   let sawChange = mode === 'stable' || first.hash !== baselineHashValue;
   const changedAtStart = sawChange && mode !== 'stable';
@@ -657,6 +673,11 @@ export async function waitFor(
     sawChange,
     changedBeforeWait: changedAtStart,
     staleBaseline,
+    blackFrames,
+    // Said as an observation, never as a diagnosis: a screen can be black
+    // because the app drew black. What makes it the capture wedge is that it
+    // stays black while input is being delivered, and the caller knows that.
+    blackMs: blackSinceStart ? Date.now() - blackSinceStart : 0,
     baselineHash: baselineHashValue,
     baselineResolved,
     waitedMs: Date.now() - startedAt,
@@ -671,6 +692,23 @@ export async function waitFor(
       // A wedged capture loop must not look like a calm screen.
       const live = liveness(device.udid, state);
       if (!live.ok) return done(false, { stalled: true });
+
+      // A black frame is not evidence, in either direction.
+      //
+      // The capture wedge leaves every frame black while the whole capture path
+      // reports success, so before this a settle read the black screen as a
+      // change (the hash differs from anything) and then as a calm one (nothing
+      // moves), and returned `ok` for an action nobody could see the result of.
+      // It self-recovers most times, so the useful behaviour is to keep waiting
+      // rather than to conclude.
+      const black = isBlackFrame(currentSig(state));
+      if (black) {
+        blackFrames += 1;
+        blackSinceStart = blackSinceStart ?? Date.now();
+        await sleep(60);
+        continue;
+      }
+      blackSinceStart = null;
 
       if (!sawChange && state.hash !== baselineHashValue) sawChange = true;
 

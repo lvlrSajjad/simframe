@@ -69,6 +69,40 @@ export function signatureToHex(sig) {
   return sig.map((v) => v.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Is this frame black — not dark, black?
+ *
+ * The capture wedge (docs/BENCHMARKS.md) leaves `simctl io screenshot`
+ * succeeding and returning 0 non-black pixels of 3,162,132, and simframe's own
+ * frames go the same way: the display pipeline stops rendering while
+ * everything about the capture path keeps reporting success. It self-recovers
+ * most times and a device restart cures the rest, so the useful thing is to
+ * notice early — before a settle spends its whole budget deciding a black
+ * screen is a calm one.
+ *
+ * The signature is already computed for every frame, so this costs 32 integer
+ * comparisons and no decode. A real screen does not come close: measured on
+ * this device's Settings root, the 32 bytes ran 191–245.
+ *
+ * The threshold is a level, not a fraction, and it is on the *maximum*: one
+ * cell with anything in it is enough to say the display is rendering. That
+ * matters because a dark-mode screen, a video, or a splash on black are all
+ * legitimately near-zero in most cells and this must not call them faults.
+ *
+ * And it says "the frames are black", never "the simulator is wedged". A
+ * screen can be black because the app drew black. What makes it a wedge is
+ * that it stays black while input is being delivered, and only the caller
+ * knows that.
+ */
+export const BLACK_LEVEL = 8;
+
+export function isBlackFrame(sig, { level = BLACK_LEVEL } = {}) {
+  const bytes = typeof sig === 'string' ? hexToSignature(sig) : sig;
+  if (!bytes?.length) return false;
+  for (const b of bytes) if (b > level) return false;
+  return true;
+}
+
 export function hexToSignature(hex) {
   const out = [];
   for (let i = 0; i < hex.length; i += 2) out.push(parseInt(hex.slice(i, i + 2), 16));

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { runDaemon, DEFAULTS } from './daemon.js';
 import { bootedDevices, capabilitiesFor, listDevices, PLATFORMS, resolveDevice, screenshot, toolchainChecks } from './platform/index.js';
 import * as actions from './actions.js';
+import * as analyze from './analyze.js';
 import * as api from './index.js';
 import * as input from './input.js';
 import * as baseline from './baseline.js';
@@ -1316,8 +1317,20 @@ async function doctor({ json = false, strict = false, device } = {}) {
     if (probed.length) {
       const t0 = Date.now();
       const res = await api.getFrame(probed[0].udid);
-      add('capture', 'ok',
-        `frame #${res.state.seq} ${res.width}x${res.height} in ${Date.now() - t0}ms (age ${res.ageMs}ms)`,
+      // The wedge's whole signature is that everything here reports success.
+      // A black frame is 32 integer comparisons on a signature already
+      // computed, and it is what separates "captured a frame" from "captured
+      // a frame of a display that has stopped rendering".
+      const dark = analyze.isBlackFrame(
+        (res.state.history ?? []).find((h) => h.seq === res.state.seq)?.sig ?? null,
+      );
+      add('capture', dark ? 'warn' : 'ok',
+        `frame #${res.state.seq} ${res.width}x${res.height} in ${Date.now() - t0}ms (age ${res.ageMs}ms)`
+        + (dark
+          ? ' — and every pixel of it is black. If the device is not showing a black screen on purpose,'
+            + ' this is the display pipeline having stopped rendering; it usually recovers on its own,'
+            + ` and ${'xcrun simctl shutdown'} / boot is the cure that always works.`
+          : ''),
         { key: 'capture.frames', value: res.state.seq });
       // A wedged device produces the same nothing as a quiet one, so doctor has
       // to ask the capture loop rather than look at the frames. `fail`, not

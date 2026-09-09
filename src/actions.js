@@ -414,7 +414,10 @@ export async function runScript(
 
       const wrongTurn = wrongTurnFrom(verification);
       const note = (settled?.noVisibleChange ? ' [no visible change]' : '')
-        + (settled?.staleBaseline ? ' [baseline had already settled; re-taken from the live screen]' : '');
+        + (settled?.staleBaseline ? ' [baseline had already settled; re-taken from the live screen]' : '')
+        + (settled?.blackFrames
+          ? ` [${settled.blackFrames} black frame(s) waited through${settled.blackMs ? `, still black after ${settled.blackMs}ms` : ''}]`
+          : '');
       results.push({
         index: i,
         action: step.action,
