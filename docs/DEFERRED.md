@@ -1019,6 +1019,31 @@ wedge is diagnosable.
 Until one of those, HPI is a number this project measures deliberately, on a
 known device, and reads as a trend — which is what research §1 said it was for.
 
+### Learned stillness needs an unbiased estimator
+Phase 11's adaptive timeout is in and is safe: it can only ever shorten a wait,
+and a cold edge keeps the previous fixed default. Learned *stillness* — the
+window a screen must hold still before it counts as settled — is the half with
+the actual time in it, and the first implementation was reverted for cause.
+
+It made the Settings flow 8.0 s instead of 11.5 s and wrong with it: eight runs
+failed at step 2 with the screen still on Settings root, because step 1's
+settle returned mid-push, the identity read described the screen we had not
+left, and the graph learned `root -> root` as a verified edge and started
+predicting it. The bias is structural: the gap statistic comes from what a wait
+observed, and a wait that ends early cannot observe the pauses that come after
+it, so the window ratchets itself down.
+
+The fix is to estimate from the frame history instead, which holds every
+frame's timestamp and diff and therefore the whole transition — including the
+part that happened after the settle returned. `baseline.transitionsIn` already
+groups a history into transitions with exactly the right rule. Gaps are being
+recorded meanwhile and act on nothing.
+
+One consequence worth stating: a wrong stillness window corrupts the graph
+rather than merely slowing a flow, so this needs the perception eval harness
+before it is trusted with a wait — which is the third phase in a row to want
+that harness.
+
 ### The eval harness this project keeps needing does not exist
 Phase 5's perception eval harness — fifteen screens, three apps — is still
 unbuilt, and the de-duplication fix wanted it. What that fix got instead: unit

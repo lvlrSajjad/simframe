@@ -45,6 +45,18 @@ const gate = has('gate');
  * spread.
  */
 const passes = Math.max(1, Number(arg('passes', gate ? '3' : '1')));
+/**
+ * A pause between runs, and it is not superstition.
+ *
+ * Measured on one 8-run loop: 15.2 s, 15.2 s, then 6.9 s failing, then 25.7 s,
+ * 25.7 s, then the display wedged — and it wedged again within a couple of
+ * minutes of the same load after a device restart. Relaunching an app as fast
+ * as a script can is not what this suite is trying to measure, and a simulator
+ * asked to do it degrades and then stops rendering. The suite paces itself so
+ * the numbers describe simframe rather than the simulator's tolerance for
+ * being hammered.
+ */
+const cooldownMs = Math.max(0, Number(arg('cooldown', '1500')));
 
 const suite = baseline.loadSuite(arg('suite', baseline.SUITE_FILE)).filter((f) => !only || f.name === only);
 if (!suite.length) {
@@ -94,12 +106,18 @@ outer: for (let pass = 1; pass <= passes; pass += 1) {
     // The same start state the human baseline was recorded from: app not
     // running, on the home screen. Not part of the timed flow, and
     // deliberately not expressed as flow steps — see baseline.resetFor.
-    const reset = await baseline.resetFor(dev.udid, flow);
-    if (reset.failures.length) console.log(`  (reset: ${reset.failures.join('; ')})`);
-    await api.waitFor(dev.udid, { mode: 'stable', stableMs: 400, timeoutMs: 4000 });
-
+    // The reset and its settle live inside the same guard as the run.
+    //
+    // They did not, and a device whose display had failed threw out of
+    // `waitFor` — outside the try — killing the process with a stack trace
+    // instead of the one classification this script exists to make. An
+    // environmental failure has to be classified wherever it happens, not
+    // only where it was convenient to catch.
     let res;
     try {
+      const reset = await baseline.resetFor(dev.udid, flow);
+      if (reset.failures.length) console.log(`  (reset: ${reset.failures.join('; ')})`);
+      await api.waitFor(dev.udid, { mode: 'stable', stableMs: 400, timeoutMs: 4000 });
       res = await runScript(dev.udid, {
         steps: flow.steps,
         flowName: flow.name,
@@ -134,6 +152,7 @@ outer: for (let pass = 1; pass <= passes; pass += 1) {
         `${verdicts.filter((v) => v !== 'ok').length ? `verdicts: ${verdicts.join(',')}` : 'all ok'}`,
     );
     if (!res.ok) console.log(`     ${res.results.filter((r) => !r.ok).map((r) => r.error).join('; ')}`);
+    if (cooldownMs) await new Promise((r) => setTimeout(r, cooldownMs));
     }
   }
 }

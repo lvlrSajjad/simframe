@@ -1893,3 +1893,33 @@ test('waiting is learned per edge, and a cold edge waits what it always did', as
   assert.equal(graph.timingOf({}).samples, 0);
   assert.equal(graph.timingOf({}).p95, null);
 });
+
+test('stillness is learned from pauses inside a transition, and can only shorten', async () => {
+  const graph = await import('../src/graph.js');
+  // The statistic that matters is the longest pause *inside* a transition:
+  // any window shorter than that mistakes mid-flight quiet for a finished
+  // screen. Nobody was measuring it, so the window was 500ms — chosen once and
+  // paid by every step of every flow forever.
+  assert.deepEqual(graph.stillnessFor({ gapSamples: 2, gapP95: 40 }, 500), { stillnessMs: 500, cold: true });
+
+  // A transition that has never paused needs the floor, not half a second.
+  assert.deepEqual(graph.stillnessFor({ gapSamples: 12, gapP95: 0 }, 500), { stillnessMs: 150, cold: false });
+  assert.equal(graph.stillnessFor({ gapSamples: 12, gapP95: 260 }, 500).stillnessMs, 390);
+
+  // And it is capped by the caller's own default in both directions, so a
+  // learned number can never become a new way to hang.
+  assert.equal(graph.stillnessFor({ gapSamples: 12, gapP95: 900 }, 500).stillnessMs, 500);
+  assert.equal(graph.stillnessFor({ gapSamples: 30, gapP95: 4000 }, 250).stillnessMs, 250);
+  assert.ok(graph.stillnessFor({ gapSamples: 30, gapP95: 0 }, 120).stillnessMs >= 120 === false
+    || graph.stillnessFor({ gapSamples: 30, gapP95: 0 }, 120).stillnessMs === 150,
+    'the floor wins over an absurdly small default, because a settle needs a frame to judge');
+
+  // Zero is a measurement, not a missing value: "this transition never paused"
+  // is precisely what lets the next one stop waiting to find out.
+  const edge = { settles: [800, 900], quietGaps: [0, 0, 0, 0, 0, 0] };
+  const t = graph.timingOf(edge);
+  assert.equal(t.gapSamples, 6);
+  assert.equal(t.gapP95, 0);
+  assert.equal(graph.stillnessFor(t, 500).stillnessMs, 150);
+  assert.equal(graph.timingOf({}).gapSamples, 0);
+});

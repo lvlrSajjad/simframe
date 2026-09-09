@@ -92,6 +92,15 @@ export async function runDaemon(device, options = {}) {
   let prevSignature = null;
   /** Recent frames, so a caller can diff against whatever it last saw rather
    *  than only against the frame that happened to precede this one. */
+  // A new capture session inherits no stall.
+  //
+  // capture-health.json is cleared when a stalled loop captures a frame again,
+  // and a loop that dies while stalled never gets to. So a fresh daemon ran
+  // healthily while `doctor` reported "stalled for 221s, 60 re-attaches" from
+  // its predecessor, and the display probe — correctly, on that input — called
+  // it a simframe bug. It was: this one.
+  store.writeCaptureHealth(udid, null);
+
   let history = [];
   /** seq + timestamp for every frame still on disk, so retention can be thinned by age. */
   let ringIndex = [];

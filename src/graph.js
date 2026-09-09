@@ -348,18 +348,52 @@ export function findScreen(udid, query) {
  * 2.4 s on a screen that fetches — and because the graph is already persisted,
  * versioned and pruned.
  */
-function noteSettle(edge, settleMs) {
-  if (!Number.isFinite(settleMs) || settleMs < 0) return;
-  edge.settles = [...(edge.settles ?? []), Math.round(settleMs)].slice(-TIMING_WINDOW);
+function noteSettle(edge, settleMs, quietGapMs) {
+  if (Number.isFinite(settleMs) && settleMs >= 0) {
+    edge.settles = [...(edge.settles ?? []), Math.round(settleMs)].slice(-TIMING_WINDOW);
+  }
+  // Recorded even when zero: "this transition never paused" is exactly the
+  // observation that lets the next one stop waiting 500ms to find out.
+  if (Number.isFinite(quietGapMs) && quietGapMs >= 0) {
+    edge.quietGaps = [...(edge.quietGaps ?? []), Math.round(quietGapMs)].slice(-TIMING_WINDOW);
+  }
+}
+
+/**
+ * How long a screen must hold still on this edge before it is finished.
+ *
+ * Derived from the longest pause ever seen *inside* this transition, plus a
+ * margin, and never longer than the caller's own default — this can only make
+ * a wait shorter, never longer, which is what keeps a learned number from
+ * becoming a new way to hang.
+ *
+ * The floor is 150 ms because a settle also needs at least one fresh frame to
+ * judge, and the capture loop's own idle interval is the limit on how fast an
+ * answer can arrive.
+ */
+export const STILLNESS_FLOOR_MS = 150;
+
+export function stillnessFor({ gapSamples, gapP95 } = {}, fallbackMs) {
+  if (!Number.isFinite(gapP95) || !Number.isFinite(gapSamples) || gapSamples < COLD_SAMPLES) {
+    return { stillnessMs: fallbackMs, cold: true };
+  }
+  const margin = Math.max(100, Math.round(gapP95 * 0.5));
+  return {
+    stillnessMs: Math.max(STILLNESS_FLOOR_MS, Math.min(fallbackMs, gapP95 + margin)),
+    cold: false,
+  };
 }
 
 /** What this edge's observed settle durations say, or that it has none. */
 export function timingOf(edge) {
   const samples = edge?.settles ?? [];
+  const gaps = edge?.quietGaps ?? [];
   return {
     samples: samples.length,
     p50: metrics.percentile(samples, 50),
     p95: metrics.percentile(samples, 95),
+    gapSamples: gaps.length,
+    gapP95: metrics.percentile(gaps, 95),
   };
 }
 
@@ -377,7 +411,7 @@ export function timingFor(udid, screen, step) {
   return { ...stats, ...adaptiveTimeout(stats), known: Boolean(edge) };
 }
 
-export function record(udid, { from, action, to, kind, settleMs }) {
+export function record(udid, { from, action, to, kind, settleMs, quietGapMs }) {
   const fromKey = typeof from === 'string' ? { hash: from } : from;
   const toHash = typeof to === 'string' ? to : to?.hash;
   if (!fromKey?.hash || !toHash) return null;
@@ -444,7 +478,7 @@ export function record(udid, { from, action, to, kind, settleMs }) {
         save(udid, target);
         existing.count += 1;
         existing.lastSeen = Date.now();
-        noteSettle(existing, settleMs);
+        noteSettle(existing, settleMs, quietGapMs);
         save(udid, node);
         return node;
       }
@@ -468,6 +502,7 @@ export function record(udid, { from, action, to, kind, settleMs }) {
       count: 1,
       lastSeen: Date.now(),
       settles: Number.isFinite(settleMs) && settleMs >= 0 ? [Math.round(settleMs)] : [],
+      quietGaps: Number.isFinite(quietGapMs) && quietGapMs >= 0 ? [Math.round(quietGapMs)] : [],
     });
   }
   save(udid, node);

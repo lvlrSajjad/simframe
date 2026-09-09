@@ -424,6 +424,15 @@ case "run":
         }
         defer { control.stop() }
 
+        // A new capture session inherits no stall.
+        //
+        // capture-health.json is cleared when a stalled loop captures a frame
+        // again, and a loop that dies while stalled never gets to. So a fresh
+        // daemon captured happily while `doctor` reported "stalled for 221s,
+        // 60 re-attaches" from its dead predecessor — and the display probe,
+        // correctly on that input, called it a simframe bug. It was: this one.
+        try? store.writeCaptureHealth(nil)
+
         FileHandle.standardError.write("simframed: capturing \(device.name) (\(device.udid))\n".data(using: .utf8)!)
 
         while true {

@@ -2261,3 +2261,70 @@ before the pool — roughly the same per-frame accumulation, so the pool did not
 change the profile materially. It stays as hygiene. And a few hundred megabytes
 on a machine with tens of gigabytes cannot exhaust anything, so memory pressure
 is not the wedge either. That is the value of the number: it removed a suspect.
+
+## The wedge is load-induced, and the load was mine
+
+Better characterised than "four times in one session". One 8-run loop of
+`settings-larger-text`, each run resetting the app and relaunching it:
+
+| run | wall time | steps |
+|---|---|---|
+| 1 | 19542 ms | 4/4 |
+| 2 | 15208 ms | 4/4 |
+| 3 | 15178 ms | 4/4 |
+| 4 | 6974 ms | 3/4 |
+| 5 | 25657 ms | 1/4 |
+| 6 | 25701 ms | 1/4 |
+| 7 | — | the display wedged |
+
+It then wedged **again within a couple of minutes** of resuming the same load
+after a full device restart. So it is not a slow drift over an afternoon: rapid
+app relaunch cycling induces it in about six runs, reliably, and a restart buys
+only as long as it takes to do it again. `simctl launch` itself degrades on the
+way down — the 25.7 s runs are simctl taking that long to answer, which is the
+same fault the hosted CI runner shows at 47-55 s.
+
+Two changes follow, and neither is a workaround for a simframe bug — the
+simulator's display failing is not something simframe can fix:
+
+- The suite's flows **resume** the app instead of forcing `relaunch: true`. The
+  reset already guarantees the app starts on its root screen, so terminating it
+  again bought nothing and cost an extra terminate+launch per run. It is also
+  closer to what the human baseline did: they tapped the icon.
+- `bench-hpi` paces itself with `--cooldown` (1.5 s default) between runs.
+  Relaunching an app as fast as a script can is not what this suite measures.
+
+The user watching the simulator was the source of the diagnosis twice over —
+first "the device is blacked out", which is what identified the fault as the
+display pipeline, and then "performance gets degraded on each test", which is
+the table above.
+
+## Phase 11 so far, including a regression it caught
+
+Per-edge timing is in and persisted with the graph: a rolling window of the
+last 50 observed settle durations, `adaptiveTimeout` at p95 + max(150 ms, 20%)
+capped at Nielsen's 10 s, and cold edges (<5 samples) keeping the previous fixed
+8 s default and reporting themselves as cold. A measured tab switch drops from
+an 8000 ms budget to 240 ms.
+
+**A shorter timeout does not make a passing flow faster, and it is worth being
+explicit about why.** A settle returns as soon as the screen holds still, so the
+timeout only bounds the failure path. On four clean runs of the Settings flow
+the split is 64% waiting for the screen and 36% everything else (perception,
+locate, dispatch), and the reducible part of the waiting is the fixed 500 ms
+stillness window every step pays — not the timeout.
+
+So learned stillness was built, and then reverted for cause. It worked, in the
+sense that the flow went from 11.5 s to 8.0 s. It was also **wrong**: eight runs
+in a row failed at step 2 with the screen still showing Settings root, because
+step 1's settle returned mid-push, `screenIdentity` read the screen we had not
+left, and the graph learned `root -> root` as a verified edge and began
+predicting it. The estimator is the flaw: the gap statistic is gathered from
+what a wait itself observed, so a wait that ends early never sees the later
+pauses, the gaps read as zero, the window ratchets down, and the next wait ends
+earlier still. A self-reinforcing bias with a corrupt graph at the end of it.
+
+The gaps are still recorded and no longer act on anything. The unbiased
+estimator is available and is the next piece of work: the frame history holds
+every frame's timestamp and diff, so a transition's true motion profile can be
+computed *after* it is over rather than from inside the wait that cut it short.

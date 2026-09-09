@@ -194,8 +194,39 @@ export async function runScript(
       // How long this transition has cost before, on this screen, for this
       // action. A cold edge gets the old fixed default and says so; a measured
       // one gets p95 plus a margin. Research §7.
-      const stillness = step.stableMs ?? stableMs;
       const learned = verify && beforeScreen?.hash ? graph.timingFor(udid, beforeScreen, step) : null;
+      // How long this screen must hold still before it counts as settled.
+      //
+      // 500 ms was a constant paid by every step of every flow, and it is the
+      // reducible half of a settle: the rest is the transition genuinely
+      // taking time. An edge whose transition has never paused mid-flight
+      // needs 150 ms of quiet, not 500. Capped at the caller's own value, so
+      // this can only ever shorten a wait.
+      // NOT YET USED TO DECIDE ANYTHING, and the reason is worth the space.
+      //
+      // `graph.stillnessFor` computes a shorter window from the longest pause
+      // ever observed inside this transition, and measured live it made the
+      // Settings flow 8.0 s instead of 11.5 s — and wrong. Eight runs in a row
+      // failed at step 2 with the screen still showing Settings root, because
+      // step 1's settle returned mid-push, `screenIdentity` then read the
+      // screen we had not left yet, and the graph learned root -> root as a
+      // verified edge and started predicting it.
+      //
+      // The flaw is in the estimator, not the idea: the gap statistic is
+      // gathered only from what a wait itself observed, so a wait that ends
+      // early never sees the pauses that come later, the gaps look like zero,
+      // the window ratchets down, and the next wait ends earlier still. A
+      // self-reinforcing bias with a wrong graph at the end of it.
+      //
+      // The unbiased estimator is available and is a separate piece of work:
+      // the frame history holds every frame's timestamp and diff, so the true
+      // motion profile of a transition can be computed *after* it is over
+      // rather than from inside the wait that cut it short. Until then the
+      // gaps are recorded and not acted on — measuring is safe, and this is
+      // Phase 11's own rule that a learned number may only ever shorten a
+      // wait, applied to itself.
+      const stillness = step.stableMs ?? stableMs;
+      const stillnessPlan = learned ? graph.stillnessFor(learned, stillness) : { cold: true };
       // A settle is not satisfied until the screen has held still for
       // `stillness`, so a budget below that can never be met — and the learned
       // p95 is measured from waits that include the stillness window, which
@@ -224,8 +255,20 @@ export async function runScript(
           // timeout nobody can explain is how a fixed sleep comes back as a
           // constant with a comment.
           budgetMs,
+          stillnessMs: stillness,
+          quietGapMs: w.quietGapMs,
           timing: learned
-            ? { p50: learned.p50, p95: learned.p95, samples: learned.samples, cold: learned.cold }
+            ? {
+              p50: learned.p50,
+              p95: learned.p95,
+              samples: learned.samples,
+              cold: learned.cold,
+              gapP95: learned.gapP95,
+              gapSamples: learned.gapSamples,
+              // What it *would* have been, for the eval that has to happen
+              // before this is trusted with a wait.
+              stillnessWouldBe: stillnessPlan.stillnessMs ?? null,
+            }
             : null,
         };
       };
@@ -281,6 +324,11 @@ export async function runScript(
           graph.record(udid, {
             from: beforeScreen, action: step, to: afterScreen, kind,
             settleMs: settled?.ok ? settled.waitedMs : undefined,
+            // The pause statistic is worth having from any settle that saw the
+            // screen move, satisfied or not: a transition that paused for
+            // 400ms and then timed out is exactly the case a 150ms stillness
+            // window would have got wrong.
+            quietGapMs: settled?.sawChange ? settled.quietGapMs : undefined,
           });
           carriedScreen = afterScreen;
         }

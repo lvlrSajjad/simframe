@@ -536,6 +536,21 @@ export async function waitFor(
   const deadline = startedAt + timeoutMs;
   const startSeq = first.seq;
   let last = first;
+  /**
+   * The longest pause *inside* this transition, in ms.
+   *
+   * This is the statistic a stillness window exists to defeat: a transition
+   * that pauses for 180 ms mid-flight will be mistaken for a finished screen
+   * by any window shorter than that. Nobody was measuring it, so the window
+   * was a constant — 500 ms, chosen once, paid by every step forever.
+   *
+   * Tracked as the highest `stableForMs` observed before the screen moved
+   * again. Reported so a caller can learn it per edge; a settle that ends
+   * without a second change has no gap to report and says 0.
+   */
+  let quietGapMs = 0;
+  let quietRun = 0;
+  let lastHash = first.hash;
   let sawChange = mode === 'stable' || first.hash !== baselineHashValue;
   const changedAtStart = sawChange && mode !== 'stable';
 
@@ -544,6 +559,7 @@ export async function waitFor(
     state: last,
     satisfied,
     mode,
+    quietGapMs,
     sawChange,
     changedBeforeWait: changedAtStart,
     baselineHash: baselineHashValue,
@@ -562,6 +578,17 @@ export async function waitFor(
       if (!live.ok) return done(false, { stalled: true });
 
       if (!sawChange && state.hash !== baselineHashValue) sawChange = true;
+
+      // A pause that turned out not to be the end of the transition. Only
+      // pauses followed by more movement count: the quiet at the end of a
+      // settle is the answer, not a gap.
+      if (state.hash !== lastHash) {
+        if (quietRun > quietGapMs) quietGapMs = quietRun;
+        quietRun = 0;
+        lastHash = state.hash;
+      } else if (Number.isFinite(state.stableForMs)) {
+        quietRun = Math.max(quietRun, state.stableForMs);
+      }
 
       // Some controls barely move the screen at all — a radio dot, a checkbox,
       // a button changing state. Waiting the full timeout for a change that

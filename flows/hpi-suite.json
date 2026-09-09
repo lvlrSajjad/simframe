@@ -22,8 +22,7 @@
     "steps": [
       {
         "launch": {
-          "value": "com.apple.Preferences",
-          "relaunch": true
+          "value": "com.apple.Preferences"
         }
       },
       {
@@ -58,8 +57,7 @@
     "steps": [
       {
         "launch": {
-          "value": "com.apple.MobileAddressBook",
-          "relaunch": true
+          "value": "com.apple.MobileAddressBook"
         }
       },
       {
