@@ -117,3 +117,45 @@ not this rebuild).
 - `docs/research/` the two research reports (architecture audit; on-device perception)
 - `docs/PHASES.md` the phased build plan and the prompt for each phase
 - `docs/BENCHMARKS.md` measured numbers, appended per phase
+
+## Human parity (Phases 10–16)
+
+The goal of this series is that an agent using simframe reaches or beats a
+human tester's speed and accuracy. Rationale and sources are in
+`docs/research/03-human-parity.md`; prompts are in `docs/PHASES-HUMAN-PARITY.md`.
+
+**Fixed decisions.**
+
+- Every phase is scored on two numbers: **model turns removed** and **Human
+  Parity Index** (`simframe hpi`). A phase that does not move one of them is
+  not done.
+- The **escalation log** (`~/.simframe/<udid>/escalations.jsonl`, schema in
+  research §8) is the steering wheel. After Phase 10, the reason breakdown in
+  `docs/ESCALATIONS.md` decides which faculty is built next; the default order
+  in PHASES-HUMAN-PARITY.md is a default, not a commitment. Every escalation
+  must carry one of the five reasons; "unknown" is not a reason.
+- **Verify barrier.** Nothing local — reflex, speculation, exploration, icon
+  inference — may perform an action whose label matches the destructive
+  vocabulary (Delete, Remove, Pay, Send, Sign out, Reset…), leaves the app, or
+  runs on an edge with a prior `unexpected-*` verdict. Those wait for confirmed
+  perception; when in doubt, escalate. A model call is cheaper than a wrong tap.
+- **Reflexes are data, not code.** Trigger → action → escalate-instead lives in
+  a locale-keyed file. A reflex fires at most once per trigger per screen; the
+  second occurrence is an escalation. Every firing is logged and shown to the
+  human in the flow summary.
+- **Waiting is learned, not fixed.** No fixed sleeps anywhere after Phase 11.
+  Timeouts are p95 + margin per graph edge; the hard cap is 10 s.
+- **Perception is incremental with a safety valve.** ROI/damage-rect perception
+  always falls back to full perception on an unrecognised fingerprint and
+  unconditionally every 10th settle. Full perception stays as ground truth for
+  the perception eval harness.
+- **Exploration is bounded.** Six actions per attempt, then escalate with the
+  partial map attached. Never explore when a graph path exists.
+- **Human baselines are measured, not assumed.** `simframe baseline` records
+  real humans on the same simulator; medians and IQR, N≥5, re-collected when
+  the app changes. HPI is a trend metric, not a claim.
+- **CI gates on HPI.** The `bench` job fails on a >10% HPI_time regression or
+  any HPI_accuracy drop against the committed baseline.
+
+**Still deferred:** Phase 9 (Tier-2 local model), Android accessibility APK
+(8b), non-English reflex/confirm vocabulary.
