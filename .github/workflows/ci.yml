@@ -30,6 +30,17 @@ jobs:
       - name: The package ships every build input
         run: node scripts/check-package.mjs
 
+      # Client work is not repo material and one bundle id reached two public
+      # commit diffs before anything was checking. The denylist is a repository
+      # secret rather than a file, because a file listing what must not be in
+      # the repo is a puzzle that solves itself. Without the secret this step
+      # says it checked nothing and passes, which is what keeps it alive on
+      # forks instead of being switched off.
+      - name: Nothing private entered the repo
+        env:
+          SIMFRAME_PRIVATE_STRINGS: ${{ secrets.SIMFRAME_PRIVATE_STRINGS }}
+        run: node scripts/check-private.mjs
+
       - name: The packaged tarball can actually build the daemon
         # No pipe to `tail` here. `swift build | tail -3` reports tail's exit
         # code, so the previous version of this step could not fail — the one

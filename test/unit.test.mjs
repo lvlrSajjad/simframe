@@ -2041,3 +2041,28 @@ test('a recalled screen map says how old it is', async () => {
   assert.equal(view.recalledNote(null), null);
   assert.equal(view.recalledNote({ entry: {} }), null);
 });
+
+test('the private-string guard reports where, never what', async () => {
+  const g = await import('../scripts/check-private.mjs');
+
+  // Both sources, de-duplicated, lowercased, comments and blanks dropped.
+  assert.deepEqual(
+    g.patternsFrom({ env: 'Alpha.One,beta.two', file: '# a comment\n\nBETA.TWO\ngamma.three\n' }),
+    ['alpha.one', 'beta.two', 'gamma.three'],
+  );
+  // A pattern of one or two characters matches everything, which is a check
+  // that only ever fails and therefore only ever gets turned off.
+  assert.deepEqual(g.patternsFrom({ env: 'a,ab,abc' }), ['abc']);
+  // No list is not an empty list of rules, it is no rules — and the caller
+  // treats that as "checked nothing" rather than "found nothing".
+  assert.deepEqual(g.patternsFrom({}), []);
+
+  const text = 'clean line\nhas com.example.client in it\nalso Com.Example.Client twice com.example.client\n';
+  const hits = g.offendingLines(text, ['com.example.client']);
+  assert.deepEqual(hits, [{ line: 2, patterns: 1 }, { line: 3, patterns: 1 }]);
+  // The whole point: the report carries a location and a count, and the
+  // matched text appears nowhere in it — so a failed run is safe to paste into
+  // an issue, a CI log, or a conversation with an agent.
+  const printed = JSON.stringify(hits);
+  assert.ok(!printed.includes('com.example.client'), 'a finding must not restate the string it found');
+});

@@ -120,6 +120,108 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 16. The fingerprint gate is intermittent: failed on the 0.8.0 push, passed on
    the next with nothing changed.
 
+### The route — where each item sits against the phases
+
+The list above is an ordering by cost of neglect. This is the same items placed
+against the phase plan, because several of them are not "before the next phase"
+in general — they are *before a specific phase*, for a specific reason, and two
+of them are cheap enough that doing them late is just paying twice.
+
+The rule used throughout: **a phase may not be built on top of a measurement or
+a threshold that is known to be wrong.** Every gate below is an instance of it.
+
+**Gate A — before any phase at all.** These make every subsequent phase's
+number mean something.
+
+- **1. The stale settle baseline.** Not a Phase 12 prerequisite in particular:
+  a graph that records `root → root` makes *every* later phase's HPI a
+  measurement of a corrupt graph. It is also a logic fix with no threshold in
+  it, so nothing gates it. First.
+- **14. A session id on each escalation record.** An hour's work, and CLAUDE.md
+  makes the escalation breakdown the thing that chooses which faculty comes
+  next. Choosing Phase 12's contents from a log that silently pools two agents'
+  sessions is choosing from the wrong data. Do it before the choice, not after.
+- **22. Detect an all-black frame early.** Filed under P4 as the wedge's
+  consolation prize, and it belongs here for a duller reason: it pays for
+  itself in every benchmarking session from now on. The wedge cost three
+  restarts and two confounded A/B rounds in this session alone.
+
+**Gate B — before Phase 12 (reflexes).** A reflex acts locally, with no model
+call, and is guarded by matching a label against a destructive vocabulary. So
+Phase 12 builds a *safety* mechanism on top of label matching and verdicts.
+
+- **4. Label resolution.** Not a hole today — `confirm` matches with regex
+  tiers and the destructive vocabulary from CLAUDE.md is **not implemented at
+  all yet** (`grep -rn destructive src/` finds nothing; Phase 12 step 5 builds
+  it). It becomes one the moment that guard exists, because `nameScore` gives
+  a flat 0.86 to a one-character prefix and the guard would inherit that
+  looseness in both directions. Needs 2 (it is a ranking change), so: 2 then 4
+  then 12.
+- **3. Small-delta change detection.** A reflex whose trigger is a transient
+  `no-visible-change` will fire on every switch, radio and segment tap, because
+  those are eight times below the change threshold. Building a retry reflex on
+  a fabricated verdict is building a retry that fires on working actions.
+  Needs 2.
+- **8. `sim_launch` fronting.** `prep` launches apps; a launch that reports
+  success without fronting makes every prep step a lie. Cheap and independent.
+- **6. Ambiguity at the first frame.** A reflex fires "only when the trigger
+  matches with confidence above the intent-resolution threshold" — an answer
+  that costs 30 s cannot be on the hot path of a reflex.
+
+**Gate C — before Phase 13 (ROI perception).**
+
+- **2. The eval harness.** Phase 13's own prompt says to build it *inside*
+  Phase 13, step 5. That is now wrong, and this is the deviation from the
+  written plan: four items ahead of Phase 13 need it, so it comes out of 13 and
+  becomes its own piece of work before Gate B. It is the single most-blocking
+  item in this file.
+- **5. A field's contents need an authoritative source.** Phase 13's whole
+  method is carrying elements over from the previous list for anything outside
+  the ROI set. That is right for structure and wrong for content — it would
+  *institutionalise* the staleness that cost a real session two wrong
+  conclusions. So either 5 lands first, or Phase 13's ROI set must
+  unconditionally include every content-bearing element, which is a constraint
+  worth writing into the phase rather than discovering during it.
+- **10, 11. The unbiased stillness estimator and the structural window.** Both
+  are Phase 11's unfinished half, both need 2, and both are on the perception
+  path Phase 13 rewrites. Doing them after 13 means doing them twice.
+
+**Gate D — before Phase 15 (goal-directed exploration).**
+
+- **7. The nav-bar back chevron.** Exploration is bounded at six actions and
+  then has to *get back*. A control that is invisible to the map, to
+  `all: true`, and to `sim_find` asked in plain language is a control
+  exploration cannot rely on, and coordinates are not a plan. Full icon
+  semantics is Phase 16; what Gate D needs is narrower and cheaper — the
+  nav-bar left slot with a small glyph in it is a back button by position, and
+  position is already computed.
+
+**Gate E — before trusting a phase's number in CI, not before the phase.**
+
+- **15, 16.** The `bench` gate cannot gate on a hosted runner, and the
+  fingerprint gate is intermittent. Neither blocks work; both mean a green CI
+  says less than it appears to. Worth fixing before anyone else relies on it.
+
+**Ungated — no phase depends on these.**
+
+- **17–21** (default-device preference helper, `android.internals.js`,
+  `getPasteboard` dispatch, non-English vocabulary, OCR confusables). **21**
+  should ride with **4**, since both are changes to comparison.
+- **23** the Apple feedback report, which is correspondence rather than work.
+- **Phase 9** (Tier-2 local model) and **8b** (the Android accessibility APK)
+  stay deferred, unchanged.
+
+**So the order is:** 1, 14, 22 → 2 → 5, 10, 11 → 3, 4 (+21), 6, 8 →
+**Phase 12** → **Phase 13** → 7 → **Phase 15** → **Phase 14**, **Phase 16**.
+
+Two notes on that order. Phase 14 (anticipation) moves behind 15 because
+speculative resolution on top of a resolver that silently picks the wrong
+element is the least safe thing in the whole plan — it would act on a guess
+before anyone asked for it. And Phase 12 sits ahead of Phase 13 even though 13
+is where HPI_time moves, because every failure a real user hit this week was a
+Phase 12 failure, and a tool that is fast on the suite and helpless on a fresh
+install has optimised the wrong number.
+
 ### Phases still unbuilt
 
 **12** reflexes (specified by 12–13 above), **13** ROI perception (gated by 2),
@@ -151,17 +253,47 @@ moves; Phase 12 is where the real-app failures are.
 
 ### Waiting on the user, not on work
 
-- The client bundle id in two public commit diffs. Three options were laid out:
-  rewrite and force-push *plus* a GitHub Support request to garbage-collect
-  unreachable objects; delete and recreate the repo; or do nothing, since no
-  release tag and no npm tarball contains it. A rewrite changes every tag SHA,
-  so it belongs *before* a release rather than after. **Do not start one
-  without an explicit, specific instruction.**
-- Two colleagues' frame caches under `~/.simframe` (72 MB + 62 MB), the cache
-  for deleted device `101D4EEC-…`, and the `TEST-*` fixtures. The decision was
-  made to delete all four; the sandbox blocked the recursive delete, so it is
-  one command the user runs:
-  `cd ~/.simframe && rm -rf B55AB0AE-… CDB00FD6-… 101D4EEC-… TEST-*`
+- ~~The client bundle id in two public commit diffs.~~ **Decided, 2026-09-10:
+  the history stays as it is.** Delegated to me, so the reasoning is recorded
+  here rather than in a conversation.
+
+  Against a rewrite: its costs are certain and its benefit is not. A force-push
+  changes every commit SHA from the rewrite point forward, which changes the
+  tag SHAs — and those tags are what npm's provenance attestations and the MCP
+  Registry entry were built against, plus anybody's `git checkout v0.8.0`.
+  Meanwhile the string is very likely already beyond recall: unreachable
+  objects stay fetchable by SHA until GitHub garbage-collects, which is a
+  best-effort support request, and GitHub code search, the GH Archive dataset
+  and Software Heritage all take copies. A rewrite would trade working
+  provenance for a probability. Deleting and recreating the repo costs the same
+  provenance plus the npm link and every issue, for the same probability.
+
+  And the thing being protected is not a secret. A bundle id is a public
+  identifier — it is in an App Store URL. What the two diffs disclose is an
+  *association*, that this project was once pointed at that app, and a rewrite
+  that leaves archived copies intact does not remove the association, it just
+  makes it slightly harder to find while breaking things that work.
+
+  So: history unchanged, and the effort goes to the half still under our
+  control, which is recurrence. `scripts/check-private.mjs` fails a commit
+  containing any denied string and **prints only the file and line, never the
+  match** — so its own output is safe to paste into an issue, a CI log, or a
+  conversation with an agent, which is where the last one would have gone. The
+  denylist deliberately lives outside the repo (`.private-strings`, gitignored,
+  or `$SIMFRAME_PRIVATE_STRINGS` as a CI secret): a file in the repo listing
+  what must not be in the repo is a puzzle that solves itself, and a file of
+  hashes is a confirmation oracle for anyone who already has a candidate. With
+  no list it checks nothing and passes, because a check that fails on every
+  fork is a check somebody turns off.
+
+  **To finish this:** add `SIMFRAME_PRIVATE_STRINGS` as a repository secret,
+  and put the same lines in a local `.private-strings`. Neither file nor secret
+  is in this repo, so nothing about this entry names anything.
+
+  Revisit only if the association is ever actually a problem, at which point
+  the rewrite is still available and the calculation will have new facts in it.
+- ~~Two colleagues' frame caches, the cache for a deleted device, and the
+  `TEST-*` fixtures.~~ **Cleared, 2026-09-10.**
 - The human baseline JSONs are committed and therefore public: medians, IQRs
   and inter-transition intervals for one person, no name attached. Flagged so
   it is a choice rather than an accident.

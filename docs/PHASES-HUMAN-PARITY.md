@@ -97,6 +97,15 @@ we wait and how we describe it.
 
 ---
 
+> **Before Phase 12, and before Phase 13, read the route in
+> `docs/DEFERRED.md`.** Five things now sit between here and Phase 12, and one
+> of them changes this file: the perception eval harness is written into Phase
+> 13 step 5, and four items ahead of Phase 13 need it, so it comes out of 13
+> and happens first. Phase 12 also depends on label resolution and the change
+> detector being fixed, because a reflex is a *safety* mechanism built on label
+> matching and on verdicts, and both are currently miscalibrated in ways that
+> are measured rather than suspected.
+
 ## Phase 12 — Reflexes: local recovery before escalation
 
 ```
