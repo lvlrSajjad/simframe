@@ -1,6 +1,7 @@
 # simframe — project instructions for Claude Code
 
-simframe gives coding agents eyes, hands and memory for the iOS Simulator.
+simframe gives coding agents eyes, hands and memory for the iOS Simulator and
+for Android emulators.
 We are rebuilding the engine underneath it. These decisions are settled; do not
 relitigate them. Rationale and benchmarks live in `docs/research/` — read the
 relevant section when you need a symbol name, a number, or a threshold.
@@ -69,10 +70,13 @@ never obeyed it.
 
 Android is the second backend and it is real, not planned: `src/platform/
 android.js` lists devices, launches apps, grants permissions and captures frames
-at 21 ms through the emulator console, and every layer above the boundary — the
+through the emulator console — 20 ms for a screenshot, 41 ms for a frame with
+the resize that makes it readable — and every layer above the boundary — the
 frame store, settle, the fingerprint, the screen map, refs, the graph — runs on
-it unmodified. It cannot act yet: there is no input path and no accessibility
-tree. Two rules follow from that and both are load bearing. A backend declares
+it unmodified. It acts, too, since 0.7.0: tap, swipe, text and keys over the
+console, and the clipboard over the emulator's gRPC endpoint. What it does not
+have is an accessibility tree, and it says so rather than borrowing the other
+platform's vocabulary. Two rules follow from that and both are load bearing. A backend declares
 its own `capabilities`, because `doctor` asked about an emulator once reported
 "input driver: idb", which is a claim about a tool that has never spoken to an
 Android device. And a layer a platform does not have is `optional` with a

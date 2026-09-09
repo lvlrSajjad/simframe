@@ -2,10 +2,12 @@
   "name": "simframe",
   "version": "0.7.0",
   "mcpName": "io.github.lvlrSajjad/simframe",
-  "description": "Always-warm iOS Simulator frames: agents read the screen in ~20ms instead of waiting on screenshots. MCP server + CLI.",
+  "description": "Always-warm iOS Simulator and Android emulator frames: agents read the screen in ~20ms instead of waiting on screenshots. MCP server + CLI.",
   "keywords": [
     "ios",
     "simulator",
+    "android",
+    "emulator",
     "mcp",
     "model-context-protocol",
     "claude",

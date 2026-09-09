@@ -129,20 +129,25 @@ not silent either.
 None of these is hard. They are here because they existed only in a
 conversation, and this file is where a status is supposed to live.
 
-- **`server.json`'s description still says iOS only.** *"Always-warm iOS
-  Simulator frames: agents read the screen in ~20ms instead of screenshotting"*
-  is what the MCP Registry shows, and Android is the headline of 0.7.0. The
-  description only reaches the registry on a publish, so it rides along with
-  whatever ships next rather than justifying a release of its own.
-- **`doctor` with no `--device` fans out across every booted device.** It reports
-  per-device layers for all of them, which means it starts capture on each and
-  writes frames for each. On a shared machine that reaches devices somebody else
-  is using: it did, during this session, on a colleague's simulator. Nothing
-  read their screen content and nothing left the machine, but the default is too
-  broad. Options, in increasing order of nerve: prefer one device and say which,
-  ask before touching a device with a live client heartbeat, or keep the fan-out
-  and skip devices held by another client. The one-writer guard already knows
-  which those are — `stop --all` refuses them correctly.
+- ~~**`server.json`'s description still says iOS only.**~~ **Fixed, 0.7.1**, as
+  predicted, by riding along with the next release — together with
+  `package.json`'s description and its keywords, which had no `android` in them
+  either. `README.md`'s headline and `CLAUDE.md`'s opening line said the same
+  thing and are fixed too. The pattern is worth naming: the version string was
+  kept in step by a hook, and every *prose* claim about what the tool is drifted
+  independently, in five files, for a whole release.
+- ~~**`doctor` with no `--device` fans out across every booted device.**~~
+  **Fixed, 0.7.1**, with the first of the listed options and a little of the
+  third. *Listing* every booted device is free and stays. *Probing* — the part
+  that starts a capture loop and reads frames — now goes to a device already
+  running its own capture loop, or to the only booted device, and otherwise to
+  none, with a `warn` naming the flag that would pick one. Two related fixes
+  fell out of writing it: `--device X` with a space now parses (it set the flag
+  to `true` and resolved a device named "true", and the space form is exactly
+  how `doctor`'s own advice reads), and a cleanup that cannot stop a loop it
+  started now says so instead of `catch { /* best effort */ }` — a refused stop
+  used to leave a capture loop running on somebody else's machine while doctor
+  reported a clean bill of health.
 - **The release workflow creates no GitHub Release.** It publishes to npm and
   the MCP Registry off a `v*` tag and stops. Nothing is missing, but the commit
   messages in this project are detailed enough to be release notes, and nobody
@@ -345,13 +350,25 @@ existed on a platform where `swipe` did not. The coordinate space is device
 pixels, settled by watching the touch driver report `0x3fff` for a point at half
 the screen rather than by reading the help text.
 
-**What is still open is the `paste` *step*, not the clipboard.** Putting text on
-the Android clipboard works (see below). But the step then long-presses the
-field, which raises a paste *menu* on iOS and does nothing useful on Android,
-where the completion is a tap and `KEYCODE_PASTE` — a key the vocabulary now
-has. So `paste` on Android places the text and does not deliver it. Small, and
-the kind of half-working that is worse than absent, because the step reports
-success.
+**The `paste` *step* was broken, and not only on Android — fixed, 0.7.1.** This
+entry used to say "open on Android". That was wrong in a way worth keeping on
+the page: the step set the pasteboard, long-pressed the field and returned
+*"placed text on the pasteboard"*, and **nothing ever issued the paste on either
+platform**. iOS had the mechanism and did not use it — the daemon's `paste` is
+pbcopy *plus* Cmd-V, which is why `type` worked — and Android had `KEYCODE_PASTE`
+sitting unused in its own `KEYS` map. Filing it as a platform gap is what hid
+it: an entry that names one platform stops anyone checking the other.
+
+The fix is `input.pasteText`, which sets the pasteboard **and** delivers the
+keystroke (the platform's own key where there is one, the daemon's Cmd-V
+otherwise) and **throws** where it can neither — a step that cannot do what it
+says has to say so. The step now focuses the field through the same `focusField`
+helper `type` uses, so it reports when the field never visibly took focus.
+
+Reached through `sim_type_into` with `paste: true`, this was the worst shape a
+bug can take here: `paste` is in `ACTION_STEPS`, so the edit menu appearing
+satisfied `settle`, `sawChange` came back true, and the graph could record an
+edge for a field that stayed empty.
 
 ### The capture loop's recovery path has no test — fixed
 A display port torn down under a live daemon left capture dead for six minutes
@@ -549,6 +566,77 @@ Everything the reviewer raised is now closed except where noted:
 **Not fixed:** no `autoreleasepool` in the tree walk — up to 4000 nodes of
 autoreleased objects accumulate until the read returns. Memory pressure only,
 and free to fix whenever that file is next open.
+
+## What an independent review of 0.7.0 found
+
+Two peers were pointed at the release: one reviewing the source read-only, one
+installing the published tarball on a clean prefix. Seven findings, every one
+verified against the source before it was believed. Six are fixed in 0.7.1 and
+are recorded above or below; what follows is the residue — the things the review
+raised that are *decisions* rather than bugs, so they belong here rather than in
+a commit.
+
+The review's own lesson is the cheapest thing in it: **the highest-value
+question to ask a reviewer is "what reports success without doing the work",**
+and asking it found a bug that had been filed for a whole release under the
+wrong platform. Three of the seven were of that shape.
+
+### The Android backend has ~970 lines and two assertions
+Fixed in 0.7.1 only where a fix was one line. The coverage gap is real and
+mostly *pure* functions, which is the annoying part — none of this needs a
+device:
+
+- `toPixels` — points→pixels and its off-screen throw. This is the arithmetic
+  whose absence produced the `393x700pt` wrong-tap bug, and it has no test.
+- `geometry`'s parse of `wm size; wm density`, and `fetchDevices`' parse of
+  `adb devices -l` plus the batched `getprop` block.
+- `setPermission`'s read-back — the declared/actionable/undeclared/disagreed
+  split is the most intricate reasoning in the file and the thing that makes
+  Android permissions honest.
+- `completePng`'s IEND check, `protoString`/`firstString`, `consolePort`, the
+  `KEYS` normalisation, and `ConsoleSession`'s OK/KO framing.
+
+**Why they are still untested, which is the part worth writing down.** Testing
+them means exporting them, and a backend exporting anything but its one
+`platform` object is the rule `CLAUDE.md` sets and a test enforces. So this is a
+choice between two rules, and the options are: a `__test` property on the
+platform object (ugly, honest, and the fake-backend surface test would need to
+know about it); a sibling `android.internals.js` the backend imports and the
+test may too; or leaving the arithmetic that once mis-aimed every tap untested.
+The second is probably right. It was not done in 0.7.1 because a release fixing
+seven confident-wrong-answer bugs is not the place to also restructure a module.
+
+One item on that list is a possible bug rather than a gap: `ConsoleSession`'s
+response matcher is unanchored, so an `OK` or `KO` *substring* inside a response
+line would terminate the read — an AVD or device model containing those letters
+would do it. Too speculative to fix blind; five lines of test would settle it.
+
+### `getPasteboard` exists on the Android backend and cannot be reached
+It is on the platform object and has no dispatch wrapper in `platform/index.js`,
+so nothing above the boundary can call it, and iOS has no counterpart. It got
+there because the surface test checks that every `PLATFORM_SURFACE` member is
+*present* on a real backend, and only checks "nothing more than the surface"
+against the *fake* one. Harmless today — it exists to make the setter checkable
+in development — but it is an asymmetry the tests were meant to catch and
+didn't. Either wrap it on both platforms or take it off the object.
+
+### Physical Android devices are filtered out of the listing — decided
+`adb devices` lists phones as readily as emulators, and `fetchDevices` listed
+whatever it was handed while `ownsUdid` claimed emulator serials only. 0.7.1
+filters the listing to emulator serials, so listing and routing agree.
+
+The decision inside that fix: a plugged-in phone is now **invisible** rather
+than listed-and-broken. Physical devices are a stated non-goal, and this list
+means "devices simframe can drive". The alternative — list it and refuse it with
+a clear reason — is friendlier to someone wondering why their phone is missing,
+and is the better answer the day physical devices stop being a non-goal. Worth
+revisiting then, not before.
+
+A quieter finding rode along with it: the unit test asserting that listing and
+routing agree **would have failed** on any machine with an Android phone
+attached. It passed everywhere because nobody testing this project had one
+plugged in. A test whose result depends on what is plugged into the host is not
+a test, and this one had been green for a phase.
 
 ## Known and unresolved
 

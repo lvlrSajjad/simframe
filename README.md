@@ -4,11 +4,11 @@
 [![npm](https://img.shields.io/npm/v/simframe.svg)](https://www.npmjs.com/package/simframe)
 [![license](https://img.shields.io/npm/l/simframe.svg)](./LICENSE)
 
-**Eyes, hands and memory for an agent driving the iOS Simulator.**
+**Eyes, hands and memory for an agent driving the iOS Simulator or an Android emulator.**
 
 [Website](https://lvlrsajjad.github.io/simframe/) · [npm](https://www.npmjs.com/package/simframe)
 
-An agent driving the iOS Simulator is slow for three reasons, and only the first
+An agent driving a simulator is slow for three reasons, and only the first
 one is obvious:
 
 1. **Every look is a wait.** `simctl io screenshot` costs ~130 ms of blocking
@@ -143,7 +143,7 @@ boundary hands it frames and nothing above it knows what a simulator is.
 | Read labels + coordinates from pixels | yes | the same Vision OCR + CV, off the same PNG |
 | Screen map, refs, screen memory, the graph | yes | unchanged above the boundary |
 | Tap, type, swipe, keys | yes | the console's `event mouse` as a real down/move/up, `event text` for characters, `input keyevent` for keys |
-| Clipboard | yes | the emulator's gRPC `setClipboard`, over `node:http2`, no dependency |
+| Clipboard, and `paste` into a field | yes | the emulator's gRPC `setClipboard`, over `node:http2`, no dependency, then `KEYCODE_PASTE` to deliver it |
 | List/resolve devices, launch, terminate, open a URL, permissions | yes | `adb`, with the permission state read back off the device |
 | Accessibility tree | **not available (OCR + CV only)** | `uiautomator dump` costs **2,012 ms** a read, against 45 ms for the iOS tree. See [`docs/DEFERRED.md`](docs/DEFERRED.md) |
 
@@ -152,6 +152,17 @@ boundary hands it frames and nothing above it knows what a simulator is.
 simframe devices          # ● Small_Phone_API_36  Android 16 (API 36)  emulator-5554
 simframe ui --device=emulator-5554
 simframe do --device=emulator-5554 flow.json
+```
+
+A host with a booted simulator **and** a booted emulator has no default, and
+simframe will not pick one for you: preferring iOS because it came first would
+tap a simulator while you were driving an emulator, and acting on the wrong
+device is worse than refusing. So a command with no device names both and stops.
+`--device` answers it per command; `SIMFRAME_DEVICE` answers it per shell:
+
+```bash
+export SIMFRAME_DEVICE=emulator-5554
+simframe ui               # the emulator, without saying so every time
 ```
 
 The tree is a deliberate omission, not an oversight. Making it fast needs a
@@ -517,7 +528,13 @@ simframe frame --out=now.png   # newest frame, native resolution, to a file
 simframe strip --count=6       # contact sheet, for an animation
 simframe doctor --strict       # any degraded layer is a non-zero exit
 simframe start / status / stop [--force] / devices
+simframe ui --device=emulator-5554      # or export SIMFRAME_DEVICE once
 ```
+
+`--device` takes `--device=X` and `--device X` alike. It used to take only the
+first: the space form set the flag to `true` and then resolved a device named
+"true", which is a poor answer to a flag `doctor`'s own advice tells you to
+type.
 
 ### The Claude Code skill
 
