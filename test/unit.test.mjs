@@ -2042,31 +2042,40 @@ test('a recalled screen map says how old it is', async () => {
   assert.equal(view.recalledNote({ entry: {} }), null);
 });
 
-test('the private-string guard reports where, never what', async () => {
+test('no third-party bundle id, and the report never restates one', async () => {
   const g = await import('../scripts/check-private.mjs');
 
-  // Both sources, de-duplicated, lowercased, comments and blanks dropped.
-  assert.deepEqual(
-    g.patternsFrom({ env: 'Alpha.One,beta.two', file: '# a comment\n\nBETA.TWO\ngamma.three\n' }),
-    ['alpha.one', 'beta.two', 'gamma.three'],
-  );
-  // A pattern of one or two characters matches everything, which is a check
-  // that only ever fails and therefore only ever gets turned off.
+  // The rule is a pattern, not a list, because simframe drives *your* app and
+  // has no relationship with any particular one. A denylist assumes there is a
+  // single app to protect and needs configuring, and the first version of this
+  // sat passing — waiting for a secret nobody had supplied — while a
+  // third-party app's field notes were committed and pushed.
+  assert.equal(g.isAllowedIdentifier('com.apple.Preferences'), true);
+  assert.equal(g.isAllowedIdentifier('com.android.settings'), true);
+  assert.equal(g.isAllowedIdentifier('com.example.app'), true);
+  assert.equal(g.isAllowedIdentifier('com.someones.realapp'), false);
+
+  // Ordinary property chains look exactly like bundle ids until the head is
+  // required to be a real reverse-DNS prefix, which is what keeps this usable.
+  for (const safe of ['res.state.seq', 'registry.paths.dir', 'import.meta.url', 'process.env.HOME']) {
+    assert.deepEqual(g.offendingLines(`const x = ${safe};`), [], `${safe} must not flag`);
+  }
+  assert.deepEqual(g.offendingLines('launch com.apple.MobileAddressBook'), []);
+
+  const hits = g.offendingLines('// we launched com.someones.realapp here');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].line, 1);
+  // The whole point: a location and a count, and the identifier itself appears
+  // nowhere — so a failed run is safe to paste into an issue, a CI log, or a
+  // conversation with an agent, which is where the last one would have gone.
+  assert.ok(!JSON.stringify(hits).includes('someones'), 'a finding must not restate what it found');
+
+  // The optional extra patterns still work, and need nothing to exist.
+  assert.deepEqual(g.patternsFrom({ env: 'Alpha.One,beta.two', file: '# c\n\nBETA.TWO\n' }),
+    ['alpha.one', 'beta.two']);
   assert.deepEqual(g.patternsFrom({ env: 'a,ab,abc' }), ['abc']);
-  // No list is not an empty list of rules, it is no rules — and the caller
-  // treats that as "checked nothing" rather than "found nothing".
   assert.deepEqual(g.patternsFrom({}), []);
-
-  const text = 'clean line\nhas com.example.client in it\nalso Com.Example.Client twice com.example.client\n';
-  const hits = g.offendingLines(text, ['com.example.client']);
-  assert.deepEqual(hits, [{ line: 2, patterns: 1 }, { line: 3, patterns: 1 }]);
-  // The whole point: the report carries a location and a count, and the
-  // matched text appears nowhere in it — so a failed run is safe to paste into
-  // an issue, a CI log, or a conversation with an agent.
-  const printed = JSON.stringify(hits);
-  assert.ok(!printed.includes('com.example.client'), 'a finding must not restate the string it found');
 });
-
 test('a settle will not accept stillness that predates the action', async () => {
   const api = await import('../src/index.js');
   const settled = api.baselineAlreadySettled;

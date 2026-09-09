@@ -43,7 +43,14 @@ jobs:
       - name: Perception expectations still hold
         run: node scripts/eval-perception.mjs
 
-      - name: Nothing private entered the repo
+      # simframe drives *your* app, so no particular app's bundle id belongs in
+      # it. A pattern rather than a denylist, so it needs no configuration and
+      # works on a fork and on a pull request from a stranger. The first version
+      # of this waited for a secret nobody had supplied, and a third-party app's
+      # field notes were committed and pushed while it sat there passing. The
+      # env var is still read, for anyone who wants extra patterns, and nothing
+      # depends on it existing.
+      - name: No third-party app identifiers
         env:
           SIMFRAME_PRIVATE_STRINGS: ${{ secrets.SIMFRAME_PRIVATE_STRINGS }}
         run: node scripts/check-private.mjs

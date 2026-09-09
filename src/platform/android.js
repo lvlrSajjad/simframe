@@ -827,7 +827,7 @@ async function launchApp(udid, bundleId, { args = [], env = {}, terminateFirst =
 async function terminateApp(udid, bundleId) {
   // `am` reports failure on stdout and still exits 0 — the same trap launchApp
   // and openUrl already check for. Without this, terminating a package that is
-  // not installed answered "terminated com.typo.app".
+  // not installed answered "terminated com.example.mistyped".
   const { stdout, stderr } = await adb(udid, ['shell', 'am', 'force-stop', bundleId]);
   const error = /^Error:.*$/m.exec(`${stdout}${stderr}`);
   if (error) {

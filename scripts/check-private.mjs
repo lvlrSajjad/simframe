@@ -1,30 +1,33 @@
 #!/usr/bin/env node
-// Strings that must never enter this repository.
+// No third-party app identifiers in this repository. Ever, from anyone.
 //
-// This is a personal project and some of the work that exercises it is not.
-// A client's app name and its bundle id are theirs, not material for a public
-// repo, and one of them reached two public commit diffs before anybody was
-// checking. The history is staying as it is — the reasoning is in
-// docs/DEFERRED.md — so the part still worth controlling is recurrence.
+// simframe is a general-purpose tool: you install it and Claude Code drives
+// *your* app on the simulator. It has no relationship with any particular app,
+// so no particular app's bundle id belongs in it — not in the source, not in
+// the docs, and not in a secret either. A denylist of specific strings would
+// assume there is one app to protect, which is the wrong shape for this.
 //
-// The denylist deliberately does not live here. A file in the repo listing the
-// strings that must not be in the repo is a puzzle that solves itself, and so
-// is a file of their hashes: an unsalted hash of a low-entropy string is a
-// confirmation oracle for anyone who already has a candidate. So the list comes
-// from outside:
+// So the rule is a pattern, not a list, and it needs no configuration at all.
+// Anything shaped like a reverse-DNS bundle id is flagged unless it is one of:
 //
-//   .private-strings        one pattern per line, gitignored, on this machine
-//   SIMFRAME_PRIVATE_STRINGS  newline- or comma-separated, for CI as a secret
+//   * a platform's own                 com.apple.*, com.android.*, com.google.*
+//   * a documentation placeholder      com.example.*, com.acme.*, com.mycompany.*
+//   * this project's own identifiers
 //
-// With neither, this exits 0 and says it did nothing. That is not a silent
-// pass: a check that fails on every fork and every fresh clone would be turned
-// off within a week, and a check nobody has turned off is worth more than a
-// check nobody can run.
+// That works on a fresh clone, on a fork, and in a pull request from a stranger,
+// which a secret does not. An optional `.private-strings` file (gitignored) or
+// $SIMFRAME_PRIVATE_STRINGS still adds extra patterns for anyone who wants them,
+// but nothing depends on either existing.
+//
+// How this got written: a 282-line field-notes file about a real third-party app
+// was committed here by `git add -A` and pushed, an hour after the first version
+// of this script was written to prevent exactly that. It could not fire, because
+// it was waiting for a denylist nobody had supplied. A guard with a
+// precondition is a guard that is off.
 //
 // Nothing here ever prints a match. It prints the file and the line number, so
 // the output of a failed run is safe to paste into an issue, a CI log, or a
-// conversation with an agent — which is exactly where the last one would have
-// gone.
+// conversation with an agent — which is where the last one would have gone.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -33,7 +36,36 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LIST_FILE = path.join(ROOT, '.private-strings');
 
-/** Patterns from the environment first, so CI can supply them without a file. */
+/**
+ * Bundle-id-shaped strings, and the ones that are fine.
+ *
+ * The first segment is restricted to real reverse-DNS prefixes, which is what
+ * keeps ordinary property chains out: `res.state.seq`, `registry.paths.dir` and
+ * `import.meta.url` all look exactly like bundle ids until you require the head
+ * to be a TLD.
+ */
+const BUNDLE = /\b(?:com|io|org|net|dev|co|app|me|xyz|uk|de|fr|jp|nl|se|ca|au)\.[A-Za-z][A-Za-z0-9_-]{1,30}(?:\.[A-Za-z][A-Za-z0-9_-]{0,30}){1,3}\b/g;
+
+/** Platform-owned, placeholder, or ours. Anything else is somebody's app. */
+export const ALLOWED = [
+  /^com\.apple\./i,
+  /^com\.android\./i,
+  /^com\.google\./i,
+  /^org\.swift\./i,
+  /^org\.json\./i,
+  /^com\.facebook\./i,     // idb, a reference implementation named in the docs
+  /^com\.example\./i,
+  /^com\.acme\./i,
+  /^com\.mycompany\./i,
+  /^com\.yourcompany\./i,
+  /^io\.github\./i,
+];
+
+export function isAllowedIdentifier(id) {
+  return ALLOWED.some((re) => re.test(id));
+}
+
+/** Extra patterns, for anyone who wants them. Nothing depends on this existing. */
 export function patternsFrom({ env, file } = {}) {
   const raw = [
     ...String(env ?? '').split(/[\n,]/),
@@ -42,7 +74,6 @@ export function patternsFrom({ env, file } = {}) {
   return [...new Set(
     raw
       .map((s) => s.trim())
-      // A comment line, and a blank line, are both "no pattern".
       .filter((s) => s && !s.startsWith('#'))
       // One character would match everything, which is a check that only ever
       // fails and therefore only ever gets disabled.
@@ -51,16 +82,20 @@ export function patternsFrom({ env, file } = {}) {
   )];
 }
 
-/** Which lines of `text` contain any pattern. Line numbers only, never matches. */
-export function offendingLines(text, patterns) {
+/** Which lines of `text` are a problem. Line numbers only, never matches. */
+export function offendingLines(text, patterns = []) {
   const hits = [];
   const lines = String(text).split('\n');
   for (let i = 0; i < lines.length; i += 1) {
     const lower = lines[i].toLowerCase();
-    // Reported as a count, not as the pattern that matched: knowing *which*
-    // secret leaked is worth less than not restating it.
-    const n = patterns.filter((p) => lower.includes(p)).length;
-    if (n) hits.push({ line: i + 1, patterns: n });
+    const why = [];
+    const extra = patterns.filter((p) => lower.includes(p)).length;
+    if (extra) why.push(`${extra} denied pattern(s)`);
+    const ids = (lines[i].match(BUNDLE) ?? []).filter((id) => !isAllowedIdentifier(id));
+    // Reported as a count and a shape, never as the identifier: knowing which
+    // app leaked is worth less to a bug report than not restating it.
+    if (ids.length) why.push(`${ids.length} third-party bundle id(s)`);
+    if (why.length) hits.push({ line: i + 1, why: why.join(', ') });
   }
   return hits;
 }
@@ -76,12 +111,9 @@ function main() {
     env: process.env.SIMFRAME_PRIVATE_STRINGS,
     file: fs.existsSync(LIST_FILE) ? fs.readFileSync(LIST_FILE, 'utf8') : '',
   });
-  if (!patterns.length) {
-    console.log('check-private: no denylist supplied (.private-strings or $SIMFRAME_PRIVATE_STRINGS) — nothing checked');
-    return;
-  }
+  const files = trackedFiles();
   let failed = 0;
-  for (const rel of trackedFiles()) {
+  for (const rel of files) {
     const full = path.join(ROOT, rel);
     let text;
     try {
@@ -91,17 +123,19 @@ function main() {
     } catch {
       continue;
     }
-    // Binary-ish: a NUL byte means this is not text and a substring hit in it
-    // would be noise.
+    // A NUL byte means this is not text, and a substring hit in it is noise.
     if (text.includes('\0')) continue;
     for (const hit of offendingLines(text, patterns)) {
-      console.error(`check-private: ${rel}:${hit.line} matches ${hit.patterns} denied pattern(s)`);
+      console.error(`check-private: ${rel}:${hit.line} — ${hit.why}`);
       failed += 1;
     }
   }
-  console.log(`check-private: ${patterns.length} pattern(s) against ${trackedFiles().length} tracked file(s)`);
+  console.log(`check-private: ${files.length} tracked file(s); no third-party bundle ids`
+    + (patterns.length ? `, plus ${patterns.length} local pattern(s)` : '')
+    + ` — ${failed} line(s) flagged`);
   if (failed) {
-    console.error(`check-private: ${failed} line(s) must not be committed. Nothing above prints the match itself.`);
+    console.error('check-private: nothing above prints the match itself. '
+      + 'A third-party app identifier does not belong in a general-purpose tool.');
     process.exitCode = 1;
   }
 }

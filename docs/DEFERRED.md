@@ -416,47 +416,42 @@ day's work.
 
 ### Waiting on the user, not on work
 
-- ~~The client bundle id in two public commit diffs.~~ **Decided, 2026-09-10:
-  the history stays as it is.** Delegated to me, so the reasoning is recorded
-  here rather than in a conversation.
+- ~~The bundle id in public commit diffs.~~ **Settled, 2026-09-10, and the
+  framing was wrong all along.** The inherited rule read "one of my clients must
+  never appear in this repo". The actual rule is simpler and stronger: simframe
+  is a general-purpose tool — you install it and Claude Code drives *your* app —
+  so **no** particular app's bundle id belongs in it, from anyone, ever. Not in
+  the source, not in the docs, and not in a secret either.
 
-  Against a rewrite: its costs are certain and its benefit is not. A force-push
-  changes every commit SHA from the rewrite point forward, which changes the
-  tag SHAs — and those tags are what npm's provenance attestations and the MCP
-  Registry entry were built against, plus anybody's `git checkout v0.8.0`.
-  Meanwhile the string is very likely already beyond recall: unreachable
-  objects stay fetchable by SHA until GitHub garbage-collects, which is a
-  best-effort support request, and GitHub code search, the GH Archive dataset
-  and Software Heritage all take copies. A rewrite would trade working
-  provenance for a probability. Deleting and recreating the repo costs the same
-  provenance plus the npm link and every issue, for the same probability.
+  That reshaped the guard. `scripts/check-private.mjs` is a **pattern**, not a
+  denylist: anything shaped like a reverse-DNS bundle id fails unless it is a
+  platform's own (`com.apple.*`, `com.android.*`, `com.google.*`), a
+  documentation placeholder (`com.example.*`), or ours. It needs no
+  configuration, so it works on a fresh clone, on a fork, and on a pull request
+  from a stranger — none of which a secret does. `SIMFRAME_PRIVATE_STRINGS` and
+  `.private-strings` still add extra patterns for anyone who wants them, and
+  nothing depends on either existing.
 
-  And the thing being protected is not a secret. A bundle id is a public
-  identifier — it is in an App Store URL. What the two diffs disclose is an
-  *association*, that this project was once pointed at that app, and a rewrite
-  that leaves archived copies intact does not remove the association, it just
-  makes it slightly harder to find while breaking things that work.
+  The first version of it did depend on that, and the cost was immediate: a
+  282-line field-notes file about a real third-party app was committed by
+  `git add -A` and pushed to `main` an hour after the guard was written, while
+  the guard sat passing because nobody had supplied a denylist. **A guard with a
+  precondition is a guard that is off.** Removed from `main` in `217454e`; the
+  findings worth keeping were extracted scrubbed first.
 
-  So: history unchanged, and the effort goes to the half still under our
-  control, which is recurrence. `scripts/check-private.mjs` fails a commit
-  containing any denied string and **prints only the file and line, never the
-  match** — so its own output is safe to paste into an issue, a CI log, or a
-  conversation with an agent, which is where the last one would have gone. The
-  denylist deliberately lives outside the repo (`.private-strings`, gitignored,
-  or `$SIMFRAME_PRIVATE_STRINGS` as a CI secret): a file in the repo listing
-  what must not be in the repo is a puzzle that solves itself, and a file of
-  hashes is a confirmation oracle for anyone who already has a candidate. With
-  no list it checks nothing and passes, because a check that fails on every
-  fork is a check somebody turns off.
+  Two occurrences remain in git history and neither is in the working tree:
 
-  **To finish this:** add `SIMFRAME_PRIVATE_STRINGS` as a repository secret,
-  and put the same lines in a local `.private-strings`. Neither file nor secret
-  is in this repo, so nothing about this entry names anything.
+  | | where | tags containing it |
+  |---|---|---|
+  | a bundle id in a since-deleted script, 2026-09-07 | history only | **all 10** |
+  | the field-notes file, 2026-09-10 | history only, after `v0.9.0` | **none** |
 
-  Revisit only if the association is ever actually a problem, at which point
-  the rewrite is still available and the calculation will have new facts in it.
-- ~~Two colleagues' frame caches, the cache for a deleted device, and the
-  `TEST-*` fixtures.~~ **Cleared, 2026-09-10.**
+  So a rewrite of post-`v0.9.0` history removes the larger of the two and moves
+  **no tag SHA** — much cheaper than the rewrite declined this morning, which
+  would have broken npm provenance for one placeholder-shaped identifier.
+  **Not started, and not to be started without an explicit, specific
+  instruction.**
+
 - The human baseline JSONs are committed and therefore public: medians, IQRs
   and inter-transition intervals for one person, no name attached. Flagged so
   it is a choice rather than an accident.
