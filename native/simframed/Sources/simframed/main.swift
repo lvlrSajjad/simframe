@@ -9,6 +9,14 @@ func flag(_ name: String) -> String? {
     return String(a.dropFirst(name.count + 3))
 }
 
+/// How long a `ui` request may spend on its two reads before what has not
+/// arrived is reported as missing.
+///
+/// Just inside the client's own 30 s give-up, because a read the caller has
+/// already abandoned is worth nothing, and stopping any earlier than that
+/// converts a slow-but-correct read into a failure. See the `ui` handler.
+let readBudgetMs = 25_000
+
 let command = args.first(where: { !$0.hasPrefix("--") }) ?? "run"
 let platform: SimulatorPlatform = args.contains("--stub") ? StubPlatform() : CoreSimulatorPlatform()
 let longEdge = Int(flag("max-dim") ?? "") ?? 700
@@ -256,19 +264,29 @@ case "run":
                     }
                     // Bounded, because this blocks the control socket and the
                     // socket is serial: a read that runs long does not just
-                    // return late, it holds up every command behind it. A CI
-                    // runner spent 28 s inside one of these. Whatever has not
-                    // arrived by the deadline is reported as missing rather
-                    // than waited for — the layer that did answer is still
-                    // worth having.
-                    let timedOut = group.wait(timeout: .now() + .seconds(12)) == .timedOut
+                    // return late, it holds up every command behind it.
+                    //
+                    // The bound is "as long as the caller is willing to wait",
+                    // not a number picked for feel. The client gives up at 30 s
+                    // (`control.js`), so anything past that is lost either way,
+                    // and stopping earlier only converts a slow-but-correct
+                    // read into a failure. It was 12 s, chosen against a runner
+                    // that once spent 28 s inside a *tree* read — a cost the
+                    // attribute batching then removed — and a hosted runner
+                    // where Vision has no GPU promptly failed a screen read
+                    // with "text recognition did not finish within 12s". OCR is
+                    // 100–400 ms on a developer's machine and evidently much
+                    // slower on a shared one; guessing its ceiling was the
+                    // mistake.
+                    let timedOut = group.wait(timeout: .now() + .milliseconds(readBudgetMs)) == .timedOut
                     var (axTree, axError, axMs, ocrElements, ocrError, ocrMs) = reads.snapshot()
                     if timedOut {
+                        let secs = readBudgetMs / 1000
                         if wantAx, axTree.nodes.isEmpty, axError == nil {
-                            axError = "the accessibility read did not finish within 12s"
+                            axError = "the accessibility read did not finish within \(secs)s"
                         }
                         if wantOcr, ocrElements.isEmpty, ocrError == nil {
-                            ocrError = "text recognition did not finish within 12s"
+                            ocrError = "text recognition did not finish within \(secs)s"
                         }
                     }
                     // OCR failing is fatal to a screen read in a way a missing

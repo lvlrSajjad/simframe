@@ -1672,3 +1672,19 @@ fourteen nodes, identical values. The commit that introduced it claimed one call
 per node; it is three — one batch, one `accessibilityLabel`, one `AXChildren`.
 The eight-fold reduction in round trips is what matters on a slow machine, and
 that part stands.
+
+### A bound picked for feel, corrected
+
+The `ui` handler's wait was bounded at 12 s. That number came from a runner that
+had once spent 28 s inside a *tree* read — a cost the attribute batching then
+removed — so it was calibrated against a problem that no longer existed. A
+hosted runner, where Vision has no GPU, then failed a screen read outright with
+`text recognition did not finish within 12s`. OCR is 100–400 ms on this machine
+and evidently much slower on a shared one; guessing its ceiling was the mistake,
+and the guess turned a slow-but-correct read into a failed step.
+
+The bound is now derived rather than chosen: 25 s, just inside the client's own
+30 s give-up. A read the caller has already abandoned is worth nothing, and
+stopping any earlier only fails reads that would have worked. The reason to
+bound it at all is unchanged — the control socket is serial, so a long read
+holds up every command behind it.
