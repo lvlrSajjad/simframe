@@ -20,8 +20,12 @@ import * as regions from './regions.js';
  *
  * 2 — elements with no visible footprint, and containers holding two or more
  *     others, no longer enter identity: only one sensor can see either.
+ * 3 — a chrome label must be a name: at least two letters, and not a URL. A
+ *     browser's address bar put "== example.com" into a screen's identity, so
+ *     a different page read as a different screen, and OCR's ":" and "+" read
+ *     off icons were identities of their own.
  */
-export const TOKEN_RULES_VERSION = 2;
+export const TOKEN_RULES_VERSION = 3;
 
 /** Frames are quantised to this, so sub-pixel drift and a nudged row do not matter. */
 export const GRID = 24;
@@ -97,12 +101,36 @@ const MONTHS = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i;
 const WEEKDAYS = /\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*day?\b/i;
 const DATE_LIKE = /\d{1,4}[/.-]\d{1,2}([/.-]\d{1,4})?|\b\d{1,2}:\d{2}\b/;
 
+/**
+ * A URL is the most volatile thing a nav bar can hold.
+ *
+ * Measured on Android, where a browser's address bar is chrome by every
+ * structural test there is: the screen's identity contained `"== example.com"`,
+ * so the same browser on a different page was a different screen, and every
+ * route through it broke on navigation. The `==` is OCR reading the lock icon.
+ *
+ * Matched after stripping the punctuation OCR decorates it with, and only when
+ * the whole label is the address — a sentence that happens to mention a domain
+ * is still a sentence.
+ */
+const URL_LIKE = /^(https?:\/\/|www\.)|^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)*\.[a-z]{2,}(\/\S*)?$/i;
+
+/** How many letters a name has to have. One is a glyph, not a name. */
+const NAME_MIN_LETTERS = 2;
+
 export function isVolatileLabel(label) {
   const text = String(label ?? '').trim();
   if (!text) return true;
   if (MONTHS.test(text) || WEEKDAYS.test(text) || DATE_LIKE.test(text)) return true;
+  // Strip what OCR hangs off an icon before asking whether the rest is an
+  // address: the observed label was `== example.com`.
+  const bare = text.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}/]+$/u, '');
+  if (URL_LIKE.test(bare)) return true;
   const letters = (text.match(/\p{L}/gu) ?? []).length;
   const digits = (text.match(/\p{N}/gu) ?? []).length;
+  // A label with no word in it is not a name for anything. OCR reads `:`, `+`,
+  // `...` and `—` off icons, and each of those became an identity of its own.
+  if (letters < NAME_MIN_LETTERS) return true;
   // Mostly digits: a count, a price, a phone number, an ID. "1020" and
   // "+1 (111) 111-1111" are both this; "Assets" is not.
   return digits > 0 && digits >= letters;

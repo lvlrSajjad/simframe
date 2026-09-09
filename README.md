@@ -172,20 +172,27 @@ screen, and where they come from:
 | --- | --- | --- | --- | --- |
 | launcher | **1** | nav-bar 1 | text 1 | 0 |
 | Settings root | 9 | content 9 | text 9 | 0 |
-| example.com in Chrome | 6 | content 3, nav-bar 3 | text 6 | 3 |
+| example.com in Chrome | 6 | content 3, nav-bar 3 | text 6 | 0 |
 
 Every token has role `text`, because without a tree nothing infers a button from
-a rectangle reliably enough to say so. Two of those screens carry no chrome
-label at all. And the browser's three "labels" are `"== example.com"`, `":"` and
-`"+"` — a URL, so a different page reads as a different screen, and two OCR
-misreads of icons. So on Android a screen is recognised by the geometry of its
-text, which is thinner and noisier than the iOS mix of roles, chrome labels and
-geometry. Flows still work; screen *memory* is doing more guessing, and that is
-the honest cost of the tier being absent. It is also why the obvious fix for the
-iOS drift — dropping content-region text out of identity, which would be a
-strict improvement there — is not available: it would leave Settings' root with
-zero tokens, and zero tokens is no identity at all. See
-[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+a rectangle reliably enough to say so, and no screen here carries a chrome label
+at all. So on Android a screen is recognised by the geometry of its text, which
+is thinner and noisier than the iOS mix of roles, chrome labels and geometry.
+Flows still work; screen *memory* is doing more guessing, and that is the honest
+cost of the tier being absent.
+
+It is also why the obvious fix for the iOS drift — dropping content-region text
+out of identity, which would be a strict improvement there — is not available:
+it would leave Settings' root with zero tokens, and zero tokens is no identity
+at all. See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+
+That last column read **3** before this measurement changed it. Chrome's address
+bar is chrome by every structural test there is, so the screen's identity
+contained `"== example.com"` — a URL, meaning the same browser on a different
+page was a different screen and every learned route through it broke on
+navigation — plus `":"` and `"+"`, which are OCR reading punctuation off icons.
+A chrome label now has to be a name: two letters at minimum, and not an
+address.
 
 The emulator's own gRPC surface was checked for anything tree-shaped and has
 nothing: 43 RPCs for sensors, input, screenshots and VM state, and no notion of

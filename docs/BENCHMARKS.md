@@ -1818,7 +1818,7 @@ tokens per screen and where they come from:
 | --- | --- | --- | --- | --- |
 | launcher | **1** | nav-bar 1 | text 1 | 0 |
 | Settings root | 9 | content 9 | text 9 | 0 |
-| example.com in Chrome | 6 | content 3, nav-bar 3 | text 6 | 3 |
+| example.com in Chrome | 6 | content 3, nav-bar 3 | text 6 | 3 → **0** |
 
 Every token on every screen has role `text`, because without an accessibility
 tree nothing infers a button from a rectangle reliably enough to say so. Two of
@@ -1841,9 +1841,30 @@ weak in three specific ways rather than vaguely:
    The positional region bands put the URL bar in `nav-bar`, and chrome labels
    are the one text that enters identity.
 
-That third one is the region-bands bug, on a second platform, doing more damage
-than it does on the first. It is also a cheap partial: a label of one
-punctuation character is not a name and `isVolatileLabel` should say so.
+That third one was **not** the region-bands bug, and mistaking it for one is
+worth recording. The bands are clustered, not positional, and they were right:
+Chrome's address bar *is* chrome — a short row at the top with a gap under it.
+The fault was one layer along, in which labels are allowed to be names.
+`isVolatileLabel` rejected dates and mostly-digit strings and accepted a URL,
+a colon and a plus sign.
+
+Fixed in `TOKEN_RULES_VERSION` 3: a chrome label needs at least two letters and
+must not be an address, matched after stripping the punctuation OCR decorates it
+with. Measured either side —
+
+- **Android**, the case that motivated it: the same Chrome screen went from
+  three chrome labels to none, so a different page is no longer a different
+  screen.
+- **iOS**: chrome labels entering identity fell from 9 to 8 — the one lost was
+  `"..."` — and the distributions did not move: same-screen min 0.75, median
+  1.00, different-screen max 0.05, gap 0.70, with `general`, `accessibility`
+  and `settings` all correctly retained.
+
+A URL in a fingerprint is worse than it sounds, and worth stating for whoever
+meets it next: it does not degrade recognition, it *inverts* it. Every visit to
+a browser on a new page mints a new screen, the graph fills with screens that
+will never be seen again, and every route through the browser breaks the moment
+the page changes.
 
 ## What the accessibility tier is actually worth
 

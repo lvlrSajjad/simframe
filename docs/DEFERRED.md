@@ -165,6 +165,26 @@ artifact, but it is ours, it is built from source in this repo, and it is
 automatic. The promise change is "simframe puts a helper on your emulator" —
 an honest sentence to add to the README on the day it is true, and not before.
 
+### Android input reported success while the device did not move — once
+Observed 2026-09-09 on an emulator that had been running about two hours under
+capture and OCR load. A `home` key and a `launch --relaunch` both reported
+success, three consecutive readings of what should have been three different
+screens returned one identical fingerprint, and `dumpsys window` confirmed the
+device had never left Chrome. Both commands worked immediately afterwards, from
+the same code, against the same device.
+
+That is the same shape as the long-running-simulator entry above — input
+reporting success with nothing moving — on the other platform and through a
+completely different mechanism, which makes a shared cause unlikely and a shared
+*class* worth naming: **an input path with no feedback channel cannot tell you
+it did nothing.** simframe's answer is the verdict layer, which compares the
+screen before and after; the reason this was caught at all is that the
+fingerprints came back identical.
+
+One observation, so no diagnosis. What would settle it is `dumpsys window`'s
+focused activity recorded alongside a verdict, which is 27 ms and would say
+"the app never came to the front" instead of "the screen did not change".
+
 ### A contact row is ambiguous with its own name
 Found while measuring the a11y tier: `"Kate Bell"` on the Contacts list resolves
 as *ambiguous* with the tree present, because the row arrives as a row and as

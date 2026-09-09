@@ -113,13 +113,23 @@ was always the install story — idb was the last heavyweight requirement — an
 that is what it delivered. It is not a perception-quality win: it changed who
 reads the tree, not what the app publishes.
 
-**Region-bands-from-clustering has earned its way up the list.** Phase 7 found
-it for the third time: dumping the structural tokens of twenty learned screens
-showed three of them carrying content in their identity because the positional
-bands had called it chrome, one of which was a nav title reading "Tuesday,
-September 8" — an identity with until midnight to live. That specific class is
-patched (a date is a value, not a name) but the cause is not, and it has now
-produced three bugs in three phases.
+**Region bands from clustering: done, and do not re-open it from this file.**
+The bands are derived from where the elements actually sit — a nav bar is a
+short row at the top with a gap under it, not a fraction of screen height — with
+the HIG fractions kept only for a screen too sparse to cluster. Chrome labels
+entering identity fell from 14 to 6 and the distributions held; the numbers are
+in `docs/DEFERRED.md` and `docs/BENCHMARKS.md`.
+
+This paragraph used to say the opposite, and it outlived the fix by two phases.
+It was read as open work twice, which is its own lesson about where a status
+lives: the entry in `docs/DEFERRED.md` was marked fixed the day it was fixed,
+and this one was not.
+
+The class is not closed, though the cause has moved: on Android a browser's
+address bar is chrome by every structural test there is — and correctly so —
+which put `"== example.com"` into a screen's identity through the *label* rule
+rather than the band rule. `TOKEN_RULES_VERSION` 3 requires a chrome label to be
+a name: two letters at minimum, and not an address.
 
 **One habit this project earned the hard way.** Three separate times, a first
 measurement agreed with the hypothesis and was wrong — capture, the layout-hash

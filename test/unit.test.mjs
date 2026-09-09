@@ -1278,3 +1278,33 @@ test('a stalled capture loop is reported as stalled, not as a still screen', asy
   assert.equal(cleared.stalled, false);
   assert.doesNotMatch(cleared.note ?? '', /stalled/);
 });
+
+test('a chrome label has to be a name before it can be an identity', async () => {
+  // Chrome labels are the only text that enters a fingerprint, so anything
+  // that gets in and then changes takes a screen's identity with it. Two
+  // classes were getting in, both found by reading what Android actually
+  // produced: a browser's address bar, and the punctuation OCR reads off icons.
+  const { isVolatileLabel } = await import('../src/fingerprint.js');
+
+  // A URL is the most volatile thing a nav bar can hold: same screen, new page,
+  // new identity, every route through it broken. `==` is OCR reading the lock.
+  for (const url of ['example.com', '== example.com', 'https://x.com/a', 'www.bbc.co.uk']) {
+    assert.equal(isVolatileLabel(url), true, `${url} is a value, not a name`);
+  }
+  // But a sentence that mentions a domain is still a sentence.
+  assert.equal(isVolatileLabel('Search the site at example.com for more'), false);
+
+  // A glyph is not a name. Each of these was observed as a chrome label.
+  for (const glyph of [':', '+', '...', '—', 'A']) {
+    assert.equal(isVolatileLabel(glyph), true, `${glyph} names nothing`);
+  }
+
+  // And the names that have to survive, including the adversarial pair the
+  // whole chrome-label mechanism exists for.
+  for (const name of ['general', 'accessibility', 'settings', 'Wi-Fi', 'OK', 'Kate Bell', 'Assets', 'iPhone 17']) {
+    assert.equal(isVolatileLabel(name), false, `${name} is a name`);
+  }
+
+  // Dates were the first bug in this class and stay fixed.
+  assert.equal(isVolatileLabel('Tuesday, September 8'), true);
+});
