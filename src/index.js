@@ -298,12 +298,38 @@ export function changeLevel(diff) {
   return 'none';
 }
 
+/** How long a stall has been going on, in words an agent can act on. */
+function stallNote(health) {
+  const forMs = Math.max(0, Date.now() - (health.since ?? Date.now()));
+  const parts = [`capture: stalled — the display surface has been unreadable for ${Math.round(forMs / 1000)}s`];
+  if (health.reattaches) parts.push(`${health.reattaches} re-attach${health.reattaches === 1 ? '' : 'es'} did not help`);
+  if (health.reason) parts.push(String(health.reason).slice(0, 120));
+  // The cure is the user's to apply. Saying so is the difference between an
+  // agent that reports "the simulator is wedged" and one that retries a tap
+  // twenty times because nothing appeared to change.
+  parts.push('only restarting the device is known to cure it');
+  return parts.join('; ');
+}
+
 export function liveness(udid, state) {
   const ageMs = Date.now() - state.capturedAt;
   const { running } = daemonStatus(udid);
+  // A wedged device and a quiet one look identical from the frames alone: both
+  // produce nothing. The difference is that a wedged one is failing reads, and
+  // only the capture loop knows that, so it writes it down.
+  const health = store.captureHealth(udid);
+  const stalled = Boolean(health?.stalled);
   if (!running) {
-    return { ok: false, ageMs, note: 'the capture loop has died; the frame you are looking at is the last one it wrote' };
+    return {
+      ok: false,
+      ageMs,
+      stalled,
+      note: stalled
+        ? `the capture loop has died, and it was stalled before it did — ${stallNote(health)}`
+        : 'the capture loop has died; the frame you are looking at is the last one it wrote',
+    };
   }
+  if (stalled) return { ok: false, ageMs, stalled: true, note: stallNote(health) };
   // Frame age means "stalled" only for a fixed-rate loop.
   //
   // simframed captures on damage, so a screen that is genuinely still produces
@@ -315,9 +341,9 @@ export function liveness(udid, state) {
   // daemon.
   const damageDriven = engine.runningEngine(udid) === 'simframed';
   if (!damageDriven && ageMs > STALE_FRAME_MS) {
-    return { ok: false, ageMs, note: `capture loop is stalled: newest frame is ${ageMs}ms old` };
+    return { ok: false, ageMs, stalled: false, note: `capture loop is stalled: newest frame is ${ageMs}ms old` };
   }
-  return { ok: true, ageMs, note: null };
+  return { ok: true, ageMs, stalled: false, note: null };
 }
 
 /**

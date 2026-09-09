@@ -80,6 +80,26 @@ public final class FrameStore {
 
     /// The newest state written, for callers that need the current hashes
     /// without recomputing them.
+    /// Publish how capture itself is doing, separately from any frame.
+    ///
+    /// It cannot ride in `state.json`, because that is written when a frame is
+    /// recorded and a stall is precisely the absence of frames: the state a
+    /// reader sees during a stall is the last healthy one, arbitrarily old, and
+    /// there is nothing in it that says so. An idle screen also produces no
+    /// frames, so "no frames" is not the signal either — the signal is the
+    /// daemon's own failed reads, which only the daemon knows about.
+    ///
+    /// `nil` removes the file: health is the absence of a complaint, so a
+    /// reader that finds nothing here is right to assume capture is fine.
+    public func writeCaptureHealth(_ health: [String: Any]?) throws {
+        let url = root.appendingPathComponent("capture-health.json")
+        guard let health else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        try writeAtomic(try JSONSerialization.data(withJSONObject: health), to: url)
+    }
+
     public func latestState() -> [String: Any]? {
         guard let data = try? Data(contentsOf: root.appendingPathComponent("state.json")) else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]

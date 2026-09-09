@@ -871,6 +871,14 @@ async function doctor({ json = false, strict = false, device } = {}) {
       add('capture', 'ok',
         `frame #${res.state.seq} ${res.width}x${res.height} in ${Date.now() - t0}ms (age ${res.ageMs}ms)`,
         { key: 'capture.frames', value: res.state.seq });
+      // A wedged device produces the same nothing as a quiet one, so doctor has
+      // to ask the capture loop rather than look at the frames. `fail`, not
+      // `warn`: nothing here is degraded-but-working, and the cure is a device
+      // restart that simframe deliberately does not perform.
+      for (const d of booted) {
+        const live = api.liveness(d.udid, (await api.getState(d.udid)).state);
+        if (live.stalled) add(`capture health (${d.name})`, 'fail', live.note, { key: 'capture.stalled', value: true });
+      }
     }
   } catch (err) {
     add('capture', 'fail', err.message);

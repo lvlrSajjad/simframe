@@ -25,6 +25,18 @@ import { isBootedSync, resize, screenshot } from './platform/index.js';
 // through a flow. A unit test asserts these two constants match.
 export const STATE_VERSION = 6;
 
+/**
+ * How many failed captures in a row mean this loop is wedged rather than
+ * unlucky.
+ *
+ * Four, against the ten that make it give up: far enough in that a single
+ * hiccup does not raise an alarm, early enough that a reader learns about it
+ * while the loop is still trying. The Swift daemon reaches the same conclusion
+ * differently — it counts re-resolves of the display port, because there a
+ * successful re-resolve resets the failure count and hides the loop.
+ */
+export const STALLED_AFTER_ERRORS = 4;
+
 export const DEFAULTS = {
   fps: 4,
   idleFps: 1.5,
@@ -85,6 +97,7 @@ export async function runDaemon(device, options = {}) {
   let ringIndex = [];
   let lastChangeAt = Date.now();
   let consecutiveErrors = 0;
+  let stalledSince = null;
   let lastBootCheck = Date.now();
   let running = true;
   const stop = () => {
@@ -141,6 +154,10 @@ export async function runDaemon(device, options = {}) {
 
       seq = nextSeq;
       prevSignature = signature;
+      if (consecutiveErrors >= STALLED_AFTER_ERRORS) {
+        log('capture recovered on its own');
+        store.writeCaptureHealth(udid, null);
+      }
       consecutiveErrors = 0;
 
       const hash = frameHash(bmp);
@@ -199,7 +216,25 @@ export async function runDaemon(device, options = {}) {
     } catch (err) {
       consecutiveErrors++;
       log(`capture error (${consecutiveErrors}): ${err.message}`);
+      // Say that capture is wedged rather than merely slow, and do nothing
+      // about it: the cure is a device restart, and that is the user's to make.
+      // Published rather than only logged, because a reader of `state` sees the
+      // last healthy frame with nothing in it to say the device stopped
+      // answering — the same frames a merely idle screen produces.
+      if (consecutiveErrors >= STALLED_AFTER_ERRORS) {
+        stalledSince ??= Date.now();
+        store.writeCaptureHealth(udid, {
+          stalled: true,
+          since: stalledSince,
+          at: Date.now(),
+          consecutiveFailures: consecutiveErrors,
+          reattaches: 0,
+          reason: err.message,
+        });
+      }
       if (consecutiveErrors >= 10) {
+        // Left published on purpose. The file is how a reader learns why this
+        // loop is not running any more.
         log('exit: too many consecutive capture errors');
         break;
       }

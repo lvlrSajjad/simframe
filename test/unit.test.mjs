@@ -1234,3 +1234,43 @@ test('nothing above the boundary shells out to a platform tool', async () => {
     assert.ok(!source.includes("'./simctl.js'"), `${file} imports the old pre-boundary module`);
   }
 });
+
+// --- a wedged device, told apart from a quiet one -----------------------------
+
+test('a stalled capture loop is reported as stalled, not as a still screen', async () => {
+  // These two states produce identical frames — none — and simframe spent an
+  // afternoon reporting the second when it meant the first. A device whose
+  // display surface has stopped answering reads is not a screen that is
+  // holding still, and an agent told "nothing changed" will keep tapping.
+  const api = await import('../src/index.js');
+  const udid = freshDevice('stalled');
+  const state = { seq: 12, capturedAt: Date.now(), stableForMs: 40_000, width: 322, height: 700 };
+
+  // No complaint filed: health is the absence of one.
+  const quiet = api.liveness(udid, state);
+  assert.equal(quiet.stalled, false, 'a quiet screen is not a stall');
+
+  store.writeCaptureHealth(udid, {
+    stalled: true,
+    since: Date.now() - 45_000,
+    at: Date.now(),
+    consecutiveFailures: 18,
+    reattaches: 3,
+    reason: 'the display surface could not be read',
+  });
+  const wedged = api.liveness(udid, state);
+  assert.equal(wedged.stalled, true);
+  assert.match(wedged.note, /capture: stalled/);
+  assert.match(wedged.note, /45s/, 'it says how long, because that is what makes it actionable');
+  assert.match(wedged.note, /3 re-attaches did not help/);
+  assert.match(wedged.note, /restarting the device/, 'and what the only known cure is');
+
+  // And it clears. Only evidence clears it — the loop removes the file when it
+  // captures a real frame again. There is no daemon in a unit test, so the
+  // remaining note is the honest one about a loop that is not running; what
+  // matters is that it has stopped claiming a stall.
+  store.writeCaptureHealth(udid, null);
+  const cleared = api.liveness(udid, state);
+  assert.equal(cleared.stalled, false);
+  assert.doesNotMatch(cleared.note ?? '', /stalled/);
+});

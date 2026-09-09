@@ -30,7 +30,39 @@ export function paths(udid) {
     heartbeat: path.join(dir, 'heartbeat'),
     log: path.join(dir, 'daemon.log'),
     lock: path.join(dir, 'daemon.lock'),
+    // Written by whichever capture loop is running, and only when capture is
+    // wedged. It cannot ride in state.json: that is written when a frame is
+    // recorded, and a stall is the absence of frames.
+    captureHealth: path.join(dir, 'capture-health.json'),
   };
+}
+
+/** What the capture loop last said about its own health, or null if it has no complaint. */
+export function captureHealth(udid) {
+  return readJson(paths(udid).captureHealth);
+}
+
+/**
+ * Publish a complaint, or clear it with `null`.
+ *
+ * The directory is created rather than assumed. A capture loop has always made
+ * it already, so the first version of this left it out and swallowed the
+ * failure — which meant the write silently did nothing for every other caller,
+ * and the test that caught it was the first thing to ask.
+ */
+export function writeCaptureHealth(udid, health) {
+  const p = paths(udid);
+  try {
+    if (health) {
+      fs.mkdirSync(p.dir, { recursive: true });
+      writeAtomic(p.captureHealth, JSON.stringify(health));
+    } else {
+      fs.rmSync(p.captureHealth, { force: true });
+    }
+  } catch {
+    // Never let bookkeeping stop capture. Anything that reaches here has
+    // already failed to make a directory, which capture itself will report.
+  }
 }
 
 export function ensureDirs(udid) {

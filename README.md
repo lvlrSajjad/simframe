@@ -528,6 +528,13 @@ So every downgrade now announces itself:
   is deliberate: `WARN` means this machine could be doing better and silently is
   not, which is the failure worth shouting about. An optional fallback missing on
   a fresh machine has not degraded from anything, and `--strict` ignores it.
+- A device whose capture has **wedged** says so: `capture: stalled — the display
+  surface has been unreadable for 62s; 3 re-attaches did not help; only
+  restarting the device is known to cure it`. This is a different thing from a
+  still screen, and it used to look identical, because a damage-driven engine
+  produces no frames for either. An agent told "nothing changed" keeps tapping;
+  one told the simulator is wedged stops. simframe reports it and does not
+  restart your device.
 - `--strict`, or `SIMFRAME_STRICT=1`, turns any downgrade into a non-zero exit.
   CI runs strict, so a release cannot ship in the state that shipped twice.
 

@@ -18,15 +18,48 @@ public struct CaptureRecovery {
     /// watches a dead capture loop and wonders.
     public static let reattachAfterFailures = 6
 
+    /// When re-resolving the port has demonstrably not helped.
+    ///
+    /// Re-resolving *succeeds* in the pathology this exists for: the call
+    /// returns a fresh descriptor, the callback re-arms, and every read still
+    /// fails. Because a successful re-resolve resets the failure count, that
+    /// state loops — six failures, re-resolve, six failures — and no count of
+    /// consecutive failures ever grows large enough to notice it. Observed
+    /// three times in one afternoon on a simulator driven hard for ten minutes;
+    /// only restarting the device cured it.
+    ///
+    /// So the signal is re-resolves, not failures. Two of them means the port
+    /// was not the problem.
+    public static let stalledAfterReattaches = 2
+
+    /// And the other way it goes wrong: re-resolving itself failing, where the
+    /// failure count does keep growing because nothing resets it.
+    public static let stalledAfterFailures = reattachAfterFailures * 3
+
     public private(set) var consecutiveFailures = 0
+    /// Successful re-resolves since the last real frame.
+    public private(set) var reattaches = 0
     private let threshold: Int
 
     public init(threshold: Int = CaptureRecovery.reattachAfterFailures) {
         self.threshold = threshold
     }
 
+    /// Is capture wedged rather than merely stumbling?
+    ///
+    /// Deliberately a state and not an event: the daemon reports it, and does
+    /// not act on it. A capture loop that restarted the device it is watching
+    /// would be a tool that reaches for the mains when a reading looks wrong.
+    public var isStalled: Bool {
+        reattaches >= Self.stalledAfterReattaches || consecutiveFailures >= Self.stalledAfterFailures
+    }
+
     public mutating func captureSucceeded() {
         consecutiveFailures = 0
+        // A real frame is the only evidence that health is back. Resetting this
+        // anywhere else — on a re-resolve, say — is how the loop above stayed
+        // invisible.
+        reattaches = 0
     }
 
     /// Records a failure and says whether the port is now due a re-resolve.
@@ -50,6 +83,7 @@ public struct CaptureRecovery {
             _ = try platform.reattachDisplay()
             try platform.observeChanges(onDamage)
             consecutiveFailures = 0
+            reattaches += 1
             return .success(failures)
         } catch {
             // Deliberately not reset: if the port cannot be re-resolved, the

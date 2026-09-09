@@ -102,6 +102,29 @@ driven hard, which makes a shared cause in CoreSimulator more likely than two
 coincidences. The next step is not more recovery code; recovery already runs and
 already fails. It is finding out what a restart resets.
 
+**Detected and reported since 2026-09-09, and deliberately not cured.**
+`simframe state` leads with `capture: stalled — the display surface has been
+unreadable for 62s; 3 re-attaches did not help; only restarting the device is
+known to cure it`, `doctor` grades it `fail`, and `--strict` exits non-zero. An
+agent that reads "nothing changed" keeps tapping; one that reads "the simulator
+is wedged" stops. simframe does not restart the device: a capture loop that
+rebooted the device it was watching would be a tool reaching for the mains
+because a reading looked wrong.
+
+Two things about the signal were not obvious. **Frame age is not it** — a screen
+that is genuinely still produces no frames at all under a damage-driven engine,
+which is the state `settle` exists to detect, so "no frames" cannot distinguish
+a wedge from a quiet screen. The signal is the daemon's own failed reads, which
+only the daemon knows about, published to `capture-health.json` because
+`state.json` is written when a frame is recorded and a stall is the absence of
+frames. **And the count to watch is re-resolves, not failures**: a successful
+re-resolve resets the failure count, so the pathology loops — six failures,
+re-resolve, six failures — and no count of consecutive failures ever grows
+large enough to notice. Two re-resolves without a frame in between means the
+port was never the problem. The Node capture loop, which has no port to
+re-resolve, counts consecutive errors instead, so a wedged Android emulator is
+not silent either.
+
 ### Phase 8b — the instrumentation APK, and when to build it
 **Decided 2026-09-09: Android ships OCR + CV only.** Not because the tree is
 worthless but because of where the pain is. Android is the second proof of the

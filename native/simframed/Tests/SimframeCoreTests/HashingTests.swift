@@ -306,6 +306,45 @@ final class CaptureRecoveryTests: XCTestCase {
         XCTAssertTrue(damaged, "the damage callback was re-armed on the new descriptor")
     }
 
+    func testReResolvingTwiceWithoutAFrameIsAStall() {
+        // The pathology this is for: re-resolving *works* and reads keep
+        // failing. Because a successful re-resolve clears the failure count,
+        // the loop is six-failures-then-re-resolve for as long as you let it,
+        // and no count of consecutive failures ever notices. Observed three
+        // times in one afternoon; only a device restart cured it.
+        let platform = StubPlatform()
+        _ = try? platform.attach(udid: "STUB-1")
+        var recovery = CaptureRecovery(threshold: 2)
+
+        _ = recovery.captureFailed()
+        XCTAssertTrue(recovery.captureFailed())
+        _ = recovery.reattach(platform: platform, onDamage: {})
+        XCTAssertFalse(recovery.isStalled, "one re-resolve is a recovery, not a stall")
+
+        _ = recovery.captureFailed()
+        XCTAssertTrue(recovery.captureFailed())
+        _ = recovery.reattach(platform: platform, onDamage: {})
+        XCTAssertTrue(recovery.isStalled, "the second says the port was never the problem")
+
+        // And only a real frame clears it. Nothing else is evidence.
+        recovery.captureSucceeded()
+        XCTAssertFalse(recovery.isStalled)
+        XCTAssertEqual(recovery.reattaches, 0)
+    }
+
+    func testAReattachThatKeepsFailingIsAlsoAStall() {
+        // The other direction: when the re-resolve itself fails the count does
+        // keep growing, because nothing resets it.
+        let platform = StubPlatform()
+        platform.failReattach = true
+        var recovery = CaptureRecovery(threshold: 6)
+        for _ in 0..<(CaptureRecovery.stalledAfterFailures - 1) { _ = recovery.captureFailed() }
+        XCTAssertFalse(recovery.isStalled)
+        _ = recovery.captureFailed()
+        XCTAssertTrue(recovery.isStalled)
+        XCTAssertEqual(recovery.reattaches, 0, "nothing was ever re-resolved")
+    }
+
     func testAFailedReattachStaysDueRatherThanWaitingForAnotherSix() {
         let platform = StubPlatform()
         platform.failReattach = true

@@ -167,6 +167,7 @@ case "run":
         let lock = NSLock()
         var dirty = true
         var recovery = CaptureRecovery()
+        var stalledSince: Double?
         var lastCapture = 0.0
         var frames = 0
         var lastReport = Date().timeIntervalSince1970
@@ -433,7 +434,17 @@ case "run":
                     latencies.append(Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6)
                     frames += 1
                     lastCapture = now
+                    let wasStalled = recovery.isStalled
                     recovery.captureSucceeded()
+                    if wasStalled {
+                        // A frame after a stall is the only thing that clears
+                        // it, and it is worth saying out loud: the device came
+                        // back on its own, which nobody would otherwise know.
+                        try? store.writeCaptureHealth(nil)
+                        stalledSince = nil
+                        FileHandle.standardError.write(
+                            "simframed: capture recovered on its own\n".data(using: .utf8)!)
+                    }
                 } catch {
                     let due = recovery.captureFailed()
                     FileHandle.standardError.write(
@@ -459,6 +470,25 @@ case "run":
                             FileHandle.standardError.write(
                                 "simframed: could not re-resolve the display port: \(error)\n".data(using: .utf8)!)
                         }
+                    }
+                    // Say that capture is wedged rather than merely slow, and
+                    // then do nothing about it. The cure for this state is a
+                    // device restart, which is the user's to make: a capture
+                    // loop that rebooted the device it was watching would be a
+                    // tool reaching for the mains because a reading looked
+                    // wrong. So it is published, `doctor` grades it and
+                    // `simframe state` prints it, and an agent reads "the
+                    // simulator is wedged" instead of "nothing changed".
+                    if recovery.isStalled {
+                        if stalledSince == nil { stalledSince = FrameStore.nowMs() }
+                        try? store.writeCaptureHealth([
+                            "stalled": true,
+                            "since": stalledSince ?? FrameStore.nowMs(),
+                            "at": FrameStore.nowMs(),
+                            "consecutiveFailures": recovery.consecutiveFailures,
+                            "reattaches": recovery.reattaches,
+                            "reason": "\(error)",
+                        ])
                     }
                     Thread.sleep(forTimeInterval: 0.5)
                 }
