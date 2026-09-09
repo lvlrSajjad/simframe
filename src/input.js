@@ -3,7 +3,7 @@
 // even available?" before it answers anything else.
 import { execFile } from 'node:child_process';
 import * as control from './control.js';
-import { geometryFor, inputDriverFor } from './platform/index.js';
+import { capabilitiesFor, geometryFor, inputDriverFor, setPasteboard } from './platform/index.js';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -207,6 +207,14 @@ export async function describeAll(udid) {
       /* daemon went away mid-call; fall through to idb */
     }
   }
+  // A platform with no accessibility tree is not a machine missing idb.
+  // `doctor` learned that when it reported "input driver: idb" for an emulator;
+  // this path had not, so every Android screen map carried a note telling the
+  // reader to brew-install a tool that has never spoken to an Android device —
+  // and on a machine where idb *is* installed, spawned it against an emulator
+  // serial on every map build.
+  const ax = capabilitiesFor(udid).ax;
+  if (!ax.supported) throw new Error(`no accessibility tree on this device — ${ax.note}`);
   // Passing --json here yields empty output; the default already emits JSON.
   const out = await idb(['ui', 'describe-all', '--udid', udid]);
   const nodes = [];
@@ -355,6 +363,39 @@ export async function typeText(udid, value) {
     return;
   }
   await idb(['ui', 'text', '--udid', udid, String(value)]);
+}
+
+/**
+ * Put text on the pasteboard **and deliver it** into the focused field.
+ *
+ * The delivery is the whole point, and it is what was missing: the `paste` step
+ * used to set the pasteboard, long-press the field, and report success while
+ * the field stayed empty — on both platforms, not just the one it was filed
+ * against. iOS had the mechanism and did not use it (the daemon's `paste` is
+ * pbcopy *plus* Cmd-V) and Android had the keycode sitting unused in `KEYS`.
+ *
+ * When nothing can deliver the keystroke this throws rather than returning a
+ * cheerful description of half the job. A step that cannot do what it says has
+ * to say so; `type` still works on every device.
+ */
+export async function pasteText(udid, value) {
+  const own = inputDriverFor(udid);
+  if (own?.key) {
+    // The clipboard goes over gRPC; KEYCODE_PASTE is what puts it in the field.
+    await setPasteboard(udid, String(value));
+    await own.key(udid, 'paste');
+    return;
+  }
+  if (control.available(udid)) {
+    // One round trip: the daemon copies and presses Cmd-V.
+    await control.paste(udid, String(value));
+    return;
+  }
+  await setPasteboard(udid, String(value));
+  throw new Error(
+    'the text is on the pasteboard but nothing here can paste it: the keystroke needs the simframe ' +
+      'daemon (start it with `simframe start`), or use `type`, which carries the characters itself',
+  );
 }
 
 /** Key events rather than text: for shortcuts and search-as-you-type. */

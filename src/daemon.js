@@ -159,6 +159,12 @@ export async function runDaemon(device, options = {}) {
         store.writeCaptureHealth(udid, null);
       }
       consecutiveErrors = 0;
+      // And the clock, which it did not. A second stall then kept the first
+      // one's timestamp — `stalledSince ??=` only fills a null — and reported
+      // "unreadable for 4 hours" about a wedge four seconds old. The Swift loop
+      // resets it (main.swift), which is what made this a missed line rather
+      // than a difference of opinion between the two engines.
+      stalledSince = null;
 
       const hash = frameHash(bmp);
       const layout = layoutHash(bmp);

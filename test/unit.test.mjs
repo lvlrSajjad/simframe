@@ -1190,6 +1190,80 @@ test('resolving a device asks every backend, and an ambiguity outranks a match',
   await assert.rejects(() => platform.resolveAcross('Nexus', null, [right]), /nothing on right matches/);
 });
 
+test('a bare query on a host with two platforms says so, and can be answered once', async () => {
+  // The mixed setup is the one the second backend exists for, and it used to
+  // break every command that did not name a device: both backends answer an
+  // empty query with their first booted device, two hits is ambiguous, and the
+  // message interpolated the word "undefined" as the query.
+  const platform = await import('../src/platform/index.js');
+  const sim = fakeBackend('sim', 'S-', [{ udid: 'S-1', name: 'iPhone 17', runtime: 'r', state: 'Booted' }]);
+  const emu = fakeBackend('emu', 'E-', [{ udid: 'E-1', name: 'Small Phone', runtime: 'r', state: 'Booted' }]);
+
+  await assert.rejects(() => platform.resolveAcross(undefined, null, [sim, emu]), (err) => {
+    assert.doesNotMatch(err.message, /undefined/, 'the message does not quote a query nobody typed');
+    assert.match(err.message, /no device named/);
+    assert.match(err.message, /S-1/, 'both devices are named by id, since that is what resolves them');
+    assert.match(err.message, /E-1/);
+    assert.match(err.message, /SIMFRAME_DEVICE/, 'and the way out is in the message');
+    return true;
+  });
+
+  // Naming one is still unambiguous, and one platform alone still needs nothing.
+  assert.equal((await platform.resolveAcross('E-1', null, [sim, emu])).udid, 'E-1');
+  assert.equal((await platform.resolveAcross(undefined, null, [sim])).udid, 'S-1');
+});
+
+test('a physical Android device is not offered as one simframe can drive', async () => {
+  // `adb devices` lists phones as readily as emulators, and the backend listed
+  // whatever it was given while `ownsUdid` claimed emulator serials only. So
+  // `devices` offered a plugged-in phone, a bare resolve could return it, and
+  // the tap that followed complained about the serial instead of saying that
+  // physical devices are a non-goal. The test below asserts listing and routing
+  // agree; it passed only because the machine that ran it had no phone attached.
+  const platform = await import('../src/platform/index.js');
+  const { android } = platform.PLATFORMS;
+  assert.ok(android.ownsUdid('emulator-5554'), 'an emulator serial is claimed');
+  for (const serial of ['R58M1234ABC', '1a2b3c4d', 'emulator-abc', '192.168.1.5:5555']) {
+    assert.ok(!android.ownsUdid(serial), `${serial} is not an emulator serial`);
+  }
+  // And the listing is gated on that same answer, which is what makes the two
+  // agree on a machine this test cannot arrange: one with a phone plugged in.
+  const source = fs.readFileSync(new URL('../src/platform/android.js', import.meta.url), 'utf8');
+  const loop = /for \(const line of stdout\.split\('\\n'\)\.slice\(1\)\) \{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(loop, 'the device-listing loop is still there');
+  assert.match(loop[1], /ownsUdid\(serial\)/, 'the listing only keeps serials this backend claims');
+});
+
+test('the steps that put text in a field deliver it, and the stall clock resets', async () => {
+  // Three one-line omissions that all produced a confident wrong answer, pinned
+  // at the source because each of them needs a device to exercise and none of
+  // them needs one to get wrong again.
+  const read = (f) => fs.readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8');
+
+  // `paste` set the pasteboard, long-pressed the field and reported success
+  // while the field stayed empty — on both platforms. The keystroke is the job.
+  const actions = read('actions.js');
+  const paste = /case 'paste': \{([\s\S]*?)\n    \}/.exec(actions);
+  assert.ok(paste, 'the paste step is still a case in runStep');
+  assert.match(paste[1], /input\.pasteText/, 'paste delivers through pasteText');
+  assert.doesNotMatch(paste[1], /placed text on the pasteboard/, 'and does not describe half the job');
+
+  // pasteText has exactly two ways to deliver and throws when it has neither,
+  // rather than returning a cheerful description of setting the pasteboard.
+  const input = read('input.js');
+  const pasteText = /export async function pasteText\(([\s\S]*?)\n\}/.exec(input);
+  assert.ok(pasteText, 'pasteText exists');
+  assert.match(pasteText[1], /own\.key\(udid, 'paste'\)/, 'the platform keycode path');
+  assert.match(pasteText[1], /control\.paste\(/, 'and the daemon Cmd-V path');
+  assert.match(pasteText[1], /throw new Error/, 'and a refusal when neither is there');
+
+  // A stall clock that is never reset reports the first stall's age forever.
+  const daemon = read('daemon.js');
+  const recovery = /capture recovered on its own[\s\S]{0,600}/.exec(daemon);
+  assert.ok(recovery, 'the recovery branch is still there');
+  assert.match(recovery[0], /stalledSince = null/, 'recovery resets the clock, as the Swift loop does');
+});
+
 test('a listing unions the backends and stamps every record', async () => {
   const platform = await import('../src/platform/index.js');
   const devices = await platform.listDevices();

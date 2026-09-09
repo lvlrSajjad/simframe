@@ -147,18 +147,30 @@ export async function bootedDevices(opts) {
  * device is the wrong-device bug wearing a different hat.
  *
  * Cross-platform ambiguity — one name matching a simulator and an emulator — is
- * reported rather than guessed at. Which of them a bare query should prefer is
- * a question for the step that adds the second backend, not one to invent an
- * answer to here.
+ * reported rather than guessed at, and so is a *bare* query on a host with a
+ * booted device on both platforms. That case is not exotic: it is the mixed
+ * setup the second backend exists for, and it used to break every command that
+ * did not name a device, with the word "undefined" standing in for the query.
+ *
+ * There is no defensible way to pick for you. Preferring iOS because it came
+ * first would silently tap a simulator while you were driving an emulator,
+ * which is the one failure this project will not ship. So a bare query on a
+ * mixed host says so and names both devices — and `SIMFRAME_DEVICE` exists so
+ * the answer can be given once per shell instead of on every command.
  *
  * @returns {Promise<Device>}
  */
 export async function resolveDevice(query, opts) {
-  return resolveAcross(query, opts, backends());
+  return resolveAcross(query ?? process.env.SIMFRAME_DEVICE ?? undefined, opts, backends());
 }
 
 /** As above, over a given set of backends — the testable half. @returns {Promise<Device>} */
 export async function resolveAcross(query, opts, all) {
+  // A backend is entitled to assume a query is a string. `--device X` used to
+  // parse as `device: true`, which reached ios.js as `query.toLowerCase` and
+  // crashed with a TypeError where an unmatched device should have been a
+  // sentence. The parser no longer produces that, and this makes it unable to.
+  if (query != null && typeof query !== 'string') query = String(query);
   const hits = [];
   const misses = [];
   for (const backend of all) {
@@ -171,9 +183,12 @@ export async function resolveAcross(query, opts, all) {
   }
   if (hits.length === 1) return hits[0];
   if (hits.length > 1) {
+    const named = hits.map((d) => `${d.name} (${d.platform}, ${d.udid})`).join(', ');
     throw new Error(
-      `"${query}" matches a device on more than one platform: ` +
-        `${hits.map((d) => `${d.name} (${d.platform})`).join(', ')} — name one by its id`,
+      (query == null || query === ''
+        ? 'no device named, and there is a booted device on more than one platform'
+        : `"${query}" matches a device on more than one platform`) +
+        `: ${named} — name one by its id, or set SIMFRAME_DEVICE to pick a default`,
     );
   }
   // One backend: its own message, unchanged. It is the better message, because

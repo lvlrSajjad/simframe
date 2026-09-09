@@ -86,14 +86,39 @@ The reliable pattern around an action is:
   simframe state --since=$H
 `;
 
+/**
+ * Flags that take a value, so `--flag value` can mean what it looks like.
+ *
+ * Deliberately not every flag: `--json`, `--refresh` and friends have a bare
+ * form, and letting those swallow the next argument would turn
+ * `simframe tap --refresh Save` into a tap on nothing.
+ */
+const VALUE_FLAGS = new Set([
+  'ago', 'count', 'detail', 'device', 'durationMs', 'engine', 'filter', 'fps', 'index', 'maxDim',
+  'mode', 'out', 'ringSize', 'since', 'spanMs', 'stableMs', 'timeoutMs',
+]);
+
 function parseArgs(argv) {
   const flags = {};
   const positional = [];
-  for (const arg of argv) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
     if (arg.startsWith('--')) {
       const [key, value] = arg.slice(2).split('=');
       const camel = key.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-      flags[camel] = value === undefined ? true : value;
+      if (value !== undefined) {
+        flags[camel] = value;
+      } else if (VALUE_FLAGS.has(camel) && argv[i + 1] != null && !argv[i + 1].startsWith('--')) {
+        // `--device X` as well as `--device=X`. Only for flags whose bare form
+        // means nothing: `simframe doctor --device B55AB0AE` used to set
+        // `device` to `true`, push the udid to positional, and resolve the
+        // literal string "true" — and doctor's own advice is to name a device
+        // with --device, which is exactly how someone would write it.
+        flags[camel] = argv[i + 1];
+        i += 1;
+      } else {
+        flags[camel] = true;
+      }
     } else {
       positional.push(arg);
     }
@@ -800,6 +825,25 @@ async function doctor({ json = false, strict = false, device } = {}) {
       const wanted = await resolveDevice(device);
       booted = booted.filter((d) => d.udid === wanted.udid);
     }
+    // Which devices get *probed*, as opposed to listed. The probes below start
+    // a capture loop and read frames, and doctor used to do that to every
+    // booted device on the host. On a shared machine that means starting a
+    // daemon on a colleague's simulator and capturing their screen to answer a
+    // question about this one. Listing is free and stays; probing is not, so
+    // without --device it goes to a device already running its own capture loop
+    // (nothing new is started), or to the only booted device, and otherwise to
+    // none, with a line saying which flag would pick one.
+    let probed = booted;
+    if (!device && booted.length > 1) {
+      probed = booted.filter((d) => engineModule.runningEngine(d.udid));
+      if (probed.length !== 1) {
+        probed = [];
+        add('device probes', 'warn',
+          `${booted.length} devices are booted and none is clearly yours — name one with --device ` +
+            'to check its capture, input and accessibility layers',
+          { key: 'probes.skipped', value: booted.length });
+      }
+    }
     // `deviceNoun` earns its place here: one platform's devices are called by
     // its own word, and a mixed set by the neutral one. An emulator reported as
     // a "booted simulator" is the same small lie as an emulator reported as
@@ -807,7 +851,7 @@ async function doctor({ json = false, strict = false, device } = {}) {
     const nouns = [...new Set(booted.map((d) => capabilitiesFor(d.udid) && PLATFORMS[d.platform].deviceNoun))];
     add(`booted ${nouns.length === 1 ? nouns[0] : 'device'}`, booted.length ? 'ok' : 'warn',
       booted.map((d) => `${d.name} (${d.runtime})`).join(', ') || 'none');
-    for (const d of booted) {
+    for (const d of probed) {
       const input = await import('./input.js');
       const control = await import('./control.js');
       // What this device's platform can do at all. Without asking, doctor
@@ -871,9 +915,9 @@ async function doctor({ json = false, strict = false, device } = {}) {
         ax.available ? `${ax.name}: ${ax.version}` : `unavailable: ${ax.reason}`,
         { key: 'ax.driver', value: ax.name });
     }
-    if (booted.length) {
+    if (probed.length) {
       const t0 = Date.now();
-      const res = await api.getFrame(booted[0].udid);
+      const res = await api.getFrame(probed[0].udid);
       add('capture', 'ok',
         `frame #${res.state.seq} ${res.width}x${res.height} in ${Date.now() - t0}ms (age ${res.ageMs}ms)`,
         { key: 'capture.frames', value: res.state.seq });
@@ -881,7 +925,7 @@ async function doctor({ json = false, strict = false, device } = {}) {
       // to ask the capture loop rather than look at the frames. `fail`, not
       // `warn`: nothing here is degraded-but-working, and the cure is a device
       // restart that simframe deliberately does not perform.
-      for (const d of booted) {
+      for (const d of probed) {
         const live = api.liveness(d.udid, (await api.getState(d.udid)).state);
         if (live.stalled) add(`capture health (${d.name})`, 'fail', live.note, { key: 'capture.stalled', value: true });
       }
@@ -893,8 +937,21 @@ async function doctor({ json = false, strict = false, device } = {}) {
   // doctor is a diagnostic, not a way to start things. If it had to start a
   // daemon to answer "which engine is in use", it stops it again rather than
   // leaving a detached process behind.
+  //
+  // And it says when it could not. This was `catch { /* best effort */ }`, and
+  // best effort silently failed: a stop refused because another client holds
+  // the device left a capture loop running on a machine somebody else was
+  // using, with doctor reporting a clean bill of health. A diagnostic that
+  // leaves something behind has to name it.
   for (const udid of startedHere) {
-    try { await api.stopDaemon(udid); } catch { /* best effort */ }
+    try {
+      await api.stopDaemon(udid);
+    } catch (err) {
+      add('cleanup', 'warn',
+        `started a capture loop on ${udid} to answer a question and could not stop it again ` +
+          `(${err.message}) — stop it with: simframe stop --device=${udid}`,
+        { key: 'cleanup.left', value: udid });
+    }
   }
 
   const failed = checks.filter((c) => c.level === 'fail');

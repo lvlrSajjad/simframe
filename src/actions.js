@@ -6,7 +6,7 @@ import * as api from './index.js';
 import * as graph from './graph.js';
 import * as input from './input.js';
 import * as intent from './intent.js';
-import { launchApp, openUrl, setPasteboard, setPermission, terminateApp } from './platform/index.js';
+import { launchApp, openUrl, setPermission, terminateApp } from './platform/index.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MAX_PAUSE_MS = 5000;
@@ -272,6 +272,33 @@ export async function runScript(
   };
 }
 
+/**
+ * Tap a field and wait for it to take focus, for the steps that then put text
+ * in it.
+ *
+ * `locate`, not `tapLabel`: tapLabel asks the accessibility tree directly, so a
+ * field only OCR can see was untypeable and a selector (`#4`, `@x,y`) meant
+ * nothing here. The returned `quiet` says when the field never visibly took
+ * focus — usually fine, since a field that already had focus does not move, but
+ * also exactly what a tap that missed looks like, so the caller should be told.
+ */
+async function focusField(deviceQuery, udid, step, ctx) {
+  const found = await api.locate(deviceQuery, step.into, { index: step.index, refresh: step.refresh });
+  await input.tapPoint(udid, found.target.x, found.target.y);
+  const focused = await api.waitFor(deviceQuery, {
+    mode: 'settle',
+    stableMs: FOCUS_STABLE_MS,
+    reactionMs: FOCUS_REACTION_MS,
+    timeoutMs: FOCUS_TIMEOUT_MS,
+    options: ctx.options,
+  });
+  return {
+    found,
+    where: `"${found.target.label}" at ${found.target.x},${found.target.y}`,
+    quiet: focused.satisfied ? '' : ' [the field did not visibly take focus]',
+  };
+}
+
 async function runStep(deviceQuery, udid, step, ctx) {
   switch (step.action) {
     case 'tap': {
@@ -298,33 +325,25 @@ async function runStep(deviceQuery, udid, step, ctx) {
     }
     case 'type': {
       if (step.into) {
-        // locate, not tapLabel: tapLabel asks the accessibility tree directly,
-        // so a field that only OCR can see was untypeable, and a selector
-        // (`#4`, `@x,y`) meant nothing here.
-        const found = await api.locate(deviceQuery, step.into, { index: step.index, refresh: step.refresh });
-        await input.tapPoint(udid, found.target.x, found.target.y);
-        const focused = await api.waitFor(deviceQuery, {
-          mode: 'settle',
-          stableMs: FOCUS_STABLE_MS,
-          reactionMs: FOCUS_REACTION_MS,
-          timeoutMs: FOCUS_TIMEOUT_MS,
-          options: ctx.options,
-        });
+        const field = await focusField(deviceQuery, udid, step, ctx);
         await input.typeText(udid, step.text ?? step.value);
-        // Say when the field never visibly took focus. It is usually fine — a
-        // field that was already focused does not move — but it is also what a
-        // tap that missed looks like, and the caller should be able to tell.
-        const quiet = focused.satisfied ? '' : ' [the field did not visibly take focus]';
-        return `typed into "${found.target.label}" at ${found.target.x},${found.target.y}${quiet}`;
+        return `typed into ${field.where}${field.quiet}`;
       }
       await input.typeText(udid, step.text ?? step.value);
       return 'typed text';
     }
     case 'paste': {
-      // Long strings are much faster on the pasteboard than through the keyboard.
-      await setPasteboard(udid, step.text ?? step.value);
-      if (step.into) await input.tapLabel(udid, step.into, { index: step.index, durationMs: 900 });
-      return 'placed text on the pasteboard';
+      // Long strings are much faster on the pasteboard than through the
+      // keyboard. `pasteText` delivers the keystroke as well as setting the
+      // pasteboard, and throws if it cannot — this step used to do neither and
+      // report success anyway.
+      if (step.into) {
+        const field = await focusField(deviceQuery, udid, step, ctx);
+        await input.pasteText(udid, step.text ?? step.value);
+        return `pasted into ${field.where}${field.quiet}`;
+      }
+      await input.pasteText(udid, step.text ?? step.value);
+      return 'pasted into the focused field';
     }
     case 'swipe': {
       const from = { x: step.from?.[0] ?? step.from?.x, y: step.from?.[1] ?? step.from?.y };

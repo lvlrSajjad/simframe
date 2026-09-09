@@ -223,9 +223,19 @@ function spawnNodeDaemon(udid, options) {
   for (const key of ['fps', 'maxDim', 'ringSize', 'idleExitMs']) {
     if (options[key] != null) args.push(`--${key}=${options[key]}`);
   }
+  // stderr goes to the device's own log, the way the Swift daemon's does
+  // (engine.js). It was `stdio: 'ignore'`, so anything this loop said about
+  // itself went to /dev/null — including the Android backend's notice that the
+  // console capture path had failed and it had fallen back to adb at five times
+  // the latency. A silent fallback is the failure mode this project has been
+  // bitten by twice; it does not get a third time for want of a file handle.
+  // The directory may not exist yet on a first start, and `writeCaptureHealth`
+  // already taught this project that an unwritable path here fails silently.
+  fs.mkdirSync(store.paths(udid).dir, { recursive: true });
+  const log = fs.openSync(store.paths(udid).log, 'a');
   const child = spawn(process.execPath, args, {
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', log, log],
     env: process.env,
   });
   child.unref();

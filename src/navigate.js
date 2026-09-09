@@ -51,6 +51,13 @@ export async function goto(deviceQuery, target, { options, ...runOptions } = {})
     return { ok: true, already: true, screen: found.name, steps: [] };
   }
 
+  // `hashTokens` returns null for an empty token set on purpose — a constant
+  // hash for "I could read nothing" is the self-confirming-emptiness bug. So a
+  // screen with no identity has to be reported, not sliced: this threw
+  // `Cannot read properties of null (reading 'slice')` instead of answering.
+  // Not hypothetical on Android, where README's own table puts the launcher at
+  // one token.
+  if (!here.hash) return { ok: false, reason: 'no-identity', to: found.name };
   const path_ = graph.route(udid, { hash: here.hash, tokens: here.tokens }, found.node.hash);
   if (!path_) return { ok: false, reason: 'no-route', from: here.hash.slice(0, 8), to: found.name };
 
@@ -65,7 +72,7 @@ export async function goto(deviceQuery, target, { options, ...runOptions } = {})
     steps,
     ranSteps: result.ranSteps,
     results: result.results,
-    arrived: arrived.hash.slice(0, 8),
+    arrived: arrived.hash ? arrived.hash.slice(0, 8) : null,
   };
 }
 

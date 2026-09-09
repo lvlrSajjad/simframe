@@ -10,6 +10,10 @@
 // below, and the reason two of them are not the obvious command:
 //
 //   emulator console `screenrecord screenshot <dir>`     20 ms, written host-side
+//
+// Those are screenshot costs. A *frame* — screenshot plus the resize that makes
+// it readable — measures 41 ms, which is the number README quotes; the two were
+// quoted interchangeably in three files and agreed with each other in none.
 //   adb exec-out screencap -p                           113 ms, 9 KB over adb
 //   adb exec-out screencap (raw RGBA, 3.7 MB)           218 ms — the transfer, not the encode
 //   adb shell getprop x4 in one hop                      28 ms
@@ -107,7 +111,14 @@ async function fetchDevices() {
   const serials = [];
   for (const line of stdout.split('\n').slice(1)) {
     const [serial, state] = line.trim().split(/\s+/);
-    if (serial && state) serials.push({ serial, adbState: state });
+    // Only emulators. Physical devices are a stated non-goal, and this list is
+    // "devices simframe can drive" — `ownsUdid` claims emulator serials and
+    // nothing else, so listing a plugged-in phone here made listing and routing
+    // disagree: `devices` offered it, a bare `resolveDevice` could return it,
+    // and the tap that followed failed with a complaint about the serial rather
+    // than an honest "not supported". A unit test asserts the two agree; it
+    // passed only because nobody had a phone attached.
+    if (serial && state && ownsUdid(serial)) serials.push({ serial, adbState: state });
   }
   const out = [];
   for (const { serial, adbState } of serials) {
@@ -556,6 +567,12 @@ async function screenshot(udid, outFile, { mask: _mask = 'ignored' } = {}) {
     try {
       const { stdout } = await adb(udid, ['exec-out', 'screencap', '-p'], { encoding: 'buffer', timeout: 20_000 });
       fs.writeFileSync(outFile, stdout);
+      // stderr, not a store write: a backend below the boundary has no business
+      // knowing where simframe keeps its files. The capture loop is now spawned
+      // with its stderr pointed at `daemon.log` (src/index.js), which is what
+      // makes this line readable at all — it used to go to a daemon started
+      // `stdio: 'ignore'`, so a five-times-slower capture path could be in
+      // effect for a whole session with no trace of it anywhere.
       process.env.SIMFRAME_QUIET === '1' ||
         process.stderr.write(`simframe: emulator console unavailable (${consoleErr.message}); used adb screencap\n`);
     } catch (adbErr) {
@@ -796,7 +813,14 @@ async function launchApp(udid, bundleId, { args = [], env = {}, terminateFirst =
 }
 
 async function terminateApp(udid, bundleId) {
-  await adb(udid, ['shell', 'am', 'force-stop', bundleId]);
+  // `am` reports failure on stdout and still exits 0 — the same trap launchApp
+  // and openUrl already check for. Without this, terminating a package that is
+  // not installed answered "terminated com.typo.app".
+  const { stdout, stderr } = await adb(udid, ['shell', 'am', 'force-stop', bundleId]);
+  const error = /^Error:.*$/m.exec(`${stdout}${stderr}`);
+  if (error) {
+    throw new Error(`could not terminate ${bundleId}: ${error[0].replace(/^Error:\s*/, '')}`);
+  }
 }
 
 async function openUrl(udid, url) {
@@ -928,10 +952,15 @@ function toolchain() {
  * There is no framebuffer engine, so `screenshot` is not a downgrade on this
  * platform and doctor must not report it as one.
  *
- * Input and the accessibility tree: not yet, and said so rather than answered
- * with the iOS driver's name. Both paths are measured and unwired — the console's
- * `event mouse` puts a real down/move/up on the touch screen in ~20 ms, and
- * `uiautomator dump` costs 2 s a read, which is the interesting problem.
+ * Input: yes, through the emulator console — `event mouse` puts a real
+ * down/move/up on the touch screen, and `event text` carries characters rather
+ * than key positions, so a non-Latin host layout cannot reinterpret them. This
+ * comment said "not yet" for a release after it shipped; a stale comment above
+ * a live value is worse than no comment, because the next reader believes it.
+ *
+ * The accessibility tree: no, and said so rather than answered with the iOS
+ * driver's name. `uiautomator dump` costs 2,012 ms a read, which is why it is
+ * not the answer; see docs/DEFERRED.md for the shape of the one that would be.
  */
 function capabilities() {
   return {
