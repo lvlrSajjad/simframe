@@ -21,6 +21,7 @@
 // stays as the fallback for the case where the console is unreachable.
 import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import http2 from 'node:http2';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -354,6 +355,150 @@ async function consoleScript(udid, lines, { timeoutMs = 10_000 } = {}) {
   return out.join('');
 }
 
+// --- the emulator's gRPC endpoint -------------------------------------------
+//
+// Reached with nothing but `node:http2`, because a unary gRPC call is a plain
+// HTTP/2 POST: a five-byte frame header in front of the message, `grpc-status`
+// in the trailers, and that is the whole protocol for this purpose. No
+// dependency, which is what makes it usable here at all.
+//
+// It exists for one thing so far: the clipboard. `cmd clipboard` does not exist
+// on API 36 and `service call clipboard` depends on transaction numbers that
+// move between platform versions, so this was written up as "no path to the
+// Android clipboard" until the emulator's own service definitions turned out to
+// declare `setClipboard`, `getClipboard` and `streamClipboard`. `ClipData` is
+// the simplest message protobuf can express — one string field — so the encoder
+// below is three lines rather than a library.
+
+/** Where a running emulator writes its own port and token. */
+function runningAvdDirs() {
+  return [
+    path.join(os.homedir(), 'Library/Caches/TemporaryItems/avd/running'),
+    process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, 'avd/running') : null,
+    path.join(os.tmpdir(), `android-${os.userInfo().username}`, 'avd/running'),
+  ].filter(Boolean);
+}
+
+const endpointCache = new Map();
+
+/**
+ * The gRPC port and token for a device.
+ *
+ * The emulator writes both into a per-process ini alongside the AVD it is
+ * running, which is how this avoids hardcoding 8554 and works with a second
+ * emulator on another port. The token is a local credential the emulator wrote
+ * for whoever can read the file — the same status as the console auth token —
+ * and it is read at call time, never logged and never stored anywhere else.
+ */
+function grpcEndpoint(udid) {
+  const cached = endpointCache.get(udid);
+  if (cached && Date.now() - cached.at < DEVICE_CACHE_MS) return cached.endpoint;
+  const serial = consolePort(udid);
+  if (!serial) throw new Error(`${udid} is not an emulator serial`);
+  for (const dir of runningAvdDirs()) {
+    let names = [];
+    try {
+      names = fs.readdirSync(dir).filter((f) => /^pid_\d+\.ini$/.test(f));
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      let text = '';
+      try {
+        text = fs.readFileSync(path.join(dir, name), 'utf8');
+      } catch {
+        continue;
+      }
+      const field = (key) => new RegExp(`^${key.replace('.', '\\.')}=(.*)$`, 'm').exec(text)?.[1]?.trim();
+      if (field('port.serial') !== String(serial)) continue;
+      const port = Number(field('grpc.port'));
+      const token = field('grpc.token');
+      if (!port) continue;
+      const endpoint = { port, token: token || null };
+      endpointCache.set(udid, { at: Date.now(), endpoint });
+      return endpoint;
+    }
+  }
+  throw new Error(
+    `could not find the gRPC endpoint for ${udid} — no running-AVD record names console port ${serial}`,
+  );
+}
+
+/** A length-delimited protobuf string field. */
+function protoString(fieldNumber, value) {
+  const body = Buffer.from(String(value), 'utf8');
+  const length = [];
+  let remaining = body.length;
+  do {
+    length.push((remaining & 0x7f) | (remaining > 0x7f ? 0x80 : 0));
+    remaining >>>= 7;
+  } while (remaining > 0);
+  return Buffer.concat([Buffer.from([(fieldNumber << 3) | 2]), Buffer.from(length), body]);
+}
+
+/** Read the first length-delimited field out of a protobuf message. */
+function firstString(message) {
+  if (!message.length || (message[0] >> 3) !== 1) return '';
+  let offset = 1;
+  let length = 0;
+  let shift = 0;
+  for (;;) {
+    const byte = message[offset];
+    offset += 1;
+    length |= (byte & 0x7f) << shift;
+    if (!(byte & 0x80)) break;
+    shift += 7;
+  }
+  return message.subarray(offset, offset + length).toString('utf8');
+}
+
+function grpcCall(udid, method, message, { timeoutMs = 10_000 } = {}) {
+  const { port, token } = grpcEndpoint(udid);
+  return new Promise((resolve, reject) => {
+    const client = http2.connect(`http://127.0.0.1:${port}`);
+    const fail = (err) => {
+      client.close();
+      reject(err);
+    };
+    client.on('error', fail);
+    const header = Buffer.alloc(5);
+    header.writeUInt8(0, 0);
+    header.writeUInt32BE(message.length, 1);
+    const req = client.request({
+      ':method': 'POST',
+      ':path': `/android.emulation.control.EmulatorController/${method}`,
+      'content-type': 'application/grpc',
+      te: 'trailers',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    });
+    req.setTimeout(timeoutMs, () => fail(new Error(`emulator gRPC ${method} timed out after ${timeoutMs}ms`)));
+    const chunks = [];
+    let status = null;
+    let detail = '';
+    const readStatus = (headers) => {
+      if (headers['grpc-status'] == null) return;
+      status = Number(headers['grpc-status']);
+      detail = headers['grpc-message'] ?? '';
+    };
+    req.on('response', readStatus);
+    req.on('trailers', readStatus);
+    req.on('error', fail);
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      client.close();
+      if (status !== 0) {
+        // 16 is UNAUTHENTICATED, which here means the token was missing or
+        // stale rather than anything the caller did wrong.
+        const why = status === 16 ? 'the emulator refused the gRPC token' : `grpc-status ${status}`;
+        return reject(new Error(`${method} failed: ${why}${detail ? ` (${detail})` : ''}`));
+      }
+      // Strip the five-byte frame header the response carries too.
+      resolve(Buffer.concat(chunks).subarray(5));
+    });
+    req.end(Buffer.concat([header, message]));
+  });
+}
+
 /** A PNG that has not been written all the way to its IEND chunk is a truncated read. */
 function completePng(file) {
   try {
@@ -573,6 +718,7 @@ const KEYS = {
   delete: 'KEYCODE_DEL',
   menu: 'KEYCODE_MENU',
   search: 'KEYCODE_SEARCH',
+  paste: 'KEYCODE_PASTE',
 };
 
 async function key(udid, name) {
@@ -636,7 +782,13 @@ async function launchApp(udid, bundleId, { args = [], env = {}, terminateFirst =
   // already on, which is the exact bug `relaunch` exists to prevent on iOS.
   // `-S` stops the app and `--activity-clear-task` drops the restored stack.
   const fresh = terminateFirst ? ['-S', '--activity-clear-task'] : [];
-  const { stdout, stderr } = await adb(udid, ['shell', 'am', 'start', '-W', ...fresh, '-n', component]);
+  // `-W` waits for the activity to be idle and `-S` makes it a cold start:
+  // measured at 6.1 s for Settings on an idle emulator, and it exceeded the
+  // 20 s default while OCR and capture were competing for the same cores. The
+  // bound belongs to the app's start-up, not to adb.
+  const { stdout, stderr } = await adb(udid, ['shell', 'am', 'start', '-W', ...fresh, '-n', component], {
+    timeout: 60_000,
+  });
   const said = `${stdout}${stderr}`;
   // `am start` reports its failures on stdout and exits 0 — the same silent
   // success `pm grant` has, and the reason setPermission below reads back.
@@ -736,19 +888,21 @@ async function setPermission(udid, action, service, bundleId) {
 }
 
 /**
- * There is no pasteboard path on Android.
+ * Put text on the device clipboard.
  *
- * `cmd clipboard` does not exist (API 36 answers "No shell command
- * implementation"), and the clipboard service cannot be driven over `service
- * call` in any way that survives a platform version. The alternatives both cost
- * something honest: type the text, or install a helper APK, which would be the
- * first runtime dependency this project has taken. See docs/DEFERRED.md.
+ * Not over adb, which has no path to it: `cmd clipboard` does not exist on API
+ * 36 and `service call clipboard` depends on transaction numbers that move
+ * between platform versions. The emulator's gRPC endpoint declares
+ * `setClipboard(ClipData)` and that is the whole answer — about 48 ms, no
+ * dependency, no helper app on the device.
  */
-async function setPasteboard(udid, _value) {
-  throw new Error(
-    'setting the pasteboard is not supported on Android — there is no adb path to the clipboard ' +
-      '(type the text instead, which is slower but real)',
-  );
+async function setPasteboard(udid, value) {
+  await grpcCall(udid, 'setClipboard', protoString(1, String(value)));
+}
+
+/** What the device currently holds. Mostly here to make the setter checkable. */
+async function getPasteboard(udid) {
+  return firstString(await grpcCall(udid, 'getClipboard', Buffer.alloc(0)));
 }
 
 /**
@@ -808,6 +962,7 @@ export const platform = {
   openUrl,
   setPermission,
   setPasteboard,
+  getPasteboard,
   permissionServices: () => PERMISSION_SERVICES,
   capabilities,
   toolchain,
