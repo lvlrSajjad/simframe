@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.lvlrSajjad/simframe",
   "title": "simframe",
-  "description": "Always-warm iOS Simulator and Android emulator frames: agents read the screen in ~20ms instead of screenshotting",
+  "description": "Always-warm iOS Simulator and Android emulator frames: agents read the screen in ~20ms",
   "version": "0.7.1",
   "websiteUrl": "https://lvlrsajjad.github.io/simframe/",
   "repository": {

@@ -123,4 +123,19 @@ if (missing.length) {
   );
   process.exit(1);
 }
+// The MCP Registry rejects a description over 100 characters, and it does so at
+// `mcp-publisher validate` — after the tag is pushed and the release has begun.
+// A 0.7.1 release found that out the hard way with a 113-character one. The
+// constraint is the registry's; discovering it locally is this script's job.
+const DESCRIPTION_MAX = 100;
+const server = JSON.parse(fs.readFileSync(path.join(ROOT, 'server.json'), 'utf8'));
+if (server.description.length > DESCRIPTION_MAX) {
+  console.error(
+    `server.json description is ${server.description.length} characters; the MCP Registry accepts ` +
+      `${DESCRIPTION_MAX}. It would fail at validate, with the tag already pushed.`,
+  );
+  process.exit(1);
+}
+console.log(`server.json description ${server.description.length}/${DESCRIPTION_MAX} chars`);
+
 console.log('ok — every build input ships');
