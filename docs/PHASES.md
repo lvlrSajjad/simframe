@@ -13,8 +13,15 @@ what Claude sees. Phase 8 is the second platform.
 
 ## Where this stands
 
-Updated 2026-09-08. Numbers for every claim here are in `docs/BENCHMARKS.md`;
+Updated 2026-09-09. Numbers for every claim here are in `docs/BENCHMARKS.md`;
 open work is in `docs/DEFERRED.md`.
+
+This file covers Phases 0-9. **The human-parity series, Phases 10-16, is in
+[`docs/PHASES-HUMAN-PARITY.md`](PHASES-HUMAN-PARITY.md)**, with its research in
+[`docs/research/03-human-parity.md`](research/03-human-parity.md) and its fixed
+decisions in `CLAUDE.md`. It is a separate file because it is scored
+differently: every phase there reports model turns removed and a Human Parity
+Index, not a latency in milliseconds.
 
 | Phase | State |
 | --- | --- |
@@ -34,8 +41,16 @@ open work is in `docs/DEFERRED.md`.
 | CI — the memory layer | done. `scripts/ci-memory.mjs` drives the real CLI over the screen map, refs, graph, verdicts, flows and `goto`, OCR-only. Four bugs found writing it, one of them a capture loop that could not recover a lost display port |
 | 7 — compact agent state, skill | done. A ten-step flow is **1 tool call, 0 images, ~1,650 characters**. Every action returns the numbered text screen map; `sim_look` is the only image path and is capped at 1024 px |
 | 8 — Android | steps 0-3 done — the seam exists, dispatch is device-keyed, and Android both reads and acts: frames at 41 ms, a screen map, the graph, taps, typing, keys and the clipboard. No accessibility tree (Phase 8b, conditional) |
+| 8b — Android accessibility APK | **deferred**, with criteria and numbers in `docs/DEFERRED.md`. `uiautomator dump` costs 2,012 ms; the fast path needs an instrumentation APK on the device, which would be simframe's first installed artifact |
+| 9 — tier-2 local model | **deferred, and not merely unstarted.** Its own gate — the Phase 5 eval harness — does not exist, and the measured gap it would address (83% icon-only elements) has a cheaper tool in Phase 16 |
+| 10-16 — human parity | not started. See [`PHASES-HUMAN-PARITY.md`](PHASES-HUMAN-PARITY.md). Phase 10 is mandatory and first; after it the escalation log, not the file, decides the order |
 
-**Pick up here: Phase 8, and here is what is actually in the way.**
+**Pick up here: Phase 10** — instrumentation, in
+[`PHASES-HUMAN-PARITY.md`](PHASES-HUMAN-PARITY.md). Phase 8 landed; what
+follows in this section is the record of how its boundary was built, kept
+because the reasoning is still what governs adding a third backend. It read
+"pick up here" for two phases after it stopped being true, which is the third
+time a stale status in this file has been mistaken for open work.
 
 The Swift half is ready. `SimframeCore` — history, settle, transitions, hashing,
 the frame store — imports no platform framework at all, verified rather than
