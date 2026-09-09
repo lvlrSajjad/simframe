@@ -91,20 +91,55 @@ jobs:
       - name: Validate server.json
         run: ./mcp-publisher validate
 
+      # A version with a hyphen in it is a prerelease: 0.6.0-rc.0, not 0.6.0.
+      # This decides two things below, and getting either wrong is worse than
+      # not shipping.
+      - name: Is this a prerelease?
+        id: kind
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          case "$VERSION" in
+            *-*) echo "prerelease=true"  >> "$GITHUB_OUTPUT"; echo "$VERSION is a prerelease" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT"; echo "$VERSION is a release" ;;
+          esac
+
       - name: Publish to npm
         # Publishing by hand and then tagging is a normal thing to do, and npm
         # rejects a version that already exists. That must not stop the run
         # before the registry step, so an existing version is a skip, not a
         # failure. Any other npm error still fails the job.
+        #
+        # The dist-tag is not cosmetic. `npm publish` with no --tag writes
+        # `latest` whatever the version says, so a release candidate published
+        # without this becomes what every `npm i simframe` installs — a silent
+        # downgrade in stability for everyone, from a tag that was meant to test
+        # the pipeline. Prereleases go to `next`; people opt in with @next.
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          VERSION="${{ steps.kind.outputs.version }}"
+          if [ "${{ steps.kind.outputs.prerelease }}" = "true" ]; then
+            DIST_TAG=next
+          else
+            DIST_TAG=latest
+          fi
+          echo "publishing simframe@$VERSION under dist-tag $DIST_TAG"
           if npm view "simframe@$VERSION" version >/dev/null 2>&1; then
             echo "simframe@$VERSION is already on npm — skipping"
           else
-            npm publish --provenance --access public
+            npm publish --provenance --access public --tag "$DIST_TAG"
           fi
 
       - name: Publish to the MCP Registry
+        # Releases only. The registry lists one version as the thing to install,
+        # and a release candidate is by definition not that.
+        if: steps.kind.outputs.prerelease != 'true'
         run: |
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
+
+      - name: A prerelease stops here
+        if: steps.kind.outputs.prerelease == 'true'
+        run: |
+          echo "simframe@${{ steps.kind.outputs.version }} is on npm under @next."
+          echo "The MCP Registry was deliberately skipped: it lists the version to install."
+          echo "Install it with: npm i simframe@next"
