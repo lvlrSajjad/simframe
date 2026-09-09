@@ -299,6 +299,39 @@ Fixed by pinning the publish runner to Node 22. Still open: nothing verifies
 after a release that the version actually landed. `npm view simframe version`
 against the tag would have caught this the day it happened.
 
+**And the publish still does not work.** `v0.6.0-rc.1` got further than anything
+since 0.5.0 and then stopped:
+
+```
+npm notice Publishing to https://registry.npmjs.org/ with tag next and public access
+npm notice publish Signed provenance statement with source and build information from GitHub Actions
+npm notice publish Provenance statement published to transparency log
+npm error code E404
+npm error 404 Not Found - PUT https://registry.npmjs.org/simframe
+npm error 404  The requested resource 'simframe@0.6.0-rc.1' could not be found
+               or you do not have permission to access it.
+```
+
+Everything up to the registry write worked: the OIDC identity, the provenance
+signature, the transparency log entry, the `next` dist-tag. The write itself was
+refused. npm answers an unauthenticated write to an existing package with 404
+rather than 401, so "not found" here means "no credential npm accepted", not
+"no such package".
+
+What that is *not*: a missing Trusted Publisher. `npm view simframe@0.5.0` shows
+a SLSA provenance attestation, so 0.5.0 published through this same OIDC path
+and the publisher entry works.
+
+What changed between them is the npm major. 0.5.0 went out on npm 11.x; this ran
+on npm 12, because the upgrade step installs `@latest` and npm 12 shipped in
+between — the same moving dependency that broke v0.5.1, one layer along. The
+cheap experiment is to pin `npm@11` on Node 22 and cut another candidate: that
+reproduces 0.5.0's conditions with one variable changed. Untested, and named
+here as a hypothesis rather than a diagnosis.
+
+Two tags were spent finding this and both are harmless — `v0.6.0-rc.0` was
+deleted, `v0.6.0-rc.1` published nothing. npm remains at 0.5.0.
+
 ### 0.5.x is published, but only single commands have been run from it
 `simframe@0.5.0` is on npm and in the MCP registry, published over GitHub OIDC
 with no token anywhere. An independent session installed it and exercised
