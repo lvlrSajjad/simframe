@@ -255,10 +255,11 @@ nav-bar:
   #2 text      201,64     Inbox
 content:
   #3 cell      201,140    Weekly digest
-  #4 cell      201,196    Payment received
+  #4 field     201,196    Search = weekly ~ weekly|
+  #5 switch    201,252    Notifications = 1
 tab-bar:
-  #5 text      62,835     Inbox
-  #6 text      201,835    Settings
+  #6 text      62,835     Inbox
+  #7 text      201,835    Settings
 ```
 
 Region first, because "Inbox" the title and "Inbox" the tab differ only by where
@@ -266,6 +267,18 @@ they are. A tap point, because that is what an action needs. And a number, which
 is a selector: whatever this calls `#3`, the next call can tap as `#3` without
 describing it. A ref is valid only while that screen is showing — used on a
 different screen it refuses rather than tapping whatever now sits there.
+
+`= something` is what the control *contains*, from the accessibility tree, and
+`~ something` is what OCR read off the pixels. Both are printed, and where they
+disagree that is the point: one is authoritative and the other is what is
+actually on screen, and a field mid-edit can legitimately differ. A row with no
+`=` is a control that reports no value, not an empty one.
+
+When the elements were recalled from screen memory rather than looked at just
+now, the header says so and how long ago — `elements recalled from 41s ago —
+pass refresh for what is there now`. Identity is cached on purpose, because a
+list with new rows is the same screen; contents are exactly what changes without
+the screen changing, so the age is worth seeing.
 
 Three ways to name a control, anywhere one is named:
 
@@ -542,8 +555,10 @@ simframe frame --out=now.png   # newest frame, native resolution, to a file
 simframe strip --count=6       # contact sheet, for an animation
 simframe doctor --strict       # any degraded layer is a non-zero exit
 simframe escalations           # why simframe still needs a model, by reason
+simframe escalations --session # ...this agent only, not every agent on the device
 simframe hpi                   # speed and accuracy against a human baseline
 simframe baseline record settings-larger-text --runs=5   # record the human
+simframe input reset           # rebuild the HID session, without restarting anything
 simframe start / status / stop [--force] / devices
 simframe ui --device=emulator-5554      # or export SIMFRAME_DEVICE once
 ```
@@ -646,6 +661,16 @@ said a word — the exact failure shape, found by the thing built to catch it.
   dramatically between visits will simply be rebuilt.
 - It speeds up *confirming* a fix, not *locating* one. A bug living in a memo
   comparator or a stale closure is not visible in any frame.
+- A switch is tapped at the centre of its frame, and a switch's frame is the
+  whole row — so the tap lands on the label and the control, which sits at the
+  trailing end, does not move. Use `@x,y` on the control for now. Filed with
+  the measurement in `docs/DEFERRED.md`; it is a role-specific tap point, not a
+  patch at one call site.
+- The simulator's display pipeline stops rendering under rapid app relaunch —
+  about six cycles, reproducibly — and every frame comes back black while
+  `simctl` itself reports success. simframe now says so instead of reading a
+  black screen as a calm one, but it cannot fix it: restarting the device is
+  the cure that always works, and it usually recovers on its own.
 
 ## Roadmap
 
