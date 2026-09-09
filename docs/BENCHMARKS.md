@@ -1562,3 +1562,53 @@ blacked out during the session. That is the degenerate-hash class this file
 already documents, and structural identity is what is supposed to carry it. It
 passed on a re-run and is worth re-checking on a fresh device rather than
 assuming it was noise.
+
+---
+
+## 0.6.0, from the published package
+
+The gap `docs/DEFERRED.md` had been carrying since 0.5.0: every number in this
+file came from the working copy, and nobody had run a multi-step verified flow
+from what npm actually serves. This is that run.
+
+`npm install simframe@0.6.0` into an empty directory, then driven entirely
+through `./node_modules/.bin/simframe`. The install built its own daemon from
+the tarball's Swift sources — verified by path, so it is not borrowing the
+repository's binary:
+
+```
+/…/scratchpad/fresh/node_modules/simframe/native/simframed/.build/release/simframed
+```
+
+`doctor` reports every layer on the daemon, with nothing installed but Xcode:
+
+```
+ok   capture engine (iPhone 17 Pro)      simframed
+ok   input driver (iPhone 17 Pro)        simframed: Indigo HID
+ok   text recognition (iPhone 17 Pro)    simframed (in-process, off the framebuffer)
+ok   accessibility tree (iPhone 17 Pro)  simframed: AXPTranslator, host-side
+```
+
+### A ten-step flow, one command
+
+| Pass | Result | Steps | From memory | Verdicts |
+| --- | --- | --- | --- | --- |
+| cold | halted | 3/10 | 1 | `no-visible-change`, `unexpected-screen` |
+| warm 1 | ok | **10/10** | 6 | `unverified`, then `ok` ×8 |
+| warm 2 | ok | **10/10** | 6 | `unverified`, then `ok` ×8 |
+
+Warm output is **1,326 characters and zero images**, identical across runs — so
+the Phase 7 claim holds from the published package, and slightly better than the
+~1,650 measured in the working copy on a different flow.
+
+Two things worth noting rather than glossing:
+
+The cold pass **halted at step 3 and reported `ok: false`**. That is the flaky
+first-pass convergence recorded in DEFERRED, and it is the behaviour a new user
+meets on their first run — the second pass onwards is stable and stayed stable.
+It is also the halt-reporting fix working as intended: a run that stopped on a
+wrong turn said so instead of reporting success, which is the failure this
+project cares most about not having.
+
+`no-visible-change` on the cold `launch` step is honest rather than wrong: the
+app was already frontmost from the `doctor` run before it.
