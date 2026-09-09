@@ -60,7 +60,12 @@ Code skill are thin front-ends over the CLI. One writer per device, as today.
 **Platform boundary.** All simulator-specific code sits behind a `Platform`
 protocol (frames, accessibilityTree, tap/swipe/type/key, launch/openURL/
 permission). Android is a planned second backend; nothing above the boundary
-may import a platform framework.
+may import a platform framework or name a platform tool. In Swift that is
+`SimulatorPlatform` in `PrivateAPI`; in JavaScript it is `src/platform/`, whose
+`index.js` is the only door — `ios.js` exports one object and no functions, and
+a test fails if any file above the boundary contains `'xcrun'`, `'adb'` or
+`'idevice'`. That rule was stated here for three phases before anything checked
+it, and the JavaScript half had quietly never obeyed it.
 
 ## Non-goals (for now)
 

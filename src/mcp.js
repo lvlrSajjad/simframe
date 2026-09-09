@@ -14,7 +14,7 @@ import * as actions from './actions.js';
 import * as api from './index.js';
 import * as input from './input.js';
 import * as navigate from './navigate.js';
-import { bootedDevices, PERMISSION_SERVICES } from './simctl.js';
+import { bootedDevices, permissionServices } from './platform/index.js';
 import * as store from './store.js';
 import * as view from './view.js';
 
@@ -189,7 +189,7 @@ const TOOLS = [
   },
   {
     name: 'sim_permission',
-    description: `Grant, revoke or reset a privacy permission for an app. Do this instead of tapping the system alert: the alert is not part of the app under test, and its buttons move between iOS versions. Services: ${PERMISSION_SERVICES.join(', ')}.`,
+    description: `Grant, revoke or reset a privacy permission for an app. Do this instead of tapping the system alert: the alert is not part of the app under test, and its buttons move between iOS versions. Services: ${permissionServices().join(', ')}.`,
     inputSchema: {
       type: 'object',
       properties: {

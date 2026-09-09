@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { runDaemon, DEFAULTS } from './daemon.js';
-import { bootedDevices, listDevices, resolveDevice } from './simctl.js';
+import { bootedDevices, listDevices, resolveDevice, toolchainChecks } from './platform/index.js';
 import * as actions from './actions.js';
 import * as api from './index.js';
 import * as input from './input.js';
@@ -748,11 +748,10 @@ async function doctor({ json = false, strict = false, device } = {}) {
 
   add('node', 'ok', process.version);
   const { execFileSync } = await import('node:child_process');
-  try {
-    add('xcrun', 'ok', execFileSync('xcrun', ['--version'], { encoding: 'utf8' }).trim().split('\n')[0]);
-  } catch (err) {
-    add('xcrun', 'fail', err.message);
-  }
+  // The active backend names its own prerequisites — doctor renders them and
+  // does not know what they are. On iOS that is xcrun; on Android it will be
+  // adb, and this line will not change.
+  for (const check of toolchainChecks()) add(check.name, check.level, check.detail);
   try {
     execFileSync('sips', ['--version'], { encoding: 'utf8', stdio: 'pipe' });
     add('sips', 'ok', 'available');

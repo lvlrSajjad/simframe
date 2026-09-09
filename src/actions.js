@@ -6,7 +6,7 @@ import * as api from './index.js';
 import * as graph from './graph.js';
 import * as input from './input.js';
 import * as intent from './intent.js';
-import { launchApp, openUrl, setPasteboard, setPermission, terminateApp } from './simctl.js';
+import { launchApp, openUrl, setPasteboard, setPermission, terminateApp } from './platform/index.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MAX_PAUSE_MS = 5000;

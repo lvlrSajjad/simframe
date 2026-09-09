@@ -3,7 +3,7 @@
 import { runScript } from '../src/actions.js';
 import * as input from '../src/input.js';
 import * as api from '../src/index.js';
-import { launchApp, terminateApp } from '../src/simctl.js';
+import { launchApp, terminateApp } from '../src/platform/index.js';
 
 const BUNDLE = process.argv[2];
 const device = process.argv[3];

@@ -12,7 +12,7 @@ import {
   signatureToHex,
 } from './analyze.js';
 import * as store from './store.js';
-import { isBootedSync, resize, screenshot } from './simctl.js';
+import { isBootedSync, resize, screenshot } from './platform/index.js';
 
 // Bump whenever the shape of state.json changes, so an upgraded client retires
 // a capture loop left running by an older install instead of misreading it.

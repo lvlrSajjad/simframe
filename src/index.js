@@ -19,7 +19,7 @@ import * as graph from './graph.js';
 import * as matching from './matching.js';
 import * as refs from './refs.js';
 import * as screenmap from './screenmap.js';
-import { resolveDevice, resize, screenshot } from './simctl.js';
+import { resolveDevice, resize, screenshot } from './platform/index.js';
 import * as store from './store.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));

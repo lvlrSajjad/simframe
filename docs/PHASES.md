@@ -33,7 +33,7 @@ open work is in `docs/DEFERRED.md`.
 | CI — packaging + integration gates | done. `integration` boots a simulator on `macos-15` and asserts every layer under `--strict`; required on `main` with an admin bypass |
 | CI — the memory layer | done. `scripts/ci-memory.mjs` drives the real CLI over the screen map, refs, graph, verdicts, flows and `goto`, OCR-only. Four bugs found writing it, one of them a capture loop that could not recover a lost display port |
 | 7 — compact agent state, skill | done. A ten-step flow is **1 tool call, 0 images, ~1,650 characters**. Every action returns the numbered text screen map; `sim_look` is the only image path and is capped at 1024 px |
-| 8 — Android | not started |
+| 8 — Android | step 0 done — the `platform/` seam exists and dispatches; no second backend yet |
 
 **Pick up here: Phase 8, and here is what is actually in the way.**
 
@@ -45,29 +45,39 @@ assumed: no `CoreSimulator`, no `SimulatorKit`, no `IOSurface`, no
 already proving the protocol is implementable by something that is not a
 simulator.
 
-**The JavaScript half has no such boundary, and that is Phase 8's real first
-task.** `src/simctl.js` is imported directly by five modules:
+**The JavaScript half now has one too — that was Phase 8 step 0.** Five modules
+(`index.js`, `daemon.js`, `actions.js`, `mcp.js`, `cli.js`) imported
+`src/simctl.js` directly. That file is now `src/platform/ios.js`, every function
+in it is module-private, and the only way in is `src/platform/index.js`:
 
-| Module | What it takes from `simctl.js` |
+| File | What it is |
 | --- | --- |
-| `index.js` | `resolveDevice`, `resize`, `screenshot` |
-| `daemon.js` | `isBootedSync`, `resize`, `screenshot` |
-| `actions.js` | `launchApp`, `openUrl`, `setPasteboard`, `setPermission`, `terminateApp` |
-| `mcp.js` | `bootedDevices`, `PERMISSION_SERVICES` |
-| `cli.js` | `bootedDevices`, `listDevices`, `resolveDevice` |
+| `platform/index.js` | the boundary: `PLATFORM_SURFACE`, the `PLATFORMS` registry, `activePlatform()`, and one-line dispatch for each member |
+| `platform/ios.js` | the iOS backend — the old `simctl.js`, exporting a single `platform` object and nothing else |
+| `platform/host.js` | `resize`, which is host-side sips and never touches a device |
 
-Eleven functions and one constant, and none of them is conceptually iOS: listing
-devices, resolving one, launching and terminating an app, opening a URL, setting
-the pasteboard, granting a permission, taking a screenshot, resizing an image.
-Every one has an `adb` equivalent. So the work is a `platform/` seam with two
-implementations rather than anything architectural — but it is real work, and
-doing it *before* an Android backend is what stops the second backend from
-being bolted on beside the first.
+`resize` was on the list of eleven and did not belong there: it downscales a PNG
+file. Behind the boundary each backend would have had to declare it, identically.
+The remaining ten plus `permissionServices()` and `toolchain()` make up the
+surface a backend must implement, and three tests hold it: every registered
+backend provides the whole surface, a hand-written non-simulator fake satisfies
+it, and no file above the boundary contains the string `'xcrun'`, `'adb'` or
+`'idevice'`. That last one is the rule CLAUDE.md always stated and nothing had
+ever checked.
+
+`doctor`'s `xcrun` line now comes from `platform.toolchain()`, so the backend
+names its own prerequisites and doctor stays one renderer.
+
+**Selection is deliberately still trivial**: one backend, so `activePlatform()`
+returns it. Step 1 is where that becomes device-keyed — `listDevices` unions the
+backends, each device record carries its own `platform`, and every udid-taking
+function routes on the record rather than on a process-wide default. Writing
+that dispatch against one backend would have been writing it blind.
 
 Two smaller things Android will meet immediately, both already recorded in
 `docs/DEFERRED.md`: the confirm vocabulary is hardcoded English, and
 `PERMISSION_SERVICES` is a list of simctl's service names, which has no meaning
-on Android.
+on Android — that one is a real protocol question, not a rename.
 
 Nothing else is outstanding. Every finding from the 0.6.0 review is closed, the
 identity question is decided and measured, and the memory harness passes 33/33.
@@ -419,31 +429,29 @@ model API.
 
 ## Phase 8 — Android backend behind the Platform boundary
 
-**Before the prompt below: there is no Platform boundary on the JavaScript
-side.** The Swift half is ready and verified — `SimframeCore` imports no
-platform framework, and the 21-method `SimulatorPlatform` protocol already has a
-non-simulator implementation in `StubPlatform`. But `src/simctl.js` is imported
-directly by five modules, and every consumer below would otherwise need an
-`if (android)` in it:
+**Step 0 is done: the boundary exists on both sides now.** The Swift half was
+ready from Phase 0 — `SimframeCore` imports no platform framework, and the
+21-method `SimulatorPlatform` protocol already has a non-simulator implementation
+in `StubPlatform`. The JavaScript half caught up in `src/platform/`: `index.js`
+is the boundary and the registry, `ios.js` is the old `simctl.js` with every
+function module-private behind one exported `platform` object, `host.js` holds
+`resize` because sips is host-side and not a device operation. `PLATFORM_SURFACE`
+is the list a backend must satisfy; three tests enforce it, including one that
+fails if any file above the boundary names `'xcrun'`, `'adb'` or `'idevice'`.
 
-| Module | What it takes from `simctl.js` |
-| --- | --- |
-| `index.js` | `resolveDevice`, `resize`, `screenshot` |
-| `daemon.js` | `isBootedSync`, `resize`, `screenshot` |
-| `actions.js` | `launchApp`, `openUrl`, `setPasteboard`, `setPermission`, `terminateApp` |
-| `mcp.js` | `bootedDevices`, `PERMISSION_SERVICES` |
-| `cli.js` | `bootedDevices`, `listDevices`, `resolveDevice` |
+Verified as no behaviour change: 78 unit tests (up from 74 — the three boundary
+tests plus a wrapper-name check), `scripts/ci-memory.mjs` green on every check,
+`scripts/eval-fingerprint.mjs --tour=test/tours/device-native.json` separating at
+gap 0.64, `simframe doctor --strict` all-ok, `check:package` shipping the new
+directory, and the `sim_permission` tool description byte-identical.
 
-Eleven functions and one constant, none of them conceptually iOS: list devices,
-resolve one, launch and terminate an app, open a URL, set the pasteboard, grant
-a permission, screenshot, resize an image. Every one has an `adb` equivalent.
-
-**So Phase 8 step 0 is a `src/platform/` seam with `ios.js` behind it and no
-behaviour change at all** — same tests, same benchmarks, same output, verified by
-`scripts/ci-memory.mjs` still passing 33/33 and the eval harness still
-separating. Do that as its own commit before writing a line of Android. A
-boundary drawn after the second backend exists is a boundary drawn around
-whatever the second backend happened to need.
+**Step 1 is device-keyed dispatch**, and it is the first thing to do here.
+Today `activePlatform()` returns the only backend. Android makes a device iOS
+*or* Android: `listDevices` has to union the backends, each device record has to
+carry its own `platform`, and every udid-taking member has to route on that
+record. Do that with the iOS backend still the only one — the union of one set
+is a set, and the routing is testable with the fake backend the contract test
+already builds — and only then write `android.js`.
 
 Two smaller things Android meets immediately, both in `docs/DEFERRED.md`: the
 confirm vocabulary is hardcoded English, and `PERMISSION_SERVICES` is a list of

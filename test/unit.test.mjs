@@ -1050,3 +1050,72 @@ test('a graph whose hashes came from older rules is discarded, not compared', ()
   assert.equal(graphmod.nearestScreen(UDID, A), null, 'and nothing resolves against them');
   assert.equal(graphmod.predict(UDID, A, { tap: 'go' }), null, 'so no prediction is made from them');
 });
+
+// --- the platform boundary ---------------------------------------------------
+
+test('every registered backend provides the whole platform surface', async () => {
+  const platform = await import('../src/platform/index.js');
+  for (const [name, backend] of Object.entries(platform.PLATFORMS)) {
+    for (const member of platform.PLATFORM_SURFACE) {
+      assert.ok(member in backend, `${name} backend is missing ${member}`);
+    }
+    assert.equal(backend.id, name, 'a backend is registered under its own id');
+  }
+});
+
+test('the platform surface is satisfiable by something that is not a simulator', async () => {
+  // The Swift half has proved this since Phase 0 with StubPlatform: a protocol
+  // nothing but the real thing can implement is not a boundary, it is a rename.
+  // This is the same check one level up — and it is the shape Android has to
+  // meet, written down before Android exists.
+  const { PLATFORM_SURFACE } = await import('../src/platform/index.js');
+  const fake = {
+    id: 'fake',
+    deviceNoun: 'device',
+    listDevices: async () => [{ udid: 'F', name: 'Fake', runtime: 'none', state: 'Booted' }],
+    bootedDevices: async () => [{ udid: 'F', name: 'Fake', runtime: 'none', state: 'Booted' }],
+    resolveDevice: async () => ({ udid: 'F', name: 'Fake', runtime: 'none', state: 'Booted' }),
+    isBootedSync: () => true,
+    screenshot: async () => {},
+    launchApp: async () => {},
+    terminateApp: async () => {},
+    openUrl: async () => {},
+    setPermission: async () => 'granted nothing',
+    setPasteboard: async () => {},
+    permissionServices: () => [],
+    toolchain: () => [{ name: 'nothing', level: 'ok', detail: 'no tools needed' }],
+  };
+  for (const member of PLATFORM_SURFACE) assert.ok(member in fake, `a backend needs ${member}`);
+  assert.deepEqual(Object.keys(fake).sort(), [...PLATFORM_SURFACE].sort(), 'and needs nothing more');
+});
+
+test('every dispatch wrapper reaches the backend member of the same name', async () => {
+  // A wrapper is one line, which is exactly the kind of line where openUrl
+  // forwards to openURL and nothing notices until an Android backend spells it
+  // the other way. Checked at the source, since the registry is frozen and
+  // there is no second backend to swap in yet.
+  const src = fs.readFileSync(new URL('../src/platform/index.js', import.meta.url), 'utf8');
+  const wrappers = [...src.matchAll(/^export const (\w+) = \(\.\.\.args\) => activePlatform\(\)\.(\w+)\(\.\.\.args\);$/gm)];
+  assert.ok(wrappers.length >= 10, `found ${wrappers.length} dispatch wrappers`);
+  for (const [, exported, called] of wrappers) {
+    assert.equal(called, exported, `${exported} forwards to ${called}`);
+  }
+});
+
+test('nothing above the boundary shells out to a platform tool', async () => {
+  // The rule in CLAUDE.md — "nothing above the boundary may import a platform
+  // framework" — was true of the Swift half and untrue of this half, silently,
+  // because nothing checked. This is the check. `xcrun` is the executable name,
+  // not the string 'simctl', which is also the name of a capture engine and is
+  // allowed to appear anywhere.
+  const dir = new URL('../src/', import.meta.url);
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js'));
+  assert.ok(files.length >= 15, 'the source directory was actually read');
+  for (const file of files) {
+    const source = fs.readFileSync(new URL(file, dir), 'utf8');
+    for (const tool of ["'xcrun'", "'adb'", "'idevice"]) {
+      assert.ok(!source.includes(tool), `${file} calls ${tool} directly; it belongs in src/platform/`);
+    }
+    assert.ok(!source.includes("'./simctl.js'"), `${file} imports the old pre-boundary module`);
+  }
+});

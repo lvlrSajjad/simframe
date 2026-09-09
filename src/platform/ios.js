@@ -1,4 +1,9 @@
-// Everything that shells out to Xcode's command line tools.
+// The iOS backend: everything that shells out to Xcode's command line tools.
+//
+// Nothing outside src/platform/ may import this file. Callers go through
+// src/platform/index.js, which is why every function here is module-private
+// and reachable only through the `platform` object at the bottom — the
+// JavaScript counterpart of the `SimulatorPlatform` protocol in Swift.
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -10,7 +15,7 @@ const DEVICE_CACHE_MS = 4000;
 let deviceCache = { at: 0, devices: null, inflight: null };
 
 /** @returns {Promise<Array<{udid: string, name: string, runtime: string, state: string}>>} */
-export async function listDevices({ maxAgeMs = DEVICE_CACHE_MS } = {}) {
+async function listDevices({ maxAgeMs = DEVICE_CACHE_MS } = {}) {
   if (deviceCache.devices && Date.now() - deviceCache.at <= maxAgeMs) return deviceCache.devices;
   if (deviceCache.inflight) return deviceCache.inflight;
   deviceCache.inflight = fetchDevices()
@@ -47,7 +52,7 @@ async function fetchDevices() {
   return out;
 }
 
-export async function bootedDevices(opts) {
+async function bootedDevices(opts) {
   return (await listDevices(opts)).filter((d) => d.state === 'Booted');
 }
 
@@ -56,7 +61,7 @@ export async function bootedDevices(opts) {
  * booted device. Prefers booted devices; falls back to a clear error listing
  * what is actually available.
  */
-export async function resolveDevice(query, opts) {
+async function resolveDevice(query, opts) {
   const all = await listDevices(opts);
   const booted = all.filter((d) => d.state === 'Booted');
   if (!query) {
@@ -77,7 +82,7 @@ export async function resolveDevice(query, opts) {
   throw new Error(`no simulator matches "${query}"; booted: ${booted.map((d) => d.name).join(', ') || 'none'}`);
 }
 
-export function isBootedSync(udid) {
+function isBootedSync(udid) {
   try {
     const out = execFileSync('xcrun', ['simctl', 'list', 'devices', '--json'], {
       maxBuffer: 8 << 20,
@@ -95,7 +100,7 @@ export function isBootedSync(udid) {
   return false;
 }
 
-export async function screenshot(udid, outFile, { mask = 'ignored' } = {}) {
+async function screenshot(udid, outFile, { mask = 'ignored' } = {}) {
   try {
     await run('xcrun', ['simctl', 'io', udid, 'screenshot', '--type=png', `--mask=${mask}`, outFile], {
       timeout: 10_000,
@@ -109,11 +114,6 @@ export async function screenshot(udid, outFile, { mask = 'ignored' } = {}) {
   }
 }
 
-/** Resample with sips, which ships with macOS, so simframe needs no image deps. */
-export async function resize(inFile, outFile, maxDim) {
-  await run('sips', ['-Z', String(maxDim), inFile, '--out', outFile], { timeout: 10_000 });
-}
-
 /**
  * Launch, optionally with arguments and environment.
  *
@@ -121,7 +121,7 @@ export async function resize(inFile, outFile, maxDim) {
  * `SIMCTL_CHILD_`-prefixed variables of its own process — which is why env has
  * to be set on the child rather than passed as flags.
  */
-export async function launchApp(udid, bundleId, { args = [], env = {}, terminateFirst = false } = {}) {
+async function launchApp(udid, bundleId, { args = [], env = {}, terminateFirst = false } = {}) {
   if (terminateFirst) {
     // A launch against an already-running app is a no-op that reports success,
     // which is how a flow "relaunched" an app and tested the screen it was
@@ -148,15 +148,15 @@ export async function launchApp(udid, bundleId, { args = [], env = {}, terminate
   }
 }
 
-export async function terminateApp(udid, bundleId) {
+async function terminateApp(udid, bundleId) {
   await run('xcrun', ['simctl', 'terminate', udid, bundleId], { timeout: 20_000 });
 }
 
-export async function openUrl(udid, url) {
+async function openUrl(udid, url) {
   await run('xcrun', ['simctl', 'openurl', udid, url], { timeout: 20_000 });
 }
 
-export const PERMISSION_SERVICES = [
+const PERMISSION_SERVICES = [
   'all', 'calendar', 'contacts-limited', 'contacts', 'location', 'location-always',
   'photos-add', 'photos', 'media-library', 'microphone', 'motion', 'reminders', 'siri',
 ];
@@ -168,7 +168,7 @@ export const PERMISSION_SERVICES = [
  * tapping a system alert, and a system alert is not part of the app under test:
  * its buttons move between iOS versions and its appearance is a race.
  */
-export async function setPermission(udid, action, service, bundleId) {
+async function setPermission(udid, action, service, bundleId) {
   const verb = String(action).toLowerCase();
   if (!['grant', 'revoke', 'reset'].includes(verb)) {
     throw new Error(`permission action must be grant, revoke or reset (got "${action}")`);
@@ -188,7 +188,7 @@ export async function setPermission(udid, action, service, bundleId) {
 }
 
 /** Put text on the device pasteboard — far faster than typing a long string. */
-export async function setPasteboard(udid, value) {
+async function setPasteboard(udid, value) {
   const child = execFile('xcrun', ['simctl', 'pbcopy', udid], { timeout: 10_000 });
   child.stdin.end(value);
   await new Promise((resolve, reject) => {
@@ -196,3 +196,35 @@ export async function setPasteboard(udid, value) {
     child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`pbcopy exited ${code}`))));
   });
 }
+
+/**
+ * The prerequisites `simframe doctor` reports for this backend. Returned rather
+ * than printed so doctor stays one renderer: a backend says what it needs, and
+ * a machine missing it is told which tool, not which platform.
+ */
+function toolchain() {
+  try {
+    const version = execFileSync('xcrun', ['--version'], { encoding: 'utf8' }).trim().split('\n')[0];
+    return [{ name: 'xcrun', level: 'ok', detail: version }];
+  } catch (err) {
+    return [{ name: 'xcrun', level: 'fail', detail: err.message }];
+  }
+}
+
+/** @type {import('./index.js').Platform} */
+export const platform = {
+  id: 'ios',
+  deviceNoun: 'simulator',
+  listDevices,
+  bootedDevices,
+  resolveDevice,
+  isBootedSync,
+  screenshot,
+  launchApp,
+  terminateApp,
+  openUrl,
+  setPermission,
+  setPasteboard,
+  permissionServices: () => PERMISSION_SERVICES,
+  toolchain,
+};
