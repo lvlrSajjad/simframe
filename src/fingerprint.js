@@ -157,6 +157,19 @@ export function tokens(targets, screen) {
 }
 
 export function hashTokens(list) {
+  // No tokens is not an identity. It is the absence of one.
+  //
+  // sha256 of the empty string is a constant, so every unreadable screen used
+  // to hash to `e3b0c442…` — one identity shared by a dark screen, a screen
+  // whose OCR failed, and a screen read mid-transition. Different screens
+  // collapsing onto a single hash is a wrong *merge*, which is worse than a
+  // missed match: a ref numbered on one screen resolved happily on another,
+  // and an edge learned on one predicted the other, with a verdict of `ok`.
+  //
+  // The pixel layout hash had exactly this degeneracy and got an
+  // `informative()` guard for it. The structural hash did not, and the guard
+  // could not have helped: a constant is perfectly informative-looking.
+  if (!list.length) return null;
   return crypto.createHash('sha256').update(list.join('\n')).digest('hex').slice(0, 32);
 }
 
@@ -174,7 +187,11 @@ export function fingerprint(targets, screen) {
  * everything.
  */
 export function similarity(a = [], b = []) {
-  if (!a.length && !b.length) return 1;
+  // Two empty token sets are not a match, they are two absences of evidence.
+  // Returning 1 here made unreadability *self-confirming*: two consecutive
+  // unreadable reads "agreed", which promoted the non-identity to a confirmed
+  // screen and let it be written into memory and learned as an edge.
+  if (!a.length || !b.length) return 0;
   const setA = new Set(a);
   const setB = new Set(b);
   let shared = 0;

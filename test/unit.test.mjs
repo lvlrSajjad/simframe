@@ -202,7 +202,8 @@ test('spreadEvenly returns everything when asked for more than it has', () => {
 });
 
 // --- batch scripting: shorthand parsing and element matching ---
-import { haltDecision, normalizeStep } from '../src/actions.js';
+import { haltDecision, normalizeStep, wrongTurnFrom } from '../src/actions.js';
+import { CONFIDENT_OBSERVATIONS } from '../src/graph.js';
 import { centerOf, matchElement } from '../src/input.js';
 
 test('step shorthand keeps sibling options', () => {
@@ -468,6 +469,17 @@ test('a flow with an unverified step is not saved', () => {
 // --- variant fingerprints -------------------------------------------------
 
 const tok = (n, tag) => Array.from({ length: n }, (_, i) => `${tag}:cell:content:w16:h4:x0:y${i}#1`);
+// The same screen wearing a slightly different face: most rows shared, one
+// swapped. A *variant* has to resemble what it is a variant of — that is the
+// difference between a second face and a different screen.
+// One row swapped for a uniquely-named one: distinct token sets, every one of
+// them still 0.71 similar to the original, which is well above the 0.36
+// threshold. Varying *how many* rows differ would walk the similarity down
+// past the threshold and stop testing what these tests are about.
+const face = (n, tag, id = 0) => [
+  ...tok(n - 1, tag),
+  `${tag}extra${id}:cell:content:w16:h4:x0:y${90 + id}#1`,
+];
 // store.ROOT is read once at import, so setting SIMFRAME_HOME here would be too
 // late — `npm test` sets it to a temp dir for the whole process instead. These
 // tests used to write TEST-* directories into the real ~/.simframe, where they
@@ -478,19 +490,46 @@ const freshDevice = (name) => {
   return udid;
 };
 
-test('a known edge landing on an unrecognised screen grows a variant, not a screen', () => {
+test('a known edge landing on a recognisable second face of the same screen grows a variant', () => {
   const UDID = freshDevice('variant-grows');
   const A = { hash: 'a'.repeat(32), tokens: tok(6, 'a') };
   const B = { hash: 'b'.repeat(32), tokens: tok(6, 'b') };
   graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: B, kind: 'push' });
-  // Same action from A, but B has arrived wearing a different structure.
-  const Bprime = { hash: 'c'.repeat(32), tokens: tok(6, 'c') };
+  // B has to be a screen we have actually *read*, not just a hash on the end of
+  // an edge. An edge stores its destination's hash and nothing else, so a
+  // target that has never been stood on has no structure to compare a new
+  // reading against — and in that case simframe now declines to call the
+  // reading a second face of it, because it has no grounds to.
+  graphmod.record(UDID, { from: B, action: { tap: 'stay' }, to: B, kind: 'none' });
+  // Same action from A, and B has arrived wearing a different face — but still
+  // recognisably B: five of its six rows are the ones B always had.
+  const Bprime = { hash: 'c'.repeat(32), tokens: face(6, 'b') };
   graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: Bprime, kind: 'push' });
 
   assert.equal(graphmod.stats(UDID).screens, 2, 'B prime must not become a third screen');
-  // Both structures now resolve to the same node.
   assert.equal(graphmod.nearestScreen(UDID, B).node.hash, B.hash);
   assert.equal(graphmod.nearestScreen(UDID, Bprime).node.hash, B.hash);
+});
+
+test('a screen sharing nothing with the target is never called a face of it', () => {
+  // This assertion replaces one that encoded the opposite, and the old one was
+  // reproducible as a wrong action: a reading sharing ZERO tokens with B was
+  // merged into B, after which arriving there returned `ok` — "matches the
+  // outcome seen 3x before" — and a flow kept walking, tapping real controls on
+  // a screen its plan never contained. Being unclaimed by any stored screen is
+  // not evidence of being a second face of this one.
+  const UDID = freshDevice('variant-stranger');
+  const A = { hash: 'a'.repeat(32), tokens: tok(6, 'a') };
+  const B = { hash: 'b'.repeat(32), tokens: tok(6, 'b') };
+  graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: B, kind: 'push' });
+  const stranger = { hash: 'c'.repeat(32), tokens: tok(6, 'zzz') };
+  graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: stranger, kind: 'push' });
+
+  // The stranger resolves to nothing — which is the point. It is a screen we
+  // have not read, not a face of one we have.
+  assert.equal(graphmod.nearestScreen(UDID, stranger), null, 'the stranger must not resolve to B');
+  const edge = graphmod.nearestScreen(UDID, A).node.edges.find((e) => e.action === 'tap:go');
+  assert.equal(edge.changedOutcomes, 1, 'it is a changed destination, which is the honest reading');
 });
 
 test('an edge that really goes somewhere else is not swallowed as a variant', () => {
@@ -512,12 +551,18 @@ test('an edge that really goes somewhere else is not swallowed as a variant', ()
 test('variants are capped, so a non-deterministic action cannot grow forever', () => {
   const UDID = freshDevice('variant-cap');
   const A = { hash: 'a'.repeat(32), tokens: tok(6, 'a') };
-  graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: { hash: 'b'.repeat(32), tokens: tok(6, 'b') } });
+  const B = { hash: 'b'.repeat(32), tokens: tok(6, 'b') };
+  graphmod.record(UDID, { from: A, action: { tap: 'go' }, to: B });
+  // B must be a screen with a known structure before anything can be judged a
+  // face of it — see the test above.
+  graphmod.record(UDID, { from: B, action: { tap: 'stay' }, to: B, kind: 'none' });
   for (let i = 0; i < graphmod.MAX_VARIANTS + 3; i += 1) {
     graphmod.record(UDID, {
       from: A,
       action: { tap: 'go' },
-      to: { hash: String(i).padStart(32, 'd'), tokens: tok(6, `v${i}`) },
+      // Recognisably the same screen each time, or these are not variants at
+      // all and the cap is not what is being tested.
+      to: { hash: String(i).padStart(32, 'd'), tokens: face(6, 'b', i) },
     });
   }
   const b = graphmod.nearestScreen(UDID, { hash: 'b'.repeat(32), tokens: tok(6, 'b') }).node;
@@ -932,4 +977,27 @@ test('a daemon that answers with a failure is reported, not returned as an empty
     server.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('one observation is not enough to call an arrival a wrong turn', () => {
+  // Halting on a single-observation prediction made a new user's second run
+  // worse than their first: run one learns every edge at count 1 and cannot
+  // contradict itself, run two has an expectation for every step and stops
+  // dead on the first screen whose identity wobbled.
+  const once = { verdict: 'unverified', detail: 'x' };
+  assert.equal(wrongTurnFrom(once), false, 'unverified is never a wrong turn');
+
+  // The distinction has to survive into the halt decision, because
+  // `unexpected-screen` is what stops a run — and what "a run that reported a
+  // wrong turn never also reports success" is asserted over.
+  const weak = { verdict: 'unverified', detail: 'seen here once before and went somewhere else' };
+  assert.equal(haltDecision({ verification: weak }).halt, false);
+  assert.equal(haltDecision({ verification: weak }).failRun, false);
+
+  const confident = { verdict: 'unexpected-screen', detail: 'expected the screen this action reached 4x before' };
+  assert.equal(wrongTurnFrom(confident), true);
+  assert.equal(haltDecision({ verification: confident }).halt, true, 'a repeated pattern still halts');
+  assert.equal(haltDecision({ verification: confident }).failRun, true);
+
+  assert.equal(CONFIDENT_OBSERVATIONS, 2, 'the threshold is a decision, not an accident');
 });

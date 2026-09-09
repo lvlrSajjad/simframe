@@ -260,7 +260,20 @@ export function record(udid, { from, action, to, kind }) {
       const claimant = nearestScreen(udid, reading)?.node;
       const target = load(udid, existing.to);
       const unclaimed = !claimant || claimant.hash === target.hash;
-      if (unclaimed && target.hash !== to_ && reading.tokens?.length) {
+      // "Nothing we have stored claims this reading" is not evidence that the
+      // target grew a second face. It is equally consistent with this action
+      // being state-dependent and having gone somewhere genuinely new — and
+      // treating the two the same welds an unrelated screen onto a learned
+      // edge. Reproduced: a screen sharing *zero* tokens with the target got
+      // merged into it, after which landing there returned `ok` ("matches the
+      // outcome seen 3x before") and a flow kept walking, tapping real controls
+      // on a screen its plan never contained.
+      //
+      // So the reading has to positively look like the target before it is
+      // called a face of it. Unclaimed is a necessary condition, not a
+      // sufficient one.
+      const looksLikeTarget = resembles(target, reading);
+      if (unclaimed && looksLikeTarget && target.hash !== to_ && reading.tokens?.length) {
         addVariant(target, reading);
         save(udid, target);
         existing.count += 1;
@@ -293,6 +306,20 @@ export function record(udid, { from, action, to, kind }) {
 }
 
 /** What this action did last time, if we have ever seen it here. */
+/**
+ * Does this reading look like a face of this screen, rather than a different
+ * screen we happen not to have stored yet?
+ *
+ * Compared against every face the screen already wears, because a screen with
+ * two structures is exactly the case variants exist for and a new reading may
+ * resemble the second one rather than the first.
+ */
+function resembles(node, reading) {
+  if (!node || !reading?.tokens?.length) return false;
+  const faces = [node.tokens ?? [], ...(node.variants ?? []).map((v) => v.tokens ?? [])];
+  return faces.some((face) => face.length && fingerprint.similarity(face, reading.tokens) >= SIMILARITY_THRESHOLD);
+}
+
 export function predict(udid, from, action) {
   const found = nearestScreen(udid, from);
   if (!found) return null;
@@ -375,6 +402,18 @@ function sameScreen(udid, a, b) {
   return Boolean(nodeA && nodeB && nodeA.hash === nodeB.hash);
 }
 
+/**
+ * How many times an edge must have been observed before a mismatch counts as a
+ * wrong turn rather than as "we do not know yet".
+ *
+ * Two, because the difference between one and two observations is the
+ * difference between a coincidence and a pattern, and the cost of being wrong
+ * is asymmetric: halting a correct run is visible and annoying, while
+ * continuing one extra step past a genuinely wrong turn is caught by the next
+ * step's own verdict.
+ */
+export const CONFIDENT_OBSERVATIONS = 2;
+
 export function verdict({ udid, prediction, before, after, kind }) {
   if (!before || !after) return { verdict: 'unverified', detail: 'no state to compare' };
   const moved = before !== after;
@@ -387,6 +426,46 @@ export function verdict({ udid, prediction, before, after, kind }) {
     return { verdict: 'no-visible-change', detail: `expected to reach a different screen (seen ${prediction.count}x)` };
   }
   if (!sameScreen(udid, prediction.to, after)) {
+    // One observation is not a prediction, and halting on it is what made a new
+    // user's *second* run worse than their first.
+    //
+    // The first run learns every edge at count 1 and cannot contradict itself,
+    // so it reports `unverified` throughout and completes. The second run then
+    // has an expectation for every step, and any screen whose identity wobbles
+    // — a read taken while the tree was still arriving, a screen with more than
+    // one legitimate structure — contradicts it and stops the run. Measured
+    // from the published package: run 1 halted at 3/10, runs 2 and 3 went
+    // 10/10. The halt was not protecting anyone from anything.
+    //
+    // So a single-observation miss is reported as what it actually is: we do
+    // not know yet. It must not be `unexpected-screen`, because that verdict is
+    // what halts a run and what "a run that reported a wrong turn never also
+    // reports success" is asserted over — and both of those should stay true.
+    // Once the same edge has been seen twice, a miss is a real wrong turn.
+    if (prediction.count < CONFIDENT_OBSERVATIONS) {
+      return {
+        verdict: 'unverified',
+        detail: `seen here once before and went somewhere else that time`
+          + ` — one observation is not enough to call this a wrong turn`,
+        weakPrediction: { count: prediction.count, to: prediction.to },
+      };
+    }
+    // This action has already led somewhere different at least once, so its
+    // destination is not a fact about the screen — it is a distribution. An app
+    // relaunch that lands on restored state, a list whose first row depends on
+    // what happened last time: these genuinely have more than one outcome, and
+    // calling the second one a wrong turn is calling the world wrong.
+    //
+    // The graph has always counted this as `changedOutcomes` and nothing ever
+    // read it.
+    if (prediction.changedOutcomes > 0) {
+      return {
+        verdict: 'unverified',
+        detail: `this action has reached ${prediction.changedOutcomes + 1} different screens from here`
+          + ` — its outcome is not predictable, so this is not a wrong turn`,
+        nondeterministic: { outcomes: prediction.changedOutcomes + 1, count: prediction.count },
+      };
+    }
     return {
       verdict: 'unexpected-screen',
       detail: `expected the screen this action reached ${prediction.count}x before, and landed somewhere else`,

@@ -138,6 +138,114 @@ would be worth adding:
 `APPLY`, `OK`, `SAVE`, `DONE` and friends are hardcoded. A localised UI needs
 them extended, and the same applies to the synonym table Phase 5 introduces.
 
+## What an independent review of 0.6.0 found
+
+A reviewer was asked whether the two known-open defects could produce a *wrong
+action* — tapping the wrong thing, `goto` walking somewhere wrong, a verdict
+reporting success on the wrong screen — or only wasted work. The entries below
+said wasted work. **It reproduced two wrong-action paths**, and both are now
+fixed.
+
+### Fixed: "nothing claims this reading" was treated as proof of a variant
+
+`graph.record` merged an arrival into a learned edge's destination whenever no
+*other* stored screen claimed it. Unknown is not the same as "the target grew a
+second face" — it is equally consistent with the action being state-dependent
+and having gone somewhere new. Fed a screen sharing **zero** tokens with the
+target (Jaccard 0.0 against a 0.36 threshold), the reviewer got it merged, after
+which arriving there returned `ok` — *"matches the outcome seen 3x before"* — so
+`stopOnUnexpected` never fired and a flow kept walking, tapping real controls on
+a screen its plan never contained.
+
+A reading must now positively resemble the target before it is called a face of
+it. Unclaimed is a necessary condition, not a sufficient one.
+
+That change surfaced something the old code was quietly relying on: an edge
+stores its destination's **hash and nothing else**, so a target that has never
+been stood on has no structure to compare against. In that case simframe now
+declines to call the reading a variant and records a changed outcome instead —
+the conservative reading, and the honest one.
+
+### Fixed: every unreadable screen shared one identity
+
+`hashTokens([])` was sha256 of the empty string — a constant — so a zero-target
+read of *any* screen produced the same structural hash. And `similarity([], [])`
+returned 1, so two consecutive unreadable reads "agreed", which promoted the
+non-identity to a confirmed screen and let it be learned as an edge.
+
+The reviewer showed this defeats all three of `resolveRef`'s guards at once: the
+structural check passes because both hashes are the constant, `screenKnown` is
+truthy because a stored dark entry matched, and the pixel backstop is skipped
+because `informative()` correctly reports a near-zero layout hash as no
+evidence. `#3` then resolves to coordinates numbered on a different screen and
+taps them. The pixel hash got an `informative()` guard for exactly this
+degeneracy; the structural hash had the same one and no guard — and a guard
+could not have helped, because a constant looks perfectly informative.
+
+No tokens is now `null` rather than a hash, and two empty sets are similar by
+0, not 1.
+
+### Fixed: one observation was enough to halt a run
+
+Separately, and the reason a first install behaved worse on its *second* run
+than its first: `verdict` returned `unexpected-screen` whether an edge had been
+seen once or fifty times, and any `unexpected-screen` halts. Run one learns
+every edge at count 1 and cannot contradict itself; run two has an expectation
+for every step and stops dead on the first screen whose identity wobbled.
+
+A single-observation miss now reports `unverified`, and so does a miss on an
+edge that has already reached more than one destination — the graph had been
+counting that as `changedOutcomes` and nothing ever read it. `unexpected-screen`
+is reserved for an edge seen at least twice that had always gone to one place
+and then did not, which is a real wrong turn worth stopping for.
+
+Measured from a cleared graph, six consecutive runs of a ten-step flow with
+halting enabled:
+
+| | before | after |
+| --- | --- | --- |
+| run 1 | **halted 3/10** | 10/10 |
+| runs 2–6 | 10/10 | 10/10 |
+| converged to all-`ok` by | run 2, then oscillated | **run 3, and stayed** |
+
+### Still open, from the same review
+
+Not fixed here, in roughly the reviewer's order of severity:
+
+- **`AccessibilityBridge.swift`: one KVC call is unguarded.** Setting
+  `bridgeTokenDelegate` uses `setValue(_:forKey:)` without the
+  `responds(to:)` check its neighbours have. If Apple renames that property the
+  daemon raises `NSUnknownKeyException`, which Swift cannot catch — a crash
+  instead of "accessibility unavailable", in the file this release calls its
+  riskiest, and the exact inversion of the degrade-rather-than-fail rule.
+- **The lazy `bridge()` accessor is unsynchronised** while the capture loop's
+  rebind path can clear it. Two constructions racing both install a delegate on
+  the process-global translator; the loser's deallocates, and because the
+  translator holds it weakly the survivor can be left with a nil delegate — the
+  silent-nil failure that file's own header warns about.
+- **The 12-second bound abandons the wait, not the work.** `tree()` is not
+  reentrant: `resetTimeouts()` and the timeout count share one counter, so an
+  abandoned read overlapping the next one can clear timeouts the other has
+  accumulated — a truncated tree reported with `truncated: nil`, which is the
+  class of bug this release claims to have removed.
+- **`recallNearest` has no `informative()` guard** on the layout hash, though
+  `refs.js` documents why one is needed and applies it. It feeds the guarded
+  function's inputs.
+- **`release.yml` pins Node and leaves `npm@latest` floating** — the same moving
+  dependency that killed v0.5.1, still moving.
+- **`workflow_dispatch` skips the tag/version agreement check but still
+  publishes**, so a manual run ships whatever `package.json` says from whatever
+  ref, straight to `latest` and the MCP Registry.
+- **`mcp-publisher` is fetched from `releases/latest` with no pin or checksum**
+  and executed in a job holding `id-token: write`.
+- **`ci.yml` does not run on tags**, so `check:package` and the tarball build —
+  the checks written to catch a broken package — never run on the commit that
+  actually ships.
+- **`route()` and `nearestScreen()` disagree about variants**: BFS keys on
+  canonical hashes only, so an edge whose destination is a variant hash is a
+  dead end even though `nearestScreen` says that hash *is* the node. At least
+  one mechanical cause of the convergence flakiness recorded below.
+
 ## Known and unresolved
 
 ### A screen has two identities: one with the tree, one without
