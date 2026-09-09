@@ -1084,6 +1084,11 @@ test('the platform surface is satisfiable by something that is not a simulator',
     setPermission: async () => 'granted nothing',
     setPasteboard: async () => {},
     permissionServices: () => [],
+    capabilities: () => ({
+      captureEngines: ['screenshot'],
+      input: { supported: false, note: 'a fake device has no input' },
+      ax: { supported: false, note: 'nor an accessibility tree' },
+    }),
     toolchain: () => [{ name: 'nothing', level: 'ok', detail: 'no tools needed' }],
   };
   for (const member of PLATFORM_SURFACE) assert.ok(member in fake, `a backend needs ${member}`);
@@ -1128,6 +1133,7 @@ function fakeBackend(id, ownedPrefix, devices) {
     setPermission: say('permission'),
     setPasteboard: say('paste'),
     permissionServices: () => [`${id}-only`, 'shared'],
+    capabilities: () => ({ captureEngines: ['screenshot'], input: { supported: true }, ax: { supported: true } }),
     toolchain: () => [{ name: `${id}-tool`, level: 'ok', detail: 'present' }],
   };
 }
@@ -1183,16 +1189,32 @@ test('resolving a device asks every backend, and an ambiguity outranks a match',
 test('a listing unions the backends and stamps every record', async () => {
   const platform = await import('../src/platform/index.js');
   const devices = await platform.listDevices();
-  for (const d of devices) assert.equal(d.platform, 'ios', 'every record says where it came from');
-  assert.deepEqual(
-    [...new Set(platform.permissionServices())].length,
-    platform.permissionServices().length,
-    'the unioned service menu has no duplicates',
-  );
-  // Unioned across one backend is that backend's list, in its order — which is
-  // what keeps the MCP tool description byte-identical.
-  const { PLATFORMS } = platform;
-  assert.deepEqual(platform.permissionServices(), PLATFORMS.ios.permissionServices());
+  for (const d of devices) {
+    assert.ok(platform.PLATFORMS[d.platform], `${d.udid} says it came from "${d.platform}"`);
+    assert.ok(
+      platform.PLATFORMS[d.platform].ownsUdid(d.udid),
+      `${d.udid} is claimed by the backend that listed it — otherwise routing and listing disagree`,
+    );
+  }
+
+  // The service menu is the union, deduplicated, and asking about one device
+  // gets that platform's own list rather than the menu.
+  const menu = platform.permissionServices();
+  assert.deepEqual([...new Set(menu)].length, menu.length, 'the unioned menu has no duplicates');
+  for (const backend of platform.backends()) {
+    for (const service of backend.permissionServices()) {
+      assert.ok(menu.includes(service), `${backend.id}'s "${service}" is on the menu`);
+    }
+  }
+  assert.deepEqual(platform.permissionServices('emulator-5554'), platform.PLATFORMS.android.permissionServices());
+
+  // And the two lists are genuinely different, which is the point: `siri` has
+  // no Android meaning and `notifications` has no iOS one, so a shared name
+  // would have had to mean two things.
+  const ios = platform.PLATFORMS.ios.permissionServices();
+  const android = platform.PLATFORMS.android.permissionServices();
+  assert.ok(ios.includes('siri') && !android.includes('siri'));
+  assert.ok(android.includes('notifications') && !ios.includes('notifications'));
 });
 
 test('nothing above the boundary shells out to a platform tool', async () => {

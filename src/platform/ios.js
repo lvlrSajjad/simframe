@@ -229,6 +229,21 @@ function toolchain() {
   }
 }
 
+/**
+ * What this backend can currently do, so nothing above the boundary has to
+ * assume. iOS has both capture engines, input through Indigo HID and the
+ * accessibility tree through AXPTranslator — which is to say, everything, and
+ * that is exactly why the shape of this was invisible until a second backend
+ * turned up without it.
+ */
+function capabilities() {
+  return {
+    captureEngines: ['simframed', 'screenshot'],
+    input: { supported: true },
+    ax: { supported: true },
+  };
+}
+
 /** @type {import('./index.js').Platform} */
 export const platform = {
   id: 'ios',
@@ -245,5 +260,6 @@ export const platform = {
   setPermission,
   setPasteboard,
   permissionServices: () => PERMISSION_SERVICES,
+  capabilities,
   toolchain,
 };

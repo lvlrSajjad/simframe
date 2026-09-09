@@ -337,7 +337,19 @@ const novelVerdicts = novelSteps.length
 // has not told us anything about the graph.
 const novelRan = novelSteps.length > 0 && novelSteps.every((r) => r.ok !== false);
 check(novelRan, 'the novel action ran at all', `[${novelVerdicts.join(', ')}]`);
+// The other half of the precondition, which was written above as a comment and
+// then trusted. It is not trustworthy: the positioning run sends the device
+// home, and a simulator that has been driven hard stops delivering `home` while
+// still reporting success (docs/DEFERRED.md). From a screen the action cannot
+// change, `no-visible-change` is the honest verdict and the claim below was
+// never asked — so this is a precondition, and saying otherwise is how this
+// file has spent the day accusing the graph of something the device did.
+const novelMoved = novelRan && !novelVerdicts.every((v) => v === 'no-visible-change');
 if (novelRan) {
+  check(novelMoved, 'and the device was somewhere the novel action could change',
+    novelMoved ? `[${novelVerdicts.join(', ')}]` : 'the screen never moved — the device was already there, or ignored being sent home');
+}
+if (novelRan && novelMoved) {
   check(novelSteps.some((r) => r.verification?.verdict === 'unverified'),
     'an action never taken here before is reported as unverified, not as verified',
     `[${novelVerdicts.join(', ')}]`);

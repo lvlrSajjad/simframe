@@ -102,6 +102,50 @@ driven hard, which makes a shared cause in CoreSimulator more likely than two
 coincidences. The next step is not more recovery code; recovery already runs and
 already fails. It is finding out what a restart resets.
 
+### Android's accessibility tree costs 2 seconds a read
+`uiautomator dump` is 2,012 ms on this machine (`docs/BENCHMARKS.md`), against
+45 ms for the iOS tree after Phase 2a. It is not the same kind of cost and it
+does not have the same kind of fix: iOS was slow because each attribute was a
+separate hop to the guest, and batching removed that. Here the cost is a fresh
+instrumentation process per dump, so there is nothing to batch.
+
+The known way to make it fast is a resident server — an APK on the device that
+holds the `UiAutomation` connection open and answers over a socket, which is
+what Appium's UiAutomator2 server is. That would be the first runtime
+dependency this project has ever shipped, and shipping an APK is a different
+promise from shipping a Node package. Not decided.
+
+Two cheaper things exist and neither is a tree: `dumpsys window displays` names
+the focused activity in 27 ms, and `dumpsys activity` can name the current
+fragment. Both are useful for "which app am I in" and neither gives an element
+list, so neither substitutes for perception — OCR does, and does it today.
+
+Until this is settled, Android reports its accessibility layer as `optional`
+with the reason, which is the state doctor exists to make visible.
+
+### There is no adb path to the Android clipboard
+`cmd clipboard` does not exist on API 36 — the shell answers "No shell command
+implementation" — and `service call clipboard` depends on transaction numbers
+that move between platform versions. So `setPasteboard` throws on Android with
+the reason, rather than appearing to work.
+
+This matters more than it sounds: on iOS the pasteboard is how simframe types a
+long string exactly, because key events follow the active keyboard layout and a
+device with a non-Latin layout installed types the wrong characters. Android's
+`input text` has the same class of problem. The honest options are an APK (see
+above) or accepting slower, layout-sensitive typing.
+
+### Android input is measured and unwired
+The emulator console's `event mouse <x> <y> 0 1` / `... 0 0` puts a real
+down-and-up on the touch screen — verified by the screen changing — in about
+20 ms, host-side, with no adb and no dependency. That is the Android equivalent
+of Indigo HID, including the ability to write real down→move→up sequences with
+honest timing rather than teleporting taps, and `event text` types.
+
+It is deliberately not wired yet: input belongs to the same step as the control
+socket and the gesture vocabulary, and landing half of it would mean `sim_tap`
+existing on Android while `swipe` and `key` did not. Phase 8's next step.
+
 ### The capture loop's recovery path has no test — fixed
 A display port torn down under a live daemon left capture dead for six minutes
 until the process was restarted (see `docs/BENCHMARKS.md`). The fix re-resolves

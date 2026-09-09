@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { runDaemon, DEFAULTS } from './daemon.js';
-import { bootedDevices, listDevices, resolveDevice, toolchainChecks } from './platform/index.js';
+import { bootedDevices, capabilitiesFor, listDevices, PLATFORMS, resolveDevice, toolchainChecks } from './platform/index.js';
 import * as actions from './actions.js';
 import * as api from './index.js';
 import * as input from './input.js';
@@ -51,8 +51,8 @@ Options
   --json                 machine-readable output — on every command
   --out=<file>           output path for frame/strip/recall
   --detail=low|normal|high|full   or --detail=<max pixels>
-  --engine=simframed|simctl   capture engine (default simframed)
-  --fps=<n>              capture rate while the screen is moving (simctl engine only)
+  --engine=simframed|screenshot  capture engine (default: the fastest the device has)
+  --fps=<n>              capture rate while the screen is moving (screenshot engine only)
   --count=<n>            frames in a strip (default 5)
   --since=<hash|seq>     compare against this frame (see: simframe mark)
   --mode=settle|change|stable   what wait waits for (default settle)
@@ -177,18 +177,21 @@ async function main() {
     case 'start': {
       const { device: dev, state, started } = await api.ensureDaemon(device, options);
       const engineModule = await import('./engine.js');
-      const running = engineModule.runningEngine(dev.udid) ?? 'simctl';
+      const best = capabilitiesFor(dev.udid).captureEngines[0];
+      const running = engineModule.runningEngine(dev.udid) ?? best;
       console.log(
         `${started ? 'started' : 'already running'} — ${dev.name} (${dev.runtime}) ` +
           `engine=${running} frame #${state.seq} ${state.width}x${state.height}`,
       );
       // Say which engine, and if it is the slow one, say why. A downgrade that
-      // prints nothing is how this shipped broken twice.
-      if (running !== 'simframed') {
+      // prints nothing is how this shipped broken twice. But it is only a
+      // downgrade if this platform has something better: the screenshot loop is
+      // the whole of Android's capture, not a fallback from anything.
+      if (running !== best) {
         const why = api.fallbackReason(dev.udid);
         console.log(
-          `WARN engine=simctl — roughly 30x slower per frame. ` +
-            (why ? `simframed unavailable: ${why}` : 'reason unrecorded; run simframe doctor'),
+          `WARN engine=${running} — roughly 30x slower per frame than ${best}. ` +
+            (why ? `${best} unavailable: ${why}` : 'reason unrecorded; run simframe doctor'),
         );
         if (Boolean(flags.strict) || process.env.SIMFRAME_STRICT === '1') {
           console.error('--strict: refusing to run on a degraded engine');
@@ -697,7 +700,7 @@ async function main() {
       if (flags.json) {
         console.log(JSON.stringify(shown, null, 2));
       } else if (!shown.length) {
-        console.log('no booted simulators (pass --all to list every device)');
+        console.log('no booted devices (pass --all to list every device)');
       } else {
         for (const d of shown) console.log(`${d.state === 'Booted' ? '●' : '○'} ${d.name}  ${d.runtime}  ${d.udid}`);
       }
@@ -797,11 +800,21 @@ async function doctor({ json = false, strict = false, device } = {}) {
       const wanted = await resolveDevice(device);
       booted = booted.filter((d) => d.udid === wanted.udid);
     }
-    add('booted simulator', booted.length ? 'ok' : 'warn',
+    // `deviceNoun` earns its place here: one platform's devices are called by
+    // its own word, and a mixed set by the neutral one. An emulator reported as
+    // a "booted simulator" is the same small lie as an emulator reported as
+    // having an idb input driver.
+    const nouns = [...new Set(booted.map((d) => capabilitiesFor(d.udid) && PLATFORMS[d.platform].deviceNoun))];
+    add(`booted ${nouns.length === 1 ? nouns[0] : 'device'}`, booted.length ? 'ok' : 'warn',
       booted.map((d) => `${d.name} (${d.runtime})`).join(', ') || 'none');
     for (const d of booted) {
       const input = await import('./input.js');
       const control = await import('./control.js');
+      // What this device's platform can do at all. Without asking, doctor
+      // described an Android emulator in iOS terms — "input driver: idb" about
+      // a tool that has never spoken to one.
+      const caps = capabilitiesFor(d.udid);
+      const bestEngine = caps.captureEngines[0];
       // Start the engine before asking which engine is in use. Reading it first
       // reports `simctl` on any machine where nothing happens to be running
       // yet — a warning about a downgrade that has not occurred, and one that
@@ -812,27 +825,37 @@ async function doctor({ json = false, strict = false, device } = {}) {
       // ensureDaemon waits for a frame; the control socket comes up a moment
       // later. Asking immediately reports `idb` for a device whose own input
       // path is seconds from ready — a race that would read as CI flake.
-      for (let i = 0; i < 40 && !control.available(d.udid); i += 1) {
+      for (let i = 0; i < 40 && caps.input.supported && !control.available(d.udid); i += 1) {
         await new Promise((r) => setTimeout(r, 50));
       }
-      const driver = await input.driverFor(d.udid, { refresh: true });
+      const driver = caps.input.supported ? await input.driverFor(d.udid, { refresh: true }) : null;
       // Which engine is actually capturing, from the daemon's own record.
       // `control.available` answers a different question — whether the input
       // socket is up — and using it here reported simctl on a machine that was
       // capturing with simframed perfectly well.
-      const captureEngine = engineModule.runningEngine(d.udid) ?? 'simctl';
+      const captureEngine = engineModule.runningEngine(d.udid) ?? bestEngine;
       const daemon = captureEngine === 'simframed';
-      const why = captureEngine === 'simctl' ? api.fallbackReason(d.udid) : null;
-      add(`capture engine (${d.name})`, captureEngine === 'simframed' ? 'ok' : 'warn',
-        captureEngine === 'simframed'
-          ? 'simframed'
-          : `simctl — roughly 30x slower per frame${why ? `; simframed unavailable: ${why}` : '. Run simframe start to see why'}`,
+      const why = captureEngine === bestEngine ? null : api.fallbackReason(d.udid);
+      add(`capture engine (${d.name})`, captureEngine === bestEngine ? 'ok' : 'warn',
+        captureEngine === bestEngine
+          ? captureEngine
+          : `${captureEngine} — roughly 30x slower per frame than ${bestEngine}${why ? `; ${bestEngine} unavailable: ${why}` : '. Run simframe start to see why'}`,
         { key: 'capture.engine', value: captureEngine });
-      add(`input driver (${d.name})`, driver.available ? (driver.name === 'simframed' ? 'ok' : 'warn') : 'warn',
-        driver.available ? `${driver.name}: ${driver.version}` : driver.reason,
-        { key: 'input.driver', value: driver.available ? driver.name : null });
+      // A layer this platform does not have yet is `optional`, the level that
+      // means "documented as absent" rather than "this machine is degraded".
+      if (!caps.input.supported) {
+        add(`input driver (${d.name})`, 'optional', caps.input.note, { key: 'input.driver', value: null });
+      } else {
+        add(`input driver (${d.name})`, driver.available ? (driver.name === 'simframed' ? 'ok' : 'warn') : 'warn',
+          driver.available ? `${driver.name}: ${driver.version}` : driver.reason,
+          { key: 'input.driver', value: driver.available ? driver.name : null });
+      }
       add(`text recognition (${d.name})`, 'ok',
         daemon ? 'simframed (in-process, off the framebuffer)' : 'sips + helper binary');
+      if (!caps.ax.supported) {
+        add(`accessibility tree (${d.name})`, 'optional', caps.ax.note, { key: 'ax.driver', value: null });
+        continue;
+      }
       const ax = await input.axDriverFor(d.udid);
       // idb here is a downgrade unless it was asked for. `warn` means this
       // machine could be doing better and silently is not; a driver someone

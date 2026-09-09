@@ -21,7 +21,7 @@ import * as view from './view.js';
 const deviceProp = {
   device: {
     type: 'string',
-    description: 'Simulator UDID or name substring. Defaults to the booted simulator.',
+    description: 'Device UDID or name substring — a simulator udid or an emulator serial. Defaults to the booted device.',
   },
 };
 
@@ -826,7 +826,7 @@ function listStateDirs() {
 
 async function devices() {
   const booted = await bootedDevices();
-  if (!booted.length) return { content: [text('no booted simulators')] };
+  if (!booted.length) return { content: [text('no booted devices')] };
   return {
     content: [text(booted.map((d) => `${d.name} · ${d.runtime} · ${d.udid}`).join('\n'))],
   };

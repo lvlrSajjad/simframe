@@ -19,7 +19,7 @@ import * as graph from './graph.js';
 import * as matching from './matching.js';
 import * as refs from './refs.js';
 import * as screenmap from './screenmap.js';
-import { resolveDevice, resize, screenshot } from './platform/index.js';
+import { capabilitiesFor, resolveDevice, resize, screenshot } from './platform/index.js';
 import * as store from './store.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -186,15 +186,24 @@ export function fallbackReason(udid) {
 }
 
 /**
- * Start whichever engine was asked for.
+ * Start whichever engine was asked for, out of the ones this device's platform
+ * has.
  *
- * simframed unless told otherwise: it reads the framebuffer directly and is
- * roughly thirty times faster per frame. The simctl loop stays reachable with
- * `engine: 'simctl'`, and is used automatically when the daemon cannot be
- * built — a machine with no Swift toolchain still has to work.
+ * On iOS that is simframed unless told otherwise: it reads the framebuffer
+ * directly and is roughly thirty times faster per frame, and the screenshot
+ * loop stays reachable with `engine: 'screenshot'` for a machine with no Swift
+ * toolchain. On Android the loop is the only engine there is — and asking for
+ * simframed there is refused rather than attempted, because a Swift daemon
+ * built against CoreSimulator has nothing to say to an emulator, and the
+ * failure it produces says nothing useful about why.
  */
 async function startEngine(udid, options) {
-  if ((options.engine ?? 'simframed') === 'simframed') {
+  const supported = capabilitiesFor(udid).captureEngines;
+  const wanted = engine.normalizeEngine(options.engine ?? supported[0]);
+  if (!supported.includes(wanted)) {
+    throw new Error(`this device cannot run the ${wanted} capture engine — it supports ${supported.join(', ')}`);
+  }
+  if (wanted === 'simframed') {
     const built = await engine.ensureBuilt();
     if (built.ok) {
       engineFallbackReason = null;
@@ -206,7 +215,7 @@ async function startEngine(udid, options) {
     recordFallback(udid, engineFallbackReason);
   }
   spawnNodeDaemon(udid, options);
-  return 'simctl';
+  return 'screenshot';
 }
 
 function spawnNodeDaemon(udid, options) {

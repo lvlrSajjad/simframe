@@ -1,10 +1,16 @@
 // Chooses and starts the capture engine.
 //
 // Two exist: `simframed`, a Swift daemon that reads the framebuffer directly,
-// and `simctl`, the original loop that shells out for each screenshot. The
-// daemon is the default because it is roughly thirty times faster, but the old
-// loop stays reachable — a machine without a Swift toolchain, or an Xcode
-// version where a private symbol has moved, still needs to work.
+// and `screenshot`, the loop that asks the platform boundary for one frame at a
+// time. The daemon is the default on iOS because it is roughly thirty times
+// faster, but the loop stays reachable — a machine without a Swift toolchain,
+// or an Xcode version where a private symbol has moved, still needs to work.
+//
+// The loop used to be called `simctl`, after the tool it shelled out to. It no
+// longer shells out to anything in particular: on Android the same loop reaches
+// the emulator console and captures a frame in ~21 ms, which is not `simctl` by
+// any reading. `simctl` stays accepted as an alias, because it is in shipped
+// meta.json files, in documentation and in people's shell history.
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,7 +23,14 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE = path.join(HERE, '..', 'native', 'simframed');
 const BINARY = path.join(PACKAGE, '.build', 'release', 'simframed');
 
-export const ENGINES = ['simframed', 'simctl'];
+export const ENGINES = ['simframed', 'screenshot'];
+
+/** `simctl` was this engine's name until it ran on a second platform. */
+const ENGINE_ALIASES = { simctl: 'screenshot' };
+
+export function normalizeEngine(name) {
+  return ENGINE_ALIASES[name] ?? name;
+}
 
 export function binaryPath() {
   return BINARY;
@@ -95,5 +108,5 @@ export function spawnDaemon(udid, { maxDim, minIntervalMs, idleExitMs } = {}) {
 export function runningEngine(udid) {
   const meta = store.readJson(path.join(store.deviceDir(udid), 'meta.json'));
   if (!meta || !store.isProcessAlive(meta.pid)) return null;
-  return meta.options?.engine === 'simframed' ? 'simframed' : 'simctl';
+  return meta.options?.engine === 'simframed' ? 'simframed' : 'screenshot';
 }

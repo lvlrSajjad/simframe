@@ -17,10 +17,10 @@
 // **Dispatch is by device, not by a process-wide default.** A device is iOS or
 // Android; nothing about the host decides which. So `listDevices` unions the
 // backends and stamps each record with the platform it came from, and every
-// function that takes a udid routes on that udid. There is still only one
-// backend registered, which makes all of this identical in behaviour to a
-// direct call — and is exactly why it was worth writing now, while "identical"
-// is checkable.
+// function that takes a udid routes on that udid — `ownsUdid` answers that from
+// the id's own shape, because the question is asked from inside a capture loop
+// in a process that never listed anything.
+import { platform as android } from './android.js';
 import { platform as ios } from './ios.js';
 
 export { resize } from './host.js';
@@ -50,6 +50,7 @@ export { resize } from './host.js';
  * @property {Function} setPermission
  * @property {Function} setPasteboard
  * @property {() => string[]} permissionServices
+ * @property {() => {captureEngines: string[], input: object, ax: object}} capabilities
  * @property {() => Array<{name: string, level: string, detail: string}>} toolchain
  */
 
@@ -58,11 +59,11 @@ export const PLATFORM_SURFACE = Object.freeze([
   'id', 'deviceNoun',
   'listDevices', 'bootedDevices', 'resolveDevice', 'isBootedSync', 'ownsUdid',
   'screenshot', 'launchApp', 'terminateApp', 'openUrl',
-  'setPermission', 'setPasteboard', 'permissionServices', 'toolchain',
+  'setPermission', 'setPasteboard', 'permissionServices', 'capabilities', 'toolchain',
 ]);
 
 /** @type {Record<string, Platform>} */
-export const PLATFORMS = Object.freeze({ ios });
+export const PLATFORMS = Object.freeze({ ios, android });
 
 /** @returns {Platform[]} in registration order, which is the order devices are listed in. */
 export function backends() {
@@ -207,6 +208,18 @@ export function permissionServices(udid) {
   }
   return all;
 }
+
+/**
+ * What a device's platform can currently do: which capture engines it has, and
+ * whether input and the accessibility tree are implemented for it at all.
+ *
+ * This exists because doctor, asked about an Android emulator, reported "input
+ * driver: idb" and "accessibility tree: idb" — a claim about a tool that has
+ * never spoken to an Android device. A layer above the boundary must not
+ * describe a device in the other platform's terms, and the only way it can
+ * avoid that is to ask.
+ */
+export const capabilitiesFor = (udid) => platformFor(udid).capabilities();
 
 /** What `simframe doctor` should check: each registered backend's own toolchain. */
 export function toolchainChecks() {

@@ -1688,3 +1688,60 @@ The bound is now derived rather than chosen: 25 s, just inside the client's own
 stopping any earlier only fails reads that would have worked. The reason to
 bound it at all is unchanged — the control socket is serial, so a long read
 holds up every command behind it.
+
+## Phase 8 — Android, first numbers
+
+Apple M-series, macOS 26, Android 16 (API 36), `Small_Phone_API_36`,
+720x1280 @320dpi, emulator 36.1.9, adb 1.0.41. Medians of 5–9 runs.
+
+| Path | Median | Note |
+| --- | --- | --- |
+| emulator console `screenrecord screenshot <dir>` | **21 ms** | the emulator writes the PNG onto the host filesystem itself |
+| `adb exec-out screencap -p` | 113 ms | 9 KB PNG across the adb transport |
+| `adb exec-out screencap` (raw RGBA) | 218 ms | 3.7 MB — the transfer dominates, not the encode |
+| `adb shell getprop` x5, one hop | 28 ms | the same batching lesson as `accessibilityMultipleAttributes:` |
+| `adb shell dumpsys package <pkg>` | 130 ms | the permission read-back |
+| `adb shell dumpsys window displays` | 27 ms | names the focused activity — cheap, and not a screen map |
+| `uiautomator dump` | **2,012 ms** | the accessibility tree, and the reason it is not wired yet |
+
+**Capture on the second platform costs 21 ms, which nobody expected.** The
+plan assumed Android capture would be the emulator's gRPC streaming endpoint
+(port 8554 is open and unused) with a scrcpy-style fallback, and that
+`adb screencap` would be the slow stopgap. It turns out the console's
+`screenrecord screenshot` writes the frame to a host path with no device-to-host
+transfer at all, over a plain TCP socket with no protobuf and no dependency —
+five times faster than adb and in the same range as the iOS framebuffer
+callback. gRPC is still the path to *streaming*; it is no longer the path to a
+frame.
+
+Two measurements corrected themselves under repetition, which is the habit this
+project keeps re-earning:
+
+- The console path first measured **67 ms** in Node against 20 ms in a shell.
+  All of the difference was a 10 ms poll interval waiting for the file to be
+  complete; at 3 ms it is 21 ms. The number was measuring the poll, not the
+  emulator.
+- Before that it measured **2,400 ms** and appeared to be the adb fallback.
+  It was: `completePng` looked for the `IEND` chunk type four bytes from the end
+  of the file, which is the CRC and never spells anything, so no frame was ever
+  judged complete and every capture fell through to adb after a 2 s poll. A
+  fallback that works is the hardest kind of bug to see — the numbers were the
+  only thing that showed it.
+
+**`uiautomator dump` at 2 s a read is the real problem of the phase.** iOS's
+tree went 203 ms → 45 ms by moving the read host-side and batching it; there is
+no equivalent move here, because the cost is a fresh instrumentation process per
+dump. A resident server (what Appium does) would need an APK, which would be
+this project's first runtime dependency. Undecided, and recorded in
+`docs/DEFERRED.md` rather than guessed at.
+
+### What the boundary bought, measured in changes not made
+
+`simframe ui` produced a full screen map of an Android emulator — 9 elements
+with points, refs and a structural identity — with **no change to any layer
+above `src/platform/`**. The frame store, the ring, the dHash, settle, the
+fingerprint, the screen map, refs and the graph all ran unmodified on a platform
+they were never written for, because the capture loop asks the boundary for a
+screenshot and a resize and both are real on Android. The only edits outside
+`src/platform/` were to stop *claiming iOS mechanisms* for a non-iOS device:
+engine selection, and four lines of `doctor`.

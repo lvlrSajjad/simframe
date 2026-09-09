@@ -33,7 +33,7 @@ open work is in `docs/DEFERRED.md`.
 | CI — packaging + integration gates | done. `integration` boots a simulator on `macos-15` and asserts every layer under `--strict`; required on `main` with an admin bypass |
 | CI — the memory layer | done. `scripts/ci-memory.mjs` drives the real CLI over the screen map, refs, graph, verdicts, flows and `goto`, OCR-only. Four bugs found writing it, one of them a capture loop that could not recover a lost display port |
 | 7 — compact agent state, skill | done. A ten-step flow is **1 tool call, 0 images, ~1,650 characters**. Every action returns the numbered text screen map; `sim_look` is the only image path and is capped at 1024 px |
-| 8 — Android | steps 0 and 1 done — the `platform/` seam exists and dispatch is device-keyed; no second backend yet |
+| 8 — Android | steps 0-2 done — the seam exists, dispatch is device-keyed, and Android reads: frames at 21 ms, a screen map, the graph. No input yet |
 
 **Pick up here: Phase 8, and here is what is actually in the way.**
 
@@ -475,10 +475,59 @@ Verified as no behaviour change: 81 unit tests, `ci-memory.mjs` 33/33 on a
 restarted device, the eval separating at gap 0.65, `doctor --strict` all-ok, and
 `devices --json` gaining exactly one additive field (`platform`).
 
-**So step 2 is `android.js` itself**, and the prompt below is what it looks
-like. Nothing above the boundary should need to change to accommodate it; if
-something does, that is the boundary being wrong and worth fixing there rather
-than routing around.
+**Step 2 landed `android.js`, and the boundary held.** `simframe ui` produced a
+full screen map of an Android emulator — elements, points, refs, a structural
+identity — with no change to any layer above `src/platform/`. The frame store,
+the ring, the dHash, settle, the fingerprint, the screen map, refs and the graph
+all ran unmodified on a platform they were never written for.
+
+What Android can do today: list and resolve devices, launch and terminate an
+app, open a URL, grant and revoke permissions, capture frames, and therefore
+everything the perception and memory layers do on top of frames. What it cannot
+do: act. There is no input path and no accessibility tree yet.
+
+Three things step 2 found that were not in the plan:
+
+- **Capture is 21 ms, and not over gRPC.** The plan said emulator gRPC
+  streaming with a scrcpy fallback, and `adb screencap` as the slow stopgap.
+  The emulator *console* — a plain TCP line protocol, no protobuf, no
+  dependency — has `screenrecord screenshot <dir>`, which makes the emulator
+  write the PNG onto the host filesystem with no device-to-host transfer at
+  all: five times faster than adb screencap and in the same range as the iOS
+  framebuffer callback. gRPC (port 8554, open and unused) is still the path to
+  *streaming*; it is no longer the path to a frame.
+- **`uiautomator dump` costs 2 s a read**, which is the real problem of the
+  phase and the opposite shape from iOS's: nothing to batch, because the cost is
+  a fresh instrumentation process per dump. The fast answer is a resident APK,
+  which would be this project's first runtime dependency. Undecided, in
+  `docs/DEFERRED.md`.
+- **`pm grant` exits 0 while doing nothing** when the app never declared the
+  permission — so `setPermission` reads the state back off the device and
+  reports what is true rather than that adb ran. Same class as `am start`
+  reporting its failures on stdout with a zero exit.
+
+Two things above the boundary had to stop assuming iOS, and finding them is
+what the step was for. Engine selection asked for the Swift daemon on every
+device, so `simframe start` on an emulator failed with a message about
+CoreSimulator; a platform now declares which capture engines it has. And
+`doctor`, asked about an emulator, reported "input driver: idb" and
+"accessibility tree: idb" — a claim about a tool that has never spoken to an
+Android device — so a platform now declares its `capabilities`, and a layer it
+does not have yet is reported `optional` with the reason instead of in the other
+platform's vocabulary.
+
+The capture loop was also renamed from `simctl` to `screenshot`, with `simctl`
+kept as an alias. It no longer shells out to simctl on either platform: on
+Android the same loop reaches the emulator console. A "downgrade" warning is
+now only printed where a faster engine actually exists, because the screenshot
+loop is the whole of Android's capture rather than a fallback from anything.
+
+**So step 3 is input**, and it is the step where Android starts being able to
+act rather than only look: the console's `event mouse` puts a real down/move/up
+on the touch screen in ~20 ms and `event text` types, both measured (see
+`docs/DEFERRED.md`). Do the whole gesture vocabulary in one step — tap, swipe,
+type, key — rather than half of it, so `sim_tap` never exists on a platform
+where `swipe` does not.
 
 Two smaller things Android meets immediately, both in `docs/DEFERRED.md`: the
 confirm vocabulary is hardcoded English, and `PERMISSION_SERVICES` is a list of

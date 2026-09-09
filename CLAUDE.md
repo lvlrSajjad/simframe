@@ -59,13 +59,24 @@ Code skill are thin front-ends over the CLI. One writer per device, as today.
 
 **Platform boundary.** All simulator-specific code sits behind a `Platform`
 protocol (frames, accessibilityTree, tap/swipe/type/key, launch/openURL/
-permission). Android is a planned second backend; nothing above the boundary
-may import a platform framework or name a platform tool. In Swift that is
-`SimulatorPlatform` in `PrivateAPI`; in JavaScript it is `src/platform/`, whose
-`index.js` is the only door — `ios.js` exports one object and no functions, and
-a test fails if any file above the boundary contains `'xcrun'`, `'adb'` or
-`'idevice'`. That rule was stated here for three phases before anything checked
-it, and the JavaScript half had quietly never obeyed it.
+permission). Nothing above the boundary may import a platform framework or name
+a platform tool. In Swift that is `SimulatorPlatform` in `PrivateAPI`; in
+JavaScript it is `src/platform/`, whose `index.js` is the only door — a backend
+exports one object and no functions, and a test fails if any file above the
+boundary contains `'xcrun'`, `'adb'` or `'idevice'`. That rule was stated here
+for three phases before anything checked it, and the JavaScript half had quietly
+never obeyed it.
+
+Android is the second backend and it is real, not planned: `src/platform/
+android.js` lists devices, launches apps, grants permissions and captures frames
+at 21 ms through the emulator console, and every layer above the boundary — the
+frame store, settle, the fingerprint, the screen map, refs, the graph — runs on
+it unmodified. It cannot act yet: there is no input path and no accessibility
+tree. Two rules follow from that and both are load bearing. A backend declares
+its own `capabilities`, because `doctor` asked about an emulator once reported
+"input driver: idb", which is a claim about a tool that has never spoken to an
+Android device. And a layer a platform does not have is `optional` with a
+reason, never the other platform's vocabulary.
 
 ## Non-goals (for now)
 
