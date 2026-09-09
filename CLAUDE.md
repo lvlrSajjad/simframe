@@ -26,14 +26,20 @@ work, has the screen settled) is made locally in tens of milliseconds.
 to land in `~/.simframe/<udid>/` with the same atomic-rename layout so existing
 readers keep working during the transition.
 
-**Input.** Indigo HID through `SimDeviceLegacyHIDClient` using the Xcode 26
-**9-argument** `IndigoHIDMessageForMouseNSEvent` signature (digitizer target
-`0x32`). The 5-argument path used by idb/AXe is broken on iOS 26 — never use it.
+**Input.** Indigo HID through `SimDeviceLegacyHIDClient`, digitizer target
+`0x32`. `docs/PRIVATE_API.md` is the source of truth for the signature and it
+says **six** arguments on this Xcode, not the nine this file used to assert —
+the binary states its own prototype as a string, which is how that was settled.
+The 5-argument path used by idb/AXe is broken on iOS 26 — never use it.
 Gestures are real down→move→up sequences with realistic timing, never
 teleporting taps. Warm the HID session once per device.
 
 **Perception order (strict).**
-1. Accessibility tree via `AXPTranslator` — authoritative when present.
+1. Accessibility tree via `AXPTranslator` — read host-side, in-process, since
+   0.6.0. Authoritative when present, and *not* authoritative about screen
+   identity: the tree and OCR agree on 0.33–0.47 of a screen's structural
+   tokens and never on its hash, so identity is settled by the graph rather
+   than by whichever sensor answered. See `docs/DEFERRED.md`.
 2. Apple Vision OCR (`VNRecognizeTextRequest`, `.accurate`, language correction
    off) + classical CV (contours/rectangles) + iOS layout priors + system-icon
    templates, **fused** into the same element list, only for gaps in (1).
@@ -71,7 +77,17 @@ not this rebuild).
 - Degrade rather than fail: if a layer is unavailable, report which and keep
   the layers below working. `simframe doctor` must reflect every layer.
 - Do not add npm dependencies. The only runtime dependency stays the MCP SDK.
-- Do not touch the release workflow, `server.json` or package versions.
+- The release workflow, `server.json` and package versions are **not** ordinary
+  files: change them only when the task is explicitly a release or a fix to the
+  release path, and say what you are changing and why before you do it. The rule
+  used to be "do not touch", and it was right about the risk and wrong about the
+  remedy — a release path nobody may repair fails silently, which is what
+  happened. `v0.5.1` was tagged, released on GitHub, and never reached npm for a
+  week because `npm install -g npm@latest` had started requiring a newer Node
+  than the runner had. Five distinct faults in that pipeline were found and
+  fixed in one afternoon, every one of them invisible from a green local build.
+  `npm version` is the only way to bump a version, because its hook keeps
+  `server.json` in step.
 - Prefer small commits per phase step; run existing tests before and after.
 
 ## Layout
