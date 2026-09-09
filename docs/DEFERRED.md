@@ -29,8 +29,39 @@ for. Each item is written up in full further down or in
 3. Perception cost per step: 36% of a clean flow is two `screenIdentity`
    passes plus locate. That is Phase 13, and it is the larger half of the gap
    to the human median.
-4. Phase 11 step 4 — the focus window (250/900/3000 ms) and the identity
-   settle (300 ms). Both sit on the perception path, so they ride with 2 and 3.
+4. ~~Phase 11 step 4 — the focus window and the identity settle.~~ **Done.**
+   The focus window is learned per edge and may only ever lengthen; the
+   identity settle now waits for the remainder it owes rather than a fresh
+   300 ms. See `docs/BENCHMARKS.md`, "Phase 11 step 4". What is left of it is
+   the structural window itself, which is per-screen learnable and still gated
+   on the eval harness at 1 — its estimator is self-correcting rather than
+   self-reinforcing, which is the opposite sign to the one that corrupted the
+   graph, and that is a reason to expect it to work, not evidence that it does.
+
+**P0 — and it outranks the harness, because it corrupts learning**
+
+1b. **A settle can be satisfied by stillness older than the action it is
+   waiting on.** Measured this session: `tap Accessibility` on the Settings
+   root reports `settled 124ms` — less than the 500 ms of stillness a settle
+   requires — and the screen never left the root. The baseline hash is captured
+   at the top of the step, and if it lands mid-animation it already differs
+   from the live hash by the time the wait starts, so `sawChange` is true before
+   the action did anything and the wait returns on quiet that predates it.
+
+   The cost is not the failed step. `screenIdentity` then reads the screen we
+   have not left and the graph records **root → root** as a verified edge; the
+   stored edge has `count: 11` and `changedOutcomes: 5`, flipping between the
+   real destination and itself. Measured 2/6 passes on `settings-larger-text`
+   before Phase 11 step 4 and 5/6 after, which nudges the symptom and does not
+   touch this. This is the same corruption the learned-stillness revert cleaned
+   up, and it came back **without** learned stillness — so that experiment was
+   never its only cause, and the graph deletion documented as the remedy is a
+   remedy for the symptom.
+
+   The fix is not a longer wait. `sawChange` needs to mean "changed after the
+   action was dispatched", which means the baseline must be a frame the daemon
+   captured after the dispatch returned, not before the step began. See
+   `docs/BENCHMARKS.md`, "Phase 11 step 4".
 
 **P2 — CI worth trusting**
 
@@ -39,20 +70,42 @@ for. Each item is written up in full further down or in
 6. The fingerprint gate is intermittent — failed on the 0.8.0 push, passed on
    the next with nothing changed.
 
+**P2 — and this one is a wrong-action risk, found by accident**
+
+7. `type into "Search"` on the Contacts root resolved to the **section-index
+   letter "S"** at 393,521 rather than the search field at 88,821, tapped it,
+   and typed. It flagged itself twice — `[the field did not visibly take focus]`
+   and `[no visible change]` — so it is not silent, but "typed into S" is a
+   claim about a scrubber.
+
+   The mechanism is exact, and it is an asymmetry in `matching.nameScore`.
+   `q.startsWith(n)` returns a flat **0.86** no matter how little of the query
+   the name covers, so "S" against "Search" scores 0.86; the field's own label
+   "Q Search" goes through `n.includes(q)`, which *does* scale by coverage, and
+   scores 0.78 × 0.75 = **0.585**. One character outranks the whole label
+   because only one of the two branches was taught that coverage matters — the
+   same lesson `n.includes(q)` already carries in a comment about "back"
+   matching a list row.
+
+   The fix looks like one line and is a ranking change, which is why it is
+   filed rather than done: 1 is the thing that would say whether scaling that
+   branch fixes this without breaking the prefix matches it exists for. First
+   case for the harness, and it was found by hand instead.
+
 **P3 — known product gaps, all filed below**
 
-7. The default-device *preference* helper above the platform boundary.
-8. `android.internals.js`, so ~970 lines with two assertions become testable.
-9. `getPasteboard` has no dispatch wrapper.
-10. English-only confirm vocabulary; the iOS/Android permission-name mismatch;
+8. The default-device *preference* helper above the platform boundary.
+9. `android.internals.js`, so ~970 lines with two assertions become testable.
+10. `getPasteboard` has no dispatch wrapper.
+11. English-only confirm vocabulary; the iOS/Android permission-name mismatch;
     pinch and the unverified iOS hardware buttons.
 
 **P4 — the wedge, which is the simulator's bug and not ours**
 
-11. Spot an all-black frame early — frames are already decoded, so it is nearly
+12. Spot an all-black frame early — frames are already decoded, so it is nearly
     free — and let `sim_do` wait for the likely self-recovery instead of
     failing the flow.
-12. Worth an Apple feedback report: rapid app relaunch cycling kills the
+13. Worth an Apple feedback report: rapid app relaunch cycling kills the
     simulator's display pipeline in about six cycles, reproducibly, and
     `simctl io screenshot` confirms it from outside simframe.
 
@@ -484,19 +537,30 @@ recovered from.
 The teardown itself still cannot be induced on demand, so what is covered is the
 decision and the act, not the event.
 
-### Fixed sleeps in `actions.js` — one of them is gone
-`sim_wait` and the settle gate defer to the daemon's real settle detector, but
-individual step types in `src/actions.js` still carry fixed sleeps. Removing
-them touches every step and deserves its own pass rather than being folded into
-a phase about something else.
+### Fixed sleeps in `actions.js` — the action path is done, the step types are not
+`sim_wait` and the settle gate defer to the daemon's real settle detector, and
+since Phase 11 step 4 so do the two waits that sat on the action path: the focus
+window after tapping a field is learned per edge (lengthen-only — the failure of
+a short focus wait is a *silent wrong type*, so the saving is declined), and the
+structural identity settle credits the time the previous sample already spent
+instead of sleeping a fresh 300 ms. `docs/BENCHMARKS.md` has the measurements
+and the asymmetry argument.
 
-The keyboard-focus one is done, because Android forced it: 150 ms is enough for
-a keyboard rising over the screen you are already on and nowhere near enough for
-a tap that starts a whole activity, and the text went before the field existed
-while the step reported success. It waits for a real settle now. That is the
-argument for the rest of the pass — every one of these numbers is calibrated
-against one platform's animation timings, and the second platform is slower in
-places the first never was.
+What is left is the individual step types. `scrollTo` settles for 250 ms and
+gives up at 2500 ms per scroll; `waitText` and the explicit `settle` step
+default to 8000 ms; `press` in the CLI waits 400 ms before asking the frames
+whether anything moved. None of these has a graph edge in hand at the point it
+waits, which is why they were not folded in — giving them one means either
+threading the step loop's timing into the inner calls or letting them read the
+graph themselves, and that is a shape decision, not a constant swap.
+
+The keyboard-focus one was the first to go, because Android forced it: 150 ms is
+enough for a keyboard rising over the screen you are already on and nowhere near
+enough for a tap that starts a whole activity, and the text went before the
+field existed while the step reported success. That is still the argument for
+the rest of the pass — every one of these numbers is calibrated against one
+platform's animation timings, and the second platform is slower in places the
+first never was.
 
 ### Screen memory still lives in Node
 Phase 2 called for porting the layout-hash cache into the daemon. It was left

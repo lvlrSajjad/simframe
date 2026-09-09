@@ -348,7 +348,7 @@ export function findScreen(udid, query) {
  * 2.4 s on a screen that fetches — and because the graph is already persisted,
  * versioned and pruned.
  */
-function noteSettle(edge, settleMs, quietGapMs) {
+function noteSettle(edge, settleMs, quietGapMs, focusMs) {
   if (Number.isFinite(settleMs) && settleMs >= 0) {
     edge.settles = [...(edge.settles ?? []), Math.round(settleMs)].slice(-TIMING_WINDOW);
   }
@@ -356,6 +356,13 @@ function noteSettle(edge, settleMs, quietGapMs) {
   // observation that lets the next one stop waiting 500ms to find out.
   if (Number.isFinite(quietGapMs) && quietGapMs >= 0) {
     edge.quietGaps = [...(edge.quietGaps ?? []), Math.round(quietGapMs)].slice(-TIMING_WINDOW);
+  }
+  // How long the *field* took to take focus, which is a different duration from
+  // how long the step took: it is measured between the tap and the keyboard,
+  // inside a step whose settle is measured after the typing. One edge, two
+  // waits, so two distributions.
+  if (Number.isFinite(focusMs) && focusMs >= 0) {
+    edge.focuses = [...(edge.focuses ?? []), Math.round(focusMs)].slice(-TIMING_WINDOW);
   }
 }
 
@@ -384,16 +391,71 @@ export function stillnessFor({ gapSamples, gapP95 } = {}, fallbackMs) {
   };
 }
 
+/**
+ * How long to wait for a tapped field to take focus.
+ *
+ * The three numbers this replaces were the last genuinely fixed waits on the
+ * action path: 250 ms of stillness, a 900 ms reaction window, a 3 s timeout.
+ * What makes them different from the step budget is the shape of the failure.
+ * A step budget that is too short reports `no-visible-change` and the flow can
+ * see it. A focus wait that is too short types into a field that does not have
+ * focus yet, `typeText` succeeds because input has no feedback channel, and the
+ * step reports that it typed — the worst shape a failure can take, and the bug
+ * this helper was written to fix in the first place.
+ *
+ * So this one is asymmetric on purpose: **a learned window may only lengthen
+ * the wait**, never shorten it. p95 of what this field has actually cost, when
+ * that is longer than 3 s, is a field that was being typed into too early and
+ * now is not. Where it is shorter, the measurement is discarded rather than
+ * banked as a saving — 5% of a distribution is one silent wrong type in twenty
+ * runs, and there is no amount of median wall time worth that.
+ *
+ * The one shortening is not a learned number at all, it is positive evidence:
+ * if the keyboard was already up before the tap, this tap moves a caret. There
+ * is no keyboard animation to wait for, so the reaction window collapses to the
+ * stillness window instead of paying 900 ms to watch a screen that was never
+ * going to move. `beforeScreen` already carries `keyboard`, so the evidence is
+ * free — it is the same perception pass the step was going to run anyway.
+ */
+export function focusPlan(stats, { reactionMs, timeoutMs, stillnessMs, keyboardUp } = {}) {
+  if (keyboardUp) {
+    return {
+      reactionMs: stillnessMs ?? reactionMs,
+      timeoutMs,
+      cold: false,
+      from: 'the keyboard was already up, so this tap moves a caret',
+    };
+  }
+  const { focusP50, focusP95, focusSamples } = stats ?? {};
+  if (!Number.isFinite(focusP95) || !Number.isFinite(focusSamples) || focusSamples < COLD_SAMPLES) {
+    return { reactionMs, timeoutMs, cold: true, from: `fewer than ${COLD_SAMPLES} focus samples` };
+  }
+  const margin = Math.max(150, Math.round(focusP95 * 0.2));
+  const learnedTimeout = Math.min(HARD_CAP_MS, focusP95 + margin);
+  const learnedReaction = Math.min(learnedTimeout, focusP50 + margin);
+  return {
+    // max, not min. See above: only ever longer.
+    reactionMs: Math.max(reactionMs, learnedReaction),
+    timeoutMs: Math.max(timeoutMs, learnedTimeout),
+    cold: false,
+    from: `p95 ${focusP95}ms over ${focusSamples} focus samples`,
+  };
+}
+
 /** What this edge's observed settle durations say, or that it has none. */
 export function timingOf(edge) {
   const samples = edge?.settles ?? [];
   const gaps = edge?.quietGaps ?? [];
+  const focuses = edge?.focuses ?? [];
   return {
     samples: samples.length,
     p50: metrics.percentile(samples, 50),
     p95: metrics.percentile(samples, 95),
     gapSamples: gaps.length,
     gapP95: metrics.percentile(gaps, 95),
+    focusSamples: focuses.length,
+    focusP50: metrics.percentile(focuses, 50),
+    focusP95: metrics.percentile(focuses, 95),
   };
 }
 
@@ -433,7 +495,7 @@ export function timingInto(udid, hash) {
   return best ? { ...timingOf(best), action: best.action, kind: best.kind ?? null } : null;
 }
 
-export function record(udid, { from, action, to, kind, settleMs, quietGapMs }) {
+export function record(udid, { from, action, to, kind, settleMs, quietGapMs, focusMs }) {
   const fromKey = typeof from === 'string' ? { hash: from } : from;
   const toHash = typeof to === 'string' ? to : to?.hash;
   if (!fromKey?.hash || !toHash) return null;
@@ -500,7 +562,7 @@ export function record(udid, { from, action, to, kind, settleMs, quietGapMs }) {
         save(udid, target);
         existing.count += 1;
         existing.lastSeen = Date.now();
-        noteSettle(existing, settleMs, quietGapMs);
+        noteSettle(existing, settleMs, quietGapMs, focusMs);
         save(udid, node);
         return node;
       }
@@ -512,7 +574,13 @@ export function record(udid, { from, action, to, kind, settleMs, quietGapMs }) {
     existing.kind = kind ?? existing.kind;
     existing.count += 1;
     existing.lastSeen = Date.now();
-    noteSettle(existing, settleMs);
+    // Every argument, and it is worth saying why this line once passed one.
+    // `quietGapMs` was dropped here — on the *main* path, the one nearly every
+    // recorded edge takes — so the pause statistic only ever accumulated on a
+    // brand-new edge and on the variant branch. The window that reads it looked
+    // permanently cold, which is a measurement quietly not being taken rather
+    // than a wrong number, and those are the ones nothing complains about.
+    noteSettle(existing, settleMs, quietGapMs, focusMs);
   } else {
     node.edges.push({
       action: signature,
@@ -525,6 +593,7 @@ export function record(udid, { from, action, to, kind, settleMs, quietGapMs }) {
       lastSeen: Date.now(),
       settles: Number.isFinite(settleMs) && settleMs >= 0 ? [Math.round(settleMs)] : [],
       quietGaps: Number.isFinite(quietGapMs) && quietGapMs >= 0 ? [Math.round(quietGapMs)] : [],
+      focuses: Number.isFinite(focusMs) && focusMs >= 0 ? [Math.round(focusMs)] : [],
     });
   }
   save(udid, node);

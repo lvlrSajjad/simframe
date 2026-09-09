@@ -27,11 +27,22 @@ const MAX_PAUSE_MS = 5000;
  * falls out at `reaction` instead. That bounds the cost of the honest case
  * rather than the broken one.
  */
+/**
+ * The stillness window stays fixed, and that is a decision rather than an
+ * oversight. Learning a stillness window is the half of Phase 11 that was
+ * reverted for cause: a wait that ends early never observes the pauses that
+ * come later, so the estimator ratchets itself down and the graph learns
+ * transitions that never happened. See docs/BENCHMARKS.md, Phase 11.
+ */
 const FOCUS_STABLE_MS = 250;
 /**
- * Long enough for a slow capture loop to produce a frame or two. The screenshot
- * engine idles at 1.5 fps — 667 ms between frames — so anything under that is a
- * verdict reached before there was anything to look at.
+ * The cold defaults, unchanged, for a field this screen has not been measured
+ * focusing. `graph.focusPlan` takes over once it has been, and may only make
+ * the wait longer.
+ *
+ * 900 ms is long enough for a slow capture loop to produce a frame or two. The
+ * screenshot engine idles at 1.5 fps — 667 ms between frames — so anything
+ * under that is a verdict reached before there was anything to look at.
  */
 const FOCUS_REACTION_MS = 900;
 const FOCUS_TIMEOUT_MS = 3000;
@@ -190,11 +201,24 @@ export async function runScript(
     // What this action did last time it was taken here, if ever.
     const prediction = verify && beforeScreen?.hash ? graph.predict(udid, beforeScreen, step) : null;
     try {
-      let detail = await runStep(deviceQuery, udid, step, { screen, options, frames });
       // How long this transition has cost before, on this screen, for this
       // action. A cold edge gets the old fixed default and says so; a measured
       // one gets p95 plus a margin. Research §7.
+      //
+      // Read before the step, not after, because one of the waits it informs
+      // happens *inside* the step: a `type into` taps the field and waits for
+      // focus before it types, and that wait used to be three constants.
       const learned = verify && beforeScreen?.hash ? graph.timingFor(udid, beforeScreen, step) : null;
+      const focus = {
+        plan: graph.focusPlan(learned, {
+          reactionMs: FOCUS_REACTION_MS,
+          timeoutMs: FOCUS_TIMEOUT_MS,
+          stillnessMs: FOCUS_STABLE_MS,
+          keyboardUp: Boolean(beforeScreen?.keyboard),
+        }),
+        observedMs: null,
+      };
+      let detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus });
       // How long this screen must hold still before it counts as settled.
       //
       // 500 ms was a constant paid by every step of every flow, and it is the
@@ -356,6 +380,9 @@ export async function runScript(
             // 400ms and then timed out is exactly the case a 150ms stillness
             // window would have got wrong.
             quietGapMs: settled?.sawChange ? settled.quietGapMs : undefined,
+            // The focus wait's own distribution, kept apart from the step's.
+            // Only set when a field was tapped and visibly took focus.
+            focusMs: focus.observedMs ?? undefined,
           });
           carriedScreen = afterScreen;
         }
@@ -464,18 +491,31 @@ export async function runScript(
  */
 async function focusField(deviceQuery, udid, step, ctx) {
   const found = await api.locate(deviceQuery, step.into, { index: step.index, refresh: step.refresh });
+  // What this field has cost to focus before, on this screen. Cold, or with no
+  // verification running, that is exactly the three constants above; measured,
+  // it can only be longer. `graph.focusPlan` carries the reason it is either.
+  const plan = ctx.focus?.plan ?? {
+    reactionMs: FOCUS_REACTION_MS, timeoutMs: FOCUS_TIMEOUT_MS, cold: true, from: 'no timing in hand',
+  };
+  const tappedAt = Date.now();
   await input.tapPoint(udid, found.target.x, found.target.y);
   const focused = await api.waitFor(deviceQuery, {
     mode: 'settle',
     stableMs: FOCUS_STABLE_MS,
-    reactionMs: FOCUS_REACTION_MS,
-    timeoutMs: FOCUS_TIMEOUT_MS,
+    reactionMs: plan.reactionMs,
+    timeoutMs: plan.timeoutMs,
     options: ctx.options,
   });
+  // Only a wait that was satisfied is a measurement of how long focus takes. A
+  // reaction window that ran out measures how long we were prepared to watch a
+  // screen that did not move, and banking that would teach the edge the cost of
+  // its own impatience — the estimator mistake learned stillness made.
+  if (ctx.focus && focused.satisfied) ctx.focus.observedMs = Date.now() - tappedAt;
   return {
     found,
     where: `"${found.target.label}" at ${found.target.x},${found.target.y}`,
     quiet: focused.satisfied ? '' : ' [the field did not visibly take focus]',
+    waited: focused.satisfied && !plan.cold ? ` [focus in ${focused.waitedMs}ms, ${plan.from}]` : '',
   };
 }
 
@@ -507,7 +547,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
       if (step.into) {
         const field = await focusField(deviceQuery, udid, step, ctx);
         await input.typeText(udid, step.text ?? step.value);
-        return `typed into ${field.where}${field.quiet}`;
+        return `typed into ${field.where}${field.quiet}${field.waited}`;
       }
       await input.typeText(udid, step.text ?? step.value);
       return 'typed text';
@@ -520,7 +560,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
       if (step.into) {
         const field = await focusField(deviceQuery, udid, step, ctx);
         await input.pasteText(udid, step.text ?? step.value);
-        return `pasted into ${field.where}${field.quiet}`;
+        return `pasted into ${field.where}${field.quiet}${field.waited}`;
       }
       await input.pasteText(udid, step.text ?? step.value);
       return 'pasted into the focused field';

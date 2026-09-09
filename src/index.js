@@ -1040,6 +1040,38 @@ export async function locate(
 export const STRUCTURAL_SETTLE_MS = 300;
 
 /**
+ * How much of the structural window is still owed, given when the last sample's
+ * frame was captured.
+ *
+ * This was `sleep(300)` between the two readings, and unlike every other fixed
+ * wait in the engine it cannot be replaced by waiting for a signal — because
+ * there is no signal. The race it guards is a screen whose *pixels* have gone
+ * still while its structure has not: a list whose spinner has gone and whose
+ * rows have not landed is perfectly quiet and structurally wrong, so the settle
+ * detector, which watches pixels, has nothing to report. Only elapsed time
+ * separates the two readings.
+ *
+ * What can be fixed is that the wait was *additional*. The guarantee wanted is
+ * 300 ms between the frames the two samples read; the code slept 300 ms after a
+ * sample that had already spent an unbounded settle wait and a full perception
+ * pass getting there. On a screen that took a second to go quiet the separation
+ * was already there and the sleep bought nothing but a second of it. So credit
+ * what has passed and wait only for the remainder — the same guarantee, and
+ * usually none of the sleep.
+ *
+ * The window itself is per-screen learnable, and worth noting that its
+ * estimator has the *opposite* feedback sign to the one that corrupted the
+ * graph: a window too short produces disagreeing samples, which lengthens it.
+ * Self-correcting rather than self-reinforcing. It still waits on the
+ * perception eval harness, because "the samples agreed" is only evidence the
+ * window was long enough if the readings themselves are trustworthy.
+ */
+export function structuralSettleOwed(capturedAt, now = Date.now(), windowMs = STRUCTURAL_SETTLE_MS) {
+  if (!Number.isFinite(capturedAt)) return windowMs;
+  return Math.max(0, Math.min(windowMs, windowMs - (now - capturedAt)));
+}
+
+/**
  * How long identity will wait for pixels to go quiet.
  *
  * Not the caller's timeout. A flow allows twelve seconds for a screen to
@@ -1122,7 +1154,8 @@ export async function screenIdentity(deviceQuery, { options, confirmNovel = true
   // Nothing recognises this, or the pixels have not gone quiet. Either way, make
   // it prove it is the same screen twice running before it becomes a node.
   for (let i = 1; i < STRUCTURAL_SETTLE_SAMPLES; i += 1) {
-    await sleep(STRUCTURAL_SETTLE_MS);
+    const owed = structuralSettleOwed(identity.state?.capturedAt);
+    if (owed > 0) await sleep(owed);
     const again = await read({ fresh: true });
     // Two readings agree if they are the same screen — the same test identity
     // itself uses. Demanding an identical hash is a stricter question than the

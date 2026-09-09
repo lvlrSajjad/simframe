@@ -2367,3 +2367,177 @@ which is where it was before Phase 11 — as expected, because a shorter timeout
 cannot speed up a flow that never times out. HPI_time is unmoved. The phase's
 value is what it makes possible next: a distribution per edge, and a
 `slower_than_usual` an agent can read instead of a fixed budget it cannot.
+
+## Phase 11 step 4: the last two fixed waits on the action path
+
+M4 Max, Xcode 26.0, iOS 26.5, iPhone 17 Pro (`326464A4-…`).
+
+Step 0's inventory left two genuinely fixed waits after the phase closed — the
+focus window after tapping a text field (250/900/3000 ms) and the structural
+identity settle (300 ms) — plus a set of poll intervals (40, 60, 80, 250 ms)
+that are loop cadence rather than guessed waits and are deliberately still
+there. Polling faster to satisfy a rule about sleeps would be the rule winning
+an argument against the reason for it.
+
+### The focus window: learned, and asymmetric on purpose
+
+A `type into` step taps the field and waits before it types. That wait is not
+the step's settle — it is measured between the tap and the field reacting,
+inside a step whose settle is measured after the typing — so it is now its own
+distribution on the same graph edge: `focuses`, alongside `settles` and
+`quietGaps`, same 50-sample window.
+
+What makes this window different from the step budget is the shape of its
+failure, and it decides the design:
+
+| | too short | too long |
+|---|---|---|
+| step budget | reports `no-visible-change`, flow sees it | costs time on a failing step |
+| focus wait | **types into an unfocused field and reports success** | costs time on the honest case |
+
+Input has no feedback channel, so `typeText` succeeds whether or not the field
+was listening. That is the failure this helper was written to fix in the first
+place — measured on Android, where tapping a search box starts a whole separate
+activity and the text went before the field existed.
+
+So the learned window may **only ever lengthen** the wait. `max`, not `min`. A
+field whose p95 is 4.2 s stops being typed into at 3 s; a field whose p95 is
+260 ms keeps the 900/3000 constants, and the saving is declined. Five percent of
+a distribution is one silent wrong type in twenty runs, and no amount of median
+wall time buys that back.
+
+The one shortening is not a learned number at all, it is positive evidence: if
+the keyboard was already up before the tap, the tap moves a caret and there is
+no keyboard animation to wait for, so the reaction window collapses to the
+stillness window. `beforeScreen` already carries `keyboard`, so the evidence
+costs nothing — it is the same perception pass the step was going to run anyway.
+
+**Measured, live**, on the Contacts search field (`~/.simframe/<udid>/graph`,
+edge `type:{"into":"Q Search","text":"Kate"}`):
+
+```
+focuses  [446, 325]     settles [678, 619]     quietGaps [174, 7209]
+```
+
+The wiring is verified end to end: the focus wait is satisfied, its duration is
+recorded on the right edge, and `timingOf` reads it back. The threshold
+arithmetic — cold below five samples, lengthen-only above it, Nielsen's cap
+above that — is unit-tested rather than measured, because the edge did not
+reach five samples: another session took the benchmark device four runs in.
+
+The keyboard branch is unit-tested and **unverified live**, and the reason is
+worth recording rather than glossing: this simulator has Connect Hardware
+Keyboard on, so the software keyboard never rises and `keyboard` is false on
+every screen here. `detectKeyboardTop` needs twelve small uniform elements low
+on the screen and gets four. What is covered is the decision, not the event —
+the same disposition as `CaptureRecovery`'s teardown.
+
+### The identity settle: the same guarantee, minus the part already paid
+
+`screenIdentity` makes a novel fingerprint prove itself across two readings,
+and slept 300 ms between them. Unlike every other fixed wait in the engine this
+one cannot be replaced by waiting for a signal, because there is no signal: the
+race it guards is a screen whose *pixels* have gone still while its structure
+has not — a list whose spinner has gone and whose rows have not landed is
+perfectly quiet and structurally wrong, so the settle detector, which watches
+pixels, has nothing to report. Only elapsed time separates the two readings.
+
+What was wrong was that the wait was *additional*. The guarantee wanted is
+300 ms between the frames the two samples read; the code slept 300 ms *after* a
+sample that had already spent an unbounded settle wait and a full perception
+pass getting there. So credit what has passed and wait for the remainder.
+
+Measured over eight `screenIdentity` passes on the device, the frame age at the
+moment the old code began sleeping:
+
+```
+age at the sleep   923, 167, 156, 612, 161, 518, 218, 165 ms   (median 218)
+owed after credit    0, 133, 144,   0, 139,   0,  82, 135 ms   (median 133)
+```
+
+Median 167 ms saved per extra sample, up to two samples per unrecognised
+screen, and three of eight owed nothing at all — the separation was already
+there and the sleep was buying a second copy of it. The guarantee is unchanged:
+sample two still reads a frame captured at least 300 ms after sample one's.
+
+This does not move the warm suite, where screens are already known and the loop
+never runs. It is the cold and exploratory paths that pay it.
+
+### A statistic that was quietly not being taken
+
+Found in the data above, not in the code. `graph.record` calls `noteSettle` from
+three places, and the one on the main path — the branch nearly every recorded
+edge takes — passed `settleMs` alone. `quietGapMs` was therefore only ever
+recorded when an edge was brand new or when it went through the variant branch.
+
+The window that reads it (`stillnessFor`, which needs five samples) looked
+permanently cold on every edge that had been traversed more than once. Nothing
+complained, because a measurement not being taken is indistinguishable from a
+cold one. `quietGaps [174, 7209]` above is two traversals of one edge; before
+the fix it would have read `[174]`.
+
+Worth stating plainly: this bug was in the code the whole time the learned
+stillness experiment was being run and reverted. It does not rescue that
+experiment — the estimator is biased for the reason already written up, and
+more samples of a biased statistic is a better-measured wrong number.
+
+### Measured: the suite, A/B, clean graph each round
+
+Six runs each side, three per round, the device's graph deleted before every
+round so neither side inherits the other's learning. `settings-larger-text`
+only — the flow with four known steps and no typing, so it isolates the
+identity settle from the focus window.
+
+| | run 1 | run 2 | run 3 | passed |
+|---|---|---|---|---|
+| HEAD, round 1 | 17304 ms 4/4 | 6927 ms **3/4** | 7208 ms **3/4** | 1/3 |
+| HEAD, round 2 | 15907 ms 4/4 | 7498 ms **3/4** | 10143 ms **3/4** | 1/3 |
+| step 4, round 1 | 14699 ms 4/4 | 15417 ms 4/4 | 14098 ms 4/4 | 3/3 |
+| step 4, round 2 | 17253 ms 4/4 | 17947 ms 4/4 | 7167 ms **3/4** | 2/3 |
+
+**2/6 against 5/6**, and the failures are not randomly placed: on HEAD they are
+always runs 2 and 3, never run 1. That is the signature of a *cold* run passing
+and a *warm* one failing, which points at what the first run wrote down.
+
+The failure itself is the same one every time. Step 1 taps Accessibility,
+reports `settled 124ms`, and step 2 cannot find "Display & Text Size" because
+the screen never left the Settings root. A settle satisfied in 124 ms cannot
+have observed the 500 ms of stillness it requires, so `since` must already have
+differed from the live hash when the wait began — the baseline was captured
+mid-animation, `sawChange` was true before the tap did anything, and the wait
+returned on stillness that predated it. `screenIdentity` then reads the screen
+we have not left, and the graph records **Settings root → Settings root** for
+`tap Accessibility`. The stored edge for that has `count: 11` and
+`changedOutcomes: 5`: it has been flipping between the right screen and itself
+all day. This is the same corruption the learned-stillness revert cleaned up,
+and it came back without learned stillness, so learned stillness was never its
+only cause. Filed in `docs/DEFERRED.md`.
+
+Why the credit changes the pass rate is a hypothesis with a mechanism, not a
+proven cause, and the difference between those two is the whole reason this
+file exists. Confirmation is "two structural readings agree". The old code
+guaranteed 300 ms between the readings and *delivered* about 600 — the sleep
+plus the perception pass that followed it — and on a screen with anything live
+on it, a clock included, a wider separation is less likely to agree. Fewer
+confirmations mean fewer recorded edges, which is exactly what the HEAD verdict
+column shows: `unverified, unverified, unverified, unverified` on run 1, so run
+2 walks in with nothing learned. With the credit the separation is the 300 ms
+the window was designed for, run 1 records edges, and runs 2 and 3 predict
+correctly.
+
+What this is **not** is a fix. Step 4 still failed once in six, with the same
+signature, and the defect is upstream of anything measured here: a settle that
+can be satisfied by stillness older than the action it is waiting on. Until
+that is fixed the pass rate is a symptom being nudged, and it is filed as such.
+
+HPI over the two step-4 rounds: `HPI_accuracy` 1.0 and 0.667, `HPI_time` 0.531
+and 0.452. Unmoved, as expected — none of this makes a passing flow faster.
+
+### Not done, and no longer a Phase 11 item
+
+The structural window itself (300 ms) is per-screen learnable, and its
+estimator has the *opposite* feedback sign to the one that corrupted the graph:
+a window too short produces disagreeing samples, which lengthens it.
+Self-correcting rather than self-reinforcing. It still waits on the perception
+eval harness, because "the two samples agreed" is only evidence the window was
+long enough if the readings themselves can be trusted.

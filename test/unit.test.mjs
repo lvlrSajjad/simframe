@@ -1923,3 +1923,78 @@ test('stillness is learned from pauses inside a transition, and can only shorten
   assert.equal(graph.stillnessFor(t, 500).stillnessMs, 150);
   assert.equal(graph.timingOf({}).gapSamples, 0);
 });
+
+test('the focus wait is learned per edge, and may only ever get longer', async () => {
+  const graph = await import('../src/graph.js');
+  const cold = { reactionMs: 900, timeoutMs: 3000, stillnessMs: 250 };
+
+  // Nothing measured: exactly the three constants this replaced, and it says so.
+  const none = graph.focusPlan({ focusSamples: 2, focusP95: 400 }, cold);
+  assert.deepEqual([none.reactionMs, none.timeoutMs, none.cold], [900, 3000, true]);
+  assert.match(none.from, /fewer than 5 focus samples/);
+
+  // A field measured *slower* than the constants gets waited for properly. This
+  // is the case the fixed 3s got wrong: it typed at 3s into a field that took
+  // 4.2s to focus, and typeText reported success because input has no feedback.
+  const slow = graph.focusPlan({ focusSamples: 9, focusP50: 3800, focusP95: 4200 }, cold);
+  assert.equal(slow.timeoutMs, 4200 + 840);
+  assert.equal(slow.reactionMs, 3800 + 840);
+  assert.equal(slow.cold, false);
+  assert.match(slow.from, /p95 4200ms over 9 focus samples/);
+
+  // A field measured *faster* keeps the constants. The 5% tail of a
+  // distribution is one silent wrong type in twenty runs, and no amount of
+  // median wall time buys that back — so the saving is declined.
+  const fast = graph.focusPlan({ focusSamples: 30, focusP50: 180, focusP95: 260 }, cold);
+  assert.deepEqual([fast.reactionMs, fast.timeoutMs], [900, 3000]);
+
+  // Nielsen's cap still applies to a field that has genuinely never been quick.
+  assert.equal(graph.focusPlan({ focusSamples: 30, focusP50: 200, focusP95: 30000 }, cold).timeoutMs, graph.HARD_CAP_MS);
+
+  // The one shortening is evidence, not statistics: the keyboard was already up
+  // before the tap, so this tap moves a caret and there is no animation to wait
+  // for. Nine hundred milliseconds of watching a screen that was never going to
+  // move is the only part of this window that was pure cost.
+  const caret = graph.focusPlan({ focusSamples: 0 }, { ...cold, keyboardUp: true });
+  assert.equal(caret.reactionMs, 250);
+  assert.equal(caret.timeoutMs, 3000);
+  assert.equal(caret.cold, false);
+  assert.match(caret.from, /keyboard was already up/);
+});
+
+test('a focus duration is its own distribution on the edge, and the main path records every one', async () => {
+  const graph = await import('../src/graph.js');
+  // Two waits happen on one edge — focus, then the settle after typing — and
+  // conflating them would time a keyboard against a whole transition.
+  const t = graph.timingOf({ settles: [1200, 1300], focuses: [300, 320, 340, 360, 900] });
+  assert.equal(t.samples, 2);
+  assert.equal(t.focusSamples, 5);
+  assert.equal(t.focusP50, 340);
+  assert.equal(t.focusP95, 900);
+  assert.equal(graph.timingOf({}).focusSamples, 0);
+
+  // And the regression that hid in plain sight: `noteSettle` was called with
+  // one argument on the path nearly every recorded edge takes, so quietGaps
+  // only ever accumulated on a brand-new edge. A statistic quietly not being
+  // taken looks exactly like a cold one.
+  const src = fs.readFileSync(new URL('../src/graph.js', import.meta.url), 'utf8');
+  for (const call of src.match(/noteSettle\(existing[^)]*\)/g) ?? []) {
+    assert.match(call, /quietGapMs/, `${call} must carry the pause statistic`);
+    assert.match(call, /focusMs/, `${call} must carry the focus statistic`);
+  }
+});
+
+test('the structural settle credits the time a sample already spent getting there', async () => {
+  const api = await import('../src/index.js');
+  // The guarantee is 300ms between the frames the two readings see, not 300ms
+  // *after* a reading that already spent a settle wait and a perception pass.
+  assert.equal(api.structuralSettleOwed(1000, 1000), 300);
+  assert.equal(api.structuralSettleOwed(1000, 1200), 100);
+  // Already separated: the sleep bought nothing but a second of it.
+  assert.equal(api.structuralSettleOwed(1000, 2400), 0);
+  // A frame from the future, or no frame at all, pays the full window rather
+  // than skipping the separation the samples exist for.
+  assert.equal(api.structuralSettleOwed(2000, 1000), 300);
+  assert.equal(api.structuralSettleOwed(undefined, 1000), 300);
+  assert.equal(api.structuralSettleOwed(null, 1000), 300);
+});
