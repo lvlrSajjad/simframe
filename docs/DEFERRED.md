@@ -6,6 +6,79 @@ as such.
 
 Ordered by how much it would hurt to keep ignoring.
 
+## Priority right now — 2026-09-09, after 0.9.0
+
+The order below was derived from this session's measurements rather than from
+the phase plan, which is what `docs/ESCALATIONS.md` says the escalation log is
+for. Each item is written up in full further down or in
+`docs/PHASES-HUMAN-PARITY.md`.
+
+**P0, and it now blocks three separate phases**
+
+1. **The Phase 5 perception eval harness** — fifteen screens, three apps. It
+   gates learned stillness (a wrong window *corrupts the graph*: proved this
+   session, not theorised), it gates Phase 13's ROI safety valve, and it is
+   Phase 9's own gate. The de-duplication fix shipped on unit tests plus one
+   fingerprint eval run because this does not exist.
+
+**P1 — where HPI_time actually is, both gated by P0**
+
+2. Unbiased stillness estimator, from the frame history after a transition
+   completes rather than from inside the wait that cut it short. ~13% of wall
+   time.
+3. Perception cost per step: 36% of a clean flow is two `screenIdentity`
+   passes plus locate. That is Phase 13, and it is the larger half of the gap
+   to the human median.
+4. Phase 11 step 4 — the focus window (250/900/3000 ms) and the identity
+   settle (300 ms). Both sit on the perception path, so they ride with 2 and 3.
+
+**P2 — CI worth trusting**
+
+5. The `bench` gate cannot gate: a hosted runner cannot `simctl launch`
+   Settings (47-55 s per failed attempt), so it only warns.
+6. The fingerprint gate is intermittent — failed on the 0.8.0 push, passed on
+   the next with nothing changed.
+
+**P3 — known product gaps, all filed below**
+
+7. The default-device *preference* helper above the platform boundary.
+8. `android.internals.js`, so ~970 lines with two assertions become testable.
+9. `getPasteboard` has no dispatch wrapper.
+10. English-only confirm vocabulary; the iOS/Android permission-name mismatch;
+    pinch and the unverified iOS hardware buttons.
+
+**P4 — the wedge, which is the simulator's bug and not ours**
+
+11. Spot an all-black frame early — frames are already decoded, so it is nearly
+    free — and let `sim_do` wait for the likely self-recovery instead of
+    failing the flow.
+12. Worth an Apple feedback report: rapid app relaunch cycling kills the
+    simulator's display pipeline in about six cycles, reproducibly, and
+    `simctl io screenshot` confirms it from outside simframe.
+
+**Waiting on the user, not on work**
+
+- The client bundle id in two public commit diffs. Three options were laid out:
+  rewrite and force-push *plus* a GitHub Support request to garbage-collect
+  unreachable objects; delete and recreate the repo; or do nothing, since no
+  release tag and no npm tarball contains it. A rewrite changes every tag SHA,
+  so it belongs *before* a release rather than after. **Do not start one
+  without an explicit, specific instruction.**
+- Two colleagues' frame caches under `~/.simframe` (72 MB + 62 MB), the cache
+  for deleted device `101D4EEC-…`, and the `TEST-*` fixtures. The decision was
+  made to delete all four; the sandbox blocked the recursive delete, so it is
+  one command the user runs:
+  `cd ~/.simframe && rm -rf B55AB0AE-… CDB00FD6-… 101D4EEC-… TEST-*`
+- The human baseline JSONs are committed and therefore public: medians, IQRs
+  and inter-transition intervals for one person, no name attached. Flagged so
+  it is a choice rather than an accident.
+- The article (`docs/agents-shouldnt-blink.html`) is deliberately **not**
+  updated per phase. Nothing in it is falsified — its five-condition
+  escalation contract is exactly what Phase 10 implemented. The next update
+  belongs after Phase 13, when HPI_time has moved, and the section waiting to
+  be written is that the first measurement of that contract overrode the
+  planned phase order: 16 of 19 escalations were one de-duplication bug.
+
 ## Correctness
 
 ### Region bands are positional, and that is now three bugs — fixed
