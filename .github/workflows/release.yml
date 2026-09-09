@@ -129,6 +129,34 @@ jobs:
             npm publish --provenance --access public --tag "$DIST_TAG"
           fi
 
+      # npm does not make a version resolvable the instant `npm publish` exits.
+      # It runs an automated review first — the web UI says "Validating: the
+      # version will remain unavailable until review completes" — and until that
+      # finishes, `npm view simframe@<version>` is a 404.
+      #
+      # Two things went wrong for want of this step. The MCP Registry validates
+      # that the npm version exists before it will register it, so it failed
+      # with a 400 on a version that had genuinely just published. And more
+      # importantly, nothing in this workflow ever confirmed that a publish
+      # landed — v0.5.1 was tagged, released on GitHub, and absent from npm for
+      # a week without a single red mark to say so.
+      - name: The version has to actually be on npm
+        run: |
+          VERSION="${{ steps.kind.outputs.version }}"
+          for attempt in $(seq 1 40); do
+            if npm view "simframe@$VERSION" version >/dev/null 2>&1; then
+              echo "simframe@$VERSION is live on npm after $attempt check(s)"
+              exit 0
+            fi
+            echo "  attempt $attempt: not resolvable yet, waiting"
+            sleep 15
+          done
+          echo "simframe@$VERSION never became resolvable on npm within 10 minutes."
+          echo "The publish step reported success, so this is npm's review queue"
+          echo "rather than a rejected publish — but it is not a release until"
+          echo "someone can install it."
+          exit 1
+
       - name: Publish to the MCP Registry
         # Releases only. The registry lists one version as the thing to install,
         # and a release candidate is by definition not that.

@@ -299,8 +299,24 @@ Fixed by pinning the publish runner to Node 22. Still open: nothing verifies
 after a release that the version actually landed. `npm view simframe version`
 against the tag would have caught this the day it happened.
 
-**And the publish still does not work.** `v0.6.0-rc.1` got further than anything
-since 0.5.0 and then stopped:
+**Resolved.** OIDC Trusted Publishing had never published anything — 0.5.0 went
+out on a token, the switch to OIDC landed after it, and v0.5.1 died before
+reaching the publish step, so `v0.6.0-rc.1` was the first attempt that actually
+reached the registry under OIDC. It was refused because the Trusted Publisher
+entry on npmjs.com was not in place; once it was added, the same workflow
+published on the next run. The npm-major hypothesis below was wrong.
+
+One more gap closed with it: the workflow now polls until the published version
+is resolvable on npm before it registers with the MCP Registry, and fails if it
+never becomes resolvable. npm runs an automated review after `npm publish`
+exits — the UI says "Validating: the version will remain unavailable until
+review completes" — so the registry's own existence check 400'd on a version
+that had genuinely just published. The same step is what would have caught
+v0.5.1 the day it happened.
+
+### The original diagnosis, kept because it was wrong
+
+**`v0.6.0-rc.1` got further than anything since 0.5.0 and then stopped:**
 
 ```
 npm notice Publishing to https://registry.npmjs.org/ with tag next and public access
@@ -328,6 +344,15 @@ between — the same moving dependency that broke v0.5.1, one layer along. The
 cheap experiment is to pin `npm@11` on Node 22 and cut another candidate: that
 reproduces 0.5.0's conditions with one variable changed. Untested, and named
 here as a hypothesis rather than a diagnosis.
+
+**It was the wrong hypothesis, and it was falsifiable in thirty seconds.** The
+successful v0.5.0 run has no npm-upgrade step in it at all, and `git show
+v0.5.0:.github/workflows/release.yml` shows `NODE_AUTH_TOKEN: secrets.NPM_TOKEN`.
+0.5.0 never used OIDC. "What changed between them" was not the npm major — it
+was the entire authentication mechanism, and the answer was in the workflow's
+own git history rather than in the npm release notes I was reasoning about.
+Checking the last success before theorising about the failure would have cost
+one command.
 
 Two tags were spent finding this and both are harmless — `v0.6.0-rc.0` was
 deleted, `v0.6.0-rc.1` published nothing. npm remains at 0.5.0.
