@@ -477,12 +477,35 @@ day's work.
 - The human baseline JSONs are committed and therefore public: medians, IQRs
   and inter-transition intervals for one person, no name attached. Flagged so
   it is a choice rather than an accident.
-- The article (`docs/agents-shouldnt-blink.html`) is deliberately **not**
-  updated per phase. Nothing in it is falsified — its five-condition
-  escalation contract is exactly what Phase 10 implemented. The next update
-  belongs after Phase 13, when HPI_time has moved, and the section waiting to
-  be written is that the first measurement of that contract overrode the
-  planned phase order: 16 of 19 escalations were one de-duplication bug.
+- The article (`docs/agents-shouldnt-blink.html`) is **checked for falsified
+  claims, not updated per phase**, and that is the standing rule. Reviewed
+  2026-09-10 against everything built since Phase 10:
+
+  - **One claim was falsified and is now amended.** It said a radio button that
+    moves 0.1% of the screen "returns in a second marked `no-visible-change`,
+    and the agent knows to check rather than wait". Measured on a real form,
+    every radio and segment tap cost **~2.5 s** of dead wait and each one *had
+    worked* — being told nothing happened when something did is a wrong answer,
+    not a hint. The amendment carries the mechanism (`changed` is a mean over a
+    4×8 grid against 0.004; a switch flip moves it 0.001348) and says plainly
+    that it is not fixed.
+  - **The token table still holds.** It quotes 1159 characters / ~330 tokens for
+    one screen's map. Re-measured across the 15 harness screens: median **740**,
+    range 372–1169. So the figure is a fair busy screen and the 5×-cheaper-than-
+    an-image conclusion is if anything conservative — even with rows now
+    carrying element state and results carrying a `next:` line.
+  - **The section that was waiting is written**: "Sixteen of nineteen were one
+    bug". The escalation contract was designed, then instrumented, and the
+    first breakdown disagreed with the plan — 16 of 19 escalations were one
+    de-duplication bug, an IoU test scoring two boxes at 0.053 where containment
+    scores 1.000. The refusal was correct; the fault was upstream of the
+    decision. It also names the two later measurements that overturned things in
+    the piece: a pause statistic that was noise in both directions, and a map
+    optimisation reverted the day it shipped.
+
+  Everything else in it — the capture numbers, the classifier, the accessibility
+  tier's worth, the borrowed work — is unchanged and still measured. HTML
+  validated and rendered after editing.
 
 ## Correctness
 
