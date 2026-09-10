@@ -3209,3 +3209,51 @@ search kept opening siblings, because nothing asked "have we arrived?" in terms
 the goal would satisfy. Asking the model to decide arrival would risk a wrong
 tap, so reporting the landing is the safe answer for now — but a cheap
 `{"seek": …}` that stops when it *has* arrived is the obvious next measurement.
+
+---
+
+## The sensor, made A/B-testable — and one flag that turned out inert
+
+2026-09-10, benchmark device, warm, five reads per mode, median.
+
+Prompted by the owner's theory: *"what you probably do is 100% matching, which is
+probably a bit slower than making it 70% accurate — humans don't read accurately,
+which makes us prone to mistakes but also faster."* Right principle. The
+measurement moves where it applies.
+
+| read | median | targets |
+|---|---|---|
+| accessibility + OCR fused (`full`, the default) | **164 ms** | 18 |
+| the same with Vision at `.fast` | 162 ms | 18 |
+| **accessibility alone** (`ax-first`) | **50 ms** | 16 |
+
+**`.fast` changed nothing, and the reason is the interesting part.** The daemon
+reads text in-process off the framebuffer and owns its own recognition level, so
+`SIMFRAME_OCR` only reaches the no-daemon fallback in `native/ocr.swift`. Two
+identical numbers are what a flag that cannot reach the code path looks like.
+`doctor` now says so in words — *"fallback helper only; the daemon owns its own"*
+— because a flag that appears to configure everyone's OCR and does not is worse
+than no flag. Plumbing the level through the control socket is a daemon change
+and is filed, not smuggled in before a field test.
+
+**Skipping the sensor beats degrading it**, which is the honest version of the
+theory: 50 ms against 164 ms, a 3.3× cheaper read.
+
+And it costs no accuracy, because it escalates. `locate` in `ax-first` mode reads
+the tree alone and, **only when a resolve fails**, pays for a full read before
+telling anyone the target is absent. Six real labels on a live Settings screen:
+
+| mode | resolved | average per resolve |
+|---|---|---|
+| `full` | 6 / 6 | 207 ms |
+| `ax-first` | **6 / 6** | **83 ms** |
+
+2.5× per resolve, nothing lost. The worst case is a screen whose targets are
+OCR-only, where every resolve pays 50 + 164 ms instead of 164 — so the bet is
+that most screens have a usable tree, and the escalation means a lost bet costs
+milliseconds rather than a wrong answer.
+
+That distinction is the lesson of the map cut restated: a cheaper reading may
+drop data nothing misses *until it does*, and the safe form of "approximate" is
+one that notices it was not enough. Vision's own `.fast` would not have had that
+property, which is the second reason it is not the knob to reach for.

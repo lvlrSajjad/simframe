@@ -1085,10 +1085,47 @@ export function offScreenMatch(targets, query, points) {
   return hit.status === 'ambiguous' && hit.alternatives?.length ? hit.alternatives[0] : null;
 }
 
-export async function locate(
+/**
+ * Which sensors a read asks for by default.
+ *
+ * `full` is the default and what CLAUDE.md fixes: accessibility and OCR fused
+ * into one element list. `ax-first` asks for the tree alone — 85 ms against
+ * 142 ms warm — and pays for OCR only when the cheap read could not answer the
+ * question.
+ *
+ * The escalation is the whole point, and it is what makes this safe to try. A
+ * mode that just dropped OCR would lose every OCR-only element, which is
+ * precisely how the map cut lost discovery: nothing became untappable, but the
+ * agent could no longer see what was there. Here a resolve failure — the one
+ * signal that says "the cheap sensor was not enough" — triggers a full read
+ * before anyone is told the target is absent. Wrong guesses cost a second read;
+ * they cannot cost a wrong answer.
+ */
+export function sensorMode() {
+  const raw = String(process.env.SIMFRAME_SENSOR ?? '').trim().toLowerCase();
+  return raw === 'ax-first' || raw === 'axfirst' ? 'ax-first' : 'full';
+}
+
+export async function locate(deviceQuery, query, options = {}) {
+  if (sensorMode() !== 'ax-first' || options.useOcr === false || options.escalated) {
+    return locateWith(deviceQuery, query, options);
+  }
+  try {
+    return await locateWith(deviceQuery, query, { ...options, useOcr: false, escalated: true });
+  } catch (err) {
+    // Only a perception failure earns the expensive retry. A refused selector or
+    // an ambiguity between two things the tree *did* see is not going to be
+    // settled by reading more text.
+    const why = metrics.escalationOf(err);
+    if (why?.reason !== 'unknown_screen' && why?.reason !== 'ambiguous_intent') throw err;
+    return locateWith(deviceQuery, query, { ...options, useOcr: true, refresh: true, escalated: true });
+  }
+}
+
+async function locateWith(
   deviceQuery,
   query,
-  { index, refresh = false, useAx = true, useOcr = true, settleMs = MEMORY_SETTLE_MS, options } = {},
+  { index, refresh = false, useAx = true, useOcr = true, settleMs = MEMORY_SETTLE_MS, options, escalated } = {},
 ) {
   const { device, state: firstState } = await ensureDaemon(deviceQuery, options);
   const udid = device.udid;

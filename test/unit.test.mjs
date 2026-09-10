@@ -2637,6 +2637,40 @@ test('a step can carry its own fallbacks, and only some failures earn one', asyn
   );
 });
 
+test('a cheaper sensor is allowed to be cheaper, not to be wrong', async () => {
+  const api = await import('../src/index.js');
+  const ocr = await import('../src/ocr.js');
+  const { readFileSync } = await import('node:fs');
+
+  // The owner's theory, aimed one layer over: we read imprecisely and gain speed
+  // by it. Measured, all of Vision costs ~57ms of a read while the waits beside
+  // it cost 1,900-2,000ms — so the win is not a worse reading, it is not reading.
+  // Warm on the benchmark device: 164ms with OCR fused, 50ms for the tree alone.
+  assert.equal(api.sensorMode(), 'full', 'full is the default and what CLAUDE.md fixes');
+  assert.equal(ocr.level(), 'accurate');
+
+  // The escalation is what makes it safe rather than a repeat of the map cut,
+  // which lost discovery by dropping data nothing missed until it did. A resolve
+  // failure — the one signal saying the cheap sensor was not enough — buys a full
+  // read before anyone is told the target is absent.
+  const src = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  const wrapper = src.slice(src.indexOf('export async function locate('), src.indexOf('async function locateWith('));
+  assert.match(wrapper, /useOcr: false/, 'the cheap read comes first');
+  assert.match(wrapper, /useOcr: true, refresh: true/, 'and a failure pays for the full one');
+  assert.match(wrapper, /unknown_screen/);
+  assert.match(wrapper, /ambiguous_intent/);
+  // An ambiguity between two things the tree already saw is not fixed by reading
+  // more text, and a refused selector is not a perception failure at all.
+  assert.match(wrapper, /throw err/);
+
+  // The recognition level is honestly scoped: the daemon reads text in-process
+  // and owns its own level, so this flag reaches only the fallback helper. Said
+  // out loud because a flag that looks like it configures everyone's OCR and
+  // does not is worse than no flag.
+  const cli = readFileSync(new URL('../src/cli.js', import.meta.url), 'utf8');
+  assert.match(cli, /fallback helper only; the daemon owns its own/);
+});
+
 test('the destructive vocabulary gates initiative, not requests', async () => {
   const vocab = await import('../src/vocabulary.js');
 

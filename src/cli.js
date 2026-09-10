@@ -1195,6 +1195,26 @@ async function doctor({ json = false, strict = false, device } = {}) {
     add('on-device OCR', 'warn', err.message, { key: 'ocr.available', value: false });
   }
 
+  // Which sensors a read asks for, and what the recognition-level flag can and
+  // cannot reach. Stated because `SIMFRAME_OCR` looks like it configures the
+  // OCR everyone uses and does not: the daemon reads text in-process off the
+  // framebuffer and owns its own recognition level, so the flag only reaches
+  // the no-daemon fallback in `native/ocr.swift`.
+  try {
+    const api = await import('./index.js');
+    const ocrMod = await import('./ocr.js');
+    const mode = api.sensorMode();
+    add('sensor mode', 'ok',
+      mode === 'ax-first'
+        ? 'ax-first — the tree alone (~50ms), paying for OCR only when a resolve fails'
+        : 'full — accessibility and OCR fused on every read (~164ms)',
+      { key: 'sensor.mode', value: mode });
+    add('OCR level', 'ok', `${ocrMod.level()} (fallback helper only; the daemon owns its own)`, {
+      key: 'ocr.level',
+      value: ocrMod.level(),
+    });
+  } catch { /* reported by the layers above */ }
+
   // The local planner tier. `none` is the normal answer and not a fault: it is
   // off unless SIMFRAME_PLANNER asks for it, and it only ever reorders
   // candidates that exploration was going to try anyway.

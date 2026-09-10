@@ -19,6 +19,17 @@ const BIN = path.join(BIN_DIR, 'ocr');
 
 let ready = null;
 
+/**
+ * Which recognition level to ask Vision for.
+ *
+ * `accurate` is the default and what CLAUDE.md fixes; `fast` is the other thing
+ * Vision offers. Exposed so the pair can be scored against each other instead
+ * of one of them being a constant nobody measured.
+ */
+export function level() {
+  return String(process.env.SIMFRAME_OCR ?? '').toLowerCase() === 'fast' ? 'fast' : 'accurate';
+}
+
 /** Compile once, then reuse. Recompiles only if the source is newer than the binary. */
 export async function ensureBinary() {
   if (ready) return ready;
@@ -55,7 +66,13 @@ export async function ensureBinary() {
 export async function readText(pngFile, { density = 3 } = {}) {
   const built = await ensureBinary();
   if (!built.available) throw new Error(built.reason);
-  const { stdout } = await run(built.binary, [pngFile], { timeout: 30_000, maxBuffer: 16 << 20 });
+  // The recognition level rides in the environment rather than in argv, so the
+  // Swift side keeps its one-argument contract and an older binary still works.
+  const { stdout } = await run(built.binary, [pngFile], {
+    timeout: 30_000,
+    maxBuffer: 16 << 20,
+    env: { ...process.env, SIMFRAME_OCR: level() },
+  });
   const raw = JSON.parse(stdout || '[]');
   return raw.map((r) => ({
     text: r.text,

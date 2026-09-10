@@ -7,8 +7,20 @@ guard args.count > 1, let img = NSImage(contentsOfFile: args[1]),
       let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
     FileHandle.standardError.write("cannot read image\n".data(using: .utf8)!); exit(1)
 }
+// Recognition level is a switch now, not a constant.
+//
+// CLAUDE.md fixes `.accurate` with language correction off, and that was chosen
+// without a comparison — which is a threshold nobody had scored. `SIMFRAME_OCR`
+// selects it so the two can be measured against each other on the perception
+// harness: accuracy lost against milliseconds gained.
+//
+// The theory being tested is a human one: we read imprecisely and gain speed by
+// it, tolerated by a forgiving match. simframe's matcher already forgives a
+// great deal — prefixes, synonyms, typo distance, a Cyrillic-for-Latin fold —
+// so a worse reading may cost nothing that matters.
 let req = VNRecognizeTextRequest()
-req.recognitionLevel = .accurate
+let level = ProcessInfo.processInfo.environment["SIMFRAME_OCR"]?.lowercased() ?? "accurate"
+req.recognitionLevel = (level == "fast") ? .fast : .accurate
 req.usesLanguageCorrection = false
 try! VNImageRequestHandler(cgImage: cg, options: [:]).perform([req])
 let w = Double(cg.width), h = Double(cg.height)

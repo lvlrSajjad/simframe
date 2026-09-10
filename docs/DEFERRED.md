@@ -208,13 +208,28 @@ the field time went where it went.
   right layer for it, because a wrong *character* is recoverable while a wrong
   *tap* is not.
 
-47. **Still worth measuring: `VNRequestTextRecognitionLevel.fast`.** CLAUDE.md
-    fixes `.accurate` with language correction off, and that was chosen without
-    a comparison. The experiment is cheap and now has a gate that can score it:
-    run the perception harness (16 screens, 73 expectations) against both levels
-    and report accuracy lost against milliseconds gained. Expected payoff is
-    ~30 ms per read, which is why it is filed rather than done — but it is filed
-    with the method, so it is an afternoon rather than an argument.
+47. ~~**Still worth measuring: `VNRequestTextRecognitionLevel.fast`.**~~
+    **Measured, and the answer is to skip the sensor rather than degrade it.**
+    `.fast` against `.accurate`: **162 ms against 164 ms — no difference**,
+    because the daemon reads text in-process and owns its own recognition level,
+    so `SIMFRAME_OCR` reaches only the no-daemon fallback. The flag exists,
+    `doctor` says exactly what it can reach, and plumbing the level through the
+    control socket is a daemon change filed as item 48 rather than smuggled in
+    before a field test.
+
+    What did work is `SIMFRAME_SENSOR=ax-first`: the tree alone is **50 ms
+    against 164 ms**, and `locate` pays for a full read only when a resolve
+    fails. Six real labels on a live screen resolved **6/6 in both modes**, at
+    **83 ms against 207 ms** per resolve. The escalation is what makes it safe
+    rather than a repeat of the map cut — a cheaper reading may drop data
+    nothing misses until it does, and the safe form of "approximate" is one that
+    notices it was not enough. `.fast` would not have had that property, which
+    is the second reason it is the wrong knob.
+
+48. **Plumb the recognition level through the control socket**, so the daemon's
+    OCR can be scored the way the fallback's now can. Small, Swift, and a
+    rebuild — worth doing next time the daemon is being touched anyway rather
+    than on its own.
 
 ### The unifying finding: there is no cheap retry — 2026-09-10
 
