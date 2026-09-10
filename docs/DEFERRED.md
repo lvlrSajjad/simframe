@@ -47,6 +47,12 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > no-go, the two reverts, the false premises — are indexed in
 > `docs/DECISIONS.md`.
 >
+> **The unifying finding of 2026-09-10 is item 46, above: there is no cheap
+> retry.** Four separate examples from the owner turned out to be one problem —
+> an attempt fails benignly, you vary it and retry, without deliberation — and
+> simframe answers all four by throwing and abandoning the batch. That is the
+> next thing to build, and it needs no model.
+>
 > **Items 41, 42 and 43 are done — one root cause, three findings, 2026-09-10.**
 > A phantom keyboard was deleting screens' content from their own identity: a
 > dozen short text rows of uniform height stacked low on a read-only summary
@@ -170,6 +176,54 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    is already caught by the frame hash. Both measured signature pairs are in
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
+
+### The unifying finding: there is no cheap retry — 2026-09-10
+
+Four examples from the owner, given one after another, and they are one problem:
+
+| the situation | what a person does |
+|---|---|
+| picked a location with no assets | pick a different location |
+| misclicked a like on Instagram | notice, un-like or go back |
+| hunting "change username" in a new app's settings | next menu, then the next |
+| a YouTube search returns nothing useful | another keyword |
+
+*"All done in maybe less than a second or a few seconds."* *"When I don't find
+what I need somewhere I don't fall into an existential crisis — I look for it
+somewhere else."*
+
+Every one of them is **an attempt that failed benignly, varied, and retried,
+with no deliberation.** And in every one of them simframe's current behaviour is
+the same: the step throws, the batch is abandoned, and the reasoner is asked.
+
+So the gap is not three features. **A step can only succeed or throw, and
+throwing is expensive** — `continueOnError` is all-or-nothing for a whole run,
+which is why nobody uses it, and there is no way to say "if this does not work,
+try that, and only ask me if none of them do".
+
+46. **Per-step alternatives.** A step should be able to carry its own fallbacks,
+    tried locally in order:
+
+    ```json
+    {"tap": "Save", "or": ["Done", "Confirm"]}
+    {"type": "compressor", "into": "Search", "expect": "results", "or": ["air compressor", "compressor repair"]}
+    ```
+
+    No model, no new state, and it makes the *batch* longer instead of making the
+    round trips more numerous — which is the whole objective. It partially covers
+    all four examples above, and it composes with what already exists: `find`
+    already returns ranked alternatives, the graph already names the way back on
+    a wrong turn, and the verify barrier still applies to every attempt.
+
+    The design question worth settling first is which failures are eligible. A
+    label that did not resolve, yes. An `unexpected-screen`, only together with
+    the way back. A destructive label, never. Getting that list wrong turns a
+    retry primitive into a way to hammer an app until something gives.
+
+Ordering against the phases: item 46 is the cheap general case; **Phase 15**'s
+mechanical half is the same idea specialised to menu trees (try an unexplored
+container, come back), and only its *ordering* half wants a model; **Phase 18**
+is the tail where neither convention nor a fallback list applies.
 
 ### From the fifth peer round — the labels worked, and then pointed at a submit button
 
