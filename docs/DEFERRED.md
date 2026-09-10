@@ -47,6 +47,30 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > no-go, the two reverts, the false premises — are indexed in
 > `docs/DECISIONS.md`.
 >
+> **Built and awaiting its first field round (2026-09-11 state).** The cheap
+> retry exists (`or`), bounded exploration exists (`seek`, and it is the thing
+> that pressed an affirmative button in a live app before its permissions were
+> split), the destructive vocabulary exists at last, and there are three local
+> tiers behind flags: `--sensor=ax-first`, `--planner=apple`,
+> `--supervisor=apple`. All three are per-call arguments on every MCP tool too,
+> because an MCP server's environment is fixed at spawn and that cost a round.
+>
+> **The supervisor is measured on a bench and not in the field**, which is the
+> distinction to keep: every previous local-tier idea here survived a bench and
+> died on a real app. The number that settles it is not accuracy, it is whether
+> batches that used to be abandoned now finish. Round 7's prompt asks for
+> exactly that, plus the operator's live commentary mapped to causes — round 6's
+> version of that section was the most useful thing in the report.
+>
+> Deterministic fixes landed alongside it and each should be re-checked in round
+> 7: `assert` reads fresh and looks twice (item 49), a stuck `continueOnError`
+> run stops (52), an `or` chain that misses while the screen just moved says
+> timing not naming (53), and a settle reports an unpopulated list (51). Still
+> open from round 6: **50** (`find`'s stale Visible list), **54** (`or` cannot
+> express "the enabled one"), **56** (ref lifetime undocumented), **57**
+> (`all` without `refresh`), **58** (`seek` asks the wrong question for a
+> wizard), **59** (`sim_state` never suggested).
+>
 > **The unifying finding of 2026-09-10 is item 46, above: there is no cheap
 > retry.** Four separate examples from the owner turned out to be one problem —
 > an attempt fails benignly, you vary it and retry, without deliberation — and

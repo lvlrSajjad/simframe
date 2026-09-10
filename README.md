@@ -96,7 +96,13 @@ ok   accessibility tree simframed: AXPTranslator, host-side
 ok   on-device OCR      available
 ok   booted simulator   iPhone 17 Pro (iOS 26.5)
 ok   capture            frame #888 322x700 in 2ms (age 538ms)
+ok   sensor mode        full — accessibility and OCR fused on every read (~164ms)
+ok   local supervisor   none — not requested (SIMFRAME_SUPERVISOR is unset)
+ok   local planner      none — not requested (SIMFRAME_PLANNER is unset)
 ```
+
+The last three are experiments and `none` is their normal answer. See
+[Local tiers, off by default](#local-tiers-off-by-default).
 
 ### Claude Code
 
@@ -116,6 +122,66 @@ registered only for the directory you ran the command in.
   }
 }
 ```
+
+## Recovering without a round trip
+
+The measured cost of driving an app is not perception — warm, an
+accessibility-only read is 85 ms and a fused read 142 ms. It is **round trips**:
+in one instrumented run, 75% of the wall time was the agent thinking and the
+call boundary, not simframe working. So the tools that matter most are the ones
+that let a batch survive a problem instead of handing it back.
+
+**Fallback selectors.** `{"tap": "Save", "or": ["Done", "Confirm"]}` — tried
+locally in order, only an exhausted list reaching the model. Eligible after a
+selector that did not *resolve* and nothing else, because retrying from a screen
+you did not expect to be on is a second guess. A destructive-looking label is
+refused as a substitute even if you list it.
+
+**`{"seek": "change username", "budget": 6}`** opens containers, checks, and
+comes back, depth first, inside a hard budget. It **acts** — opening a door
+changes state — and it refuses to open anything that commits, abandons or
+answers. It does not tap the target; it leaves you on the screen where the target
+resolves.
+
+**`worked here before:`** puts the graph's own vocabulary in the map, most-used
+first, rather than reporting a count. When the remembered controls are *not* on
+the screen it says so instead, because that means two screens share one
+fingerprint — and confident advice on a misidentified screen is how a remembered
+label ends up pointing at a submit button.
+
+## Local tiers, off by default
+
+Two on-device model experiments, both `none` unless asked for, both degrading to
+the existing matcher-then-model ladder, and CI runs with both off. They ship no
+weights: Apple's Foundation Models framework has nothing to download, which is
+the whole reason it clears this project's non-goal on shipping model weights.
+
+| flag | what it does |
+|---|---|
+| `--sensor=ax-first` | read the accessibility tree alone (~50 ms) and pay for OCR only when a resolve fails |
+| `--planner=apple` | order the containers `seek` opens; it cannot choose an action |
+| `--supervisor=apple` | when a step fails, answer `wait`, `retry` or `stop` — nothing else — before the failure reaches the model |
+
+All three are also per-call arguments on every MCP tool, because an MCP server's
+environment is fixed when it spawns and comparing two modes inside one session
+was otherwise impossible.
+
+**What is measured and what is not.** The ranker: 5 of 6 top-1 on hand-written
+cases, median 564 ms warm, and on a real exploration it went to the right region
+in two steps where reading order wandered into version strings. The supervisor:
+correct on four real batch-killers once the plan briefed it, 689–751 ms warm —
+**on a bench, not in the field.** `ax-first` made no measurable difference to how
+an agent drove a real app, with one small regression and one small win. Numbers
+and conditions are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md); the judgements,
+including a phase cancelled by its own measurement, are in
+[`docs/DECISIONS.md`](docs/DECISIONS.md).
+
+The supervisor's whole vocabulary is three words on purpose. It cannot invent a
+step, skip one, substitute a target or continue past an unexpected screen — not
+because a threshold forbids it but because those are not answers it can give.
+That constraint replaced an earlier version of the same idea that was given
+latitude over *what* to open and pressed a button labelled "YES, THIS FIXED MY
+PROBLEM" in a live app.
 
 ## Capabilities are independent
 

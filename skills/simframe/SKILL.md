@@ -43,10 +43,57 @@ So the protocol is four steps, and step 4 is the one that saves the time.
      label you have not seen on it.
    - `next: N labels repeat on this screen` → address those by `#ref`.
    - `next: the flow stopped here` → this is the moment to think.
+   - `worked here before: tap "…" (7x)` → the graph's own vocabulary for this
+     screen, most-used first. It is evidence for writing a chain, not an
+     instruction: the most-tapped control on a screen is often what earlier runs
+     used to *back out*.
+   - `memory disagrees with this screen: N remembered controls not present` →
+     two screens share one fingerprint. Trust the element list, not the graph,
+     and re-read before anything irreversible.
 
 **Do not** narrate each step, re-read the screen after every action, or use
 extended thinking inside a flow. The flow is already planned; executing it is
 not a decision.
+
+### Recovering without a round trip
+
+Three things let a batch survive a problem instead of handing it back. Every one
+of them exists because a real run lost a call to the thing it prevents.
+
+**Fallback selectors.** `{"tap": "Save", "or": ["Done", "Confirm"]}` — tried
+locally, in order, and only an exhausted list reaches you. Eligible after a
+selector that did not *resolve*, and nothing else: retrying from a screen you did
+not expect to be on is a second guess, not a retry. simframe refuses to
+substitute a label that looks destructive even when you list it.
+
+They are a cure for *"I named it wrong"*, and most real failures are *"it is not
+there yet"* — so when everything in an `or` chain misses and the screen has only
+just stopped moving, the failure says so. Reach for `waitFor` there, not for more
+labels.
+
+**`{"seek": "change username", "budget": 6}`** looks for something that is not on
+this screen: it opens containers, checks, and comes back, depth first.
+
+It **acts** — opening a door changes state — and it refuses to open anything that
+commits, abandons or answers. It once opened `CANCEL` and pressed *"YES, THIS
+FIXED MY PROBLEM"*, which is why that sentence is here. It does not tap the
+target: it leaves you on the screen where the target resolves, and returns to
+where it started if it fails. **Do not point it into a flow whose progress you
+cannot afford to lose.**
+
+**The local supervisor**, when one is enabled, decides whether a failed step
+should `wait`, `retry` or `stop` — before the failure reaches you. It knows
+nothing about the app and you do, so brief it from the plan:
+
+```json
+{"supervisor": "apple",
+ "supervise": "Lists here render a count header before their rows, so a missing row usually means waiting.",
+ "steps": [{"tap": "Ceiling", "expect": "the asset list arrives after a count header"}]}
+```
+
+A `stop` names the steps it did not attempt. If the ruling was wrong, re-issue
+them with a corrected `supervise` note. It is off unless asked for, and **not yet
+proven in the field** — measured on a bench, not on a real run.
 
 ### Anything network-backed: `waitFor`, never `settle`
 
