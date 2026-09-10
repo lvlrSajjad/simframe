@@ -12,6 +12,7 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 
 | date | decision | verdict | what settled it |
 |---|---|---|---|
+| 2026-09-10 | Phase 12 next, per the default order | **REORDERED** | `novel_dialog`: 0 of 173, ever |
 | 2026-09-10 | Phase 17 — local planner tier | **NO-GO** | The prize is 5% of decisions |
 | 2026-09-10 | Phase 11.5's premise (the agent is not batching) | **OVERTURNED** | It batches 84% of the time |
 | 2026-09-10 | The map cut — drop prose from the element list | **REVERTED, same day** | It deleted list rows |
@@ -21,6 +22,63 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 | earlier | Phase 9 — tier-2 local model | **DEFERRED, gate unmet** | Cheaper tool for the same gap, unbuilt |
 
 ---
+
+## 2026-09-10 — the phase order, reordered by the log it said would decide it
+
+**The rule being followed.** CLAUDE.md: *"After Phase 10, the reason breakdown
+in `docs/ESCALATIONS.md` decides which faculty is built next; the default order
+in PHASES-HUMAN-PARITY.md is a default, not a commitment."* This is the first
+time that clause has been used, and it changes the order.
+
+**The breakdown, 173 escalations on the benchmark device:**
+
+| reason | all | last 40 |
+|---|---|---|
+| `verification_failed` | 102 | **38** |
+| `ambiguous_intent` | 59 | 2 |
+| `unknown_screen` | 12 | 0 |
+| `novel_dialog` | **0** | 0 |
+
+**Phase 12 is reflexes, and reflexes exist to handle interruptions — which is
+`novel_dialog`. It has never been logged once.** Not rare: zero, across two
+days and 173 records, on a device driving a real third-party app through
+permission grants, pasteboard consent and a four-step wizard. Real use *did*
+specify some of it (pasteboard consent eating the first paste, a notifications
+prompt blocking a `waitFor`), but those happen at **setup**, where the cheap half
+of Phase 12 — `simframe prep` and the destructive-vocabulary data file — covers
+them without a reflex engine.
+
+**What the log points at instead is not a new faculty at all.**
+`verification_failed` is 102 of 173 and 38 of the last 40, and five field rounds
+established that a large share of those are **false**: `unexpected-screen` on
+correct transitions (3 for 3 wrong in one round), `no-visible-change` on taps
+and types that worked, a focus warning that fires because the simulator has a
+hardware keyboard. The faculty that removes the most escalations is *correct
+verification*, and its root cause is one thing: **screen identity weighting
+chrome over content**, which also made `assert` resolve against another screen's
+stored elements.
+
+**Revised order.**
+
+1. **Verification correctness** — screen identity (items 41, 42), then the
+   negative verdict on data variation (43). Not a phase in the plan; it is what
+   the plan's own steering wheel points at.
+2. **Plan-first** — item 44, opening a batch against a remembered screen with no
+   read. This is Phase 14's territory (anticipation) arriving early because a
+   primitive version of it already paid: naming the remembered vocabulary cut a
+   cold run from 25 calls to 19.
+3. **Phase 12, shrunk** — `simframe prep` and the destructive vocabulary file
+   only. The reflex table waits for a `novel_dialog` count above zero.
+4. **Phases 13, 15, 16 on evidence.** Phase 13 is ROI perception, and perception
+   was never the bottleneck — *emission* was: the map omitted a control the
+   resolver could hit instantly. Phase 15 is exploration when lost, and the cold
+   run was never lost, it was misinformed. Neither has field evidence behind it
+   yet.
+
+**What would reverse this.** A `novel_dialog` count that climbs once verification
+stops swallowing everything — some interruptions may currently be logged as
+`verification_failed` because a dialog is what made the verification fail. Worth
+re-reading the breakdown after item 41.
 
 ## 2026-09-10 — Phase 17, local planner tier: NO-GO
 

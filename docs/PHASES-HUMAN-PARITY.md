@@ -136,6 +136,28 @@ included, zero images. Numbers in `docs/BENCHMARKS.md`, baseline in
 
 ## Phase 12 — Reflexes: local recovery before escalation
 
+> **Reordered, 2026-09-10 — most of this is waiting on evidence that has not
+> arrived.** Reflexes handle interruptions, which is the `novel_dialog`
+> escalation reason, and `novel_dialog` has been logged **zero times in 173
+> escalations** across two days of driving a real third-party app. CLAUDE.md
+> says the breakdown decides the next faculty and the default order is not a
+> commitment; this is the first time that has bitten.
+>
+> **Build now: step 1 only** — `simframe prep`, plus the destructive-vocabulary
+> data file from step 5, which several other things already want. Both are cheap
+> and both address interruptions where they actually occur, at setup: pasteboard
+> consent eating the first paste, a notifications prompt blocking a `waitFor`.
+>
+> **Wait: steps 2–4**, the reflex table and its detection. A trigger→action
+> table for dialogs that have never been recorded is a guess with a
+> configuration file. Re-read the breakdown after screen identity is fixed —
+> some interruptions may be hiding inside `verification_failed`, because a
+> dialog is exactly the sort of thing that makes a verification fail.
+>
+> What the log points at instead is in `docs/DECISIONS.md`: verification
+> correctness first, then plan-first batching.
+
+
 ```
 Read CLAUDE.md, docs/research/03-human-parity.md §4 (the reflex table and
 its caveats), and docs/ESCALATIONS.md — especially the novel_dialog and
