@@ -143,6 +143,15 @@ changes state — and it refuses to open anything that commits, abandons or
 answers. It does not tap the target; it leaves you on the screen where the target
 resolves.
 
+**`{"sweep": "all", "fill": {…}}`** reads a long screen a viewport at a time and
+fills each field while it is on screen. A form taller than the screen is only
+knowable in pieces — the tree publishes what is rendered — and one scroll gesture
+travels a non-deterministic distance, so finding a field and scrolling back to it
+does not work. Sweeping does: on a real web form it filled every field in one
+call. It detects both ends by measuring how far the *content* moved, ignoring
+fixed chrome, which is the only reliable signal available since nothing reports a
+scroll offset.
+
 **`worked here before:`** puts the graph's own vocabulary in the map, most-used
 first, rather than reporting a count. When the remembered controls are *not* on
 the screen it says so instead, because that means two screens share one

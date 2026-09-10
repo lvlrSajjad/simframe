@@ -3350,3 +3350,71 @@ which reads like a display quirk and is a wrong write.
 tracked invocation count almost perfectly: *"fast"/"fair" = steps inside a batch,
 "taking too much time" = a round trip, "failure" = a defect.* Thirteen complaints
 across 21 calls blind; three across four batched.
+
+---
+
+## `sweep` — reading and filling a screen taller than the screen
+
+2026-09-11, on a real HTML form in mobile Safari, at the owner's suggestion —
+a web page turned out to be a harder and better test surface than an app,
+because a page load is a genuine race and browser chrome is genuinely fixed.
+
+**The algorithm is the owner's:** *"to scan a scrollable screen and fill, you
+need to detect min/max scroll and look at it section by section. Section 1:
+anything to fill? Do it. Not? Scroll to section 2."*
+
+**Result: every field on the form filled, in one call** — first name, last name,
+email and a comment, with the select chosen in a following call. `scrollTo` had
+failed at this repeatedly, and the reason it cannot work is structural: it hunts
+*one* label, and a form's fields are not rendered until they are near the
+viewport, so there is nothing to hunt.
+
+### Four signals for "where am I", three of them wrong
+
+Detecting the ends is the whole problem, because **nothing on either platform
+reports a scroll offset**. Each wrong answer looked reasonable and each failed
+on a real page.
+
+| signal | why it failed |
+|---|---|
+| the screen hash stopped changing | a page whose footer has live content changes it forever — it thrashed at the bottom for **40 s** |
+| a section added no new labels | a gesture that reveals a little looks like an end — it stopped **two sections above** the form |
+| element geometry, all elements | a browser's fixed toolbar is five rows whose `y` never moves, dragging the median to zero — it declared the bottom after **one section** |
+| **element geometry, content only, two consecutive stalls** | works |
+
+The last one is the sensor: take the labels present before and after a gesture,
+drop anything in a fixed region, and compare their `y`. An unchanged median
+means nothing moved. **Two** consecutive stalls are required, not one, because
+any sticky element inside a page makes a single median read as zero — and that
+single-stall exit is what produced the symptom the operator described from
+outside: *"I feel like you miss the form, you either scroll to the end or to the
+beginning."*
+
+### A section is a viewport
+
+Measured: `{"scroll":"down"}` moved **28, 42 and 58 points** on an 874-point
+screen — about five per cent of a viewport per gesture. Covering a page that way
+takes dozens of swipes, which is what *"I still see scroll thrashing, you
+scrolled too much"* was actually describing: too many gestures, not too far each.
+A sweep now advances 70% of the viewport per section, leaving a band of overlap
+so nothing falls between two reads.
+
+### Two ordering bugs worth keeping
+
+Measuring movement *after* scrolling and breaking before reading **discarded the
+final screenful** — it reported one section and 30 elements where it had just
+read 52. One read per section, with the end detected at the start of the next
+iteration, fixes it.
+
+And the blind reversal added to fix the thrashing **triggered pull-to-refresh**:
+scrolling up at the top of a web page reloads it, changing the hash and
+defeating the very end-detection it was meant to feed. A reversal now requires
+evidence — the tree saying where the target is — because no evidence is not a
+direction.
+
+### Cost
+
+Six sections including going to the top: ~27 s, of which most is perception
+(a full read per section) rather than gesture. A single-viewport screen sweeps in
+~8 s. That is the price of covering a screen instead of guessing at it, and it
+replaces a `scrollTo` that cost two calls and did not work.

@@ -2698,6 +2698,65 @@ test('round 7: the supervisor stops going silent, and code answers what code kno
   assert.match(src, /consulted and did not answer/);
 });
 
+test('a sweep measures where it is, and covers a page rather than guessing', async () => {
+  const actions = await import('../src/actions.js');
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+
+  // The owner's algorithm: detect min/max scroll, then look section by section —
+  // anything to fill here? Do it. Not? Move on. Getting there took four wrong
+  // signals, and each one is worth keeping because each looked reasonable.
+  //
+  // The screen hash: useless on a page whose footer has live content, so
+  // "stopped changing" never fired and it thrashed at the bottom for 40s.
+  // New labels: fails the other way, because a gesture that reveals little
+  // looks like an end — it stopped two sections above the form.
+  // So: element geometry.
+  const rows = [{ label: 'One', y: 100 }, { label: 'Two', y: 200 }, { label: 'Three', y: 300 }];
+  assert.equal(actions.scrollDelta(rows, rows.map((r) => ({ ...r, y: r.y - 120 }))).px, -120);
+  assert.equal(actions.scrollDelta(rows, rows).moved, false, 'nothing moved is an end');
+  assert.equal(actions.scrollDelta(rows, rows.map((r) => ({ ...r, y: r.y - 3 }))).moved, false, 'jitter is not movement');
+  assert.equal(actions.scrollDelta(rows, [{ label: 'Zed', y: 5 }]).moved, null, 'nothing shared is not evidence of an end');
+
+  // Fixed chrome was the trap. A browser's bottom toolbar is five elements whose
+  // y never changes, and with few shared content rows they drag the median to
+  // zero — so a page that had plainly scrolled measured as motionless and the
+  // sweep declared the bottom after one section.
+  const withChrome = [
+    { label: 'Back', y: 816, region: 'tab-bar' },
+    { label: 'Address', y: 816, region: 'tab-bar' },
+    { label: 'More', y: 816, region: 'tab-bar' },
+    { label: 'Body', y: 400, region: 'content' },
+  ];
+  const scrolled = withChrome.map((r) => (r.region === 'content' ? { ...r, y: r.y - 200 } : r));
+  assert.equal(actions.scrollDelta(withChrome, scrolled).px, -200, 'only what can move is evidence');
+
+  // Two consecutive stalls, not one. Acting on a single stall is why it kept
+  // jumping from the top straight to the end and never reading the form
+  // between — any sticky element inside a page makes one median read as zero.
+  assert.match(src, /stalls \+= 1/);
+  assert.match(src, /if \(stalls >= 2\)/);
+  assert.match(src, /if \(upStalls >= 2\)/);
+
+  // A section is a viewport, not whatever a default swipe does. Measured:
+  // `{"scroll":"down"}` moved 28, 42 and 58 points on an 874-point screen —
+  // about five per cent per gesture, which is dozens of swipes for one page and
+  // is what "you scrolled too much" was actually describing.
+  assert.match(src, /const SECTION_FRACTION = 0\.7/);
+  assert.match(src, /input\.swipe\(udid, from, to/);
+
+  // The last screenful is merged and filled, not discarded. Measuring movement
+  // after scrolling and breaking before reading reported one section and 30
+  // elements where it had just read 52.
+  const sweepFn = src.slice(src.indexOf('async function sweep('), src.indexOf('async function runStep('));
+  assert.match(sweepFn, /const here = await sectionHere/);
+  assert.ok(sweepFn.indexOf('const here = await sectionHere') < sweepFn.lastIndexOf('await scrollOne('),
+    'each section is read before it is scrolled past');
+  // Going to the top is bounded and stops on the same signal, which is what
+  // keeps a web page from being pulled to refresh.
+  assert.match(sweepFn, /step\.from === 'here'/);
+});
+
 test('round 7: a type never sends a selector, and scrollTo follows the offset', async () => {
   const actions = await import('../src/actions.js');
 

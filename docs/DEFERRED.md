@@ -201,6 +201,31 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
 
+### `sweep` lands, and `scrollTo` is no longer the answer for a form — 2026-09-11
+
+Built on the owner's algorithm, verified on a real HTML form in Safari, and it
+retires several of the findings above rather than filing new ones. Every field on
+that form filled **in one call**. Numbers, and the three wrong "where am I"
+signals it took to get there, are in `docs/BENCHMARKS.md`.
+
+Two open items are answered by it and should be read together with it: **item 60**
+(an off-screen match only helps when the element is in the tree — a sweep does
+not need it to be) and **F2/item 69** (a scroll's distance is
+non-deterministic — a sweep acts on whatever the viewport holds, so it does not
+care).
+
+71. **A sweep cannot choose from a picker.** `fill` types or pastes, so a select
+    needs a `tap` on the control and a `tap` on the option, in a following call
+    once the list has rendered — which is what the verification run did. A
+    `choose: {"Subject": "Support Inquiry"}` companion to `fill` would make a
+    form with dropdowns a single call instead of three. This is the obvious next
+    piece and it is small.
+
+72. **A sweep pays a full perception read per section**, which is most of its
+    ~27 s on a six-section page. `ax-first` should help here more than anywhere
+    else — it is exactly the case the cheaper sensor was built for — and the two
+    have never been measured together.
+
 ### From round 7 — the supervisor's first field round, and it went silent
 
 Five runs across two flows, with the order deliberately reversed between them so

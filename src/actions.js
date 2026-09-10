@@ -1572,6 +1572,251 @@ async function seek(deviceQuery, udid, step, ctx) {
   );
 }
 
+/**
+ * How far the screen actually moved, measured from the elements themselves.
+ *
+ * The missing sensor, and the owner named the need exactly: *"you have to find a
+ * way to detect where you currently are, so when you are already on top you
+ * don't scroll further, or the bottom."* Nothing on either platform reports a
+ * scroll offset, so it has to be inferred — and the two signals tried before
+ * this both failed on a real page.
+ *
+ * The **screen hash** changes forever on a page whose footer has live content,
+ * so "the hash stopped changing" never fired and a sweep thrashed at the bottom
+ * for forty seconds. **New labels** fail the other way: a gesture that reveals
+ * only a little adds nothing new and looks like an end, which stopped a sweep
+ * two sections above the form it was looking for.
+ *
+ * Element geometry answers it directly. Take the labels present both before and
+ * after, and compare their y. Unchanged means nothing moved — that is an end,
+ * whatever the hash or the label set says. A negative median delta means the
+ * content came up, so we travelled down, and by how much.
+ */
+export const SCROLL_STILL_PX = 6;
+
+export function scrollDelta(before, after) {
+  // Content only. Fixed chrome is the trap: a browser's bottom toolbar is five
+  // elements whose y never changes, and with few shared content rows they drag
+  // the median to zero — so a page that had plainly scrolled measured as
+  // motionless and a sweep declared the bottom after one section. Only things
+  // that can move are evidence that something moved.
+  const scrolls = (r) => {
+    const region = r?.region ?? 'content';
+    return region !== 'nav-bar' && region !== 'tab-bar' && region !== 'status-bar' && region !== 'keyboard';
+  };
+  const was = new Map();
+  for (const r of before ?? []) {
+    if (!scrolls(r)) continue;
+    const k = alnum(r.label);
+    if (k && Number.isFinite(r.y) && !was.has(k)) was.set(k, r.y);
+  }
+  const deltas = [];
+  for (const r of after ?? []) {
+    if (!scrolls(r)) continue;
+    const k = alnum(r.label);
+    if (!k || !Number.isFinite(r.y) || !was.has(k)) continue;
+    deltas.push(r.y - was.get(k));
+  }
+  if (!deltas.length) {
+    // Nothing in common. Either everything changed — a real move — or the read
+    // failed; either way this is not evidence of an end.
+    return { moved: null, px: null, shared: 0 };
+  }
+  deltas.sort((a, b) => a - b);
+  const median = deltas[deltas.length >> 1];
+  return {
+    moved: Math.abs(median) > SCROLL_STILL_PX,
+    px: Math.round(median),
+    shared: deltas.length,
+  };
+}
+
+/**
+ * Sweep a scrollable screen section by section, and fill what is there.
+ *
+ * The owner's algorithm: *"to scan a scrollable screen and fill, you need to
+ * detect min/max scroll and look at it section by section. Section 1: anything
+ * to fill? Do it. Not? Scroll to section 2."*
+ *
+ * That is the right shape for a reason `scrollTo` cannot fix. The tree publishes
+ * what is rendered, so a long form is only ever knowable in pieces — and one
+ * gesture travels a non-deterministic distance (four rows once, one row the
+ * next), so "jump to section 3" is not a thing that exists. Acting on whatever
+ * the current viewport holds is the only plan that survives that.
+ *
+ * **Both ends are detected, and by the right signal.** The first version keyed
+ * on the screen hash and ran its whole budget on a page whose footer has live
+ * content: the hash kept changing, so "stopped moving" never fired, and the
+ * operator watched it thrash at the bottom for forty seconds. A section that
+ * contributes **no new elements** is the end, whatever the hash says.
+ *
+ * **And it starts at the beginning**, because a sweep from an unknown position
+ * covers an unknown amount — the same forty seconds began with section 1 being
+ * the page footer. Going up is bounded and stops on the same no-new-elements
+ * signal, which is also what protects against pull-to-refresh: the top is
+ * reached and left alone rather than pulled past.
+ */
+export const SWEEP_SECTIONS = 10;
+
+const sweepKey = (r) => `${alnum(r.label)}\u0000${Math.round((r.x ?? 0) / 8)}`;
+
+async function sectionHere(deviceQuery, options) {
+  try {
+    const map = await view.screenMap(deviceQuery, { options, refresh: true });
+    return (map.rows ?? []).filter((r) => r.label);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Advance by a section, not by whatever a default swipe happens to do.
+ *
+ * Measured on a real page: `{"scroll":"down"}` moved **28, 42 and 58 points** on
+ * an 874-point screen — about five per cent of a viewport per gesture. Covering
+ * a page that way takes dozens of swipes, which is precisely what the operator
+ * was watching: *"I still see scroll thrashing, you scrolled too much."* Too
+ * many gestures, not too far each.
+ *
+ * A section is a viewport. `SECTION_FRACTION` leaves a band of overlap so
+ * nothing falls between two reads, which is the whole reason to sweep rather
+ * than to jump.
+ */
+const SECTION_FRACTION = 0.7;
+
+async function scrollOne(deviceQuery, udid, dir, ctx) {
+  const geo = await ctx.screen();
+  const h = geo?.pointHeight ?? 874;
+  const x = Math.round((geo?.pointWidth ?? 402) / 2);
+  const span = Math.round(h * SECTION_FRACTION);
+  const top = Math.round(h * 0.12);
+  const from = dir === 'up' ? { x, y: top } : { x, y: top + span };
+  const to = dir === 'up' ? { x, y: top + span } : { x, y: top };
+  try {
+    await input.swipe(udid, from, to, { durationMs: 260 });
+  } catch {
+    // A platform without a swipe still has a scroll.
+    await runStep(deviceQuery, udid, { action: 'scroll', value: dir }, ctx);
+  }
+  await api.waitFor(deviceQuery, {
+    mode: 'stable', stableMs: 200, timeoutMs: SCROLL_SETTLE_MS, options: ctx.options,
+  }).catch(() => null);
+}
+
+async function sweep(deviceQuery, udid, step, ctx) {
+  const limit = Math.max(1, Math.min(step.sections ?? SWEEP_SECTIONS, 20));
+  const options = ctx.options;
+  const fill = step.fill && typeof step.fill === 'object' ? { ...step.fill } : null;
+  const wanted = typeof step.sweep === 'string' && step.sweep !== 'all' ? step.sweep.trim() : null;
+
+  // To the beginning, unless told otherwise. Bounded, and it stops as soon as a
+  // screenful adds nothing — which is the top, and is where pull-to-refresh
+  // lives, so it is left alone rather than pulled past.
+  let upSteps = 0;
+  let upStalls = 0;
+  let atTop = step.from === 'here';
+  if (!atTop) {
+    let last = await sectionHere(deviceQuery, options);
+    for (let i = 0; i < limit; i += 1) {
+      await scrollOne(deviceQuery, udid, 'up', ctx);
+      const now = await sectionHere(deviceQuery, options);
+      upSteps += 1;
+      // Measured, not inferred from labels: an `up` that moves nothing means we
+      // are at the top, and stopping there is also what keeps a web page from
+      // being pulled to refresh.
+      if (scrollDelta(last, now).moved === false) {
+        upStalls += 1;
+        if (upStalls >= 2) { atTop = true; break; }
+      } else {
+        upStalls = 0;
+      }
+      last = now;
+    }
+  }
+
+  const seen = new Map();
+  const filled = [];
+  const sections = [];
+  const travelled = [];
+  let atBottom = false;
+  let section = 0;
+
+  // One read per section, and the bottom is detected at the *start* of the next
+  // iteration rather than at the end of this one. That ordering is what makes
+  // every screenful — including the last — get merged and filled: an earlier
+  // version measured movement after scrolling and broke before reading, which
+  // silently discarded the final section.
+  let prev = null;
+  let stalls = 0;
+  for (; section < limit; section += 1) {
+    const here = await sectionHere(deviceQuery, options);
+    if (prev) {
+      const delta = scrollDelta(prev, here);
+      // Two consecutive stalls, not one.
+      //
+      // A single stall reading is not the bottom, and acting on one is why a
+      // sweep kept jumping from the top straight to the end and never reading
+      // the form in between: any sticky element inside the page — a heading
+      // that stays put, a floating widget — makes one median read as zero. The
+      // operator's diagnosis was exactly this: *"I feel like you miss the form,
+      // you either scroll to the end or to the beginning."*
+      //
+      // Coverage beats stopping early. A wasted section costs about a second; a
+      // missed section costs the whole point of sweeping.
+      if (delta.moved === false) {
+        stalls += 1;
+        if (stalls >= 2) { atBottom = true; break; }
+      } else {
+        stalls = 0;
+      }
+      if (delta.px != null) travelled.push(delta.px);
+    }
+
+    const fresh = here.filter((r) => !seen.has(sweepKey(r)));
+    for (const r of here) if (!seen.has(sweepKey(r))) seen.set(sweepKey(r), { ...r, section: section + 1 });
+    sections.push({ section: section + 1, elements: here.length, fresh: fresh.length });
+
+    // Anything to fill in this section? Do it here, while it is on screen —
+    // which is the whole reason this beats finding a field and then trying to
+    // scroll back to it.
+    if (fill) {
+      for (const [label, text] of Object.entries(fill)) {
+        if (!here.some((r) => alnum(r.label).includes(alnum(label)))) continue;
+        try {
+          await runStep(deviceQuery, udid, {
+            action: step.paste === false ? 'type' : 'paste', into: label, text: String(text),
+          }, ctx);
+          filled.push(`${JSON.stringify(label)} in section ${section + 1}`);
+        } catch (err) {
+          filled.push(`${JSON.stringify(label)} FAILED in section ${section + 1}: ${err.message.split('\n')[0].slice(0, 90)}`);
+        }
+        delete fill[label];
+      }
+    }
+
+    if (wanted && [...seen.values()].some((r) => alnum(r.label).includes(alnum(wanted)))) break;
+    if (fill && !Object.keys(fill).length) break;
+    prev = here;
+    await scrollOne(deviceQuery, udid, 'down', ctx);
+  }
+
+  const all = [...seen.values()];
+  ctx.sweep = all;
+  const hits = wanted ? all.filter((r) => alnum(r.label).includes(alnum(wanted))) : [];
+  const listed = (wanted ? hits : all).slice(0, 30)
+    .map((r) => `[${r.section}] ${JSON.stringify(String(r.label).slice(0, 36))} @${r.x},${r.y}`);
+  const unfilled = fill ? Object.keys(fill) : [];
+  return `swept ${sections.length} section(s)`
+    + `${upSteps ? ` after ${upSteps} up to reach the ${atTop ? 'top' : 'start'}` : ''}`
+    + `${atBottom ? ', reached the bottom' : ', budget spent before the bottom'}`
+    + `${travelled.length ? ` (each gesture moved ${travelled.map((t) => Math.abs(t)).join(', ')}pt)` : ''};`
+    + ` ${all.length} distinct element(s)`
+    + (filled.length ? `; filled ${filled.join(', ')}` : '')
+    + (unfilled.length ? `; NOT FOUND anywhere: ${unfilled.map((u) => JSON.stringify(u)).join(', ')}` : '')
+    + (wanted ? `; ${hits.length} match ${JSON.stringify(wanted)}` : '')
+    + (listed.length ? `: ${listed.join(', ')}` : '');
+}
+
 async function runStep(deviceQuery, udid, step, ctx) {
   switch (step.action) {
     case 'tap': {
@@ -1706,6 +1951,8 @@ async function runStep(deviceQuery, udid, step, ctx) {
       const r = await intent.chooseAny(udid, { prefer: step.value ?? step.prefer, geo });
       return `chose "${r.label}" of ${r.optionCount} options`;
     }
+    case 'sweep':
+      return sweep(deviceQuery, udid, step, ctx);
     case 'seek':
       return seek(deviceQuery, udid, step, ctx);
     case 'settle': {

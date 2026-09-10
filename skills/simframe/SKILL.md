@@ -81,6 +81,24 @@ target: it leaves you on the screen where the target resolves, and returns to
 where it started if it fails. **Do not point it into a flow whose progress you
 cannot afford to lose.**
 
+**`sweep` — read and fill a long screen.** A viewport is the only honest unit:
+the tree publishes what is rendered, so a form taller than the screen is knowable
+only in pieces.
+
+```json
+{"sweep": "all", "fill": {"Last Name": "Asadi", "Email": "a@b.c", "Comment": "…"}}
+```
+
+It goes to the top, then reads section by section to the bottom, filling each
+field **while it is on screen** — which beats finding a field and then trying to
+scroll back to it, because one gesture travels a non-deterministic distance.
+`{"from": "here"}` sweeps down from where you are. `{"sweep": "<text>"}` stops as
+soon as it finds that text. It reports which section each element was in, what it
+filled, and what it never found at any scroll position.
+
+Prefer it to `scrollTo` on any form or long list. `scrollTo` hunts one label and
+cannot work when the label is not yet rendered; a sweep covers the screen.
+
 **The local supervisor**, when one is enabled, decides whether a failed step
 should `wait`, `retry` or `stop` — before the failure reaches you. It knows
 nothing about the app and you do, so brief it from the plan:

@@ -817,6 +817,38 @@ worked here before: tap "NEW REQUEST" (7x)</code></pre>
   </section>
 
   <section>
+    <p class="sec-label">Where am I, and why nothing could answer it</p>
+    <h2>Four signals for one question, three of them wrong</h2>
+    <div class="track">
+      <p class="lede">A form taller than the screen is only knowable a screenful at a time. The accessibility tree publishes what is rendered, so the fields below the fold do not exist yet &mdash; there is nothing to search for and nothing to scroll to.</p>
+      <p>Which makes the obvious tool useless. &ldquo;Scroll until you find X&rdquo; hunts one label, and X is not there to be found; it gets discovered by being scrolled to. So the unit has to be the viewport: read this screenful, act on what is in it, move by a screenful, repeat. That framing came from the owner, watching it fail: <em>&ldquo;detect min and max scroll and look at it section by section &mdash; section one, anything to fill? Do it. Not? Scroll to section two.&rdquo;</em></p>
+      <p>Which turns the whole problem into one question: <b>where am I in the scroll range?</b> And neither iOS nor Android will tell you. There is no scroll offset in the accessibility tree, no content height, no scrollbar to read. It has to be inferred, and I inferred it wrongly three times.</p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-label">Four answers to &ldquo;did that gesture move anything?&rdquo;</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Signal</th><th>How it failed, on a real page</th></tr></thead>
+          <tbody>
+            <tr><td>the screen fingerprint stopped changing</td><td>a footer with live content changes it forever &mdash; it thrashed at the bottom for <b>40 seconds</b></td></tr>
+            <tr><td>a screenful added no new labels</td><td>a gesture revealing a little looks like an end &mdash; it stopped <b>two sections above</b> the form</td></tr>
+            <tr><td>element positions, all elements</td><td>a browser toolbar is five rows whose <em>y</em> never moves, dragging the median to zero &mdash; it declared the bottom after <b>one section</b></td></tr>
+            <tr><td class="win">element positions, content only, two consecutive stalls</td><td class="win">works</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="track">
+      <p>The working answer is embarrassingly concrete: take the labels present both before and after a gesture, throw away anything in a fixed region, and compare their vertical positions. An unchanged median means nothing moved. That is a scroll-position sensor built entirely out of things already being read for other reasons.</p>
+      <p>Two of those details are load bearing and neither was obvious. <b>Content only</b>, because fixed chrome is a majority of the shared set on a short page and it never moves &mdash; averaging it in says &ldquo;stationary&rdquo; about a page that plainly scrolled. And <b>two consecutive stalls</b>, not one, because any sticky element inside a page makes a single median read as zero. Acting on one stall produced exactly the symptom the owner described from across the room: <em>&ldquo;I feel like you miss the form &mdash; you either scroll to the end or to the beginning.&rdquo;</em></p>
+      <p>There was a fourth mistake underneath all three, and it is the one I would most want a reader to take. The default scroll gesture moved <b>28, 42 and 58 points</b> on an 874-point screen &mdash; about five per cent of a viewport. Every version of this was making dozens of tiny gestures and calling it a search, which is what <em>&ldquo;you scrolled too much&rdquo;</em> was actually describing: not too far, too many. A section is a viewport, and once a gesture moves a viewport the loop is four steps long instead of thirty.</p>
+      <p>The result fills a form taller than the screen in one call. What I find worth recording is not the feature but the shape of getting there: every wrong signal was a reasonable abstraction &mdash; a hash, a label set, a median &mdash; and each one failed on a specific, ordinary property of a real web page. None of them failed in a test.</p>
+    </div>
+  </section>
+
+  <section>
     <p class="sec-label">What the contract said when it was first measured</p>
     <h2>Sixteen of nineteen were one bug</h2>
     <div class="track">
