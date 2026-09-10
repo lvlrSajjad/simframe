@@ -354,6 +354,33 @@ is permitted for step selection only, never for planning a goal and never for
 overriding a verdict.* Recorded here rather than edited in, because a fixed
 decision should not be quietly loosened by the phase that wants it loosened.
 
+**Blockers, checked 2026-09-10.** Two are real, one is the user's, one turned
+out not to be a blocker at all.
+
+- **Not a blocker: the candidate exists here.** macOS 26.6.2 and
+  `FoundationModels.framework` is in the macOS SDK (26.5). No download, no MLX
+  fallback needed to *try* it.
+- **Blocker, and it was the user's to clear: the CLAUDE.md amendment.** Fixed
+  decisions forbid model calls inside the daemon. See above.
+- **Blocker, now cleared: the ground truth was not being logged.** The go/no-go
+  needs (goal, element list, the action Claude eventually took). The element
+  list was there as `candidate_elements`, and the eventual action is recoverable
+  from the graph — the tap that finally worked on that screen becomes a verified
+  edge carrying its own step. The **goal** was missing, sitting inside
+  `detail`'s prose. It is a field now: `intent`. Without it there was no test to
+  run, only a sentence to regex.
+- **Blocker, and only time clears it: the existing data is contaminated.** The
+  bench device's log holds ~121 records of which 55 are `ambiguous_intent` — and
+  `ambiguous_intent` is the reason a *ranking* bug produced all day on
+  2026-09-10, fixed the same day. Those 121 also predate session ids, so they
+  cannot be attributed to one agent. **The 200 must be collected after the
+  ranking fix, from real peer sessions, filtered to one session id.**
+
+**Ordering.** "After Phase 16" is a default, not a dependency. The go/no-go is
+cheap and reads a log, so it can and should be run as soon as the 200 exist — a
+*no-go* changes the plan for Phases 12–16, and finding that out early is worth
+more than tidiness.
+
 **Go/no-go, to be run before any build, using Phase 10's log:**
 
 1. Export 200 real `ambiguous_intent` and `no_plan` escalations, each with the

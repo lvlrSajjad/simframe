@@ -119,7 +119,7 @@ export const readFlows = (udid, opts) => readJsonl(metricPaths(udid).flows, opts
  * matching error strings at the boundary — a regexed message is a reason that
  * silently becomes "unknown" the day somebody rewords it.
  */
-export function tag(err, reason, { candidates = [], tried = [], ambiguous = false } = {}) {
+export function tag(err, reason, { candidates = [], tried = [], ambiguous = false, intent = null } = {}) {
   if (!REASONS.includes(reason)) throw new Error(`not an escalation reason: ${reason}`);
   // `ambiguous` is narrower than the reason, and that is the point. Two very
   // different failures both tag `ambiguous_intent`: the target is on screen
@@ -127,7 +127,19 @@ export function tag(err, reason, { candidates = [], tried = [], ambiguous = fals
   // thought we knew. Only the first is resolvable by *choosing*, and only the
   // first tells a waiting caller that waiting is pointless — the thing it is
   // waiting for has already arrived.
-  err.escalation = { reason, candidates, tried, ambiguous };
+  // `intent` is the goal in the caller's own words, recorded as a field rather
+  // than left in the prose of `detail`.
+  //
+  // Phase 17's go/no-go asks whether an on-device model would pick the element
+  // Claude picked, given the goal and the element list. The element list is
+  // here as `candidates` and the eventual choice is recoverable from the
+  // graph — the tap that finally worked on this screen becomes a verified edge
+  // carrying its own step. The goal was the missing third, and it was sitting
+  // inside a sentence: `"X" matches 3 things on this screen — say which…`.
+  // Regexing it back out at export time is the exact habit this file exists to
+  // avoid, and it would silently return nothing the day that sentence is
+  // reworded.
+  err.escalation = { reason, candidates, tried, ambiguous, intent };
   return err;
 }
 
@@ -271,6 +283,7 @@ export const clientName = () => CLIENT;
 export function recordEscalation(udid, {
   flowId = null,
   flowName = null,
+  intent = null,
   stepIndex = null,
   fingerprint = null,
   reason,
@@ -292,6 +305,9 @@ export function recordEscalation(udid, {
     client: CLIENT,
     flow_id: flowId,
     flow_name: flowName,
+    // What was asked for, in the caller's words. Ground truth for Phase 17's
+    // go/no-go, and on its own it answers "what kind of decision is costing us".
+    intent: intent ? String(intent).slice(0, 120) : null,
     step_index: stepIndex,
     screen_fingerprint: fingerprint,
     reason,

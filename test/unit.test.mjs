@@ -2292,10 +2292,20 @@ test('waiting for something already on screen stops immediately', async () => {
   // means waiting is pointless. `ambiguous` carries that difference from the
   // throw site, rather than a caller reading the message — which is the rule
   // the escalation log is built on.
-  const present = metrics.tag(new Error('matches 4 things'), 'ambiguous_intent', { ambiguous: true });
+  const present = metrics.tag(new Error('matches 4 things'), 'ambiguous_intent', { ambiguous: true, intent: 'Assets' });
   const absent = metrics.tag(new Error('is not on this screen'), 'ambiguous_intent', {});
   assert.equal(metrics.escalationOf(present).ambiguous, true);
   assert.equal(metrics.escalationOf(absent).ambiguous, false);
+
+  // The goal, as a field rather than inside `detail`'s prose. Phase 17's
+  // go/no-go needs (goal, element list, the action eventually taken); the list
+  // is `candidates`, the eventual action is recoverable from the graph edge that
+  // finally worked on that screen, and the goal was the missing third — sitting
+  // inside the sentence `"X" matches 3 things on this screen`. Regexing it back
+  // out at export time is the habit this module exists to avoid, and it returns
+  // nothing the day that sentence is reworded.
+  assert.equal(metrics.escalationOf(present).intent, 'Assets');
+  assert.equal(metrics.escalationOf(absent).intent, null);
 
   // And both wait loops act on it. Asserted at the source because the
   // behaviour is a *non*-event — thirty seconds that no longer pass.

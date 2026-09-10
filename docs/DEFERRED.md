@@ -41,6 +41,12 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > be built before Phase 16 and before its go/no-go passes — and it needs a
 > CLAUDE.md fixed-decision amendment that is the user's to make, not mine.
 >
+> **How we work now (2026-09-10):** a phase ends with tests green and the work
+> pushed, then a **proposed peer test** — not a release. A CI cycle plus a
+> release costs ~30 minutes of waiting, and every finding that changed the plan
+> so far came from a peer driving a real third-party app rather than from the
+> bench suite. Wait for an explicit instruction before `npm version`.
+>
 > After that, the CI speed work, which the user asked to confirm before it
 > lands: `concurrency: cancel-in-progress`; move the fingerprint distribution
 > check into the offline harness (−4.8 min and it stops flaking); take `bench`

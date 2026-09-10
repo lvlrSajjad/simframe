@@ -1167,7 +1167,7 @@ export async function locate(
         // ambiguous_intent when the screen was one we thought we knew. A
         // waiting caller needs the difference: more time cannot make a thing
         // unique, and it can make an absent thing arrive.
-        { candidates: outcome.alternatives, ambiguous: true },
+        { candidates: outcome.alternatives, ambiguous: true, intent: query },
       );
     }
     if (outcome.status === 'ok') {
@@ -1190,7 +1190,7 @@ export async function locate(
     throw metrics.tag(
       new Error(`"${query}" is not on this screen. Visible: ${sample || '(nothing readable)'}`),
       from === 'memory' ? 'ambiguous_intent' : 'unknown_screen',
-      { candidates: visible.slice(0, 8) },
+      { candidates: visible.slice(0, 8), intent: query },
     );
   }
 
@@ -1202,7 +1202,7 @@ export async function locate(
     throw metrics.tag(
       new Error(`"${query}" is not on this screen. Visible: ${sample || '(nothing readable)'}`),
       from === 'memory' ? 'ambiguous_intent' : 'unknown_screen',
-      { candidates: visible.slice(0, 8) },
+      { candidates: visible.slice(0, 8), intent: query },
     );
   }
   return { device, state: current, entry, target, from, distance, settled, screens: screenmap.stats(udid).screens };

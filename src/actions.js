@@ -505,6 +505,9 @@ export async function runScript(
         reason: why.reason,
         candidates: why.candidates,
         tried: why.tried,
+        // Carried from the throw site where it exists, and otherwise the step's
+        // own target — which is what was asked for either way.
+        intent: why.intent ?? (step.value ?? step.target ?? step.label ?? step.into ?? null),
         outcome: 'failed',
         wallMs: Date.now() - stepStart,
         detail: err.message,
