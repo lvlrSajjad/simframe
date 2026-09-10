@@ -52,6 +52,12 @@ public enum PrivateAPIError: Error, CustomStringConvertible {
     case deviceNotFound(String)
     case noDisplayPort
     case surfaceUnavailable
+    /// The display had no surface *right now*, after waiting. Distinct from
+    /// `surfaceUnavailable`, which is the wedge: that one never heals without a
+    /// device restart, and this one is usually gone by the next frame. One
+    /// sentence for both is what made two sessions in a row diagnose a
+    /// transient miss as the wedge and advise a re-run.
+    case surfaceMissing(afterMs: Int)
     case hidUnavailable(String)
     case simctlFailed(String)
 
@@ -62,6 +68,10 @@ public enum PrivateAPIError: Error, CustomStringConvertible {
         case .deviceNotFound(let u): return "no simulator matching \(u)"
         case .noDisplayPort: return "the device exposes no active display port"
         case .surfaceUnavailable: return "the display surface could not be read"
+        case .surfaceMissing(let ms):
+            return "no frame was available from the display for \(ms)ms"
+                + " — this is usually transient; a display that has stopped rendering says"
+                + " \"the display surface could not be read\" instead"
         case .hidUnavailable(let d): return "input is unavailable: \(d)"
         case .simctlFailed(let d): return "simctl \(d)"
         }

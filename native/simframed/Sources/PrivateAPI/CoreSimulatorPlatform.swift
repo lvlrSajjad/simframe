@@ -307,11 +307,37 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
         return raw is IOSurface
     }
 
+    /// How long an on-demand surface read waits for a surface to exist.
+    ///
+    /// The capture *loop* has re-resolve and rebind around this same call. This
+    /// path had nothing: it asked once and threw. On a loaded hosted runner
+    /// that cost a CI job — the display renders intermittently, one read landed
+    /// in a gap, text recognition reported "the display surface could not be
+    /// read", and the screen map came back empty. Four checks failed on a
+    /// device that was healthy before and after, and whose capture loop never
+    /// logged a single failure in the whole run.
+    static let surfaceRetryBudgetMs = 600
+    static let surfaceRetryStepMs = 50
+
     public func withFrame<T>(_ body: (RawFrame) throws -> T) throws -> T {
         guard let display else { throw PrivateAPIError.noDisplayPort }
-        guard let raw = display.perform(NSSelectorFromString("framebufferSurface"))?.takeUnretainedValue(),
-              let surface = raw as? IOSurface else {
-            throw PrivateAPIError.surfaceUnavailable
+        var raw = display.perform(NSSelectorFromString("framebufferSurface"))?.takeUnretainedValue()
+        // Wait briefly rather than failing on the first miss. A display with
+        // nothing to draw can be between surfaces for a few tens of
+        // milliseconds, which is not the same condition as a display that has
+        // stopped rendering — and until now both said the same sentence.
+        var waitedMs = 0
+        while !(raw is IOSurface) && waitedMs < Self.surfaceRetryBudgetMs {
+            usleep(UInt32(Self.surfaceRetryStepMs) * 1000)
+            waitedMs += Self.surfaceRetryStepMs
+            raw = display.perform(NSSelectorFromString("framebufferSurface"))?.takeUnretainedValue()
+        }
+        guard let surface = raw as? IOSurface else {
+            // Two different conditions, and giving them one sentence bought two
+            // wrong diagnoses in a row: a transient miss reads exactly like the
+            // permanent wedge, so "it is the documented wedge, re-run it" was
+            // the advice both times. It said so here for the transient case.
+            throw PrivateAPIError.surfaceMissing(afterMs: waitedMs)
         }
         surface.lock(options: .readOnly, seed: nil)
         defer { surface.unlock(options: .readOnly, seed: nil) }
