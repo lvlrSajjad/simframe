@@ -263,11 +263,12 @@ Steps — every place a control is named accepts a selector:
 | Act | Check |
 | --- | --- |
 | `{"tap": "Save"}` · add `"index"` if a label is ambiguous | `{"assert": {"value": "Saved", "is": "visible"}}` |
-| `{"type": {"into": "Name", "text": "..."}}` | `is`: `visible` · `gone` · `enabled` · `disabled` · `value` (with `equals`) |
+| `{"type": {"into": "Name", "text": "..."}}` — drop `into` to type into whatever already has focus | `is`: `visible` · `gone` · `enabled` · `disabled` · `value` (with `equals`) |
 | `{"paste": {"into": "Notes", "text": "long text"}}` | `{"waitFor": {"value": "Saved", "timeoutMs": 5000}}` |
 | `{"scroll": "down"}` · `{"scrollTo": "Delete account"}` | `{"settle": {"stableMs": 600}}` |
 | `{"swipe": {"from": [x,y], "to": [x,y]}}` | `{"pause": 300}` |
-| `{"button": "HOME"}` | |
+| `{"button": "HOME"}` — hardware buttons | |
+| `{"key": "return"}` — the **keyboard** return key, which is how a mobile search field submits. Also `escape`, `tab`, `space`, `backspace`, arrows | |
 | `{"launch": {"value": "com.example.app", "relaunch": true, "args": ["-uiTest","1"]}}` | |
 | `{"openUrl": "myapp://path"}` | |
 | `{"permission": {"value": "photos", "grant": "grant", "bundleId": "com.example.app"}}` | |
@@ -276,12 +277,40 @@ Steps — every place a control is named accepts a selector:
 
 | | |
 | --- | --- |
-| `#3` | the number `simframe ui` gave it. Cheapest, and unambiguous. |
-| `"Save"` · `the Assets tab` · `back` | resolved by intent — verbs, typos, synonyms, icon-only controls by their common name |
+| `"Save"` · `the Assets tab` · `back` | **start here.** Resolved by intent — verbs, typos, synonyms, icon-only controls by their common name |
+| `#3` | the number `simframe ui` gave it. Cheap and exact, but only within the round trip that numbered it |
 | `@120,400` | raw point coordinates. Last resort; it cannot tell you it missed. |
 
+**Prefer a label to a number**, and this order is a correction. Four peer rounds
+in a row reported the same thing: intent resolution worked every time, including
+on labels a string matcher should not have managed, while refs renumbered
+constantly and were safe only inside a single round trip. The table used to lead
+with `#3` and call it "cheapest and unambiguous", which sent every one of them
+down the more brittle path first.
+
 A ref is valid only while that screen is showing. Use one on a different screen
-and it refuses rather than tapping whatever now sits at those coordinates.
+and it refuses rather than tapping whatever now sits at those coordinates — and
+the refusal names the label the number was given to, so re-issuing it by label
+costs nothing. A refusal that says the screen *moved* rather than *changed* is
+reporting pixel drift, not a different screen; it says which.
+
+## Lines that mean the tool is unsure, and what to do about each
+
+These exist because three peer rounds in one day all reported the same class of
+bug: a component answering confidently when it could not know. Each line below is
+a place that now says so instead. None of them is decoration — if you see one,
+the next call should change.
+
+| line | what it means |
+| --- | --- |
+| `[unconfirmed — nothing on this screen reads back the field's contents]` | the text was sent and **nothing verified it landed**. Common on web views, where the accessibility tree carries no field contents. Re-read, or `assert` the value |
+| `a value simframe wrote here is gone: …` | a field simframe filled is on screen and its contents are not. Something cleared it — a reload, a pull-to-refresh, a navigation. Re-fill before continuing |
+| `N element(s) on this screen overlap and disagree about what is there` | a sheet or overlay is probably covering the screen behind it, and some elements belong to the layer underneath |
+| `WARNING: this image is Ns older than the screen state` | the picture is very likely not what is on the device. Use `sim_ui`, which is read live |
+| `#N cannot be trusted here — … layout distance D, tolerance T` | pixel drift, **not** a different screen. The identity may be unchanged; re-issue by label |
+| `#N cannot be trusted here — … this is a different screen` | the screen really did change. Read it again |
+| `autoSettle was off, so the map below was read without waiting` | the map may describe the screen *before* the last action landed |
+| `"iPhone 17 Pro" names more than one booted device` | a name cannot identify which device answered. Pass `device` with a UDID |
 
 ## Every step is verified, and the verdict means something
 

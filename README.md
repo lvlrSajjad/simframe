@@ -359,9 +359,14 @@ Three ways to name a control, anywhere one is named:
 
 | | |
 | --- | --- |
-| `#3` | the number the map gave it. Cheapest, unambiguous. |
-| `"Save"` · `the Assets tab` · `back` | resolved by intent — verbs, typos, synonyms, icon-only controls by their common name |
+| `"Save"` · `the Assets tab` · `back` | **start here** — resolved by intent: verbs, typos, synonyms, icon-only controls by their common name |
+| `#3` | the number the map gave it. Cheap and exact, but only within the round trip that numbered it |
 | `@120,400` | raw point coordinates. Last resort: it cannot tell you it missed. |
+
+The order is deliberate and it used to be the other way round. Four peer rounds
+reported that intent resolution worked every time while refs renumbered
+underneath them, so a table that led with `#3` and called it "unambiguous" was
+recommending the more brittle of the two.
 
 ## Baselines: the thing to understand
 

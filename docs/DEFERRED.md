@@ -209,6 +209,100 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
 
+### From a second peer on the same RN app — three confidently-wrong headers, 2026-09-11
+
+Their own framing is the useful part: *"the three bugs above are all in the
+'confidently wrong' family rather than the 'obviously broken' family, which is
+the dangerous kind for an agent-facing tool."* All three are fixed.
+
+82. **A look could serve an hours-old image under a fresh header.** Reported as
+   `sim_look` returning another device's screen: the header read `frame #714 ·
+   84ms old · still for 17173ms` above an image whose status-bar clock said 6:11
+   when the real time was 11:10. **Device resolution was not the fault** —
+   measured both booted devices, each returns its own frame and hash. The fault
+   is that `state.json` and the image are **two separate writes**: state is
+   written when a frame is recorded, the PNG separately, so a freshly started
+   daemon publishes fresh state while `latest.png` is still the previous
+   session's — which is exactly when a session's first look lands. Their own
+   evidence gives it away: `sim_ui` was right in the same session because the
+   accessibility tree is read **live and in-process**, so only the image comes
+   from a file and only the image can be hours stale under a confident header.
+   The reported age is now the larger of the state's age and the file's mtime
+   age, which cannot overstate freshness — it can overstate staleness by however
+   far apart the two writes land, measured at **6ms** on a healthy daemon.
+
+83. **Two booted devices can share a name**, and do on this machine — two called
+   "iPhone 17 Pro". A header naming only the model cannot say which answered.
+   `sim_devices` now warns on the collision and headers carry a UDID prefix
+   while it holds. Their suggestion, and `xcrun simctl list devices booted`
+   makes it trivial, as they said.
+
+84. **The stale-ref message printed 8 characters of a 72-character hash.**
+   Reported three times as `#4 was numbered on a different screen (03003714 →
+   03003714)` — asserting the screen changed while showing that it had not, so
+   they could not tell a real move from a false positive. Verified on the device:
+   `layoutHash` is **72 chars**, and the refs table's own prefix at the time of
+   the fix was `c3cc409c`, one of the three pairs they quoted. A perceptual
+   hash's leading characters encode coarse structure, which is *precisely why*
+   this comparison is a distance against a tolerance rather than an equality, so
+   prefixes coincide routinely. The two refusals had been wearing one sentence
+   and now have their own: identity names the hashes it compared, drift reports
+   the layout distance and tolerance and states outright that the identity may be
+   unchanged. Both say how long ago the refs were issued, asked for by name.
+
+85. **An alias was pairing two z-layers.** With a sheet open over a dimmed page,
+   `#15 text 167,316 Area (Optional) ~ Exterior Building` reads as though the
+   field contains that value; they are unrelated things at one coordinate on
+   different layers, and the reporter fell back to a screenshot to count five
+   radio options — the case the text map exists to remove. A labelled ax element
+   now only takes an alias related to its own label; an unlabelled one still
+   takes the text outright, because that is how an icon-only control gets a name
+   and it cannot contradict a label it does not have. A rejected pairing becomes
+   its own element and the disagreement is reported as a probable overlay.
+
+**Open from this round.**
+
+86. **`memory disagrees with this screen` fired on almost every call and became
+   noise** — roughly ten consecutive appearances on screens that were fine.
+   Their diagnosis is almost certainly right: this app's screens do not hash
+   stably because the maps carry live values (`45 Records`, `1634 Records`,
+   `Sep 10, 2026`) and async rows. Two fixes, and the first is the real one:
+   exclude numeric and date-shaped text from the fingerprint (a
+   `TOKEN_RULES_VERSION` bump, so stored graphs and maps are discarded), and
+   suppress the warning after it has been overridden N times in a session.
+   *"A warning that's usually wrong trains the reader to skip the line it's
+   printed on"* — which is the same lesson as item 75, from a different reporter
+   on the same day.
+
+87. **A tap that scrolls instead of activating is reported as success.** Their
+   first tap hit a list card at `y=38`, partly under the nav bar; the list
+   scrolled and nothing was selected, reported as `ok … [a small change, in one
+   region only]`. The ingredients to be suspicious were all present — an element
+   at the top edge under a known nav bar, and "a small change in one region" is
+   what a scroll looks like rather than a navigation. Flag low-confidence taps on
+   partially-occluded elements.
+
+88. **`#N` refs are less useful than the docs claim.** The description calls
+   `#3` "cheapest and unambiguous"; in practice refs renumbered constantly and
+   were only safe within one round trip, while intent resolution worked every
+   time — `"the Assets tab"`, `"Area (All)"`, `"CREATE A SERVICE REQUEST"`,
+   including a `d=0` memory hit. **This is the fourth round running where labels
+   beat refs.** A documentation change, not a code one: lead with intent
+   resolution.
+
+**Praised, and worth protecting.** *"Errors that diagnose instead of just
+failing"* — they singled out `waited 10000ms for Gaslamp: "Gaslamp" is in the
+tree but not in view — it is at y=2975 on a 874pt screen. Scroll to it
+(sim_scroll_to) rather than waiting; waiting cannot bring it into view.* as
+**the best error message they have seen from a tool of this kind**, because it
+gives the state, why the approach cannot work, and the right tool. Outcome
+memory (`ok: matches the outcome seen 3x before`) was called the real
+differentiator over screenshot-driving. The half-loaded-list warning, the
+false-negative guard on filters, and cost framing in the descriptions were all
+named as behaviour-changing. Every one of those is an instance of the same
+principle and it is worth stating once: **this tool's value is in what it says
+about its own certainty, not in what it can do.**
+
 ### From a peer driving a React Native app — 2026-09-11
 
 A single app, a single session, heavy async list loading — which is the profile

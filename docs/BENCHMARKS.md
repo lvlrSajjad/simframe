@@ -3473,3 +3473,106 @@ wedge on a loaded hosted runner — the same wedge measured in this file twice
 before — and it is why the standing note says to re-run `integration` once before
 believing it. `test` passed on Node 18, 20 and 22; `bench` passed. No release was
 cut, per the standing rule that a red CI holds the publish.
+
+## Two forms, two arms — what the supervisor is and is not worth
+
+2026-09-11. The first side-by-side of the supervisor on a task both arms
+completed: fill every field of two web forms in mobile Safari, one arm with
+`supervisor=apple` **and** a `supervise` briefing, one arm with neither. Same
+device, same forms, same model. Neither arm submitted.
+
+| | supervisor + briefing | neither |
+|---|---|---|
+| formsmarts contact form | **5** calls | 8 calls |
+| httpbin pizza order | **20** calls | 37 calls |
+| total | **25**, 28% spent recovering | 45, **58%** recovering |
+| screenshots | 4 (2 wasted on a stale server) | 6 |
+| fields filled | 7/7 and 5/5 | 7/7 and 5/5 |
+
+**Both arms finished everything.** That is the first thing to say, because the
+call difference invites the conclusion that the unsupervised arm fails, and it
+did not: it completed both forms with every field filled.
+
+**And the 25-vs-45 is not attributable to the supervisor.** Its three words
+fired three times — one clearly right (12s of an unchanged page after a tap that
+never navigated), one defensible (a control that needed the page zoomed out,
+which is not in its vocabulary), one wrong (waiting for content that a scroll
+had gone past). Three interventions cannot account for twenty calls.
+
+What can is the **briefing**. Nine steps carrying an `expect` note passed without
+an intervention that would each have looked like a failure — a time picker
+refusing typed text, a radio repainting twelve pixels, an option list collapsing.
+The unsupervised arm documents the other side of exactly that: three
+`no-visible-change` verdicts contradicted by the element list printed beneath
+them, and their own summary of the cost — *"I was instructed to spend a call
+disproving a claim the same response had already disproved."*
+
+So this measures the briefing and the supervisor together and cannot separate
+them. **The arm that would separate them is briefing without a supervisor**, and
+it has not been run. If it lands near 25, the briefing is the whole result and
+the local model is optional — which would matter, because a briefing costs
+nothing and needs no model.
+
+The supervisor's own cost is settled and small: a probe answered in **640ms**,
+against 488–533ms on the bench, and it is only consulted on a step that has
+already failed. It also truncates a doomed batch rather than running the rest,
+which is a real saving the call count does not separate out either.
+
+**Still unmeasured on a real app by a peer.** `docs/DEFERRED.md` records that
+every previous local-tier idea passed a bench and died on a real app; this one
+has passed a bench and one arm driven by its own author. That is the reason it
+ships off by default in 0.11.0.
+
+## What three peer rounds in one day measured, other than themselves
+
+2026-09-11. Numbers established while fixing the rounds, each of which settled a
+question that reasoning had got wrong.
+
+| measurement | value | what it settled |
+|---|---|---|
+| OCR readback: label tap point → value centre | **133pt** on a pinch-zoomed page | why a 40pt readback radius never fired; it is 220pt now |
+| `state.json` vs `latest.png` write skew, healthy daemon | **6ms** | the tolerance for calling an image stale; the reported case was hours |
+| `layoutHash` length vs what the error printed | **72 chars vs 8** | why `(03003714 → 03003714)` looked identical and was not |
+| full frames on disk while `state.fullFile` named a missing one | **8 frames at 1206×2622** | why `detail:"high"` was interpolating a 322×700 source |
+| count header promised vs correct rendered rows | **1232 vs 43** | that the header is a total, so the heuristic is capped at a viewport |
+| `sweep` gestures to reach the top, before → after | **4 → 2** | the pull-to-refresh confirm gesture is gone |
+| `sweep` gesture travel asked vs measured | 612pt asked; **28, 482, 0pt** and **529pt** across runs | an open defect: sections do not overlap, and a field is skipped |
+| daemon capture failures in the CI job blamed on the wedge | **0** | it was never the wedge; one un-retried on-demand read |
+
+The last row is the one worth keeping. A red `integration` job was diagnosed
+twice — once by a previous session, once by me — as the documented capture wedge,
+on the strength of the error string matching. The job's own log contains zero
+`capture failed` lines, zero port re-resolves, zero rebinds, and a device alive
+at teardown at frame #248. The wedge is defined by repeated capture failure and
+there was none. **Two sessions in a row read a transient miss as a permanent
+condition because both said the same sentence**, which is why the transient case
+now has words of its own.
+
+## Metro's inspector, and why it needs our own WebSocket
+
+2026-09-11. Feasibility for network visibility, probed against a live Metro on
+this machine.
+
+| | |
+|---|---|
+| `http://localhost:8081/json/list` | plain HTTP, lists a CDP target per device |
+| WebSocket upgrade with no `Origin` | **401 Unauthorized** |
+| WebSocket upgrade with `Origin` matching Metro's host | **101 Switching Protocols** |
+| `Network.enable` | returns `{}` — accepted, not an error |
+| `Network.*` events in a 6s window | **none**, with no request fired in it — unresolved |
+| global `WebSocket` on Node 18 / 20 / 22 | absent / flag-only / present |
+
+Two independent reasons a hand-rolled client is required rather than a
+dependency or a built-in. The `Origin` requirement cannot be met by a stock
+client, which does not let a caller set it; and the built-in does not exist on
+two of the three Node versions CI covers, while the only runtime dependency is
+allowed to stay the MCP SDK. A handshake plus a text-frame codec is about 40
+lines and reached `101` here.
+
+What is **not** settled is whether the domain emits anything. `Network.enable`
+succeeding is not evidence that it does, and nothing fired in the listening
+window. A peer independently hand-rolled a bridge and *patched
+`XMLHttpRequest`* to get this data, which is a hint that events do not arrive —
+so the fallback is an interceptor injected through `Runtime.evaluate`. Settling
+it needs one request made while listening, which is cheaper than building the
+fallback speculatively.
