@@ -193,6 +193,21 @@ stays the default, so nothing that was working changes. For a peer round:
 SIMFRAME_SESSION=peer-2026-09-10 simframe flow ...
 ```
 
+**It is read at process start, and that is a real limit worth stating.** An
+agent driving the MCP server cannot set it: the server was spawned before the
+agent's first message, and nothing said in-session changes a running process's
+environment. A tester asked to `export` it did so, correctly, and the run was
+logged under the server's own id anyway — reported, and the instruction was
+mine and wrong.
+
+For an MCP-driven session it is also unnecessary. The server is one long-lived
+process, so its per-process id already identifies exactly one agent — which was
+the whole point. What was missing is discovery, not tagging: `simframe
+escalations` lists every session id with its client and count, so the round is
+picked out afterwards rather than named in advance. Set the variable in the
+server's `env` at spawn time if a readable name is worth having; never ask an
+agent to export it.
+
 The second defect from the same investigation: **`verification_failed` carried
 no intent**, and it is the largest reason class in the log. Both escalation
 sites in `actions.js` — the verdict path and the throw path — now read the step

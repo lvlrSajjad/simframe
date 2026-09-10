@@ -2489,6 +2489,103 @@ test('a caption never wins over the control it names', async () => {
   assert.equal(m.resolve([caption], 'Problem').status, 'ok');
 });
 
+test('the graph hands over its vocabulary instead of counting it', async () => {
+  const v = await import('../src/view.js');
+  const g = await import('../src/graph.js');
+
+  // The map said `(known, 3 known exits)` — the count — so an agent on a screen
+  // simframe had driven ten times still read it to learn what was tappable. A
+  // flow whose labels were known in advance ran 16 steps in ONE call; the same
+  // agent on screens the graph also knew spent 25 calls on 31 steps. The
+  // difference was whether a plan existed before execution started.
+  const node = {
+    edges: [
+      { step: { action: 'tap', value: 'Anaheim' }, to: 'a58fab06', count: 10, kind: 'replace' },
+      { step: { action: 'tap', value: '4 Casa' }, to: 'a58fab06', count: 4, kind: 'replace' },
+      { step: { action: 'tap', value: '#13' }, to: 'a58fab06', count: 1 },
+      { step: { action: 'tap' }, to: 'x', count: 2 },
+    ],
+  };
+  const exits = g.exitsOf(node);
+  assert.deepEqual(exits.map((e) => e.label), ['Anaheim', '4 Casa'], 'most-used first');
+  assert.equal(exits[0].count, 10);
+  // A `#13` was a ref on the screen it was typed on and means nothing on the
+  // next visit, and an unlabelled step is not vocabulary either.
+  assert.ok(!exits.some((e) => String(e.label).startsWith('#')));
+
+  const line = v.exitsLine(exits);
+  assert.match(line, /worked here before:/);
+  assert.match(line, /tap "Anaheim" \(10x\)/);
+  assert.equal(v.exitsLine([]), null, 'a new screen promises nothing');
+  assert.equal(v.exitsLine(undefined), null);
+
+  // And the hint names them, because "chain the next steps" is not actionable
+  // without saying what the steps could be.
+  const hint = v.nextHint({
+    ok: true, settled: true, known: true, hash: 'df24fd3200', exits: 2, elements: 13, ambiguous: 0, exitList: exits,
+  });
+  assert.match(hint, /chain the next steps/);
+  assert.match(hint, /Known to work here: tap "Anaheim", tap "4 Casa"/);
+});
+
+test('the two change sensors stop contradicting each other', async () => {
+  const actions = await import('../src/actions.js');
+  // The wait watches regions, the verdict compares screen identity. A tap that
+  // moved one cell printed `[a small change, in one region only]` and
+  // `no-visible-change: the screen did not change` four lines apart — both true
+  // of different questions, and reading as a contradiction.
+  const said = actions.belowThreshold(
+    { verdict: 'no-visible-change', detail: 'the screen did not change, and nothing predicted it would' },
+    { smallChange: true },
+  );
+  assert.equal(said.verdict, 'no-visible-change', 'the verdict stands; it is the finding');
+  assert.match(said.detail, /one region only/);
+  assert.ok(!/did not change,/.test(said.detail));
+
+  // Nothing observed, nothing to reconcile.
+  const quiet = { verdict: 'no-visible-change', detail: 'the screen did not change, and nothing predicted it would' };
+  assert.equal(actions.belowThreshold(quiet, { smallChange: false }).detail, quiet.detail);
+  assert.equal(actions.belowThreshold(quiet, undefined).detail, quiet.detail);
+  // And it never touches another verdict.
+  const wrong = { verdict: 'unexpected-screen', detail: 'landed somewhere else' };
+  assert.equal(actions.belowThreshold(wrong, { smallChange: true }).detail, wrong.detail);
+});
+
+test('the keyboard band collapses keys, not the control pinned above them', async () => {
+  const v = await import('../src/view.js');
+  // Region bands are positional, and this is their fourth bug. With the
+  // keyboard up, a wizard's only forward control landed in the `keyboard` band
+  // and was collapsed with the keys: four reads running — `all` and `refresh`
+  // included — printed `keyboard: 6 keys` and no NEXT, while the hint said
+  // "nothing ambiguous — chain the next steps without looking again". The next
+  // call proved it was emission, not perception: `tap "NEXT"` hit 201,800
+  // instantly, via ax|ocr, at a coordinate the map had never printed.
+  const next = { label: 'NEXT', type: 'Button', x: 201, y: 800, frame: { x: 18, y: 780, width: 366, height: 44 }, region: 'keyboard' };
+  assert.equal(v.isKey(next), false, 'a full-width primary action is not a key');
+
+  for (const key of [
+    { label: 'a', type: 'Key', frame: { width: 32, height: 42 } },
+    { label: 'Q', frame: { width: 32, height: 42 } },
+    { label: 'space', frame: { width: 110, height: 42 } },
+    { label: 'return', frame: { width: 88, height: 42 } },
+    { label: '123', frame: { width: 40, height: 42 } },
+    { label: '', frame: { width: 32, height: 42 } },
+  ]) assert.equal(v.isKey(key), true, `${key.label || '(unlabelled)'} is a key`);
+
+  // An icon-only pinned control has no label to reason about, so width is what
+  // keeps it in the map.
+  assert.equal(v.isKey({ label: '', type: 'Button', frame: { width: 366, height: 44 } }), false);
+
+  // And it reaches the rows, which is the behaviour that was actually reported.
+  const rows = v.rowsFor(
+    { targets: [next, { label: 'a', type: 'Key', x: 30, y: 850, frame: { x: 14, y: 830, width: 32, height: 42 }, region: 'keyboard' }] },
+    { screen: { width: 402, height: 874 } },
+  );
+  assert.equal(rows.rows.length, 1);
+  assert.equal(rows.rows[0].label, 'NEXT');
+  assert.equal(rows.collapsed.get('keyboard'), 1, 'the key is still collapsed');
+});
+
 test('a control is interactive by evidence when the tree got its role wrong', async () => {
   const v = await import('../src/view.js');
   // `--interactive` answered "1 element" on a form with two visible, bordered,
@@ -2514,20 +2611,22 @@ test('a typed field is verified by its contents, not by the screen moving', asyn
   // the one path where acting on the warning is destructive — re-typing doubles
   // a field that has no way to be cleared.
   assert.deepEqual(
-    actions.readbackNote('Mo Hatami', { value: 'Mo Hatami', focused: true }),
+    actions.readbackNote('Mo Hatami', { value: 'Mo Hatami', landed: true, focused: true }),
     { note: ' = "Mo Hatami"', empty: false },
   );
-  // The false `ok`: the field is readable and holds nothing, and text was sent.
-  assert.equal(actions.readbackNote('Mo Hatami', { value: '', focused: true }).empty, true);
-  assert.equal(actions.readbackNote('Mo Hatami', { value: null }).empty, true);
+  // The false `ok`: a valued control that reads empty after text was sent.
+  assert.equal(actions.readbackNote('Mo Hatami', { value: '', landed: false }).empty, true);
   // Nothing was sent, so an empty field is not a contradiction.
-  assert.equal(actions.readbackNote('', { value: '' }).empty, false);
-  // A readback that could not be taken must never fail the step: the text may
-  // well have landed, and best-effort evidence is not counter-evidence.
+  assert.equal(actions.readbackNote('', { value: '', landed: false }).empty, false);
+  // No readback at all is no evidence, and no evidence is not counter-evidence.
+  // The first version of this check treated a missing `value` attribute as an
+  // empty field and failed a step whose text was visible in the very map the
+  // failure returned — worse than the verdict it replaced, because the tool's
+  // own remediation advice would have double-entered the text.
   assert.deepEqual(actions.readbackNote('x', null), { note: '', empty: false });
   // Long values are shown truncated rather than dropped — the same call the
   // map cut got wrong on list rows.
-  const long = actions.readbackNote('x', { value: 'y'.repeat(200) });
+  const long = actions.readbackNote('x', { value: 'y'.repeat(200), landed: true });
   assert.match(long.note, /…"$/);
   assert.ok(long.note.length < 80);
 

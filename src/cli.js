@@ -47,6 +47,10 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe baseline list             recorded runs per flow, and what is committed
   simframe hpi     [device]          Human Parity Index, per flow and overall
   simframe escalations [device]      why simframe handed decisions back, by reason
+                                     (--session=<id> narrows to one agent; the
+                                     ids are listed in the output. SIMFRAME_SESSION
+                                     names one, but only at process start — an
+                                     already-running MCP server cannot pick it up)
   simframe devices                   list simulators
   simframe doctor                    check that this machine can capture
                                      (--strict, or SIMFRAME_STRICT=1, makes any

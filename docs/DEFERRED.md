@@ -47,6 +47,13 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > no-go, the two reverts, the false premises — are indexed in
 > `docs/DECISIONS.md`.
 >
+> **Round 4 (cold start) fixed T1, T2, T5 and T7, and produced the plan-first
+> change: the graph now names what worked on a screen instead of counting it.**
+> Open next: **item 36** (`unexpected-screen` on legitimate variants — it costs
+> the rest of the batch), **item 38** (phantom rows after a scroll), **item 40 /
+> 32** (cosmetic content moving screen identity), **item 37** (`assert` races),
+> then item 35, item 33, item 26.
+>
 > **Next, in order — reset by the third peer round.** Round 3 fixed N1, N2, N3,
 > N5, half of N6 and N7, which covers round 2's items 23 and 24. It also
 > **disconfirmed item 25**: every screen in the surprise flow reported `known`
@@ -137,6 +144,130 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    is already caught by the frame hash. Both measured signature pairs are in
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
+
+### From the fourth peer round — cold start, and the map lied by omission
+
+2026-09-10. A **fresh** session, no prior knowledge of the app, no source read,
+told only that the app was open on its home screen. The task was completed.
+
+| | |
+|---|---|
+| invocations | **25** |
+| steps | **31** |
+| calls per step | **0.81** |
+| images | **2** |
+| wall | 6m 16s |
+
+The reporter's own accounting is the finding: **~10 of 25 invocations, 40% of
+the run, were spent recovering from the map omitting things it demonstrably knew
+about.** Four reads were genuinely unavoidable; seven existed only because the
+tool would not say what it already knew.
+
+**T1 — `sim_ui` omitted primary pinned controls the resolver could hit.
+Critical, fixed.** On a wizard step, four reads — `all` and `refresh` included —
+never listed the only forward control, while the hint said *"nothing ambiguous —
+chain the next steps without looking again"*. The proof it was emission and not
+perception was the next call: `tap "NEXT"` hit it instantly at 201,800
+`via ax|ocr, memory d=0` — a coordinate the map had never printed.
+
+The cause is **region bands, positionally assigned, for the fourth time.** With
+the keyboard up, the bottom band is called `keyboard` and collapsed to one line —
+thirty keys nobody names. A primary action pinned above the keyboard lands in
+that band and was collapsed with them. It also explains the inconsistency the
+reporter spotted: the same control at the identical coordinate *was* listed on a
+screen where the keyboard was down. And it is the same root as round 2's "a
+control behind the keyboard is invisible". Fixed by asking whether a target in
+that band is actually a key — width settles it before any label does, which also
+keeps an icon-only pinned control in the map. `README.md`'s roadmap entry on
+clustering the bands instead of positioning them is now overdue by four bugs.
+
+**T2 — the readback failed a step whose text had landed. My regression, from
+hours earlier, fixed.** `type` reported *"the field reads empty — the text did
+not land"* while the text was visible in the very map the failure returned, and
+the tool's own remediation advice would have double-entered it. The cause: the
+text arrives as a sibling text node's **label**, not as the control's `value`,
+and treating a missing `value` attribute as an empty field is not evidence of
+absence. The readback now looks for what was sent across both `value` and
+labels, compares by alphanumerics so the OCR'd caret does not break it (a typed
+name reads back with a trailing `l`), and fails only on a valued control that
+genuinely reads empty. **No evidence is not counter-evidence** — that was the
+whole bug, and it made the verdict it replaced look good.
+
+**T5 — contradictory verdicts on a tap, fixed.** `[a small change, in one region
+only]` and `no-visible-change: the screen did not change`, four lines apart. Both
+true of different questions: the wait watches regions, the verdict compares
+screen identity. The verdict stands — a change too small to move the identity is
+the finding — but it now says what was observed rather than denying it happened.
+
+**T7 — `SIMFRAME_SESSION` cannot be honoured by an MCP client, and the
+instruction to export it was mine and wrong.** It is read into a module-level
+constant at process start; the server was spawned before the agent's first
+message, so nothing said in-session changes it, and the run was logged under the
+server's own id. It is also unnecessary there: an MCP server is one long-lived
+process, so its per-process id already identifies exactly one agent. What was
+missing was discovery, not tagging — `escalations` already lists every session
+id with its client and count. Documented, and the CLI help now says when the
+variable can and cannot work.
+
+**The user's own observation, and the change it produced.** *"Still slow and
+thinking too much between each step — how about orchestrating a plan using the
+code and then just doing its job?"* The data says exactly that: the familiar
+flow ran 16 steps in **one** call because a plan existed before execution
+started; the cold run spent 25 calls on 31 steps building one step at a time.
+The reporter's version: *"on the familiar flow I knew every label in advance, so
+I never needed a read."*
+
+The graph already held those labels and only ever reported a **count** —
+`(known, 3 known exits)`. It now names them, in the map and in the hint:
+`worked here before: tap "CREATE A SERVICE REQUEST" (7x)`. Zero perception cost,
+no new state, and it is the smallest version of the plan-first idea. Explicitly
+evidence and not a promise — the destructive-label rules are untouched.
+
+**Still open from this round:**
+
+36. **`unexpected-screen` false negatives on correct transitions.** *"expected
+    the screen this action reached 2x before, and landed somewhere else"* on a
+    tap that correctly applied a selection, populated content and enabled the
+    submit button — i.e. the screen legitimately became a variant of itself.
+    Because `continueOnError` defaults false, every false negative costs the rest
+    of the batch, which undercuts the batching that makes calls-per-step good.
+    **Do not soften the verdict itself** — the same reporter calls it the most
+    valuable thing in the tool, and one of its stops exposed a real bug in the
+    app under test. This is variant handling, not verdict policy.
+
+37. **`assert` races the state it asserts.** A tap reported settled after 2.4 s;
+    the assert in the same batch read pre-update state, and the map returned by
+    that same call showed the asserted control already enabled. One response,
+    two answers.
+
+38. **Occluded and stale content emitted as real elements.** After a scroll, rows
+    blended a sticky header with the content beneath it *and* with pre-scroll
+    leftovers, at overlapping coordinates. `settle` returned an identical map, so
+    it was not motion. An image proved several rows were not on screen at all. A
+    map with phantom rows is worse than a short map, because it looks actionable.
+    Same family as round 2's sticky-header interleaving (item 29).
+
+39. **The caret is OCR'd into field values**, so `assert {is: "value"}` fails on
+    a correct field. The readback now compares by alphanumerics and is immune;
+    `assert` is not.
+
+40. **A ref survived the element but not the screen hash.** `#16 was numbered on
+    a different screen` for a control that had not moved a pixel — the hash moved
+    because a validation message appeared and cleared. Item 32 with a concrete
+    cause: cosmetic, transient content is changing screen identity.
+
+**Working, and named as such by the reporter:** `sim_do` batching; label
+resolution against elements the map never printed (the best thing in the tool,
+and what proved T1 was emission); ambiguity refusal naming both candidates with
+coordinates, which fixed a mistake with no read; `STILL MOVING` with "do not act
+on this reading yet"; the `disabled` marker; and stating *how* a tap resolved
+(`via ax|ocr`, `memory d=0`) — keep that, it is what makes these reports
+diagnosable.
+
+**Two app bugs found, and they are the user's, not simframe's:** a work-order
+card rendering `Age of Work Order: days` with no number, and a location whose
+service-request flow dead-ends on a raw backend error string. Passed on rather
+than filed here.
 
 ### From the third peer round — the batching hypothesis dies, 2026-09-10
 

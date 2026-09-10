@@ -2926,3 +2926,68 @@ substitute for me knowing the labels."* The graph spends its knowledge on
 verdicts and routing, not on telling the caller what it already knows is
 tappable. That is Phase 17's no-go from the other end: the tool holds knowledge
 it does not hand over, and the model pays for it in reads.
+
+---
+
+## Round 4 — a cold start, and the 40% the map was hiding
+
+2026-09-10. A **fresh** session: no prior knowledge of the app, no source read,
+told only that it was open on its home screen. Task completed.
+
+| | |
+|---|---|
+| invocations | **25** |
+| steps | **31** |
+| calls per step | **0.81** |
+| images | **2** |
+| wall | 6m 16s |
+
+The reporter's own accounting is the number that matters: **four reads were
+genuinely unavoidable, seven existed only because the tool would not say what it
+already knew, and ~10 of 25 invocations — 40% of the run — were spent recovering
+from the map omitting things it demonstrably knew about.**
+
+**The map under-reported and the verifier over-reported**, which is the sentence
+to keep from this round. They pull in opposite directions and between them they
+turned a 15-call task into a 25-call one.
+
+`sim_ui` omitted the only forward control on a wizard step across four reads,
+`all` and `refresh` included, while the hint said "nothing ambiguous — chain the
+next steps without looking again". It was emission, not perception, and the next
+call proved it: `tap "NEXT"` hit 201,800 instantly, `via ax|ocr, memory d=0`, at
+a coordinate no read had printed. Cause: **positional region bands, for the
+fourth time.** With the keyboard up the bottom band is called `keyboard` and
+collapsed to one line, and a full-width action pinned above the keyboard was
+collapsed with the keys. Now settled by width before any label — a key is
+finger-sized, that button was 366pt — which also keeps an icon-only pinned
+control in the map.
+
+The verifier's worst case was **a regression from earlier the same day**: the
+field readback failed a `type` whose text was visible in the very map the failure
+returned, and its remediation advice would have double-entered it. The text
+arrives as a sibling text node's *label*, not the control's `value`, and treating
+a missing `value` as an empty field is not evidence of absence. The lesson is one
+line: **no evidence is not counter-evidence** — and getting it wrong made the
+verdict it replaced look good.
+
+### The plan-first change
+
+Both peer rounds now say the same thing from different ends. A flow whose labels
+were known in advance ran **16 steps in one call**; the same agent, on screens
+the graph also knew but whose labels it had to rediscover, spent **25 calls on 31
+steps**. The reporter: *"on the familiar flow I knew every label in advance, so I
+never needed a read."*
+
+The graph held those labels and reported only a **count** — `(known, 3 known
+exits)`. It now names them, in the map and the hint:
+
+```
+iPhone 17 Pro · 402x874pt · screen 0e1c7d0c "97f9aa68" (known, 1 known exit)
+worked here before: tap "CREATE A SERVICE REQUEST" (7x)
+```
+
+Zero perception cost, no new state, no model call — the data was already on
+disk. Stated as evidence rather than a promise, and the destructive-label rules
+are untouched. This is the smallest version of "orchestrate a plan and then do
+the job", and the next measurement to take is whether it moves calls-per-step on
+a cold run.

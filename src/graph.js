@@ -296,6 +296,38 @@ function replayable(step) {
 }
 
 /**
+ * What has worked from this screen before, in the caller's own vocabulary.
+ *
+ * The graph has always known this and never said it. A map reported
+ * `(known, 3 known exits)` — the *count* — so an agent on a screen simframe had
+ * driven successfully six times still had to read it to learn what was tappable.
+ * Measured across two peer rounds: a flow whose steps were known in advance ran
+ * 16 steps in **one** call, and the same agent on a screen the graph also knew
+ * but whose labels it did not spent 25 calls on 31 steps. The difference was not
+ * perception. It was whether a plan existed before execution started.
+ *
+ * Ordered by how often each has worked, because that is the order an agent
+ * should try them in.
+ */
+export function exitsOf(node, { limit = 8 } = {}) {
+  return (node?.edges ?? [])
+    .map((e) => ({
+      action: e.step?.action ?? (e.action ?? '').split(':')[0] ?? 'tap',
+      label: e.step?.value ?? e.step?.target ?? e.step?.label ?? e.step?.into ?? null,
+      to: e.to ?? null,
+      count: e.count ?? 0,
+      kind: e.kind ?? null,
+    }))
+    // A `#13` was a ref on the screen it was typed on and means nothing on the
+    // next visit; a raw coordinate is not a name either. Neither is reusable
+    // vocabulary, which is the whole point of this list.
+    .filter((e) => e.label != null && !/^#\d+$/.test(String(e.label).trim())
+      && !/^@?-?\d+\s*,\s*-?\d+$/.test(String(e.label).trim()))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
+
+/**
  * What to call this screen, for a human typing `goto`.
  *
  * Chrome labels are the only text in a fingerprint, which makes them the only

@@ -402,7 +402,10 @@ export async function runScript(
         const kind = afterState.transition?.kind;
         const afterScreen = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, confirmNovel });
         verification = {
-          ...graph.verdict({ udid, prediction, before: beforeScreen.hash, after: afterScreen.hash, kind, action: step.action }),
+          ...belowThreshold(
+            graph.verdict({ udid, prediction, before: beforeScreen.hash, after: afterScreen.hash, kind, action: step.action }),
+            settled,
+          ),
           predicted: prediction ? { to: prediction.to.slice(0, 10), kind: prediction.kind, seen: prediction.count } : null,
           observed: { to: afterScreen.hash?.slice(0, 10), kind },
         };
@@ -603,38 +606,80 @@ export async function runScript(
  * to one cheap read. Best effort — a readback that fails must not fail the
  * step, because the text may well have landed.
  */
-async function fieldContents(deviceQuery, target, ctx) {
+async function fieldContents(deviceQuery, target, sent, ctx) {
   try {
     const { entry } = await api.readScreenWith(deviceQuery, { useOcr: false, options: ctx.options });
-    let best = null;
-    let bestD = Infinity;
-    for (const t of entry.targets ?? []) {
-      const d = Math.hypot((t.x ?? 0) - target.x, (t.y ?? 0) - target.y);
-      // Same control, allowing for the caret and a placeholder giving way to
-      // text — both of which move a label's centre by a few points.
-      if (d > FIELD_READBACK_RADIUS) continue;
-      const scored = d - (t.value != null ? 12 : 0) - (t.focused ? 8 : 0);
-      if (scored < bestD) { bestD = scored; best = t; }
+    const near = (entry.targets ?? []).filter(
+      (t) => Math.hypot((t.x ?? 0) - target.x, (t.y ?? 0) - target.y) <= FIELD_READBACK_RADIUS,
+    );
+    if (!near.length) return null;
+    // The text may arrive as the control's `value` or as a sibling's label —
+    // a React Native input renders its contents as a separate text node — so
+    // look for what was sent across both before concluding anything. Getting
+    // this wrong is what made the first version of this check fail a step whose
+    // text was visible in the very map the failure returned.
+    const wanted = alnum(sent);
+    for (const t of near) {
+      for (const seen of [t.value, t.label]) {
+        if (!seen) continue;
+        // `includes`, not equals: the caret is OCR'd into the value ("Maryam
+        // Hatami" reads back as "Maryam Hatamil"), and a long value is
+        // truncated by the renderer.
+        if (wanted && alnum(seen).includes(wanted)) {
+          return { value: String(seen), landed: true, focused: Boolean(t.focused) };
+        }
+      }
     }
-    if (!best) return null;
-    return { value: best.value ?? null, label: best.label ?? null, focused: Boolean(best.focused) };
+    // Not found. Only an *empty* valued control is evidence of absence; a
+    // control with no `value` attribute at all is no evidence either way.
+    const valued = near.find((t) => t.value != null);
+    if (valued && String(valued.value) === '') {
+      return { value: '', landed: false, focused: Boolean(valued.focused) };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
+/** Comparison that ignores what OCR adds — a caret, a stray glyph, spacing. */
+const alnum = (v) => String(v ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
 /** How the readback is reported, and whether it contradicts what was sent. */
 export function readbackNote(sent, seen) {
+  // No readback, or a readback that found no valued control: no evidence, and
+  // no evidence is not counter-evidence. The first version of this treated a
+  // missing `value` attribute as an empty field and failed a step whose text was
+  // visible in the same map the failure returned — reported, correctly, as
+  // worse than the verdict it replaced.
   if (!seen) return { note: '', empty: false };
-  const value = seen.value;
-  if (value == null || value === '') {
-    // The field is readable and holds nothing. If text was sent, it did not
-    // land — which is the false `ok` this exists to catch. Said plainly rather
-    // than inferred from a verdict.
-    return { note: ' [the field reads empty]', empty: Boolean(sent) };
+  if (seen.landed) {
+    const v = String(seen.value);
+    const shown = v.length > 60 ? `${v.slice(0, 60)}…` : v;
+    return { note: ` = ${JSON.stringify(shown)}`, empty: false };
   }
-  const shown = value.length > 60 ? `${value.slice(0, 60)}…` : value;
-  return { note: ` = ${JSON.stringify(shown)}`, empty: false };
+  return { note: ' [the field reads empty]', empty: Boolean(sent) };
+}
+
+/**
+ * Reconcile the two sensors when they disagree about "did anything happen".
+ *
+ * The wait watches regions and the verdict compares screen identity, so a tap
+ * that moved one cell produced `[a small change, in one region only]` and
+ * `no-visible-change: the screen did not change` four lines apart. Both were
+ * true of different questions, and the pair reads as a contradiction rather
+ * than as a measurement.
+ *
+ * The verdict stands — a change too small to move the screen's identity is the
+ * finding — but it should say what was actually observed.
+ */
+export function belowThreshold(verification, settled) {
+  if (verification?.verdict !== 'no-visible-change' || !settled?.smallChange) return verification;
+  return {
+    ...verification,
+    detail: 'the screen changed in one region only, by too little to be a different screen'
+      + ' — if that was the whole effect, this is fine; if a transition was expected, it did not happen',
+  };
 }
 
 async function focusField(deviceQuery, udid, step, ctx) {
@@ -696,7 +741,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
         const field = await focusField(deviceQuery, udid, step, ctx);
         const sent = step.text ?? step.value;
         await input.typeText(udid, sent);
-        const seen = await fieldContents(deviceQuery, field.found.target, ctx);
+        const seen = await fieldContents(deviceQuery, field.found.target, sent, ctx);
         const back = readbackNote(sent, seen);
         if (back.empty) {
           throw new Error(
@@ -718,7 +763,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
         const field = await focusField(deviceQuery, udid, step, ctx);
         const sent = step.text ?? step.value;
         await input.pasteText(udid, sent);
-        const seen = await fieldContents(deviceQuery, field.found.target, ctx);
+        const seen = await fieldContents(deviceQuery, field.found.target, sent, ctx);
         const back = readbackNote(sent, seen);
         if (back.empty) {
           throw new Error(

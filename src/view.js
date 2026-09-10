@@ -198,6 +198,47 @@ const trim = (text) => {
 
 /** Rank and number what is on screen. */
 /**
+ * Whether a target in the keyboard band really is a key.
+ *
+ * Region bands are positional, and this is the fourth bug they have produced.
+ * When the keyboard is up, the bottom band is called `keyboard` and collapsed to
+ * one line — thirty keys nobody refers to by name. A primary action pinned above
+ * the keyboard lands in that band and was collapsed with them, so on a
+ * four-step wizard the map printed `keyboard: 6 keys` and **no forward
+ * control**, four reads running, `all` and `refresh` included, while the hint
+ * said "nothing ambiguous — chain the next steps without looking again".
+ *
+ * That it was an emission bug and not a perception one was proved by the next
+ * call: `tap "NEXT"` hit it instantly at 201,800 `via ax|ocr, memory d=0` — a
+ * coordinate the map had never printed. Reported as ~40% of a cold run's calls,
+ * and it is the same root as "a control behind the keyboard is invisible" from
+ * the round before.
+ *
+ * A key is small, unlabelled or single-character, and there are dozens. Anything
+ * carrying a real label or a non-key role is a control that happens to be
+ * sitting near the keyboard, and it belongs in the map.
+ */
+export const KEY_MAX_WIDTH = 120;
+
+const NAMED_KEY = /^(space|return|enter|shift|delete|backspace|done|globe|dictate|emoji|caps ?lock|number|numbers|symbols|letters|more|search|go|send|join|route|abc|123)$/i;
+
+export function isKey(t) {
+  if (/^key$/i.test(t?.type ?? '')) return true;
+  // Width settles it before any label does. A key is finger-sized; a primary
+  // action pinned above the keyboard runs the width of the screen, and the one
+  // this was reported on was 366pt against a key's ~35. This is also what keeps
+  // an icon-only pinned control — no label to reason about — in the map.
+  const width = t?.frame?.width;
+  if (isNum(width) && width > KEY_MAX_WIDTH) return false;
+  const label = String(t?.label ?? '').trim();
+  // A wide-enough control is already out; a narrow unlabelled one among thirty
+  // others is a key.
+  if (!label) return true;
+  if (label.length <= 2) return true;
+  return NAMED_KEY.test(label);
+}
+
+/**
  * Whether a target can be acted on, by role *or* by evidence.
  *
  * The role alone was wrong twice on real forms. A React Native composite select
@@ -256,7 +297,7 @@ export function rowsFor(entry, { screen, filter, interactive, all = false, limit
   const collapsed = new Map();
   for (const t of kept) {
     const region = t.region ?? 'content';
-    if (COLLAPSE_REGIONS.has(region)) {
+    if (COLLAPSE_REGIONS.has(region) && isKey(t)) {
       collapsed.set(region, (collapsed.get(region) ?? 0) + 1);
       continue;
     }
@@ -419,6 +460,10 @@ export async function screenMap(deviceQuery, {
   // screen is what the agent can actually use: it says how much of this screen
   // the graph can navigate from without being told.
   const exits = node ? node.edges.length : null;
+  // Not just how many — which. The graph has always known what worked here and
+  // only ever reported a count, so an agent on a screen simframe had driven ten
+  // times still read it to learn what was tappable.
+  const exitList = node ? graph.exitsOf(node) : [];
 
   return {
     device,
@@ -434,7 +479,8 @@ export async function screenMap(deviceQuery, {
     screen,
     name,
     exits,
-    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits }),
+    exitList,
+    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList }),
   };
 }
 
@@ -459,7 +505,7 @@ export async function screenMap(deviceQuery, {
  * cheerfully says "carry on" into an unknown screen would be worse than no hint
  * at all.
  */
-export function nextHint({ ok, escalated, settled, loading, known, hash, exits, elements, ambiguous, filtered } = {}) {
+export function nextHint({ ok, escalated, settled, loading, known, hash, exits, elements, ambiguous, filtered, exitList } = {}) {
   if (ok === false) {
     return 'next: the flow stopped here — this is the moment to think. sim_recall shows how you got here; sim_ui re-reads the screen.';
   }
@@ -502,7 +548,13 @@ export function nextHint({ ok, escalated, settled, loading, known, hash, exits, 
     // it as the screen concludes a form has nothing to fill in.
     return `next: settled; screen ${known_}; ${elements} element${elements === 1 ? '' : 's'} **matching your filter** — this is not the whole screen, and an empty text input can look like a caption. Read it unfiltered before concluding something is absent.`;
   }
-  return `next: settled; screen ${known_}; ${elements} element${elements === 1 ? '' : 's'}; nothing ambiguous — chain the next steps in one sim_do without looking again.`;
+  // Naming the vocabulary is what makes "chain" actionable. A hint that says
+  // "chain the next steps" without saying what the steps could be is asking the
+  // agent to plan from a map it has to keep re-reading.
+  const vocab = (exitList ?? []).filter((e) => e.label).slice(0, 6)
+    .map((e) => `${e.action} ${JSON.stringify(String(e.label).slice(0, 28))}`).join(', ');
+  return `next: settled; screen ${known_}; ${elements} element${elements === 1 ? '' : 's'}; nothing ambiguous — chain the next steps in one sim_do without looking again.`
+    + (vocab ? ` Known to work here: ${vocab}.` : '');
 }
 
 /**
@@ -525,9 +577,32 @@ export function hintFor(map, { flowOk = true, escalated = false } = {}) {
     known: map?.exits != null,
     hash: map?.identity?.hash ?? null,
     exits: map?.exits ?? 0,
+    exitList: map?.exitList ?? [],
     elements: map?.rows?.length ?? 0,
     ambiguous: ambiguousLabels(map?.rows),
   });
+}
+
+/**
+ * What has worked from this screen before, printed rather than counted.
+ *
+ * The map said `(known, 3 known exits)` and stopped there, so the graph's own
+ * vocabulary never reached the caller. A flow whose labels were known in
+ * advance ran 16 steps in one call; the same agent on screens the graph also
+ * knew, but whose labels it had to rediscover, spent 25 calls on 31 steps.
+ *
+ * Deliberately terse and deliberately *not* a promise. These are actions that
+ * previously worked here, with how often — evidence for a plan, not a
+ * guarantee, and the destructive-label rules apply to them exactly as before.
+ */
+export function exitsLine(exitList, { limit = 6 } = {}) {
+  const list = (exitList ?? []).filter((e) => e.label).slice(0, limit);
+  if (!list.length) return null;
+  const parts = list.map((e) => {
+    const label = String(e.label).length > 28 ? `${String(e.label).slice(0, 28)}…` : String(e.label);
+    return `${e.action} ${JSON.stringify(label)}${e.count > 1 ? ` (${e.count}x)` : ''}`;
+  });
+  return `worked here before: ${parts.join(', ')}`;
 }
 
 /** How many labels are worn by more than one element a caller could act on. */
@@ -541,7 +616,7 @@ export function ambiguousLabels(rows) {
   return [...seen.values()].filter((n) => n > 1).length;
 }
 
-export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, verdictLine, ambiguities }) {
+export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, verdictLine, ambiguities }) {
   const head = [
     device?.name,
     screen?.width ? `${screen.width}x${screen.height}pt` : null,
@@ -558,6 +633,8 @@ export function render({ device, identity, rows, truncated, collapsed, screen, n
 
   const lines = [head];
   if (verdictLine) lines.push(verdictLine);
+  const worked = exitsLine(exitList);
+  if (worked) lines.push(worked);
 
   let region = null;
   for (const r of rows) {
