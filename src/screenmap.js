@@ -51,6 +51,9 @@ function mapDir(udid) {
  */
 export const DEFAULT_TOLERANCE = 20;
 
+/** Comparison that ignores what OCR adds — a caret, a stray glyph, spacing. */
+const alnum = (v) => String(v ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
 export function recall(udid, hash) {
   if (!hash) return null;
   const entry = store.readJson(path.join(mapDir(udid), `${hash}.json`));
@@ -150,6 +153,9 @@ export async function build(udid, {
   // empty `sources` rethrew — so making a layer work turned a loud failure into
   // a quiet one.
   const degraded = [];
+  // Pairs where an ax element and an OCR word share a coordinate and disagree
+  // about what is there — the signature of one layer covering another.
+  const occluded = [];
   // One round trip for both, because the daemon runs the tree read and the
   // recognition pass concurrently against the same instant of the screen. Asked
   // separately they would queue: the control socket serves one request at a
@@ -294,7 +300,28 @@ export async function build(udid, {
           ?? targets
             .filter((t) => eligible(t) && matching.sameElementSeenTwice(t, { ...w, frame: box, label: w.text }))
             .sort((a, b) => area(a.frame) - area(b.frame))[0];
-        if (covering) {
+        // An alias must be the *same thing*, read twice.
+        //
+        // The geometric branch above pairs an OCR word with whichever ax
+        // element encloses it, and across z-layers that is simply wrong.
+        // Reported on a modal-heavy screen, with a Select Area sheet open over a
+        // dimmed page: `#15 text 167,316 Area (Optional) ~ Exterior Building`,
+        // which reads as though the field "Area (Optional)" contains "Exterior
+        // Building". They are two unrelated things at one coordinate on
+        // different layers, and the reporter had to fall back to a screenshot to
+        // count five radio options — precisely the case the text map exists to
+        // remove.
+        //
+        // So a labelled ax element only takes an alias that relates to its own
+        // label. The justification for aliasing was always "a row labelled 'Kate
+        // Bell' containing OCR's 'Kate Bell' is one element two sensors saw" —
+        // that still holds. An *unlabelled* element still takes the text
+        // outright, because that is how an icon-only control gets a name at all,
+        // and it cannot contradict a label it does not have.
+        const own = alnum(covering.label);
+        const seen = alnum(w.text);
+        const relates = !own || !seen || own.includes(seen) || seen.includes(own);
+        if (covering && relates) {
           covering.aliases = [...(covering.aliases || []), w.text];
           // Keep the ax role and frame — it is the hit target — and record that
           // both sensors saw it. Anything asking "is this the tree's element?"
@@ -303,6 +330,13 @@ export async function build(udid, {
             covering.source = `${covering.source ?? 'ax'}|ocr`;
           }
           continue;
+        }
+        if (covering && !relates) {
+          // Rejected as an alias, so it falls through and becomes an element of
+          // its own — which is what it is. Marked, because "these two things
+          // overlap and disagree" is exactly the shape of an occluding layer,
+          // and a caller counting radio options needs to know it is there.
+          occluded.push({ over: covering.label, under: w.text });
         }
         targets.push({
           label: w.text,
@@ -350,6 +384,7 @@ export async function build(udid, {
     // map has to carry it, because this is what gets written into memory.
     if (daemonScreen?.axTruncated) degraded.push(`accessibility tree cut short: ${daemonScreen.axTruncated}`);
     if (degraded.length) entry.degraded = degraded;
+    if (occluded.length) entry.occluded = occluded;
     // Only a map of a settled screen is worth keeping; remembering a transition
     // fills the store with layouts that will never be seen again.
     return persist ? remember(udid, entry) : entry;

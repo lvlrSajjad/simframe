@@ -478,6 +478,16 @@ export async function screenMap(deviceQuery, {
   // thing that can notice a form being cleared underneath a caller — six `ok`
   // calls in a row hid exactly that.
   const cleared = wrote.missingLine(wrote.missing(device?.udid, rows));
+  // One layer covering another, detected where it shows: an ax element and an
+  // OCR word at one coordinate disagreeing about what is there. Reported by a
+  // peer who had to fall back to a screenshot to count five radio options
+  // through a sheet, which is the case the text map exists to remove.
+  const layered = (identity?.entry?.occluded ?? []).length;
+  const overlay = layered
+    ? `${layered} element(s) on this screen overlap and disagree about what is there`
+      + ' — a sheet or overlay is probably covering the screen behind it, so treat anything'
+      + ' you did not expect to see as belonging to the layer underneath'
+    : null;
 
   return {
     device,
@@ -496,7 +506,8 @@ export async function screenMap(deviceQuery, {
     exitList,
     staleExits,
     cleared,
-    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, cleared }),
+    overlay,
+    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, cleared, overlay }),
   };
 }
 
@@ -679,7 +690,7 @@ export function ambiguousLabels(rows) {
   return [...seen.values()].filter((n) => n > 1).length;
 }
 
-export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, verdictLine, ambiguities, cleared }) {
+export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, verdictLine, ambiguities, cleared, overlay }) {
   const head = [
     device?.name,
     screen?.width ? `${screen.width}x${screen.height}pt` : null,
@@ -699,6 +710,7 @@ export function render({ device, identity, rows, truncated, collapsed, screen, n
   // Above the element list, not below it: it contradicts something the caller
   // already believes, which is the one kind of news that must not be scrolled to.
   if (cleared) lines.push(cleared);
+  if (overlay) lines.push(overlay);
   const worked = exitsLine(exitList, { stale: staleExits });
   if (worked) lines.push(worked);
 

@@ -3478,6 +3478,49 @@ test('a control is interactive by evidence when the tree got its role wrong', as
   assert.equal(v.actsInteractive({}), false);
 });
 
+test('an alias must be the same thing read twice, not two layers at one point', async () => {
+  const v = await import('../src/view.js');
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/screenmap.js', import.meta.url), 'utf8');
+
+  // Reported on a modal-heavy screen with a Select Area sheet over a dimmed
+  // page: `#15 text 167,316 Area (Optional) ~ Exterior Building`, which reads as
+  // though the field "Area (Optional)" contains "Exterior Building". They are
+  // unrelated things at one coordinate on different z-layers, and the reporter
+  // had to fall back to a screenshot to count five radio options — precisely the
+  // case the text map exists to remove.
+  //
+  // The geometric branch of the fusion pairs an OCR word with whatever ax
+  // element encloses it, so the gate is on the strings: a LABELLED element only
+  // takes an alias related to its own label. An unlabelled one still takes the
+  // text outright, because that is how an icon-only control gets a name, and it
+  // cannot contradict a label it does not have.
+  assert.match(src, /const relates = !own \|\| !seen \|\| own\.includes\(seen\) \|\| seen\.includes\(own\)/);
+  assert.match(src, /if \(covering && relates\)/);
+  assert.match(src, /occluded\.push\(/);
+
+  // And the disagreement is reported, because "these two overlap and disagree"
+  // is the signature of a covering layer and a caller counting options needs it.
+  const withOverlay = v.render({
+    device: { name: 'iPhone', udid: 'U' },
+    identity: { hash: 'a'.repeat(32), entry: { occluded: [{ over: 'Area (Optional)', under: 'Exterior Building' }] } },
+    rows: [{ ref: 1, region: 'content', label: 'Area (Optional)', x: 1, y: 1, type: 'StaticText' }],
+    screen: { width: 402, height: 874 },
+    overlay: '1 element(s) on this screen overlap and disagree about what is there — a sheet or overlay',
+  });
+  assert.match(withOverlay, /overlap and disagree/);
+  // Silent when there is no overlay, which is the common case.
+  assert.doesNotMatch(
+    v.render({
+      device: { name: 'iPhone', udid: 'U' },
+      identity: { hash: 'a'.repeat(32) },
+      rows: [{ ref: 1, region: 'content', label: 'Save', x: 1, y: 1, type: 'Button' }],
+      screen: { width: 402, height: 874 },
+    }),
+    /overlap and disagree/,
+  );
+});
+
 test('a stale ref offers the label it was numbered against, and says it did', async () => {
   const actions = await import('../src/actions.js');
   const { resolveRef, writeRefs } = await import('../src/refs.js');
