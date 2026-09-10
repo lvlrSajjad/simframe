@@ -2817,6 +2817,20 @@ test('a sweep measures where it is, and covers a page rather than guessing', asy
   assert.match(src, /if \(stalls >= 2\)/);
   assert.match(src, /if \(upStalls >= 2\)/);
 
+  // ...and the gesture that buys the *second* upward stall is a small nudge,
+  // not another section. A section-sized up-swipe is a ~600pt drag downward
+  // from the top of a web page, which is pull-to-refresh — it reloads, and a
+  // reload clears every field the sweep is about to fill. A peer called
+  // `sweep "all"` on a half-filled form "a live grenade" for precisely this,
+  // and the comment above the loop had been claiming the top was "left alone
+  // rather than pulled past" while the code pulled past it.
+  assert.match(src, /const TOP_CONFIRM_PT = 60/);
+  assert.match(src, /upStalls \? \{ spanPt: TOP_CONFIRM_PT \}/);
+  // The nudge must only ever apply to the confirming pass: a sweep whose every
+  // upward gesture moved 60pt would take twenty of them to cross one screen.
+  const upLoop = src.slice(src.indexOf('let upStalls = 0;'), src.indexOf('const seen = new Map();'));
+  assert.equal((upLoop.match(/spanPt/g) ?? []).length, 1, 'exactly one gesture is the gentle one');
+
   // A section is a viewport, not whatever a default swipe does. Measured:
   // `{"scroll":"down"}` moved 28, 42 and 58 points on an 874-point screen —
   // about five per cent per gesture, which is dozens of swipes for one page and

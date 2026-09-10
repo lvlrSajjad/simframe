@@ -1720,9 +1720,10 @@ export function scrollDelta(before, after) {
  *
  * **And it starts at the beginning**, because a sweep from an unknown position
  * covers an unknown amount — the same forty seconds began with section 1 being
- * the page footer. Going up is bounded and stops on the same no-new-elements
- * signal, which is also what protects against pull-to-refresh: the top is
- * reached and left alone rather than pulled past.
+ * the page footer. Going up is bounded and still wants two stalls, but the
+ * gesture that confirms the second one is a 60pt nudge rather than a full
+ * section: a section-sized up-swipe at the top of a web page is
+ * pull-to-refresh, and a reload clears the form the sweep exists to fill.
  */
 export const SWEEP_SECTIONS = 10;
 
@@ -1752,11 +1753,22 @@ async function sectionHere(deviceQuery, options) {
  */
 const SECTION_FRACTION = 0.7;
 
-async function scrollOne(deviceQuery, udid, dir, ctx) {
+/**
+ * How far the gesture that *confirms* the top travels.
+ *
+ * Small on purpose. iOS Safari's pull-to-refresh fires on overscroll distance,
+ * and a section-sized up-swipe drags roughly 600 points — at the top that is an
+ * enormous overscroll and it reloads the page. Sixty points still moves a page
+ * that has anywhere left to go, which is all the confirmation needs to do, and
+ * stays well under the refresh threshold when it does not.
+ */
+const TOP_CONFIRM_PT = 60;
+
+async function scrollOne(deviceQuery, udid, dir, ctx, { spanPt } = {}) {
   const geo = await ctx.screen();
   const h = geo?.pointHeight ?? 874;
   const x = Math.round((geo?.pointWidth ?? 402) / 2);
-  const span = Math.round(h * SECTION_FRACTION);
+  const span = spanPt ? Math.round(spanPt) : Math.round(h * SECTION_FRACTION);
   const top = Math.round(h * 0.12);
   const from = dir === 'up' ? { x, y: top } : { x, y: top + span };
   const to = dir === 'up' ? { x, y: top + span } : { x, y: top };
@@ -1777,21 +1789,34 @@ async function sweep(deviceQuery, udid, step, ctx) {
   const fill = step.fill && typeof step.fill === 'object' ? { ...step.fill } : null;
   const wanted = typeof step.sweep === 'string' && step.sweep !== 'all' ? step.sweep.trim() : null;
 
-  // To the beginning, unless told otherwise. Bounded, and it stops as soon as a
-  // screenful adds nothing — which is the top, and is where pull-to-refresh
-  // lives, so it is left alone rather than pulled past.
+  // To the beginning, unless told otherwise. Bounded, and it still wants two
+  // stalls before believing the top — a sticky element inside a page can make a
+  // single median read as zero, which is why one stall used to send it from the
+  // top straight to the end without reading the form between.
+  //
+  // What changed is the gesture that buys the second stall. It used to be
+  // another section-sized up-swipe, i.e. a ~600pt drag downward from the very
+  // top of a web page, which is pull-to-refresh: it reloads, and a reload
+  // clears every field the sweep is about to fill. A peer called `sweep "all"`
+  // on a half-filled form "a live grenade" for exactly this, and their run
+  // logged `after 4 up to reach the top`. The claim in the comment above this
+  // loop — that the top is "reached and left alone rather than pulled past" —
+  // was describing an intention the code did not implement.
+  //
+  // So the confirming gesture is a deliberate 60pt nudge instead. It still
+  // moves a page with anywhere left to go, which is the entire job, and it does
+  // not overscroll far enough to refresh when there is not.
   let upSteps = 0;
   let upStalls = 0;
   let atTop = step.from === 'here';
   if (!atTop) {
     let last = await sectionHere(deviceQuery, options);
     for (let i = 0; i < limit; i += 1) {
-      await scrollOne(deviceQuery, udid, 'up', ctx);
+      await scrollOne(deviceQuery, udid, 'up', ctx, upStalls ? { spanPt: TOP_CONFIRM_PT } : undefined);
       const now = await sectionHere(deviceQuery, options);
       upSteps += 1;
       // Measured, not inferred from labels: an `up` that moves nothing means we
-      // are at the top, and stopping there is also what keeps a web page from
-      // being pulled to refresh.
+      // are at the top.
       if (scrollDelta(last, now).moved === false) {
         upStalls += 1;
         if (upStalls >= 2) { atTop = true; break; }
