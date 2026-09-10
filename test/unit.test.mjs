@@ -802,7 +802,13 @@ test('a --json call reports failure as JSON, not as prose', async () => {
   // error got `simframe: ...` on stderr and a SyntaxError from JSON.parse. It
   // could not tell "the daemon lost the display" from "simframe is broken".
   const src = await fs.promises.readFile(new URL('../src/cli.js', import.meta.url), 'utf8');
-  const handler = src.slice(src.indexOf('main().catch('));
+  // Anchored on the last `.catch((err)` rather than on `main().catch(`, which
+  // was the exact expression until the CLI grew a step that closes a long-lived
+  // local helper before reporting. Pinning the call shape made this test fail
+  // for a change that did not touch what it is about.
+  const at = src.lastIndexOf('.catch((err)');
+  assert.ok(at > 0, 'there is a top-level error handler');
+  const handler = src.slice(at);
   assert.match(handler, /--json/, 'the top-level error handler must honour --json');
   assert.match(handler, /JSON\.stringify/);
   assert.match(handler, /ok: false/);
@@ -2588,6 +2594,98 @@ test('the graph hands over its vocabulary instead of counting it', async () => {
   });
   assert.match(hint, /chain the next steps/);
   assert.match(hint, /Known to work here: tap "Anaheim", tap "4 Casa"/);
+});
+
+test('a step can carry its own fallbacks, and only some failures earn one', async () => {
+  const actions = await import('../src/actions.js');
+  const metrics = await import('../src/metrics.js');
+
+  // Four situations the owner gave in a row turned out to be one problem: a
+  // location with no assets, a misclicked like, hunting a setting through an
+  // unfamiliar menu tree, a search returning nothing useful. "All done in maybe
+  // less than a second or a few seconds." simframe answered all four by
+  // throwing and abandoning the batch, because a step could only succeed or
+  // throw and `continueOnError` is all-or-nothing for a whole run.
+  assert.deepEqual(actions.alternativesFor({ action: 'tap', value: 'Save', or: ['Done', 'Confirm'] }), ['Done', 'Confirm']);
+  assert.deepEqual(actions.alternativesFor({ action: 'tap', value: 'Save', or: 'Done' }), ['Done']);
+  assert.deepEqual(actions.alternativesFor({ action: 'tap', value: 'Save' }), []);
+
+  // An alternative is simframe's own initiative, so the destructive vocabulary
+  // applies to it even though it does not apply to the step the caller wrote.
+  const gated = actions.permittedAlternatives({ action: 'tap', value: 'Done', or: ['Finish', 'Delete', 'Submit'] });
+  assert.deepEqual(gated.allowed, ['Finish']);
+  assert.deepEqual(gated.refused.map((r) => r.label), ['Delete', 'Submit']);
+
+  // Only a selector that did not resolve earns a retry. A step that resolved and
+  // then landed somewhere unexpected does not: retrying from the wrong screen is
+  // not a retry, and the verdict names the way back instead.
+  const notHere = metrics.tag(new Error('"Done" is not on this screen'), 'unknown_screen', {});
+  const ambiguous = metrics.tag(new Error('matches 2 things'), 'ambiguous_intent', {});
+  const unverified = metrics.tag(new Error('assert failed'), 'verification_failed', {});
+  assert.equal(actions.mayRetryAfter(notHere), true);
+  assert.equal(actions.mayRetryAfter(ambiguous), true);
+  assert.equal(actions.mayRetryAfter(unverified), false, 'a wrong turn is not a wrong label');
+  assert.equal(actions.mayRetryAfter(new Error('plain')), false);
+
+  // The alternative is the same step aimed elsewhere, with its own fallbacks
+  // stripped so a retry cannot recurse.
+  const aimed = actions.stepWithTarget({ action: 'tap', value: 'Save', or: ['Done'], durationMs: 50 }, 'Done');
+  assert.deepEqual(aimed, { action: 'tap', value: 'Done', durationMs: 50 });
+  assert.deepEqual(
+    actions.stepWithTarget({ action: 'type', into: 'Search', text: 'x', or: ['Find'] }, 'Find'),
+    { action: 'type', into: 'Find', text: 'x' },
+  );
+});
+
+test('the destructive vocabulary gates initiative, not requests', async () => {
+  const vocab = await import('../src/vocabulary.js');
+
+  // CLAUDE.md has required this list since the human-parity series was written,
+  // and several code comments already spoke of "the destructive vocabulary" as
+  // though it existed. It did not.
+  //
+  // What it gates is the distinction that matters: simframe's own initiative —
+  // a retry, an alternative selector, an exploration step, a reflex — never what
+  // the caller asked for. Backwards, it would refuse the thing a tester most
+  // needs to test.
+  assert.equal(vocab.mayActLocally('Delete Account').allowed, false);
+  assert.equal(vocab.mayActLocally('Sign out').allowed, false);
+  assert.equal(vocab.mayActLocally('Submit').allowed, false);
+  assert.equal(vocab.mayActLocally('Allow').allowed, false);
+  assert.equal(vocab.mayActLocally('Open in Safari').reason, 'leaves the app');
+  assert.equal(vocab.mayActLocally('Save').allowed, true);
+  assert.equal(vocab.mayActLocally('Done').allowed, true);
+  assert.equal(vocab.mayActLocally('').allowed, true);
+  assert.equal(vocab.mayActLocally(null).allowed, true);
+
+  // Whole words, not substrings. A business app's "Work Orders" tab contains the
+  // letters of "order", and a substring match would make its main navigation
+  // untouchable by anything local — so the bare noun is deliberately not on the
+  // list and only the verb phrase is.
+  assert.equal(vocab.mayActLocally('Work Orders').allowed, true);
+  assert.equal(vocab.mayActLocally('Order Details').allowed, true);
+  assert.equal(vocab.mayActLocally('Order History').allowed, true);
+  assert.equal(vocab.mayActLocally('Place order').allowed, false);
+
+  // Exceptions match the WHOLE label, not a phrase inside it. "Cancel" declines
+  // a dialog and must stay tappable or a local tier strands on every
+  // confirmation it meets; "Cancel order" is a different act, and a phrase match
+  // waved it through on the strength of its first word.
+  assert.equal(vocab.mayActLocally('Cancel').allowed, true);
+  assert.equal(vocab.mayActLocally('cancel').allowed, true);
+  assert.equal(vocab.mayActLocally('Cancel order').allowed, false);
+  assert.equal(vocab.mayActLocally('Clear search').allowed, true);
+  assert.equal(vocab.mayActLocally('Clear').allowed, false);
+
+  // The barrier must never be silently empty — an empty list makes every label
+  // safe, which is the wrong direction to fail in. Any locale, known or not,
+  // therefore yields a non-empty vocabulary, because English is the fallback and
+  // a missing English file throws rather than returning nothing.
+  for (const locale of ['en', 'fr', 'zz-nonsense', 'pt-BR']) {
+    assert.ok(vocab.load(locale)?.destructive?.words?.length, `${locale} resolves to a real vocabulary`);
+  }
+  assert.equal(vocab.mayActLocally('Delete', { locale: 'zz-nonsense' }).allowed, false);
+  assert.equal(vocab.actableLocally('Delete'), false);
 });
 
 test('a wrong turn is reported with the way back', async () => {

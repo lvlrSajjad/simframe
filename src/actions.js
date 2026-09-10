@@ -6,6 +6,9 @@ import * as api from './index.js';
 import * as graph from './graph.js';
 import * as input from './input.js';
 import * as intent from './intent.js';
+import * as vocabulary from './vocabulary.js';
+import * as view from './view.js';
+import * as planner from './planner.js';
 import * as metrics from './metrics.js';
 import * as screenmap from './screenmap.js';
 import { launchApp, openUrl, setPermission, terminateApp } from './platform/index.js';
@@ -265,7 +268,41 @@ export async function runScript(
         }),
         observedMs: null,
       };
-      let detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus });
+      let detail;
+      // A selector that did not resolve gets the step's own alternatives before
+      // the batch is abandoned. Anything else propagates: retrying from a screen
+      // we did not expect to be on is not a retry, it is a second guess.
+      try {
+        detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus });
+      } catch (err) {
+        const { allowed, refused } = permittedAlternatives(step);
+        if (!allowed.length || !mayRetryAfter(err)) {
+          if (refused.length) {
+            err.message += ` (${refused.length} alternative(s) refused locally: `
+              + `${refused.map((r) => `"${r.label}" — ${r.reason}`).join('; ')})`;
+          }
+          throw err;
+        }
+        const tried = [step.value ?? step.target ?? step.label ?? step.into];
+        let last = err;
+        for (const label of allowed) {
+          try {
+            detail = await runStep(deviceQuery, udid, stepWithTarget(step, label), { screen, options, frames, focus });
+            detail += ` [after ${tried.map((t) => JSON.stringify(String(t))).join(', ')} did not resolve]`;
+            last = null;
+            break;
+          } catch (again) {
+            tried.push(label);
+            last = again;
+            if (!mayRetryAfter(again)) break;
+          }
+        }
+        if (last) {
+          last.message = `none of ${tried.length} selector(s) resolved `
+            + `(${tried.map((t) => JSON.stringify(String(t))).join(', ')}). Last: ${last.message}`;
+          throw last;
+        }
+      }
       // How long this screen must hold still before it counts as settled.
       //
       // 500 ms was a constant paid by every step of every flow, and it is the
@@ -703,6 +740,82 @@ export function readbackNote(sent, seen) {
 }
 
 /**
+ * Try a step's alternatives before giving up on it.
+ *
+ * Four situations the owner gave, one after another, turned out to be one
+ * problem: a location with no assets, a misclicked like, hunting a setting
+ * through an unfamiliar menu tree, a search that returns nothing useful. *"All
+ * done in maybe less than a second or a few seconds."* *"When I don't find what
+ * I need somewhere I don't fall into an existential crisis. I look for it
+ * somewhere else."*
+ *
+ * simframe answered all four the same way: the step threw, the batch was
+ * abandoned, and the reasoner was asked. A step could only succeed or throw, and
+ * throwing costs a round trip — `continueOnError` is all-or-nothing for a whole
+ * run, which is why nobody used it.
+ *
+ * So a step may now carry its own fallbacks:
+ *
+ *     {"tap": "Save", "or": ["Done", "Confirm"]}
+ *
+ * They are tried locally, in order, and only an exhausted list reaches the
+ * model. This lengthens the *batch* instead of multiplying the round trips,
+ * which is the whole objective.
+ *
+ * **Which failures are eligible, and why the list is short.** Only a selector
+ * that did not resolve — "that label is not here, try this one". A step that
+ * resolved and then went somewhere unexpected is *not* eligible: retrying from
+ * the wrong screen is nonsense, and the verdict now names the way back instead.
+ * Getting this wrong turns a retry primitive into a way to hammer an app until
+ * something gives.
+ *
+ * And an alternative is simframe's own initiative, so the destructive
+ * vocabulary applies to it even though it does not apply to the step the caller
+ * wrote. `{"tap": "DELETE"}` is a request and is honoured; substituting
+ * "DELETE" for a "Done" that did not resolve is not.
+ */
+const RESOLVE_FAILURES = new Set(['unknown_screen', 'ambiguous_intent']);
+
+export function alternativesFor(step) {
+  const raw = step?.or ?? step?.orElse ?? step?.alternatives;
+  if (raw == null) return [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.map((v) => (typeof v === 'string' ? v : v?.value ?? v?.target ?? v?.label)).filter(Boolean);
+}
+
+export function mayRetryAfter(err) {
+  const tagged = metrics.escalationOf(err);
+  return Boolean(tagged && RESOLVE_FAILURES.has(tagged.reason));
+}
+
+/**
+ * Which alternatives a local retry is permitted to try, and what was refused.
+ */
+export function permittedAlternatives(step, { locale } = {}) {
+  const allowed = [];
+  const refused = [];
+  for (const label of alternativesFor(step)) {
+    const verdict = vocabulary.mayActLocally(label, { locale });
+    if (verdict.allowed) allowed.push(label);
+    else refused.push({ label, reason: verdict.reason });
+  }
+  return { allowed, refused };
+}
+
+/** The step to run for an alternative: the same step, aimed somewhere else. */
+export function stepWithTarget(step, label) {
+  const next = { ...step };
+  delete next.or;
+  delete next.orElse;
+  delete next.alternatives;
+  for (const key of ['value', 'target', 'label', 'into']) {
+    if (key in step) { next[key] = label; return next; }
+  }
+  next.value = label;
+  return next;
+}
+
+/**
  * Say the way back, in the same breath as saying we went the wrong way.
  *
  * The owner's generalisation of the recovery problem, and it is the right one:
@@ -863,6 +976,211 @@ async function focusField(deviceQuery, udid, step, ctx) {
   };
 }
 
+/**
+ * Look for something that is not on this screen, the way a person does.
+ *
+ * The owner's description, and it is the behaviour this implements: *"I am in a
+ * new app's settings, I look for something like change username. I go to each
+ * menu, check the items, nothing like that? Next menu, until I find it."* And:
+ * *"when I don't find what I need somewhere, I don't fall into an existential
+ * crisis. I look for it somewhere else."*
+ *
+ * Today a miss is an existential crisis — nothing resolves, the step throws, the
+ * batch dies, and the reasoner is asked. Twelve of 173 escalations, each one
+ * stopping a batch, so a five-menu hunt costs ten or more round trips for
+ * something a person does in seconds.
+ *
+ * `seek` opens containers, checks, and comes back, inside a hard budget. It
+ * **finds and does not act**: it leaves you on the screen where the target
+ * resolves and says so, and the caller taps it as the next step of the same
+ * batch. That keeps `seek` non-destructive by construction, because the only
+ * things it ever taps are containers the vocabulary allowed.
+ *
+ * Ordering is the pluggable part, and the only part a local model touches. With
+ * `SIMFRAME_PLANNER` unset the order is mechanical — the screen's own reading
+ * order — and every candidate gets tried anyway; the model only changes which
+ * comes first. That is why it is safe to try and why it is A/B-testable: run the
+ * same flow with the flag off and on and compare steps to target.
+ */
+export const SEEK_BUDGET = 6;
+
+/** How many candidates a ranker is asked about, and how long a door gets to open. */
+export const SEEK_RANK_CANDIDATES = 12;
+const SEEK_SETTLE_MS = 1200;
+
+async function candidatesToOpen(deviceQuery, udid, { visited, options }) {
+  const map = await view.screenMap(deviceQuery, { options, refresh: true });
+  const here = map.identity?.hash ?? null;
+  const labels = [];
+  for (const r of map.rows ?? []) {
+    // Content only. A nav-bar title is not a door — the first version of this
+    // opened "Settings", which is the name of the screen it was already on.
+    if ((r.region ?? 'content') !== 'content') continue;
+    if (!r.label || !view.actsInteractive(r) || r.enabled === false) continue;
+    if (visited.has(String(r.label))) continue;
+    if (!vocabulary.actableLocally(r.label)) continue;
+    labels.push(String(r.label));
+  }
+  return { here, map, labels: [...new Set(labels)] };
+}
+
+/**
+ * Get back to the screen above, by whatever means this app offers.
+ *
+ * This is where `seek` first stranded itself, on a finding already in
+ * DEFERRED: the nav-bar back chevron is invisible to simframe, so
+ * `locate("back")` throws and one door was all it ever opened. The left-edge
+ * gesture needs no label and works on any pushed screen, so it is the fallback
+ * rather than the exception — and the return is confirmed, because a swipe that
+ * did nothing would make the next candidate a tap on a screen we did not mean
+ * to be on.
+ */
+async function goBack(deviceQuery, udid, step, ctx, { from, to }) {
+  const byLabel = await (async () => {
+    try {
+      const route = from && to ? graph.route(udid, from, to, { maxDepth: 1 }) : null;
+      const st = route?.length === 1 ? route[0].step ?? {} : {};
+      const label = st.value ?? st.target ?? st.label;
+      return label && vocabulary.actableLocally(label) ? String(label) : 'back';
+    } catch {
+      return 'back';
+    }
+  })();
+  let acted = false;
+  try {
+    const b = await api.locate(deviceQuery, byLabel, { options: ctx.options });
+    await input.tapPoint(udid, b.target.x, b.target.y);
+    acted = true;
+  } catch { /* no visible back control — use the gesture */ }
+  if (!acted) {
+    try {
+      const geo = await ctx.screen();
+      const y = Math.round((geo.pointHeight ?? 874) / 2);
+      await input.swipe(udid, { x: 2, y }, { x: Math.round((geo.pointWidth ?? 402) * 0.6), y }, { durationMs: 250 });
+      acted = true;
+    } catch {
+      return false;
+    }
+  }
+  await api.waitFor(deviceQuery, { mode: 'settle', stableMs: step.stableMs ?? 400, timeoutMs: step.timeoutMs ?? SEEK_SETTLE_MS, options: ctx.options });
+  try {
+    const now = await api.screenIdentity(deviceQuery, { options: ctx.options, confirmNovel: false });
+    return Boolean(now.hash) && now.hash !== from;
+  } catch {
+    return false;
+  }
+}
+
+async function seek(deviceQuery, udid, step, ctx) {
+  const goal = step.seek ?? step.value ?? step.target;
+  if (!goal) throw new Error('usage: {"seek": "what you are looking for"}');
+  const budget = Math.max(1, Math.min(step.budget ?? SEEK_BUDGET, 12));
+  const options = ctx.options;
+
+  const found = async () => {
+    try {
+      const r = await api.locate(deviceQuery, String(goal), { options });
+      return r?.target ? r : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const already = await found();
+  if (already) return `"${goal}" is already here: "${already.target.label}" at ${already.target.x},${already.target.y}`;
+
+  // Keyed on the label alone, not label-per-screen. Keying it per screen let it
+  // cycle — General, About, General, Screen Capture, General, About — because a
+  // list's identity is not perfectly stable across a return to it, so the same
+  // door read as unvisited. Within one seek, one attempt per label is enough.
+  const visited = new Set();
+  const opened = [];
+  const trail = [];
+  let spent = 0;
+
+  // Depth-first, because that is what a person does: Accessibility, then
+  // Display & Text Size, then Larger Text. The first version always came back
+  // after one probe and could never reach anything two levels down, which is
+  // where most settings live.
+  while (spent < budget) {
+    const { here, labels } = await candidatesToOpen(deviceQuery, udid, { visited, options });
+    if (!labels.length) {
+      // Nothing new here. Back out to the screen above and try its next door.
+      if (!trail.length) break;
+      const to = trail.pop();
+      if (!await goBack(deviceQuery, udid, step, ctx, { from: here, to })) break;
+      continue;
+    }
+    // Only the first handful go to the ranker. A forty-label prompt costs more
+    // to answer and the budget will never reach the tail anyway; and the model
+    // is asked about candidates, not given the screen.
+    const asked = labels.slice(0, SEEK_RANK_CANDIDATES);
+    const ranked = await planner.rank(String(goal), asked);
+    const ordered = ranked ? [...ranked, ...labels.slice(SEEK_RANK_CANDIDATES)] : labels;
+    const pick = ordered[0];
+    visited.add(pick);
+    spent += 1;
+
+    try {
+      const door = await api.locate(deviceQuery, pick, { options });
+      await input.tapPoint(udid, door.target.x, door.target.y);
+    } catch {
+      continue; // a label that will not resolve is not a door
+    }
+    await api.waitFor(deviceQuery, { mode: 'settle', stableMs: step.stableMs ?? 400, timeoutMs: step.timeoutMs ?? SEEK_SETTLE_MS, options });
+
+    let landed = null;
+    try {
+      landed = (await api.screenIdentity(deviceQuery, { options, confirmNovel: false })).hash;
+    } catch { /* unknown where we are; the found() check still decides */ }
+    // A door that led nowhere is not a door, and descending would corrupt the
+    // trail with a screen we never left.
+    if (landed && landed !== here) trail.push(here);
+
+    const hit = await found();
+    if (hit) {
+      return `found "${goal}" as "${hit.target.label}" at ${hit.target.x},${hit.target.y}`
+        + ` after opening ${opened.concat(pick).map((l) => JSON.stringify(l)).join(' -> ')}`
+        + ` (${spent} of ${budget} step(s)${planner.requested() ? ', planner-ordered' : ''})`;
+    }
+    opened.push(pick);
+  }
+
+  // Say where we got to and what is there, not just that we failed.
+  //
+  // Measured on the first real run of this: with the ranker on, `seek "make the
+  // text bigger"` went Accessibility -> Display & Text Size in two steps — the
+  // right place — and then reported "not found", because the control is called
+  // "Larger Text" and `locate` matches labels lexically. The navigation was
+  // right and the arrival was unreportable, so the caller learned nothing from a
+  // 20-second search.
+  //
+  // The whole point of a local tier is to make ONE round trip sufficient. So the
+  // hand-back carries the landing: where we are, and what is on it.
+  const landing = await (async () => {
+    try {
+      const map = await view.screenMap(deviceQuery, { options, refresh: false });
+      const here = (map.rows ?? [])
+        .filter((r) => (r.region ?? 'content') === 'content' && r.label)
+        .slice(0, 12)
+        .map((r) => JSON.stringify(String(r.label).slice(0, 32)));
+      return here.length ? ` Now on ${map.name ? `"${map.name}"` : (map.identity?.hash ?? 'an unnamed screen').slice(0, 8)}, which offers: ${here.join(', ')}.` : '';
+    } catch {
+      return '';
+    }
+  })();
+  throw metrics.tag(
+    new Error(
+      `"${goal}" did not resolve by label within ${spent} of ${budget} steps.`
+      + (opened.length ? ` Opened: ${opened.map((l) => JSON.stringify(l)).join(' -> ')}.` : ' Nothing here looked like a container.')
+      + landing
+      + ' If one of those is what you meant, tap it by name; otherwise say where to look or raise the budget.',
+    ),
+    'no_plan',
+    { intent: String(goal), tried: opened },
+  );
+}
+
 async function runStep(deviceQuery, udid, step, ctx) {
   switch (step.action) {
     case 'tap': {
@@ -991,6 +1309,8 @@ async function runStep(deviceQuery, udid, step, ctx) {
       const r = await intent.chooseAny(udid, { prefer: step.value ?? step.prefer, geo });
       return `chose "${r.label}" of ${r.optionCount} options`;
     }
+    case 'seek':
+      return seek(deviceQuery, udid, step, ctx);
     case 'settle': {
       const w = await api.waitFor(deviceQuery, {
         mode: step.mode ?? 'stable',

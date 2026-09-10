@@ -3149,3 +3149,63 @@ One caveat worth keeping: N is 6, hand-written, and five of them are Apple's own
 Settings, which is the most conventional UI in existence. The offline corpus
 Phase 15 describes — 129 stored screens, 3,915 labelled targets, ground truth
 free from the graph — is what would make this a result rather than a signal.
+
+---
+
+## Exploration, with and without the local ranker — the first A/B
+
+2026-09-10. Same device, same app (Settings), same step, one variable: the
+`SIMFRAME_PLANNER` flag. `{"seek": "make the text bigger", "budget": 8}`.
+
+The goal deliberately matches **no label on any screen** — the control is called
+"Larger Text" — which is the case a string matcher cannot do at all and the
+reason the ranker exists.
+
+| | doors opened, in order | outcome |
+|---|---|---|
+| **mechanical order** | General → About → "iOS Version, 26.5" → "iOS 26.5 (23F77)" → Screen Capture → Full-Screen Previews → Automatic Visual Look Up → AutoFill & Passwords | never within two levels of it, 28.5 s |
+| **planner: apple** | **Accessibility → Display & Text Size** → Increase Contrast → Reduce Transparency → Bold Text → … | right region in **two** steps, 20–23 s |
+
+Mechanical order is the screen's own reading order, so it walks into About and
+then into version strings, which are not doors at all. The ranker went to
+Accessibility first and Display & Text Size second — which is exactly where the
+control lives.
+
+**And it still reported "not found", which is the more useful half of the
+result.** The navigation was right and the *arrival* was unreportable: `locate`
+matches labels lexically, and "make the text bigger" does not resemble "Larger
+Text" any more than it resembles "Account". A 20-second search that ends in
+"not found" teaches the caller nothing.
+
+So the hand-back now carries the landing, and that is the compression idea made
+concrete:
+
+```
+FAIL [0] seek: "make the text bigger" did not resolve by label within 8 of 8 steps.
+  Opened: "Accessibility" -> "Display & Text Size" -> …
+  Now on "display & text size", which offers: "Bold Text", "Larger Text, Off",
+  "Show Borders", "On/Off Labels", …
+  If one of those is what you meant, tap it by name; otherwise say where to look.
+```
+
+`"Larger Text, Off"` is the answer, and it is in the list. One round trip is now
+sufficient where six were spent rediscovering the same thing in the field
+reports.
+
+**Costs.** The ranker is 766–1233 ms for four to twelve candidates, ~880 ms for
+the first call in a process (model load), and it is asked about at most twelve
+labels per screen. Off by default; `doctor` reports `local planner: none` unless
+`SIMFRAME_PLANNER=apple`, and CI runs with it off.
+
+Two bugs found building the bridge, both worth recording because both looked
+like the model being slow and neither was. A timed-out request left its waiter in
+the queue, so every later answer went to the wrong asker and the run never
+finished. And unreferencing the helper's stdout unreferenced the pipe every
+request waits on, so the process exited silently mid-await and printed nothing at
+all. The helper is closed explicitly by the CLI now.
+
+**Still open from this run.** The ranker found the right screen and then the
+search kept opening siblings, because nothing asked "have we arrived?" in terms
+the goal would satisfy. Asking the model to decide arrival would risk a wrong
+tap, so reporting the landing is the safe answer for now — but a cheap
+`{"seek": …}` that stops when it *has* arrived is the obvious next measurement.

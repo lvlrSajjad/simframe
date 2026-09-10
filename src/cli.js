@@ -1195,6 +1195,21 @@ async function doctor({ json = false, strict = false, device } = {}) {
     add('on-device OCR', 'warn', err.message, { key: 'ocr.available', value: false });
   }
 
+  // The local planner tier. `none` is the normal answer and not a fault: it is
+  // off unless SIMFRAME_PLANNER asks for it, and it only ever reorders
+  // candidates that exploration was going to try anyway.
+  try {
+    const planner = await import('./planner.js');
+    const st = await planner.status();
+    add('local planner', 'ok', `${st.planner} — ${st.detail}`, {
+      key: 'planner.backend',
+      value: st.planner,
+    });
+    planner.close();
+  } catch (err) {
+    add('local planner', 'ok', `none — ${err.message}`, { key: 'planner.backend', value: 'none' });
+  }
+
   try {
     let booted = await bootedDevices();
     // Respect --device. Without this, doctor reports on every booted simulator,
@@ -1421,7 +1436,20 @@ async function doctor({ json = false, strict = false, device } = {}) {
   process.exitCode = failed.length || (strict && warned.length) ? 1 : 0;
 }
 
-main().catch((err) => {
+// A long-lived local helper must not decide when the CLI exits. It is closed
+// after every command, whether or not one was ever started — `close()` on an
+// unopened planner is a no-op, and leaving it open made a finished flow hang.
+const closeHelpers = async () => {
+  try {
+    const planner = await import('./planner.js');
+    planner.close();
+  } catch { /* nothing to close */ }
+};
+
+main().then(closeHelpers, async (err) => {
+  await closeHelpers();
+  throw err;
+}).catch((err) => {
   // A caller that asked for JSON gets JSON, failures included. Printing prose
   // here handed `JSON.parse` a SyntaxError instead of a reason, so a script
   // could not tell "the daemon lost the display" from "simframe is broken" —

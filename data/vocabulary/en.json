@@ -1,0 +1,81 @@
+{
+  "locale": "en",
+  "note": "Data, not code. CLAUDE.md: reflexes and the destructive vocabulary live in a locale-keyed file so adding a language is not a code change. Referenced by the verify barrier, per-step alternatives, exploration and (when built) reflexes.",
+  "destructive": {
+    "note": "Matched against a control's label, case-insensitively, on word boundaries. Nothing local may act on one of these: no retry, no alternative, no exploration, no reflex, no speculation. A model call is cheaper than a wrong tap.",
+    "words": [
+      "delete",
+      "remove",
+      "erase",
+      "clear",
+      "wipe",
+      "destroy",
+      "discard",
+      "pay",
+      "purchase",
+      "buy",
+      "subscribe",
+      "checkout",
+      "confirm payment",
+      "send",
+      "submit",
+      "post",
+      "publish",
+      "share",
+      "invite",
+      "sign out",
+      "log out",
+      "logout",
+      "deactivate",
+      "deregister",
+      "reset",
+      "restore",
+      "factory",
+      "unpair",
+      "forget",
+      "block",
+      "report",
+      "ban",
+      "unfriend",
+      "unfollow",
+      "cancel subscription",
+      "close account",
+      "delete account",
+      "accept",
+      "agree",
+      "allow",
+      "grant",
+      "trust",
+      "call",
+      "dial",
+      "transfer",
+      "withdraw",
+      "deposit",
+      "place order",
+      "confirm order",
+      "submit order",
+      "cancel order"
+    ],
+    "notWords": {
+      "note": "Labels that are NOT destructive despite containing a destructive word. Matched against the WHOLE label, not as a phrase inside it: a bare 'Cancel' declines a dialog and must stay tappable, while 'Cancel order' is a different act and falls through to the list above. The bare noun 'order' is deliberately absent from that list for the same reason - 'Work Orders' and 'Order Details' are navigation, and only the verb phrase places one.",
+      "words": [
+        "cancel",
+        "clear all filters",
+        "clear search",
+        "clear filter"
+      ]
+    }
+  },
+  "leavesTheApp": {
+    "note": "Nothing local may follow one of these either: it takes the run somewhere simframe was not asked to drive.",
+    "words": [
+      "open in safari",
+      "view in browser",
+      "app store",
+      "settings app",
+      "privacy policy",
+      "terms of service",
+      "contact support"
+    ]
+  }
+}
