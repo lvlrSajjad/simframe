@@ -177,6 +177,45 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
 
+### The "read approximately, like a human" theory — right layer, wrong sensor
+
+The owner's theory, 2026-09-10: *"about your OCR — what you probably do is 100%
+matching, which is probably a bit slower than making it, idk, 70% accurate.
+Because we humans don't accurately read stuff, which makes us prone to mistakes,
+but it also makes us faster."*
+
+The principle is right and it is already applied — just not where the theory
+aimed, and the measurement says the aim matters.
+
+**What OCR actually costs, warm, on this machine:** an accessibility-only read
+is **85 ms**, a full read with OCR is **142 ms**. So all of Vision costs about
+**57 ms**. The waits it sits next to were costing **1,900–2,000 ms each**. Making
+OCR twice as fast would save ~28 ms of a step that was taking seconds; making
+one unnecessary wait go away saved two full seconds. That is the whole reason
+the field time went where it went.
+
+**Where the principle is already in force**, in two places:
+
+- **Skipping the expensive sensor rather than degrading it.** The accessibility
+  tree is authoritative when present, so the field readback and the focus check
+  ask for `useOcr: false` and pay 85 ms instead of 142. "Approximate is enough"
+  becomes "do not run it at all", which is strictly better than running a worse
+  version.
+- **Approximate *matching*, not approximate reading.** `src/matching.js` already
+  does prefixes, synonyms, verb forms, typo distance and a confusable fold for
+  Cyrillic С versus Latin C. That is the human property the theory describes —
+  imprecise recognition tolerated by a forgiving match — and matching is the
+  right layer for it, because a wrong *character* is recoverable while a wrong
+  *tap* is not.
+
+47. **Still worth measuring: `VNRequestTextRecognitionLevel.fast`.** CLAUDE.md
+    fixes `.accurate` with language correction off, and that was chosen without
+    a comparison. The experiment is cheap and now has a gate that can score it:
+    run the perception harness (16 screens, 73 expectations) against both levels
+    and report accuracy lost against milliseconds gained. Expected payoff is
+    ~30 ms per read, which is why it is filed rather than done — but it is filed
+    with the method, so it is an afternoon rather than an argument.
+
 ### The unifying finding: there is no cheap retry — 2026-09-10
 
 Four examples from the owner, given one after another, and they are one problem:
