@@ -209,6 +209,137 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
 
+### Answers from outside — the research brief, 2026-09-11
+
+`docs/research/05-private-api-and-uncertainty.md` answers the seven questions we
+could not answer ourselves. Its confidence tiers are (a) verified with a source,
+(b) inferred, (c) nobody has solved this — and several items below are marked
+**verify-against-binary**, which is this project's standing discipline: a
+signature is not confirmed until the binary states its own prototype.
+
+**Immediately actionable, cheap, and none of it needs a decision.**
+
+89. **`custom_actions` is already in the tree and we have never asked for it.**
+   idb's `describe-all` emits a `custom_actions` array per element — e.g.
+   `["Edit mode","Today"]` on a calendar icon — and `AXPTranslatorRequest`
+   carries an `action` field. We request eight attributes and none of them is
+   this. Called "the single most under-used lever" in our request, and it is the
+   candidate answer to item 61: an action performed on an element is not a
+   keystroke and cannot be corrupted by a keyboard layout.
+
+90. **Clearing a field: ⌘A then Delete over HID.** Left-GUI usage `0xE3` plus
+   `a` usage `0x04`, release, then Delete usage `0x2A`. Layout-independent,
+   because the modifier and Delete are key *positions*, and `a` in ⌘A is a
+   position too. We already have the key path — it shipped today for Return
+   (usage `0x28`, which the research confirms) — so `clear`/`replace` is now a
+   small step rather than an open question. **No tool has a clear primitive**;
+   XCUITest, Appium and idb all lack one, so this is the standard workaround
+   rather than a hack of ours.
+
+91. **Gate every text insertion on a confirmed focus read**, and stop
+   investigating paste-versus-type. Two verified causes, and neither is a
+   primitive defect. iOS 16's **paste-consent prompt** can swallow a first
+   programmatic paste (Apple confirmed the early-iOS-16 over-firing was
+   unintended; there is now a per-app "Paste from Other Apps" setting). And a
+   keystroke delivered before a web view commits focus is **dropped** — WDA
+   copes by checking `hasKeyboardFocus` before typing. That is the whole
+   explanation of "one primitive reports success into an empty field and the
+   other then works", it is a focus race, it will never reproduce
+   deterministically, and **chasing a paste-vs-type bug is the wrong
+   investigation**. We already fetch `AXFocused`; we just do not wait on it.
+
+92. **`AXTraits` exist and we read none of them.** From `AXRuntime`:
+   `AXTraitScrollable` (bit 33), `AXTraitCausesPageTurn` (14),
+   `AXTraitAdjustable` (12), `AXTraitAlert` (56), `AXTraitTouchContainer` (45),
+   `AXTraitSupportsZoom` (46), `AXTraitContainedByTable`/`List` (43/44). Two
+   uses land immediately: `AXTraitScrollable` tells us *which* element is the
+   scroller instead of inferring it, and `AXTraitAlert` is the **modality hint
+   we lack for item 85** — when a smaller frame sits inside a larger element
+   carrying `AXTraitAlert`, prefer that subtree and suppress the rest, rather
+   than only reporting that two layers disagree.
+
+**Answers that close questions rather than opening work.**
+
+93. **There is no scroll offset, and we were asking the wrong question.** No
+   AXP or CoreSimulator attribute exposes `contentOffset` or `contentSize`;
+   XCUITest cannot read them either; and *no public tool* answers "am I at the
+   top" from a read — WDA, Appium, idb and XCUITest all answer it behaviourally,
+   with the same heuristic family we already tried. Since only rendered content
+   is published, absolute position is **not observable — only change is.** So
+   our current best (content-only frame deltas, two consecutive stalls) is the
+   state of the art, with one upgrade worth taking: measure a **stable content
+   anchor's** frame delta rather than a label-set novelty, and compute the *next*
+   step size from measured travel. That closes the loop on item 87's sibling
+   defect — sections that do not overlap.
+
+94. **The unpredictable swipe is UIScrollView inertia, and the cure is a
+   drag.** Pan velocity comes from the final touch samples before lift, so our
+   612pt/260ms gesture measuring 28/40/482/529/0pt is a fling on some runs and a
+   near-static lift on others. Recipe: dwell ~50-80ms at the start, many small
+   equal steps (idb uses 10pt) with monotonic realistically-spaced timestamps,
+   and — the highest-value part — **dwell 80-120ms at the end before lift** so
+   the last velocity samples are zero. Total ~600-800ms for ~600pt. Apple's own
+   `thenHoldForDuration` has a documented no-effect bug on a perfectly still
+   finger, and Apple DTS concedes coordinate drags carry "a consistent error of
+   several pixels". **Nobody gets deterministic travel**; the answer is
+   closed-loop measurement, not open-loop tuning.
+
+95. **Hosted-runner simulator flakiness is universal and documented**, with a
+   list of `actions/runner-images` issues to match: #7971 (simulators failing to
+   boot or use openurl), #11874, #9511, #8434 (a new image ~2x slower), #11845,
+   #12948. Teams running XCUITest at scale **self-host or use a device cloud**.
+   So the bench job stays non-blocking on hosted runners, which is where it
+   already is. **The one change worth making landed immediately**: `simctl boot`
+   returns before the device is usable and nothing waited on it, so
+   `bootstatus -b` now blocks until the boot completes — named in #11874 as the
+   fix for exactly this, and the best available explanation for three different
+   failures in four runs of our own integration job.
+
+96. **Our supervisor A/B is inside the noise band until replicated**, and this
+   is the correction worth taking on the chin. Single-run agent measurements
+   vary by 2.2-6.0 percentage points depending on which run you pick, standard
+   deviations exceed 1.5pp even at temperature 0, one study found up to 15%
+   accuracy variation across identical reruns at temperature 0, and 15-22% of
+   tasks are flaky across reruns. **So "25 calls versus 45" is one run of a
+   two-armed test of a two-factor system and cannot carry the weight anyone has
+   put on it, including me.** The design: a full 2x2 factorial
+   {neither, briefing-only, model-only, both} run **within-subject** with a
+   **Williams design** to balance order and first-order carryover, the
+   transition graph **reset between conditions** (or cold/warm treated as an
+   explicit blocking factor), each cell **repeated** with mean ± SD reported,
+   primary response **model calls** analysed as a paired within-flow difference,
+   completion as a gate rather than a metric, and recovery-call fraction as the
+   diagnostic that actually separates "the briefing prevented a failure" from
+   "the model recovered one".
+
+97. **The literature for our recurring failure exists and is mature**, and the
+   weight-free subset is adoptable under the no-shipped-weights non-goal.
+   **Selective prediction / classification with a reject option** is the formal
+   name for "a sensor should refuse rather than answer". **Conformal
+   abstention** gives distribution-free guarantees where the error budget α
+   *reads directly as our allowed false-warning rate* — which operationalises
+   the rule we keep rediscovering, that a warning which is usually wrong is
+   worse than no warning: set α to the false-warning budget and the threshold
+   follows with a coverage guarantee, calibrated by a stored quantile rather
+   than a learned model. **Dempster-Shafer** represents *conflict* and
+   *ignorance* as distinct from *low probability*, which is exactly our
+   sheet-versus-background disagreement, and lets "I could not tell" be carried
+   as first-class mass instead of collapsing into a confident wrong answer.
+   **Cascades** (FrugalGPT, RouteLLM, early-abstention) are the literature for
+   deciding locally when to escalate — with the caveat that most of it assumes a
+   learned router, which would be shipped weights. And from the **UTG**
+   literature (DroidBot, Stoat, Humanoid, AppAgent): the recurring hard problem
+   is **state-abstraction quality**, and the transferable idea is to abstract a
+   screen by its **element-identity set rather than a pixel hash** — which is
+   precisely what would stop a footer with live content thrashing our
+   fingerprint.
+
+**Ordering.** 89-92 are cheap and independent; 91 changes what we investigate
+rather than adding work. 93 and 94 together are the sweep fix and should be done
+as one piece, closed-loop. 96 gates any further claim about the supervisor. 97 is
+a reading list that could reshape the verdict layer and is the least urgent and
+most likely to matter in a year.
+
 ### From a second peer on the same RN app — three confidently-wrong headers, 2026-09-11
 
 Their own framing is the useful part: *"the three bugs above are all in the

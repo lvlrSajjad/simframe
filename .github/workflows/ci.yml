@@ -178,6 +178,24 @@ jobs:
           ')
           echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
           xcrun simctl boot "$DEVICE"
+          # And WAIT for it. `simctl boot` returns before the device is usable,
+          # and nothing here waited — so every layer downstream was racing the
+          # boot. That one omission is the best available explanation for three
+          # different failures in four runs on this job: `ax.driver = null`
+          # because AXPTranslation had not attached yet, `simctl launch` taking
+          # 47-55s and failing three times in a row, and a HOME press that never
+          # settled. Different symptoms, one cause.
+          #
+          # `bootstatus -b` boots if needed and blocks until fully booted. It is
+          # named in actions/runner-images#11874 as the workaround that fixed
+          # exactly this, and external research (docs/research/) calls it the
+          # highest-value single change available for hosted-runner simulator
+          # reliability. Timeboxed, because a boot that never completes should
+          # fail here with a clear reason rather than as a puzzle further down.
+          timeout 300 xcrun simctl bootstatus "$DEVICE" -b || {
+            echo "::error::the simulator did not report a completed boot within 300s"
+            exit 1
+          }
           xcrun simctl bootstatus "$DEVICE" -b
 
       - name: Start capture
@@ -405,6 +423,24 @@ jobs:
           ')
           echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
           xcrun simctl boot "$DEVICE"
+          # And WAIT for it. `simctl boot` returns before the device is usable,
+          # and nothing here waited — so every layer downstream was racing the
+          # boot. That one omission is the best available explanation for three
+          # different failures in four runs on this job: `ax.driver = null`
+          # because AXPTranslation had not attached yet, `simctl launch` taking
+          # 47-55s and failing three times in a row, and a HOME press that never
+          # settled. Different symptoms, one cause.
+          #
+          # `bootstatus -b` boots if needed and blocks until fully booted. It is
+          # named in actions/runner-images#11874 as the workaround that fixed
+          # exactly this, and external research (docs/research/) calls it the
+          # highest-value single change available for hosted-runner simulator
+          # reliability. Timeboxed, because a boot that never completes should
+          # fail here with a clear reason rather than as a puzzle further down.
+          timeout 300 xcrun simctl bootstatus "$DEVICE" -b || {
+            echo "::error::the simulator did not report a completed boot within 300s"
+            exit 1
+          }
           xcrun simctl bootstatus "$DEVICE" -b
 
       - name: Start capture
