@@ -537,9 +537,31 @@ export async function getFrame(deviceQuery, { detail = 'normal', options } = {})
   let scaledOnRead = false;
   if (maxDim === 0) {
     file = state.fullFile;
-  } else if (maxDim > nativeMax + 8 && fs.existsSync(state.fullFile)) {
+  } else if (maxDim > nativeMax + 8) {
+    // Asking for more detail than the ring frame holds, so it has to come from
+    // a full-resolution frame. The `fs.existsSync(state.fullFile)` this used to
+    // require is exactly the condition that fails routinely — retention thins
+    // full frames aggressively, and `state.fullFile` names one that is often
+    // already gone. When it did, this fell straight through to `latest.png` and
+    // returned a 322x700 image while still calling itself detail "high".
+    //
+    // That was not a small inaccuracy. Every single `sim_look` header in a
+    // two-agent field round read `322x700` on a 402x874pt device, so "high
+    // (1024px, readable small text)" was interpolating a sub-1x source the
+    // whole time. `fullFrameFor` has always known how to find or take a full
+    // frame — state named full/9660.png while the directory held eight frames
+    // at 1206x2622 — and this path simply never asked it.
+    //
+    // What this does *not* explain, though it is tempting: the OCR corruption
+    // in that round's log (`saaiad@example.com`, `suomit order`). OCR has
+    // always gone through `fullFrameFor`, and the daemon's own text recognition
+    // reads the live surface at native resolution, so neither was ever looking
+    // at the small frame. Those errors are a desktop-width page rendering its
+    // labels at a few pixels tall. Fixing what the caller *sees* does not fix
+    // what OCR reads, and saying so here keeps the next reader from assuming it did.
+    const source = await fullFrameFor(device.udid, state);
     const out = path.join(p.dir, `read-${maxDim}.png`);
-    await resize(state.fullFile, out, maxDim);
+    await resize(source, out, maxDim);
     file = out;
     scaledOnRead = true;
   } else if (maxDim < nativeMax - 8) {
