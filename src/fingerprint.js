@@ -38,8 +38,18 @@ import * as regions from './regions.js';
  *     hash. `detectKeyboardTop` now requires the small uniform boxes to be
  *     key-shaped. Every screen with content in its lower half hashes
  *     differently, so the stored graph and maps must go.
+ * 6 — the opposite half of the same bug, and it took a recorded screen to see.
+ *     `KEYBOARD_MIN_FRACTION` is a *detection window*, not a keyboard's height,
+ *     and its edge was being used as the boundary — so on an iPhone 17 Pro with
+ *     the software keyboard up, the window starts at y=629 while the `q`–`p`
+ *     row's frame top is **590**, and that whole row fell outside it. Ten
+ *     keyboard keys were reported as page content and counted into the screen's
+ *     identity, in the same map that said `keyboard up`. The boundary now
+ *     extends upward while the rows above keep being key-shaped, which page
+ *     content is not. Any screen fingerprinted with a keyboard up hashes
+ *     differently, so the stored graph and maps must go again.
  */
-export const TOKEN_RULES_VERSION = 5;
+export const TOKEN_RULES_VERSION = 6;
 
 /** Frames are quantised to this, so sub-pixel drift and a nudged row do not matter. */
 export const GRID = 24;

@@ -3379,8 +3379,12 @@ test('a summary screen is not a keyboard, and its content stays in its identity'
   }
   assert.ok(regions.detectKeyboardTop([...chrome, ...keys], screen) != null, 'a real keyboard still registers');
 
-  // The token rules changed, so stored fingerprints must be discarded.
-  assert.equal(fingerprint.TOKEN_RULES_VERSION, 5);
+  // The token rules changed, so stored fingerprints must be discarded. Bumped to
+  // 6 by the opposite half of this same bug: the detection window's edge was
+  // being used as the boundary, so a real keyboard's top row fell outside it and
+  // ten keys were counted INTO a screen's identity. Over-detection deleted
+  // content from an identity; under-detection added a keyboard to one.
+  assert.equal(fingerprint.TOKEN_RULES_VERSION, 6);
 });
 
 test('a band is only the keyboard if there is a keyboard in it', async () => {
@@ -3476,6 +3480,36 @@ test('a control is interactive by evidence when the tree got its role wrong', as
   assert.equal(v.actsInteractive({ type: 'GenericElement' }), false, 'a bare group really is a container');
   assert.equal(v.actsInteractive({ type: 'StaticText', value: '' }), false);
   assert.equal(v.actsInteractive({}), false);
+});
+
+test('a keyboard boundary reaches the top row of keys, not the edge of its detection window', async () => {
+  const regions = await import('../src/regions.js');
+  const { readFileSync } = await import('node:fs');
+  // Real recorded data, not a construction: an iPhone 17 Pro with the software
+  // keyboard up. Recorded on purpose, because this hypothesis had already been
+  // guessed at twice and tested with live swipes that took a minute each and
+  // could not be trusted.
+  const fix = JSON.parse(readFileSync(new URL('../test/perception/screens/safari__keyboard-up.json', import.meta.url), 'utf8'));
+  const top = regions.detectKeyboardTop(fix.targets, fix.points);
+
+  // KEYBOARD_MIN_FRACTION is 0.28, so the window starts at 874 * 0.72 = 629 —
+  // and the q-p row's frame top is 590, outside it. The boundary used to land on
+  // the `a` row at 644, leaving ten keys in `content` on a screen whose own map
+  // said "keyboard up". Widening the window would be the wrong fix: 0.28 is
+  // deliberately conservative so a list of short rows cannot be read as a
+  // keyboard. The window decides; the boundary extends while rows stay
+  // key-shaped.
+  const qRow = fix.targets.filter((t) => ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'].includes(t.label));
+  assert.equal(qRow.length, 10, 'the fixture has the top key row in it');
+  assert.ok(top <= Math.min(...qRow.map((t) => t.frame.y)), `boundary ${top} must not sit below the top key row`);
+  assert.equal(top, 590);
+
+  // The extension must not run away up the screen: it stops as soon as a row is
+  // not key-shaped, which is what stops it eating page content. Nothing above
+  // the keyboard here is key-shaped, so it stops at exactly one row.
+  const above = fix.targets.filter((t) => t.frame && t.frame.y < top);
+  assert.ok(above.length > 0, 'there is content above the keyboard to protect');
+  assert.ok(above.every((t) => !regions.looksLikeKey(t)), 'nothing above the boundary looks like a key');
 });
 
 test('an alias must be the same thing read twice, not two layers at one point', async () => {

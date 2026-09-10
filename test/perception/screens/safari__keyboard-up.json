@@ -1,0 +1,653 @@
+{
+  "app": "safari",
+  "screen": "keyboard-up",
+  "note": "Software keyboard up. Recorded to settle a hypothesis with data rather than a live swipe: the keyboard top row (q-p, frame top 590) fell OUTSIDE the 0.28 detection window that starts at 629, so ten keys were reported as page content and counted into this screen identity while the same map said \"keyboard up\". After the fix the identity is the address field and one group - the keyboard is excluded, which is what keyboardTop exists to do. TOKEN_RULES_VERSION 6.",
+  "recorded_at": "2026-09-10T21:50:59.041Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Address",
+      "value": "‎formsmarts.com",
+      "type": "TextField",
+      "x": 201,
+      "y": 482,
+      "frame": {
+        "y": 474,
+        "x": 153.33333333333331,
+        "height": 16.333333333333314,
+        "width": 95.33333333333331
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "Toolbar",
+      "value": null,
+      "type": "Group",
+      "x": 201,
+      "y": 532,
+      "frame": {
+        "y": 508,
+        "height": 48,
+        "x": 0,
+        "width": 402
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "q",
+      "value": null,
+      "type": "Button",
+      "x": 24,
+      "y": 617,
+      "frame": {
+        "x": 4.666666666666657,
+        "y": 590,
+        "width": 39.333333333333336,
+        "height": 54
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "w",
+      "value": null,
+      "type": "Button",
+      "x": 64,
+      "y": 617,
+      "frame": {
+        "width": 39.66666666666666,
+        "y": 590,
+        "height": 54,
+        "x": 44
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "e",
+      "value": null,
+      "type": "Button",
+      "x": 103,
+      "y": 617,
+      "frame": {
+        "height": 54,
+        "x": 83.66666666666666,
+        "width": 39.33333333333334,
+        "y": 590
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "r",
+      "value": null,
+      "type": "Button",
+      "x": 143,
+      "y": 617,
+      "frame": {
+        "x": 122.99999999999999,
+        "y": 590,
+        "height": 54,
+        "width": 39.66666666666667
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "t",
+      "value": null,
+      "type": "Button",
+      "x": 182,
+      "y": 617,
+      "frame": {
+        "height": 54,
+        "width": 39.33333333333334,
+        "x": 162.66666666666666,
+        "y": 590
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "y",
+      "value": null,
+      "type": "Button",
+      "x": 222,
+      "y": 617,
+      "frame": {
+        "height": 54,
+        "y": 590,
+        "width": 39.66666666666666,
+        "x": 202
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "u",
+      "value": null,
+      "type": "Button",
+      "x": 261,
+      "y": 617,
+      "frame": {
+        "width": 39.333333333333314,
+        "x": 241.66666666666669,
+        "y": 590,
+        "height": 54
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "i",
+      "value": null,
+      "type": "Button",
+      "x": 301,
+      "y": 617,
+      "frame": {
+        "x": 281,
+        "y": 590,
+        "width": 39.666666666666686,
+        "height": 54
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "o",
+      "value": null,
+      "type": "Button",
+      "x": 340,
+      "y": 617,
+      "frame": {
+        "height": 54,
+        "y": 590,
+        "width": 39.333333333333314,
+        "x": 320.66666666666663
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "p",
+      "value": null,
+      "type": "Button",
+      "x": 380,
+      "y": 617,
+      "frame": {
+        "height": 54,
+        "x": 360,
+        "y": 590,
+        "width": 39.666666666666686
+      },
+      "region": "content",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "a",
+      "value": null,
+      "type": "Button",
+      "x": 44,
+      "y": 671,
+      "frame": {
+        "width": 39.33333333333334,
+        "y": 644,
+        "height": 54,
+        "x": 24.333333333333318
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "s",
+      "value": null,
+      "type": "Button",
+      "x": 83,
+      "y": 671,
+      "frame": {
+        "y": 644,
+        "height": 54,
+        "x": 63.66666666666666,
+        "width": 39.66666666666666
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "d",
+      "value": null,
+      "type": "Button",
+      "x": 123,
+      "y": 671,
+      "frame": {
+        "x": 103.33333333333331,
+        "height": 54,
+        "width": 39.33333333333334,
+        "y": 644
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "f",
+      "value": null,
+      "type": "Button",
+      "x": 163,
+      "y": 671,
+      "frame": {
+        "x": 142.66666666666666,
+        "width": 39.66666666666666,
+        "y": 644,
+        "height": 54
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "g",
+      "value": null,
+      "type": "Button",
+      "x": 202,
+      "y": 671,
+      "frame": {
+        "height": 54,
+        "width": 39.33333333333334,
+        "x": 182.33333333333334,
+        "y": 644
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "h",
+      "value": null,
+      "type": "Button",
+      "x": 242,
+      "y": 671,
+      "frame": {
+        "x": 221.66666666666666,
+        "width": 39.66666666666666,
+        "height": 54,
+        "y": 644
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "j",
+      "value": null,
+      "type": "Button",
+      "x": 281,
+      "y": 671,
+      "frame": {
+        "width": 39.333333333333314,
+        "height": 54,
+        "y": 644,
+        "x": 261.33333333333326
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "k",
+      "value": null,
+      "type": "Button",
+      "x": 321,
+      "y": 671,
+      "frame": {
+        "y": 644,
+        "x": 300.66666666666663,
+        "width": 39.666666666666686,
+        "height": 54
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "l",
+      "value": null,
+      "type": "Button",
+      "x": 360,
+      "y": 671,
+      "frame": {
+        "y": 644,
+        "width": 39.333333333333314,
+        "x": 340.33333333333326,
+        "height": 54
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "shift",
+      "value": null,
+      "type": "Button",
+      "x": 30,
+      "y": 725,
+      "frame": {
+        "y": 698,
+        "width": 51.333333333333336,
+        "height": 54,
+        "x": 4.666666666666657
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "z",
+      "value": null,
+      "type": "Button",
+      "x": 83,
+      "y": 725,
+      "frame": {
+        "x": 63.66666666666666,
+        "height": 54,
+        "y": 698,
+        "width": 39.66666666666666
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "x",
+      "value": null,
+      "type": "Button",
+      "x": 123,
+      "y": 725,
+      "frame": {
+        "height": 54,
+        "width": 39.33333333333334,
+        "y": 698,
+        "x": 103.33333333333331
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "c",
+      "value": null,
+      "type": "Button",
+      "x": 163,
+      "y": 725,
+      "frame": {
+        "height": 54,
+        "y": 698,
+        "x": 142.66666666666666,
+        "width": 39.66666666666666
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "v",
+      "value": null,
+      "type": "Button",
+      "x": 202,
+      "y": 725,
+      "frame": {
+        "height": 54,
+        "x": 182.33333333333334,
+        "y": 698,
+        "width": 39.33333333333334
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "b",
+      "value": null,
+      "type": "Button",
+      "x": 242,
+      "y": 725,
+      "frame": {
+        "height": 54,
+        "x": 221.66666666666666,
+        "width": 39.66666666666666,
+        "y": 698
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "n",
+      "value": null,
+      "type": "Button",
+      "x": 281,
+      "y": 725,
+      "frame": {
+        "width": 39.333333333333314,
+        "x": 261.33333333333326,
+        "height": 54,
+        "y": 698
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "m",
+      "value": null,
+      "type": "Button",
+      "x": 321,
+      "y": 725,
+      "frame": {
+        "x": 300.66666666666663,
+        "y": 698,
+        "width": 39.666666666666686,
+        "height": 54
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "delete",
+      "value": null,
+      "type": "Button",
+      "x": 374,
+      "y": 725,
+      "frame": {
+        "x": 348,
+        "y": 698,
+        "width": 51.666666666666686,
+        "height": 54
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "numbers",
+      "value": null,
+      "type": "Button",
+      "x": 29,
+      "y": 779,
+      "frame": {
+        "y": 752,
+        "x": 4.666666666666657,
+        "width": 49.333333333333336,
+        "height": 54
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "Emoji",
+      "value": null,
+      "type": "Button",
+      "x": 79,
+      "y": 779,
+      "frame": {
+        "width": 49.33333333333333,
+        "height": 54,
+        "x": 53.999999999999986,
+        "y": 752
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "@",
+      "value": null,
+      "type": "Button",
+      "x": 227,
+      "y": 779,
+      "frame": {
+        "y": 752,
+        "width": 49.33333333333334,
+        "height": 54,
+        "x": 202
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": ".",
+      "value": null,
+      "type": "Button",
+      "x": 276,
+      "y": 779,
+      "frame": {
+        "x": 251.33333333333337,
+        "width": 49.333333333333314,
+        "y": 752,
+        "height": 54
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "go",
+      "value": null,
+      "type": "Button",
+      "x": 350,
+      "y": 779,
+      "frame": {
+        "x": 300.66666666666663,
+        "y": 752,
+        "width": 99,
+        "height": 54
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "Next keyboard",
+      "value": "فارسی",
+      "type": "Button",
+      "x": 43,
+      "y": 840,
+      "frame": {
+        "x": 8.47726568115926,
+        "y": 805.6989567998571,
+        "width": 68.0852958475086,
+        "height": 68.73516393505099
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    },
+    {
+      "label": "Dictate",
+      "value": null,
+      "type": "Button",
+      "x": 359,
+      "y": 840,
+      "frame": {
+        "width": 68.08529584750863,
+        "height": 68.73516393505099,
+        "y": 805.3656234665239,
+        "x": 325.43743847133214
+      },
+      "region": "keyboard",
+      "source": "ax",
+      "enabled": true,
+      "selected": false
+    }
+  ],
+  "expect": {
+    "identity": {
+      "hash": "9c206307cb6b227f200b43b5a1b0ee98",
+      "tokens": [
+        "field:content:w4:h1:x6:y20#1",
+        "group:content:w17:h2:x0:y21#1"
+      ]
+    },
+    "resolutions": [],
+    "ambiguous": [],
+    "none": []
+  }
+}

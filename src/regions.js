@@ -302,7 +302,45 @@ export function detectKeyboardTop(elements, screen) {
   // And they are keys. Uniformity says "a grid of something"; this says of what.
   const keyish = low.filter(looksLikeKey).length;
   if (keyish / low.length < KEYBOARD_MIN_KEYISH) return null;
-  return Math.min(...low.map((e) => e.frame.y));
+  return extendKeyboardUp(elements, Math.min(...low.map((e) => e.frame.y)), median);
+}
+
+/**
+ * Walk the boundary up through rows that are still keys.
+ *
+ * `KEYBOARD_MIN_FRACTION` is a **detection window**, not the keyboard's height,
+ * and using its edge as the boundary cut the keyboard's own top row off.
+ * Measured on a recorded iPhone 17 Pro screen with the software keyboard up: the
+ * window starts at y=629, the `q`–`p` row's frame top is **590**, so that entire
+ * row was excluded and the boundary landed on the `a` row at 644 — ten keys
+ * reported as page content, in the same map that said `keyboard up`.
+ *
+ * Widening the window instead would be the wrong fix: 0.28 of the screen is
+ * deliberately conservative so a list of short rows at the bottom of a page
+ * cannot be mistaken for a keyboard, and a real keyboard is nearer 0.38. So the
+ * window still *decides*, and this extends the boundary only while the rows
+ * above keep being key-shaped — which page content is not.
+ *
+ * The concrete cost of not having this: a sweep gesture aimed 8pt above the
+ * boundary still landed on the top row of keys and scrolled nothing.
+ */
+function extendKeyboardUp(elements, top, median) {
+  let boundary = top;
+  // Four rows is a full keyboard's worth; the loop stops on its own long before
+  // that on anything that is not one.
+  for (let i = 0; i < 4; i += 1) {
+    const row = (elements ?? []).filter((e) => e.frame
+      && looksLikeKey(e)
+      && Math.abs(heightOf(e.frame) - median) <= Math.max(3, median * 0.4)
+      // Sitting directly on the current boundary, within one row's height.
+      && e.frame.y + heightOf(e.frame) <= boundary + 4
+      && e.frame.y + heightOf(e.frame) >= boundary - median * 1.6);
+    if (row.length < 5) break;
+    const next = Math.min(...row.map((e) => e.frame.y));
+    if (!(next < boundary)) break;
+    boundary = next;
+  }
+  return boundary;
 }
 
 /**
