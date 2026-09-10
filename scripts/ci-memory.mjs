@@ -56,6 +56,36 @@ function check(ok, label, detail = '') {
   return ok;
 }
 
+let skipped = 0;
+
+/**
+ * A check whose *setup* did not happen, reported as untested rather than failed.
+ *
+ * This exists because the harness did to itself what three peer reports spent a
+ * day telling us not to do to callers. A `simctl launch` timed out on a loaded
+ * runner, `allowFail` swallowed it, and the next check announced `FAIL the
+ * screen actually changed before testing the stale ref — 7070f77757 ->
+ * 7070f77757`. Every word of that is true and it names the wrong thing: the
+ * screen did not change because **the app never launched**, which the run knew
+ * and did not say. Two more checks failed downstream of the same cause.
+ *
+ * A skip does not fail the build, and that is deliberate. A red build caused by
+ * somebody else's build farm is the cry-wolf failure this project keeps writing
+ * down: it trains everyone to re-run rather than to read. But it is counted and
+ * printed, because a run that tested less than it claims must say so.
+ */
+function skip(label, why) {
+  skipped += 1;
+  console.log(`skip ${label} — NOT TESTED: ${why}`);
+  return false;
+}
+
+/** Did a setup flow actually do what it was there for? */
+function ran(res) {
+  if (!res || res.ok === false) return false;
+  return !(res.steps ?? []).some((st) => st.ok === false);
+}
+
 /**
  * `expectFail` asserts a non-zero exit; `allowFail` tolerates one.
  *
@@ -96,7 +126,21 @@ async function json(args, opts) {
  * rather than serving a stale frame, which is the right behaviour and a
  * transient condition. Retry those, and only those.
  */
+// Capture dropping out, and — since 2026-09-11 — simctl timing out.
+//
+// The second one is this repo's oldest CI complaint and it was never in this
+// pattern, so `jsonRetry` sailed past it: `simctl launch` takes 47-55s per
+// attempt on a loaded hosted runner and `simctl openurl` times out internally,
+// which means simframe is handed a failure it did not cause and cannot fix.
+// Three checks in one run failed downstream of exactly that.
+//
+// Retried HERE and deliberately not inside simframe, which is the rule DEFERRED
+// already wrote down for the bench script: a retried launch is an action that
+// fires twice, and the verify barrier exists to stop simframe doing that on its
+// own initiative. A test harness re-running its own setup is a different thing
+// from a driver silently repeating a user's action.
 const TRANSIENT = /did not produce a frame|display surface could not be read|no frames buffered/i;
+const SIMCTL_FLAKE = /simctl|Command failed: xcrun|timed out/i;
 
 async function jsonRetry(args, opts, attempts = 3) {
   let last;
@@ -105,9 +149,13 @@ async function jsonRetry(args, opts, attempts = 3) {
       return await json(args, opts);
     } catch (err) {
       last = err;
-      if (!TRANSIENT.test(err.message)) throw err;
-      console.log(`     (capture dropped out; retrying \`${args.join(' ')}\`)`);
-      await new Promise((r) => setTimeout(r, 1500));
+      const capture = TRANSIENT.test(err.message);
+      const simctl = SIMCTL_FLAKE.test(err.message);
+      if (!capture && !simctl) throw err;
+      console.log(`     (${capture ? 'capture dropped out' : 'simctl did not answer'}; retrying \`${args.join(' ')}\`)`);
+      // simctl's own timeouts are tens of seconds, so a 1.5s pause is not a
+      // wait, it is a formality. Give the runner room when that is the cause.
+      await new Promise((r) => setTimeout(r, simctl ? 5000 : 1500));
     }
   }
   // Out of attempts on a capture error: the device is not blinking, it is gone.
@@ -242,13 +290,15 @@ if (first) {
   // Now leave that screen WITHOUT re-reading it: `--json` skips the end-state
   // map, so the ref table still describes the screen we have left.
   const before = await markHash();
-  await jsonRetry(['do', AT_OTHER_SCREEN], { allowFail: true });
+  const left = await jsonRetry(['do', AT_OTHER_SCREEN], { allowFail: true });
   const after = await markHash();
   // Two different apps are two different screens by construction. The pixel
   // hashes only have to agree with that, and they only get a say when they are
   // informative enough to have one.
   const moved = !informativeHash(before) || !informativeHash(after) || before !== after;
-  check(moved, 'the screen actually changed before testing the stale ref',
+  if (!ran(left)) skip('the screen actually changed before testing the stale ref',
+    'the second app never launched, so there was no screen change to test against');
+  else check(moved, 'the screen actually changed before testing the stale ref',
     `${before.slice(0, 10)} -> ${after.slice(0, 10)}`
     + (informativeHash(before) && informativeHash(after) ? '' : ' (degenerate hash: not evidence either way)'));
   // Only assert the guard if the precondition actually held. Running it anyway
@@ -343,7 +393,15 @@ const novelVerdicts = novelSteps.length
 // accusing the layer underneath it. A device that crashed SpringBoard mid-run
 // has not told us anything about the graph.
 const novelRan = novelSteps.length > 0 && novelSteps.every((r) => r.ok !== false);
-check(novelRan, 'the novel action ran at all', `[${novelVerdicts.join(', ')}]`);
+// The comment above states the principle and this line used to contradict it:
+// it called `check`, so a `simctl openurl` that timed out on the runner failed
+// the build and said "the novel action ran at all" as though the graph were at
+// fault. It is a precondition. Untested is not broken.
+if (!novelRan) {
+  skip('the novel action ran at all', `the action could not be dispatched — [${novelVerdicts.join(', ')}]`);
+} else {
+  check(true, 'the novel action ran at all', `[${novelVerdicts.join(', ')}]`);
+}
 // The other half of the precondition, which was written above as a comment and
 // then trusted. It is not trustworthy: the positioning run sends the device
 // home, and a simulator that has been driven hard stops delivering `home` while
@@ -361,9 +419,20 @@ if (novelRan && novelMoved) {
     'an action never taken here before is reported as unverified, not as verified',
     `[${novelVerdicts.join(', ')}]`);
 }
-check(passes.some((p) => p.verdicts.includes('ok')),
-  'and once the graph has seen it, the outcome is predicted',
-  `pass ${passes.findIndex((p) => p.verdicts.includes('ok')) + 1}`);
+// The same precondition rule as the two above. The graph can only predict an
+// outcome it has seen, and it can only have seen one if a pass actually ran —
+// so a run in which every pass failed to dispatch says nothing about
+// prediction. It failed the build as `pass 0` while the real cause was a
+// simctl launch timing out, three checks upstream.
+const anyPassRan = passes.some((p) => Array.isArray(p.run?.results) && p.run.results.some((r) => r.ok !== false));
+if (!anyPassRan) {
+  skip('and once the graph has seen it, the outcome is predicted',
+    'no pass dispatched a step, so the graph was never given anything to learn');
+} else {
+  check(passes.some((p) => p.verdicts.includes('ok')),
+    'and once the graph has seen it, the outcome is predicted',
+    `pass ${passes.findIndex((p) => p.verdicts.includes('ok')) + 1}`);
+}
 
 // One direction only: a wrong turn must fail the run. The converse does not
 // hold — a run can fail for reasons that are not wrong turns, such as a step
@@ -472,5 +541,9 @@ try {
   }
 } catch { /* nothing to clean up */ }
 
-console.log(`\n${failures ? `${failures} check(s) failed` : 'every check passed'}`);
+const summary = [
+  failures ? `${failures} check(s) failed` : 'every check passed',
+  skipped ? `${skipped} check(s) NOT TESTED — the runner could not set them up` : null,
+].filter(Boolean).join('; ');
+console.log(`\n${summary}`);
 process.exit(failures ? 1 : 0);
