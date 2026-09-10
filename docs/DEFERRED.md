@@ -201,6 +201,70 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
 
+### From a bug-fixing agent, not a peer round — 2026-09-11
+
+A different agent used simframe to fix a ticket and reported back. Five findings,
+ordered by what each cost them. Four are fixed; the fifth is not ours.
+
+**Fixed: the viewport had one edge.** Every off-viewport filter in this project
+checked `y` and ignored `x` — invisible until a horizontal row. A filter chip
+came back at **x=422 on a 402pt-wide screen** and counted as visible, so
+`scroll_to` answered *"'Assigned to Me' is in view at 422,277 already"*, which is
+confidently wrong about the one thing it exists to decide. Off-screen chips read
+as **x=-247** the same way. Their note on the cost is the part worth keeping:
+*"the cost was not the wrong answer — it was that the wrong answer was confident,
+so the recovery was hand-tuned swipes and two overshoots."* One predicate,
+`regions.offViewport`, now used by the row filter, by `locate`'s visible list and
+by the off-screen match.
+
+**Fixed: `sim_look` takes a `region`.** A whole screen at 1024px cannot tell a
+selected chip from an unselected one, and selection state was the entire question
+their ticket turned on — so they shelled out to `simctl io` and PIL to crop and
+upscale, **for every single check**, at an estimated six round trips. `region` is
+in points, the same coordinates the map prints, and the crop is enlarged to the
+same budget the whole screen gets. Verified live: a 402x120pt slice came back as
+a legible 966x288 image.
+
+Building it found a second bug of the same family as the first: `state.width` and
+`state.height` are the **captured frame's** pixels (322x700), not the screen's
+points (402x874). Scaling by them made a crop at y=760 clamp to a single pixel
+row and return a 119-byte image — which looked like it had worked.
+`screenIdentity` supplies the point size in ~17ms warm.
+
+**Fixed: the device is sticky.** `sim_launch` accepted `device`, and the very
+next `sim_ui` refused with *"2 simulators are booted and none was named"* — so a
+UDID had to ride on all ~15 subsequent calls. Refusing to *choose* between two
+booted devices is right; forgetting which one the caller already named is not.
+Only an explicitly passed device is remembered, so nothing is ever inferred from
+a boot list. They also said the error message itself was excellent, naming both
+UDIDs and mentioning `SIMFRAME_DEVICE` — that stays.
+
+**Fixed: a wait can be a disjunction.** `waitFor "any login or dashboard
+content"` spent **120 seconds** while the login screen was already there, and the
+failure message itself listed `Email`, `Password`, `Remember me`. A phrase like
+that is a disjunction, and resolving it as one intent asks the matcher for
+something no single element answers. `{"waitFor": {"any": ["Email",
+"Dashboard"]}}` says it directly and the first to appear wins.
+
+73. **Not ours, and worth saying so: selection state is already plumbed.** They
+    asked for `selected` in the text map. It is there — the daemon reads
+    `AXSelected` (`AccessibilityBridge.swift:283`), `input.js` carries it, the
+    screen map stores it, and `view.renderRow` prints it. So the chips in that
+    app do not publish the trait, which is an accessibility gap in the app as
+    much as a testing one. What we could add is a way to tell *"the app did not
+    say"* from *"the app said no"* — the map currently prints nothing in both
+    cases, and that ambiguity is ours.
+
+**Named as working, unprompted, and none of it should be optimised away:**
+`sim_ui` at a tenth of a screenshot's cost as the right default, used far more
+than `sim_look`; `sim_do` batching as where the speed comes from; `sim_launch`'s
+`args` passthrough, which *unblocked the entire run* — the app could not find
+Metro on a fresh device and `["-RCT_jsLocation", "localhost:8082"]` fixed it with
+no rebuild. And the failure output: *"no-visible-change: the screen did not
+change, and nothing predicted it would"* and *"memory disagrees with this screen
+— trust the element list, not the graph"* both stopped them drawing a wrong
+conclusion. Their words: *"that last one is a rare quality in a tool."*
+
 ### `sweep` lands, and `scrollTo` is no longer the answer for a form — 2026-09-11
 
 Built on the owner's algorithm, verified on a real HTML form in Safari, and it

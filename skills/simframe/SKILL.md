@@ -113,6 +113,30 @@ A `stop` names the steps it did not attempt. If the ruling was wrong, re-issue
 them with a corrected `supervise` note. It is off unless asked for, and **not yet
 proven in the field** — measured on a bench, not on a real run.
 
+### Two things that answer a question a screenshot would
+
+**Waiting for either of two outcomes.** A login screen *or* a dashboard is a
+disjunction, and asking for it as one intent asks the matcher for something no
+single element answers — one agent spent 120 seconds that way while the login
+screen was already there.
+
+```json
+{"waitFor": {"any": ["Email", "Dashboard"]}}
+```
+
+**A region of the screen, enlarged.** `sim_look` caps at 1024px on the long edge,
+which cannot tell a selected chip from an unselected one. `region` is in points —
+the same coordinates the map prints — and the crop gets the whole budget, so the
+detail per point is the reason to ask:
+
+```json
+{"device": "…", "detail": "high", "region": {"x": 18, "y": 260, "width": 366, "height": 80}}
+```
+
+Reach for it when the question is *selected or not*, *is there a chevron*, *is
+that a validation mark* — the cases text genuinely cannot answer. Not for what a
+field contains or whether a button is enabled; `sim_ui` reports both.
+
 ### Anything network-backed: `waitFor`, never `settle`
 
 `settle` asks whether the screen has stopped moving. A screen waiting on a

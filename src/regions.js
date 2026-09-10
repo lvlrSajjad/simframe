@@ -305,6 +305,28 @@ export function detectKeyboardTop(elements, screen) {
   return Math.min(...low.map((e) => e.frame.y));
 }
 
+/**
+ * Is this element outside the viewport?
+ *
+ * **Both axes.** Every filter in this project checked `y` and ignored `x`,
+ * which is fine until a horizontal row: a filter chip reported at **x=422 on a
+ * 402pt-wide screen** counted as visible, and `scroll_to` then said *"'Assigned
+ * to Me' is in view at 422,277 already"* — confidently wrong about the one thing
+ * it exists to answer. Off-screen chips came back at **x=-247** the same way.
+ *
+ * Reported as the most expensive finding of an agent's session, and the cost was
+ * not the wrong answer itself: it was that the wrong answer was *confident*, so
+ * the recovery was hand-tuned swipes and two overshoots.
+ */
+export function offViewport(t, screen) {
+  if (!t) return false;
+  const w = screen?.width;
+  const h = screen?.height;
+  if (Number.isFinite(h) && (t.y < 0 || t.y > h)) return true;
+  if (Number.isFinite(w) && (t.x < 0 || t.x > w)) return true;
+  return false;
+}
+
 /** Annotate a target list with region and nav slot. Mutates and returns it. */
 export function annotate(targets, screen) {
   const band = bands(targets, screen);

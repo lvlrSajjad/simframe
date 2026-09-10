@@ -2090,9 +2090,45 @@ async function runStep(deviceQuery, udid, step, ctx) {
     // Wait for a selector rather than a label, so it works on screens the
     // accessibility tree never described.
     case 'waitFor': {
+      // One string, or any of several.
+      //
+      // Reported: a wait on *"any login or dashboard content"* spent **120
+      // seconds** while the login screen was already there — and the failure
+      // message itself listed `Email`, `Password`, `Remember me`. A phrase like
+      // that is a disjunction, and resolving it as one intent asks the matcher
+      // for something no single element answers.
+      //
+      // `{"waitFor": {"any": ["Email", "Dashboard"]}}` says it directly, and
+      // the first to appear wins. Which is also the honest division of labour:
+      // simframe resolves an intent to an element, and *which of several
+      // outcomes am I waiting for* is the caller's question to phrase.
+      const alternatives = Array.isArray(step.any) ? step.any.filter(Boolean).map(String) : null;
       const query = step.value ?? step.target ?? step.text;
+      if (!alternatives && !query) throw new Error('usage: {"waitFor": "text"} or {"waitFor": {"any": ["a", "b"]}}');
       const limit = Date.now() + (step.timeoutMs ?? 8000);
       let lastError = 'never appeared';
+      if (alternatives) {
+        for (let attempt = 0; ; attempt += 1) {
+          for (const one of alternatives) {
+            try {
+              const found = await api.locate(deviceQuery, one, { refresh: attempt > 0 });
+              return `${JSON.stringify(one)} appeared at ${found.target.x},${found.target.y}`
+                + ` (first of ${alternatives.length} awaited)`;
+            } catch (err) {
+              lastError = err.message;
+            }
+          }
+          if (Date.now() >= limit) {
+            throw new Error(
+              `none of ${alternatives.length} awaited strings appeared`
+              + ` (${alternatives.map((a) => JSON.stringify(a)).join(', ')}) in ${step.timeoutMs ?? 8000}ms.`
+              + ` Last: ${lastError}`,
+            );
+          }
+          await api.waitFor(deviceQuery, { mode: 'stable', stableMs: 200, timeoutMs: 700, options: ctx.options })
+            .catch(() => null);
+        }
+      }
       for (let attempt = 0; ; attempt += 1) {
         try {
           const found = await api.locate(deviceQuery, query, { index: step.index, refresh: attempt > 0 });

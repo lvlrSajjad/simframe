@@ -3418,3 +3418,58 @@ Six sections including going to the top: ~27 s, of which most is perception
 (a full read per section) rather than gesture. A single-viewport screen sweeps in
 ~8 s. That is the price of covering a screen instead of guessing at it, and it
 replaces a `scrollTo` that cost two calls and did not work.
+
+---
+
+## A bug-fixing agent's feedback — the viewport had one edge
+
+2026-09-11. Not a peer round: a different agent used simframe to fix a ticket and
+reported back, ordered by what each finding cost them.
+
+**The expensive one was one missing axis.** Every off-viewport filter checked `y`
+and ignored `x`, which stays invisible until a horizontal row. A filter chip came
+back at **x=422 on a 402pt-wide screen** and counted as visible, so `scroll_to`
+answered *"is in view at 422,277 already"*. Off-screen chips read **x=-247** the
+same way.
+
+Their diagnosis of the cost is the transferable part: *"the cost was not the
+wrong answer — it was that the wrong answer was confident."* A refusal would have
+cost one call; a confident wrong answer cost hand-tuned swipes and two
+overshoots. One predicate now serves the row filter, `locate`'s visible list and
+the off-screen match.
+
+**`sim_look` takes a `region`, in points.** A whole screen at 1024px cannot tell
+a selected chip from an unselected one, and that was the entire question their
+ticket turned on — so they shelled out to `simctl io` and PIL to crop and upscale
+**for every check**, an estimated six round trips. Verified live: a 402×120pt
+slice returns a legible **966×288** image, enlarged 3×.
+
+Building it found the same class of bug again. `state.width`/`state.height` are
+the **captured frame's** pixels (322×700), not the screen's points (402×874), so
+scaling by them made a crop at y=760 clamp to one pixel row and return a
+**119-byte image that looked like success**. `screenIdentity` gives the point
+size in ~17 ms warm.
+
+**Two smaller ones.** A device named once is now remembered for the session —
+refusing to *choose* between two booted simulators is right, forgetting which one
+the caller named is not, and it cost a UDID on ~15 consecutive calls. And a wait
+can be a disjunction: `{"waitFor": {"any": [...]}}`, after
+`waitFor "any login or dashboard content"` spent **120 seconds** while the login
+screen was there and its own failure message listed `Email`, `Password`,
+`Remember me`.
+
+**One finding that is not ours.** They asked for selection state in the text map.
+It is already plumbed end to end — the daemon reads `AXSelected`, and
+`view.renderRow` prints it — so those chips do not publish the trait. What *is*
+ours is that the map prints nothing both when the app says "not selected" and
+when the app says nothing at all, and those are different facts.
+
+### And the CI failure that is not a regression
+
+`integration` failed on this commit's predecessor with
+`capture failed: the display surface could not be read`, repeated, the daemon
+re-resolving the display port and failing again. That is the documented capture
+wedge on a loaded hosted runner — the same wedge measured in this file twice
+before — and it is why the standing note says to re-run `integration` once before
+believing it. `test` passed on Node 18, 20 and 22; `bench` passed. No release was
+cut, per the standing rule that a red CI holds the publish.

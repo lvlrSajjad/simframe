@@ -178,6 +178,32 @@ export function grayGrid(bmp, cols, rows) {
 }
 
 /** Nearest-neighbour scale. Only used for contact sheets, where speed beats quality. */
+/**
+ * A rectangle out of a bitmap, clamped to it.
+ *
+ * Exists because a whole screen at 1024px on the long edge cannot answer a
+ * question about one control. Reported from a real session: a selected filter
+ * chip and an unselected one are indistinguishable at that size, and selection
+ * state was the entire question the ticket turned on — so the agent shelled out
+ * to `simctl io` and PIL to crop and upscale the chip row, **for every single
+ * check**. Their estimate: six round trips.
+ *
+ * Coordinates are pixels; the caller converts from points, because only the
+ * caller knows the density it read them at.
+ */
+export function cropBitmap(bmp, x, y, width, height) {
+  const left = Math.max(0, Math.min(bmp.width - 1, Math.round(x)));
+  const top = Math.max(0, Math.min(bmp.height - 1, Math.round(y)));
+  const w = Math.max(1, Math.min(bmp.width - left, Math.round(width)));
+  const h = Math.max(1, Math.min(bmp.height - top, Math.round(height)));
+  const out = Buffer.alloc(w * h * 4);
+  for (let row = 0; row < h; row += 1) {
+    const from = ((top + row) * bmp.width + left) * 4;
+    bmp.data.copy(out, row * w * 4, from, from + w * 4);
+  }
+  return { width: w, height: h, data: out };
+}
+
 export function scaleBitmap(bmp, width, height) {
   const out = Buffer.allocUnsafe(width * height * 4);
   for (let y = 0; y < height; y++) {

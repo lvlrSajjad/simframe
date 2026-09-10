@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULTS, STATE_VERSION } from './daemon.js';
 import * as engine from './engine.js';
+import * as regions from './regions.js';
 import { decodePng, encodePng, scaleBitmap } from './png.js';
 import {
   REGION_COLS,
@@ -1077,7 +1078,9 @@ export async function readScreenWith(deviceQuery, { useAx = true, useOcr = true,
  * the control sat one scroll down. Waiting cannot fix that and scrolling can.
  */
 export function offScreenMatch(targets, query, points) {
-  const off = (targets ?? []).filter((t) => t.label && (t.y < 0 || t.y > (points?.height ?? Infinity)));
+  // Both axes: a horizontal row puts elements past the right edge, and checking
+  // only `y` reported them as visible.
+  const off = (targets ?? []).filter((t) => t.label && regions.offViewport(t, points));
   if (!off.length) return null;
   const hit = matching.resolve(off, query);
   if (hit.status === 'ok') return hit.target;
@@ -1245,7 +1248,7 @@ async function locateWith(
     // here undoes every guard above — it has no off-screen filter and no
     // coverage weighting, and it is what returned a scrolled-away list row for
     // "back". "Not found" is the correct answer.
-    const visible = entry.targets.filter((t) => t.label && t.y >= 0 && t.y <= points.height);
+    const visible = entry.targets.filter((t) => t.label && !regions.offViewport(t, points));
     const sample = visible.slice(0, 12).map((t) => t.label.slice(0, 24)).join(', ');
     // "Not on this screen" and "not in view" are different answers, and giving
     // the first for the second cost a reported 15 seconds: a `waitFor REVIEW`

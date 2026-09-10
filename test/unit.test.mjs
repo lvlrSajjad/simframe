@@ -2698,6 +2698,85 @@ test('round 7: the supervisor stops going silent, and code answers what code kno
   assert.match(src, /consulted and did not answer/);
 });
 
+test('the viewport has two edges, and a horizontal row proved it', async () => {
+  const regions = await import('../src/regions.js');
+  const screen = { width: 402, height: 874 };
+
+  // Reported as the most expensive finding of an agent's session. Every
+  // off-viewport filter in this project checked `y` and ignored `x`, which is
+  // invisible until a horizontal row: a filter chip came back at **x=422 on a
+  // 402pt-wide screen** and counted as visible, so `scroll_to` answered
+  // *"'Assigned to Me' is in view at 422,277 already"* — confidently wrong about
+  // the one thing it exists to decide. Off-screen chips read as **x=-247** the
+  // same way.
+  //
+  // The cost was not the wrong answer. It was that the wrong answer was
+  // confident, so the recovery was hand-tuned swipes and two overshoots.
+  assert.equal(regions.offViewport({ x: 422, y: 277 }, screen), true, 'past the right edge');
+  assert.equal(regions.offViewport({ x: -247, y: 277 }, screen), true, 'past the left edge');
+  assert.equal(regions.offViewport({ x: 201, y: 900 }, screen), true, 'below the fold still counts');
+  assert.equal(regions.offViewport({ x: 201, y: -40 }, screen), true, 'and above it');
+  assert.equal(regions.offViewport({ x: 201, y: 400 }, screen), false, 'on screen is on screen');
+  // A screen with no known size cannot rule anything out.
+  assert.equal(regions.offViewport({ x: 5000, y: 5000 }, {}), false);
+  assert.equal(regions.offViewport(null, screen), false);
+
+  // And the rows filter uses it, so a horizontal row's off-screen chips stop
+  // being offered as tappable.
+  const view = await import('../src/view.js');
+  const out = view.rowsFor({
+    targets: [
+      { label: 'All', type: 'Button', x: -247, y: 277, region: 'content' },
+      { label: 'Assigned to Me', type: 'Button', x: 422, y: 277, region: 'content' },
+      { label: 'Open', type: 'Button', x: 120, y: 277, region: 'content' },
+    ],
+  }, { screen });
+  assert.deepEqual(out.rows.map((r) => r.label), ['Open']);
+});
+
+test('a wait can be a disjunction, and a crop can answer what a screen cannot', async () => {
+  const { readFileSync } = await import('node:fs');
+  const png = await import('../src/png.js');
+
+  // Reported: a wait on "any login or dashboard content" spent **120 seconds**
+  // while the login screen was already there — and its own failure message
+  // listed Email, Password, Remember me. A phrase like that is a disjunction,
+  // and resolving it as one intent asks the matcher for something no single
+  // element answers.
+  const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const step = src.slice(src.indexOf("case 'waitFor': {"), src.indexOf("case 'assert': {"));
+  assert.match(step, /Array\.isArray\(step\.any\)/);
+  assert.match(step, /first of \$\{alternatives\.length\} awaited/);
+  assert.match(step, /none of \$\{alternatives\.length\} awaited strings appeared/);
+
+  // A whole screen at 1024px cannot tell a selected chip from an unselected one,
+  // and that was the entire question one ticket turned on — so the agent shelled
+  // out to `simctl io` and PIL to crop and upscale, for every check.
+  const bmp = { width: 4, height: 3, data: Buffer.alloc(4 * 3 * 4) };
+  for (let i = 0; i < 12; i += 1) bmp.data[i * 4] = i;
+  const cut = png.cropBitmap(bmp, 1, 1, 2, 2);
+  assert.equal(cut.width, 2);
+  assert.equal(cut.height, 2);
+  assert.deepEqual([cut.data[0], cut.data[4], cut.data[8], cut.data[12]], [5, 6, 9, 10]);
+  // Clamped to the bitmap rather than reading past it.
+  assert.deepEqual([png.cropBitmap(bmp, 3, 2, 10, 10).width, png.cropBitmap(bmp, 3, 2, 10, 10).height], [1, 1]);
+  assert.deepEqual([png.cropBitmap(bmp, -5, -5, 2, 2).width, png.cropBitmap(bmp, -5, -5, 2, 2).height], [2, 2]);
+
+  // The region is in points, and the frame is not: `state.width/height` are the
+  // captured frame's pixels (322x700) and not the screen's points (402x874).
+  // Scaling by them made a crop at y=760 clamp to one pixel row and return a
+  // 119-byte image, which looked like success.
+  const mcp = readFileSync(new URL('../src/mcp.js', import.meta.url), 'utf8');
+  assert.match(mcp, /cropRegion\(png, args\.region, geo\?\.points\)/);
+  assert.match(mcp, /not the screen's points/);
+
+  // And a device named once is remembered, because refusing to *choose* between
+  // two booted simulators is right while forgetting which one the caller named
+  // is not — it cost a UDID on all fifteen subsequent calls.
+  assert.match(mcp, /args\.device \|\| lastDevice \|\| defaultDevice/);
+  assert.match(mcp, /if \(args\.device\) lastDevice = String\(args\.device\)/);
+});
+
 test('a sweep measures where it is, and covers a page rather than guessing', async () => {
   const actions = await import('../src/actions.js');
   const { readFileSync } = await import('node:fs');

@@ -304,6 +304,13 @@ const TOOLS = [
           enum: ['low', 'normal', 'high'],
           description: 'Image size: low (~420px, cheapest), normal (~700px, default), high (1024px, readable small text). Capped at 1024px on the long edge.',
         },
+        region: {
+          type: 'object',
+          description: 'Crop to part of the screen and enlarge it, in POINTS — the same coordinates the element map prints: {"x":18,"y":260,"width":366,"height":80}. Use it when a whole screen cannot answer the question at 1024px: selected versus unselected, a chevron, a validation mark. Pair it with detail:"high".',
+          properties: {
+            x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' },
+          },
+        },
         maxAgeMs: { type: 'number', description: 'If the buffered frame is older than this, wait for a fresher one (default 900).' },
       },
     },
@@ -416,6 +423,8 @@ function sinceLine(since) {
 }
 
 export async function serve({ device: defaultDevice, options: baseOptions = {} } = {}) {
+  // The last device a caller named, for the life of this server.
+  let lastDevice = null;
   const server = new Server(
     { name: 'simframe', version: packageVersion() },
     { capabilities: { tools: {} } },
@@ -425,7 +434,16 @@ export async function serve({ device: defaultDevice, options: baseOptions = {} }
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const args = req.params.arguments || {};
-    const target = args.device || defaultDevice;
+    // Sticky, and stickiness is not guessing.
+    //
+    // Reported: `sim_launch` accepted `device`, and the very next `sim_ui`
+    // refused with "2 simulators are booted and none was named" — so a UDID had
+    // to ride on all ~15 subsequent calls. Refusing to *choose* between two
+    // booted devices is right; forgetting which one the caller already named is
+    // not. This remembers only what was explicitly passed, so nothing is ever
+    // inferred from a boot list.
+    const target = args.device || lastDevice || defaultDevice;
+    if (args.device) lastDevice = String(args.device);
     // An MCP server's environment is fixed when it spawns, so a tester asked to
     // compare two sensor modes inside one session could not: round 6 ran its
     // baseline and could not run either variant. The suggested workaround was
@@ -510,6 +528,49 @@ export async function serve({ device: defaultDevice, options: baseOptions = {} }
   await server.connect(new StdioServerTransport());
 }
 
+/**
+ * Crop a frame to a region of the screen and enlarge it.
+ *
+ * A whole screen at 1024px cannot answer a question about one control: a
+ * selected filter chip and an unselected one look identical at that size, and an
+ * agent shelled out to `simctl io` and PIL to crop and upscale a chip row for
+ * every check it made. The region arrives in **points** — the same coordinates
+ * the element map prints — because that is what a caller has in hand.
+ */
+async function cropRegion(png, region, points) {
+  try {
+    const { decodePng, encodePng, cropBitmap, scaleBitmap } = await import('./png.js');
+    const bmp = decodePng(png);
+    const pw = points?.width;
+    const ph = points?.height;
+    if (!Number.isFinite(pw) || !Number.isFinite(ph) || !pw || !ph) return { note: 'the screen point size is unknown' };
+    // The frame we hold is already downscaled for the model, so map points onto
+    // *this* bitmap rather than onto the device's native pixels.
+    const sx = bmp.width / pw;
+    const sy = bmp.height / ph;
+    const x = Number(region.x ?? 0) * sx;
+    const y = Number(region.y ?? 0) * sy;
+    const w = Number(region.width ?? region.w ?? pw) * sx;
+    const h = Number(region.height ?? region.h ?? ph) * sy;
+    if (!(w >= 1) || !(h >= 1)) return { note: 'the region has no size' };
+    const cut = cropBitmap(bmp, x, y, w, h);
+    // Enlarge to the same budget the whole screen gets, so the detail per point
+    // is the whole reason to ask for a region.
+    const long = Math.max(cut.width, cut.height);
+    const factor = Math.min(6, Math.max(1, Math.round(1024 / long)));
+    const big = factor > 1 ? scaleBitmap(cut, cut.width * factor, cut.height * factor) : cut;
+    return {
+      png: encodePng(big),
+      note: `cropped to ${Math.round(Number(region.width ?? region.w ?? pw))}x`
+        + `${Math.round(Number(region.height ?? region.h ?? ph))}pt at `
+        + `${Math.round(Number(region.x ?? 0))},${Math.round(Number(region.y ?? 0))}`
+        + `, enlarged ${factor}x`,
+    };
+  } catch (err) {
+    return { note: String(err.message).split('\n')[0] };
+  }
+}
+
 async function look(target, args, options) {
   const maxAge = args.maxAgeMs ?? 900;
   // Never native resolution. An image is the expensive path by a factor of ten
@@ -534,7 +595,23 @@ async function look(target, args, options) {
   const lines = [header(res.device, res.state, res.ageMs), sinceLine(st.since)];
   const warn = livenessLine(st.live);
   if (warn) lines.unshift(warn);
-  return { content: [text(lines.filter(Boolean).join('\n')), image(res.png)] };
+  let png = res.png;
+  if (args.region) {
+    // The point size, which the frame does not carry: `state.width/height` are
+    // the *captured frame's* pixels (322x700 here), not the screen's points
+    // (402x874). Scaling by them gave a 1:1 ratio, so a crop at y=760 clamped
+    // to a single pixel row and returned a 119-byte image — which looked like
+    // it had worked. `screenIdentity` answers it in ~17ms warm.
+    const geo = await api.screenIdentity(target, { options, confirmNovel: false }).catch(() => null);
+    const cropped = await cropRegion(png, args.region, geo?.points);
+    if (cropped.png) {
+      png = cropped.png;
+      lines.push(cropped.note);
+    } else {
+      lines.push(`could not crop that region (${cropped.note}) — this is the whole screen`);
+    }
+  }
+  return { content: [text(lines.filter(Boolean).join('\n')), image(png)] };
 }
 
 async function state(target, args, options) {

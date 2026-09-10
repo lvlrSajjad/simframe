@@ -247,7 +247,7 @@ export function rowsFor(entry, { screen, filter, interactive, all = false, limit
   let kept = (entry?.targets ?? []).map((t) => ({ ...t })).filter((t) => {
     if (!isNum(t.x) || !isNum(t.y)) return false;
     // Off-screen elements are real in the tree and untappable in fact.
-    if (screen?.height && (t.y < 0 || t.y > screen.height)) return false;
+    if (regions.offViewport(t, screen)) return false;
     if (!all && HIDDEN_REGIONS.has(t.region)) return false;
     if (!all && isNoise(t)) return false;
     return true;
