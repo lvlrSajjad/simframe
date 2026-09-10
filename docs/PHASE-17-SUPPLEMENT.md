@@ -77,6 +77,28 @@ test decides; do not pre-judge it in either direction.
 is the Qwen2.5-Coder/Qwen3 tier the coding-worker project runs via MLX. One
 local inference stack should serve both projects. Do not introduce a third.
 
+> **Amended 2026-09-10: for *this* project the fallback is `none`, not Qwen.**
+> The MLX tier is right for the coding-worker project and wrong here, for two
+> reasons that are specific to simframe rather than to the model.
+>
+> CLAUDE.md lists **shipping any ML model weights** as a non-goal. Apple's
+> framework ships nothing — no download, no weights in the package, no licence
+> review — which is the whole reason it clears that bar. A multi-gigabyte MLX
+> download does not, and swapping it in as a "fallback" would quietly reverse a
+> stated non-goal by way of a config default.
+>
+> And the install story is the product. This is an open-source tool whose point
+> is that anyone can `npm i -g` it and have their agent drive their own app
+> immediately; the owner's words were that any user "has to be able to test
+> their apps using claude". A first run that downloads several gigabytes before
+> it can help is a worse tool, even if the model is better.
+>
+> So: Apple first, and if Apple is unavailable or fails, degrade to the ladder
+> that already works — matcher → Claude, which is exactly what this document's
+> own `planner: none` case specifies and requires CI to pass under. A stronger
+> local model stays an option for someone who opts in explicitly, never a
+> default and never a fallback.
+
 **Availability is a capability, not an assumption.** Foundation Models
 requires Apple Silicon, macOS 26+, and Apple Intelligence enabled; it can be
 unavailable on a given machine or CI runner. `doctor` reports

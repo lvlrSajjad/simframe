@@ -755,6 +755,63 @@ tab-bar:
   </section>
 
   <section>
+    <p class="sec-label">Two brains, and only one of them may be wrong</p>
+    <h2>The reflex tier did not need to be intelligent</h2>
+    <div class="track">
+      <p class="lede">A brain does not run at one speed. Some of it argues about philosophy; some of it pulls your hand off a hot pan before the arguing part has been told. They have different latencies and, more importantly, different authority.</p>
+      <p>An agent driving a screen has the same shape, and the reason is unglamorous: its eyes and hands are on this machine and its reasoning is in a data centre. Every decision that has to cross that gap costs a round trip. A person whose motor cortex had to consult another continent before each tap would be slow too &mdash; not because they were stupid, but because of where the wire ran.</p>
+      <p>So the architecture splits by <em>who is allowed to be wrong about what</em>. The fast local part answers what is on screen, which element matches an intent, whether the screen has settled, whether the last action did what was predicted, and whether it has been here before. The slow remote part decides what to want. And the asymmetry is the load-bearing half: <b>the fast part may never take an action that cannot be undone.</b> Anything wearing a destructive label, anything that leaves the app, anything on a path that has gone wrong before &mdash; those wait for the part that can be held responsible. A model call is cheaper than a wrong tap.</p>
+      <p>Which raises the obvious question, and it was worth measuring rather than assuming: should the fast part be a small local model? A three-billion-parameter model runs on this machine in a few hundred milliseconds instead of the seconds a network round trip costs. The plan for it was written, the candidate picked, the context budget worked out.</p>
+      <p>Then the prize was measured before the solution, and it was 5%.</p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-label">Element decisions taken driving real apps &mdash; would a local model have helped?</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Of 40 decisions where an element had to be chosen</th><th>n</th><th>Share</th></tr></thead>
+          <tbody>
+            <tr><td>already resolved locally, with no model at all</td><td class="win">37</td><td class="win">92.5%</td></tr>
+            <tr><td>ambiguous &mdash; a planner could pick</td><td>2</td><td>5.0%</td></tr>
+            <tr><td>not found &mdash; a planner cannot invent an element</td><td>1</td><td>2.5%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="panel-note">Reconstructed from verified transition-graph edges: every edge is a decision that demonstrably worked, carrying its goal and the element list it was taken against. Cross-checked against the escalation log, which has the opposite bias &mdash; resolution failures per traversal on a real third-party app came to 4 in 73, or 5.5%.</p>
+    </div>
+
+    <div class="track">
+      <p>The reason is more useful than the number. <b>By the time a step reaches the tool, the decision has already been made.</b> A verified edge&rsquo;s goal <em>names</em> the option &mdash; the reasoner chose it and then asked for it by name. The deliberation you are paying for happens upstream of the call, in the one place a model reading an element list cannot see. A local planner would spend its milliseconds re-deriving a conclusion already reached.</p>
+      <p>So the survival brain here is not a brain. It is a string matcher, a structural fingerprint and a graph of what worked last time &mdash; and that is the finding I did not expect. The reflex tier had to be <em>fast</em> and <em>trustworthy</em>. It did not have to be smart.</p>
+      <p>What actually shortened the loop was not thinking faster. It was needing to think less often. The graph already knew which controls had worked on each screen and reported only how many &mdash; <code>(known, 3 known exits)</code> &mdash; so it named them instead:</p>
+    </div>
+
+<pre><code>iPhone 17 Pro · 402x874pt · screen 0e1c7d0c (known, 1 known exit)
+worked here before: tap "NEW REQUEST" (7x)</code></pre>
+
+    <div class="panel">
+      <p class="panel-label">Same task, same app, a fresh agent each time &mdash; one line added between the runs</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th></th><th>Tool calls</th><th>Reads</th><th>Images</th><th>Wall</th></tr></thead>
+          <tbody>
+            <tr><td>before</td><td>25</td><td>11</td><td>2</td><td>6m 16s</td></tr>
+            <tr><td>after</td><td class="win">19</td><td class="win">4</td><td class="win">1</td><td class="win">5m 10s</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="panel-note">Zero perception cost and no model call &mdash; the labels were already on disk. For comparison, the same flow run by an agent that knew every label in advance was <b>16 steps in a single call</b>, which is the ceiling this is walking toward.</p>
+    </div>
+
+    <div class="track">
+      <p>The best moment in that run was not a saved read. On a screen whose list had not finished loading, a remembered <code>tap</code> on a list row seen ten times before let the agent write a wait and a tap in one call <em>for a control it could not yet see</em> &mdash; collapsing read, wait, read, tap into one trip. Remembered vocabulary is worth more as material for writing a chain than as an answer to a question.</p>
+      <p>And then it pointed at a submit button. A wizard&rsquo;s read-only review screen had been given the same structural identity as its first step, so it inherited that step&rsquo;s entire vocabulary: three remembered controls, none of them present, offered under a hint that said <em>chain the next steps without looking again</em>. The only control on that screen submits the form for real.</p>
+      <p>The line was right; the identity was wrong. So the line now checks itself against the screen in front of it, and when memory and screen disagree it says so &mdash; that disagreement outranks any encouragement to carry on, because the usual cause is two screens sharing one fingerprint. Which is the same lesson as the destructive-label rule, arriving from a different direction: <b>the fast tier earns its speed by being the first to admit it might be on the wrong screen.</b></p>
+      <p>None of this closes the question of a local model; it narrows it. The job it was offered &mdash; choose the element &mdash; turned out to be nearly free without one. A different job was never measured: triage, when a step fails mid-sequence and something must decide in milliseconds whether this is benign enough to continue or bad enough to stop. That is survival-brain shaped, it is exactly where a round trip currently gets forced, and it is honest to say it is untested rather than to claim it either way.</p>
+    </div>
+  </section>
+
+  <section>
     <p class="sec-label">What the contract said when it was first measured</p>
     <h2>Sixteen of nineteen were one bug</h2>
     <div class="track">
