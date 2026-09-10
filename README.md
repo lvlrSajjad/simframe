@@ -712,6 +712,21 @@ said a word — the exact failure shape, found by the thing built to catch it.
   black screen as a calm one, but it cannot fix it: restarting the device is
   the cure that always works, and it usually recovers on its own.
 
+## What was decided, and what was not built
+
+[`docs/DECISIONS.md`](docs/DECISIONS.md) is the register of judgements that
+changed the plan: a phase cancelled by its own measurement, two features built
+and reverted for cause, and the premises that turned out to be false. It is
+short on purpose — the numbers live in
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) and the open work in
+[`docs/DEFERRED.md`](docs/DEFERRED.md).
+
+The most useful entry is a **no-go**: Phase 17 proposed a small on-device model
+to choose the next element, and measuring the prize before the model showed the
+matcher already resolves 37 of 40 real decisions. By the time a step reaches
+simframe the decision has already been made — the goal names the option,
+because the agent chose it and then asked for it by name.
+
 ## Roadmap
 
 - **Extend the confirm vocabulary beyond English.**

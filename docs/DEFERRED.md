@@ -43,7 +43,9 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > 0.10.0 is what is on npm.
 >
 > Struck items keep their original diagnosis where the diagnosis was wrong,
-> because that is the instructive half.
+> because that is the instructive half. Decisions that changed the plan — the
+> no-go, the two reverts, the false premises — are indexed in
+> `docs/DECISIONS.md`.
 >
 > **Next, in order — reordered by the 2026-09-10 field report, which is the
 > second peer round on a real form-heavy app:** items 23 and 24 (the two HIGH
