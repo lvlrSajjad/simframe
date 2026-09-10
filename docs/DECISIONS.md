@@ -13,6 +13,7 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 | date | decision | verdict | what settled it |
 |---|---|---|---|
 | 2026-09-10 | Phase 12 next, per the default order | **REORDERED** | `novel_dialog`: 0 of 173, ever |
+| 2026-09-10 | Phase 15 — exploration, and the first real local-model job | **PROMOTED** | Semantic ranking is beyond a matcher |
 | 2026-09-10 | Phase 18 — local triage, not local planning | **PROPOSED** | The recovery class cannot be enumerated |
 | 2026-09-10 | A structural "dead end" rule | **REVERTED before shipping** | It cannot tell unfinished from unfinishable |
 | 2026-09-10 | Phase 17 — local planner tier | **NO-GO** | The prize is 5% of decisions |

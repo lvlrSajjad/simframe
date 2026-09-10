@@ -272,6 +272,61 @@ unexpected verdict.
 
 ## Phase 15 — Goal-directed exploration when lost
 
+> **Promoted, 2026-09-10, and it is now the leading candidate for a local model
+> — ahead of Phase 18.** The owner described the behaviour twice, and the second
+> version named the current failure exactly:
+>
+> *"I am in a new app's settings, I look for something like change username. I go
+> to each menu, check the items, nothing like that? Next menu, until I find it."*
+>
+> *"And when I don't find what I need somewhere, I don't fall into an existential
+> crisis. I look for it somewhere else."*
+>
+> Today a miss **is** an existential crisis. Nothing matches, `unknown_screen`
+> is logged, the step throws, the batch dies, and the reasoner is asked. It is 12
+> of 173 escalations, and every one of them stops a batch — so a five-menu search
+> is ten or more round trips for a task a person does in seconds.
+>
+> **Two separable pieces, and only one of them needs a model.**
+>
+> *Not asking* is mechanical. The graph knows which exits from this screen have
+> been taken and which have not; "try the next unexplored container, then come
+> back" needs no judgement, and CLAUDE.md already fixes the guardrails — six
+> actions per attempt, never explore when a graph path exists, escalate with the
+> partial map attached, and the verify barrier forbids destructive labels
+> throughout. That gets breadth-first search with no model at all.
+>
+> *Ordering* is where a local model earns its keep, and this is **the first case
+> in this whole series where it does something a string matcher structurally
+> cannot.** "Change username" does not lexically resemble "Account", "Privacy" or
+> "Profile" — no prefix, no synonym, no typo distance. Ranking those three by
+> which one plausibly *contains* a username setting is world knowledge, and a 3B
+> model has it. Phase 17's job was choosing among candidates that all matched,
+> which the matcher already did 37 times in 40. This is choosing among candidates
+> that **none** of them match, which the matcher cannot do at all.
+>
+> **And unlike Phase 17's and Phase 18's, this go/no-go can be run offline
+> today.** The corpus is already on disk: **129 stored screens, 3,915 labelled
+> targets**, and a graph recording which container led where. Ground truth is
+> free — for a control that was eventually reached, the path that reached it says
+> which menu you had to open.
+>
+> 1. Build cases from stored screens: a goal phrase, the element list of a screen
+>    that does not contain it, and the container that in fact leads to it.
+> 2. Ask each candidate model to rank the containers. Measure **top-1** and
+>    **top-3** accuracy, and latency.
+> 3. **Go** if top-3 beats breadth-first ordering by enough to save a step on
+>    average — that is the honest baseline, because breadth-first needs no model.
+>    Top-1 is the prize; top-3 is the threshold, since being wrong twice still
+>    beats asking.
+>
+> Build the mechanical half first regardless. It removes the escalation; the
+> model only makes the search shorter. Measuring the model against
+> breadth-first — rather than against the current behaviour of giving up — is
+> what keeps this honest.
+
+
+
 ```
 Read CLAUDE.md, docs/research/03-human-parity.md §5, and docs/ESCALATIONS.md
 (unknown_screen and no_plan counts — this phase exists to lower them).
