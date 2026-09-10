@@ -3427,6 +3427,55 @@ test('a control is interactive by evidence when the tree got its role wrong', as
   assert.equal(v.actsInteractive({}), false);
 });
 
+test('a value simframe wrote and can no longer see is reported, and nothing else is', async () => {
+  const wrote = await import('../src/wrote.js');
+  // A peer filled three fields on a web form and six calls later they were
+  // empty. All six calls returned ok. simframe had recorded the values two
+  // calls earlier and said nothing when they vanished, so the only way to find
+  // out was a screenshot — and an agent trusting the verdicts would have
+  // submitted an empty order.
+  const udid = 'TEST-WROTE';
+  wrote.forget(udid);
+  wrote.record(udid, { selector: 'Telephone:', value: '5551234567' });
+
+  // The field is here and its contents are not: that is the finding.
+  const emptied = [{ label: 'Telephone:' }, { label: 'Customer name:' }];
+  assert.equal(wrote.missing(udid, emptied).length, 1);
+  assert.match(wrote.missingLine(wrote.missing(udid, emptied)), /is gone/);
+
+  // Present, in any of the shapes a sensor may hand it over in. OCR fuses a
+  // label with its value onto one line, which is why the whole row is searched.
+  for (const rows of [
+    [{ label: 'Telephone:', value: '5551234567' }],
+    [{ label: 'Telephone: 5551234567' }],
+    [{ label: 'Telephone:' }, { label: '5551234567' }],
+  ]) assert.deepEqual(wrote.missing(udid, rows), [], JSON.stringify(rows));
+
+  // Somewhere else entirely says nothing. Without the label there is no way to
+  // tell "the field was cleared" from "we navigated away", and guessing would
+  // put a false alarm on every screen change.
+  assert.deepEqual(wrote.missing(udid, [{ label: 'Settings' }, { label: 'General' }]), []);
+  assert.deepEqual(wrote.missing(udid, []), []);
+  assert.equal(wrote.missingLine([]), null);
+
+  // Stale entries stop commenting, so yesterday's form says nothing about today's.
+  assert.deepEqual(wrote.missing(udid, emptied, { now: Date.now() + wrote.MAX_AGE_MS + 1 }), []);
+
+  // Re-filling a field replaces its entry, so a field filled twice cannot warn
+  // about its own earlier contents.
+  wrote.record(udid, { selector: 'Telephone:', value: '9998887777' });
+  assert.equal(wrote.read(udid).length, 1);
+  assert.deepEqual(wrote.missing(udid, [{ label: 'Telephone: 9998887777' }]), []);
+  assert.equal(wrote.missing(udid, emptied).length, 1);
+
+  // A coordinate selector has no label to look for, so it can never be
+  // journalled into a warning — and an empty value is not a write.
+  wrote.forget(udid);
+  wrote.record(udid, { selector: '(125,325)', value: 'text' });
+  wrote.record(udid, { selector: 'Notes', value: '' });
+  assert.deepEqual(wrote.missing(udid, [{ label: '(125,325)' }, { label: 'Notes' }]), []);
+});
+
 test('a typed field is verified by its contents, not by the screen moving', async () => {
   const actions = await import('../src/actions.js');
   const graph = await import('../src/graph.js');

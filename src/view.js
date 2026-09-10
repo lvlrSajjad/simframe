@@ -13,6 +13,7 @@
 // trust.
 import * as api from './index.js';
 import * as regions from './regions.js';
+import * as wrote from './wrote.js';
 import * as graph from './graph.js';
 import { writeRefs } from './refs.js';
 import * as matching from './matching.js';
@@ -472,6 +473,11 @@ export async function screenMap(deviceQuery, {
   // of us; the rest are counted and reported as a disagreement, because memory
   // that does not match what is here is itself the most useful thing to say.
   const { exitList, stale: staleExits } = presentOnly(remembered, rows);
+  // Values simframe wrote itself and can no longer see. Computed from the same
+  // rows the map is about to print, so it costs nothing, and it is the only
+  // thing that can notice a form being cleared underneath a caller — six `ok`
+  // calls in a row hid exactly that.
+  const cleared = wrote.missingLine(wrote.missing(device?.udid, rows));
 
   return {
     device,
@@ -489,7 +495,8 @@ export async function screenMap(deviceQuery, {
     exits,
     exitList,
     staleExits,
-    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits }),
+    cleared,
+    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, cleared }),
   };
 }
 
@@ -672,7 +679,7 @@ export function ambiguousLabels(rows) {
   return [...seen.values()].filter((n) => n > 1).length;
 }
 
-export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, verdictLine, ambiguities }) {
+export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, verdictLine, ambiguities, cleared }) {
   const head = [
     device?.name,
     screen?.width ? `${screen.width}x${screen.height}pt` : null,
@@ -689,6 +696,9 @@ export function render({ device, identity, rows, truncated, collapsed, screen, n
 
   const lines = [head];
   if (verdictLine) lines.push(verdictLine);
+  // Above the element list, not below it: it contradicts something the caller
+  // already believes, which is the one kind of news that must not be scrolled to.
+  if (cleared) lines.push(cleared);
   const worked = exitsLine(exitList, { stale: staleExits });
   if (worked) lines.push(worked);
 

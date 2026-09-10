@@ -8,6 +8,7 @@ import * as input from './input.js';
 import * as intent from './intent.js';
 import * as matching from './matching.js';
 import * as vocabulary from './vocabulary.js';
+import * as wrote from './wrote.js';
 import * as supervisor from './supervisor.js';
 import * as view from './view.js';
 import * as planner from './planner.js';
@@ -908,6 +909,18 @@ async function readbackPass(deviceQuery, target, wanted, ctx, useOcr, radius) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Journal a write, but only one that was seen to land.
+ *
+ * `back.landed` is the whole gate. An unconfirmed write is not evidence the
+ * value was ever in the field, and journalling one would later announce that
+ * text had "disappeared" when it had never arrived.
+ */
+function journalWrite(udid, step, sent, back, ctx) {
+  if (!back?.landed) return;
+  wrote.record(udid, { selector: step.into, value: sent, screen: ctx?.screen ?? null });
 }
 
 /** Comparison that ignores what OCR adds — a caret, a stray glyph, spacing. */
@@ -1922,8 +1935,10 @@ async function runStep(deviceQuery, udid, step, ctx) {
               + ' paste is more reliable than type on this path; keys sends literal characters, not named keys.',
             );
           }
+          journalWrite(udid, step, sent, back, ctx);
           return `typed into ${field.where}${back.note} [took two attempts; the first keystrokes did not land]`;
         }
+        journalWrite(udid, step, sent, back, ctx);
         return `typed into ${field.where}${back.note}${back.landed ? '' : field.quiet}`;
       }
       await input.typeText(udid, step.text ?? step.value);
@@ -1949,6 +1964,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
             + ' A first paste can raise the system paste-consent dialog and lose the text; dismiss it and retry.',
           );
         }
+        journalWrite(udid, step, sent, back, ctx);
         return `pasted into ${field.where}${back.note}${back.landed ? '' : field.quiet}`;
       }
       await input.pasteText(udid, step.text ?? step.value);
