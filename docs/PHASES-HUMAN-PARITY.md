@@ -350,6 +350,117 @@ what remains. That document plus BENCHMARKS.md is the evidence for the article.
 
 ---
 
+## Phase 18 — Local triage: recovering from the unexpected, not choosing the expected
+
+Proposed 2026-09-10, out of the round-4 and round-5 field data and the owner's
+own framing. **Filed as a separate phase rather than as an appeal against Phase
+17's no-go, because it is a different job.** Phase 17 asked a local model to
+choose the next element and the answer was that the matcher already does — 37 of
+40. This asks it to handle the moment the plan breaks, which was never measured.
+
+**The case, in the owner's words:** *"testing a dynamic app with dynamic data and
+several rules has several things we might not expect at all."* That is precisely
+the shape a reflex table cannot cover. Phase 12's table handles interruptions you
+can enumerate — a permission alert, a rating prompt. It cannot enumerate "this
+location has no assets because of a branch rule", "a validation message appeared
+and cleared", "the list came back empty", "the trade is still loading". Those are
+unbounded, and a table meeting an unlisted trigger has nothing to say.
+
+**Two jobs, and the second one is the underrated half.**
+
+1. **Triage.** Given the goal, the step that just failed, what was expected and
+   what arrived, decide: *retry this step*, or *hand back to Claude*. Round 5's
+   three `unexpected-screen` failures were all benign variation, and each cost
+   the remainder of its batch — so a correct "this is benign, retry" is worth a
+   round trip every time it fires.
+2. **Compression.** When it genuinely is a surprise, describe it well enough that
+   Claude's *one* turn is sufficient. This is where the field data is loudest: a
+   single surprise repeatedly cost **three to six calls** to understand — a
+   `find`, an `--interactive`, a screenshot, a coordinate guess — because the
+   agent had to reconstruct what happened from a map. A local summary — "a
+   validation message appeared; the submit control is now disabled; two required
+   fields are empty" — does not remove the round trip. It makes the round trip
+   enough. Turning a six-call recovery into a one-call recovery is a larger win
+   than removing the call would have been.
+
+**The example that decided this, and the rule that failed to cover it.** The
+owner's own words: *"maybe we select a location in CSR but that location doesn't
+have any asset, so my next instinct is select another location — and all this
+happens in seconds. It's not like I think for minutes."*
+
+Every fact that instinct runs on looks like it is already in hand: the asset
+region has nothing in it, the primary action reports `disabled`, and the graph
+remembers `tap "Change"` worked on this screen. So the first attempt at this was
+a structural rule — *nothing choosable plus a disabled primary action equals a
+dead end, name the way back* — written, tested, and **reverted before it
+shipped**, because it cannot be made to work:
+
+- "Nothing choosable" is false. The Location select on that screen is perfectly
+  choosable; it is the *asset* list that is empty. The screen is not a dead end,
+  one required input on it is.
+- Loosening it to "the primary action is disabled" fires on **every half-filled
+  form**, which is most form screens most of the time. It cannot tell *you have
+  not finished* from *you cannot finish*.
+
+The missing fact is that an asset is **required** and that this location has
+**none** — and neither is in the accessibility tree. The map models controls,
+not the app's rules. A reflex table keyed on dialog vocabulary is even further
+away, because there is no dialog.
+
+So the owner's example is not an argument that the table needs more entries. It
+is the clearest available demonstration that **a class of recovery cannot be
+enumerated at all**, which is the case for Phase 18 and the reason it is filed
+rather than folded into Phase 12. Recorded with the failed rule attached,
+because a rule that cries wolf on every unfinished form is exactly the kind of
+threshold this project has shipped before and had to revert.
+
+**The safety property that makes it buildable: one-directional authority.**
+
+The local tier may only ever move a decision *toward* caution:
+
+- it may downgrade an escalation to **retry the same step**;
+- it may **annotate** an escalation so the model's turn is cheaper;
+- it may **not** authorise continuing past an anomaly;
+- it may **not** act on a destructive label, leave the app, or touch an edge with
+  a prior `unexpected-*`.
+
+Getting it wrong in the cautious direction costs one round trip, which is the
+status quo. Getting it wrong in the bold direction is forbidden by construction
+rather than by confidence threshold. This is the verify barrier, unchanged, and
+it is what the reflex analogy actually implies: the reflex may pull your hand off
+the pan; it may not decide to leave it there.
+
+**Ordering, and it matters.** Do not build this before the residue is measured.
+Most off-plan events observed so far were **tool defects**, not app surprises —
+false `unexpected-screen`, a phantom keyboard, a focus warning that could not
+succeed — and those were fixed by fixing them, not by adding judgement. A model
+placed on top of that would have been a brain servicing a bug.
+
+**Go/no-go, and note what it does not measure.** Unlike Phase 17's, this one
+cannot be answered from stored data, because the corpus does not exist yet: the
+false alarms polluted it and have only just been fixed.
+
+1. Run two or three field rounds on the current build. Count off-plan events and
+   classify each: tool defect, enumerable interruption (Phase 12 table), or
+   genuine app surprise.
+2. **Go** if genuine surprises are more than a third of the remainder *and* the
+   recovery cost more than two calls each on average. Below that, Phase 12's
+   table plus better failure messages is the cheaper answer and this stays
+   filed.
+3. If go, measure two things separately, because they succeed independently:
+   triage precision on the "retry" decision (a wrong retry costs a round trip, so
+   the bar is ~90%), and **calls-per-recovery before and after** the compression
+   summary. The second is the number that justifies the phase.
+
+**Candidate and constraints** are unchanged from `docs/PHASE-17-SUPPLEMENT.md`,
+including its amendment: Apple's on-device model first because it ships no
+weights, degrade to `none`, and never a multi-gigabyte download as a default.
+The 4,096-token budget is more comfortable here than it was for planning — a
+failed step, its expectation, and the current element list is a smaller prompt
+than a full screen plus a goal.
+
+---
+
 ## Phase 17 — Local planner tier (a plan, a go/no-go, and a NO-GO)
 
 > **Result, 2026-09-10: NO-GO.** The go/no-go was run — see "Go/no-go, as run"

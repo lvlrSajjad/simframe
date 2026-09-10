@@ -13,6 +13,8 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 | date | decision | verdict | what settled it |
 |---|---|---|---|
 | 2026-09-10 | Phase 12 next, per the default order | **REORDERED** | `novel_dialog`: 0 of 173, ever |
+| 2026-09-10 | Phase 18 — local triage, not local planning | **PROPOSED** | The recovery class cannot be enumerated |
+| 2026-09-10 | A structural "dead end" rule | **REVERTED before shipping** | It cannot tell unfinished from unfinishable |
 | 2026-09-10 | Phase 17 — local planner tier | **NO-GO** | The prize is 5% of decisions |
 | 2026-09-10 | Phase 11.5's premise (the agent is not batching) | **OVERTURNED** | It batches 84% of the time |
 | 2026-09-10 | The map cut — drop prose from the element list | **REVERTED, same day** | It deleted list rows |
@@ -22,6 +24,51 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 | earlier | Phase 9 — tier-2 local model | **DEFERRED, gate unmet** | Cheaper tool for the same gap, unbuilt |
 
 ---
+
+## 2026-09-10 — Phase 18 proposed, and the rule that would have made it unnecessary
+
+**Phase 17 asked a local model to choose the next element. Phase 18 asks it to
+handle the moment the plan breaks.** Filed as its own phase rather than as an
+appeal against the no-go, because it is a different job and the no-go's evidence
+still stands.
+
+**What made the case.** Five field rounds, and the owner's framing: *"testing a
+dynamic app with dynamic data and several rules has several things we might not
+expect at all."* A reflex table covers interruptions you can list; it cannot
+cover "this location has no assets because of a branch rule".
+
+**The concrete example, and why the cheap answer failed.** Select a location
+with no assets; the instinct is to pick another, immediately. Every fact that
+instinct runs on appears to be in hand — an empty asset region, a `disabled`
+primary action, a remembered `tap "Change"` — so a structural rule was written
+and tested. It was **reverted before shipping**: "nothing choosable" is false
+because the Location select is choosable, and loosening it to "the primary action
+is disabled" fires on every half-filled form. It cannot distinguish *you have
+not finished* from *you cannot finish*, because the missing fact — an asset is
+required and this location has none — is an app rule and not in the tree.
+
+That failure is the strongest evidence for the phase. Recorded with the rule
+attached, because a threshold that cries wolf on every unfinished form is the
+exact class of thing this project has shipped and had to revert before.
+
+**The underrated half is compression, not triage.** When a surprise is genuine
+the right answer is usually still to ask Claude — but the field reports show a
+single surprise costing **three to six calls** to *understand*: a `find`, an
+`--interactive`, a screenshot, a coordinate guess. A local summary does not
+remove the round trip; it makes one round trip sufficient. Turning a six-call
+recovery into a one-call recovery is worth more than removing the call.
+
+**Safety, by construction rather than by threshold.** One-directional authority:
+the local tier may downgrade an escalation to a retry, or annotate one to make
+the model's turn cheaper. It may not authorise continuing past an anomaly, act
+on a destructive label, or leave the app. Wrong in the cautious direction costs a
+round trip, which is the status quo; wrong in the bold direction is impossible
+rather than unlikely.
+
+**Not before the residue is measured.** Most off-plan events so far were tool
+defects — false `unexpected-screen`, a phantom keyboard, a focus warning that
+could not succeed — and they were fixed by fixing them. A model on top of that
+would have been a brain servicing a bug.
 
 ## 2026-09-10 — the phase order, reordered by the log it said would decide it
 
