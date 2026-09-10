@@ -22,6 +22,7 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 | 2026-09-10 | Phase 11.5's premise (the agent is not batching) | **OVERTURNED** | It batches 84% of the time |
 | 2026-09-10 | The map cut — drop prose from the element list | **REVERTED, same day** | It deleted list rows |
 | 2026-09-10 | No third-party app identifier in this repo, ever | **ADOPTED** | A real leak, mine |
+| 2026-09-11 | Phase 19 — the web as a third target | **ROADMAP** | Port the philosophy, not the implementation |
 | 2026-09-09 | Learned stillness — a settle window per edge | **REVERTED for cause** | Faster, and it corrupted the graph |
 | 2026-09-09 | Phase 8b — Android accessibility APK | **DEFERRED** | OCR + CV first; the pain is elsewhere |
 | earlier | Phase 9 — tier-2 local model | **DEFERRED, gate unmet** | Cheaper tool for the same gap, unbuilt |

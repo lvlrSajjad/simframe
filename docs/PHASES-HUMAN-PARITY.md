@@ -396,6 +396,72 @@ let an icon label override an accessibility label when both exist.
 
 ---
 
+## Phase 19 — The web as a third target (roadmap, not committed)
+
+> **Added 2026-09-11 on the owner's framing, which is the correct one.** Their
+> words: *"we can use our philosophy on web rather than the exact thing we do
+> for simulators"* and *"web browser gives us lots of tools to find a field,
+> debug etc — it's not a sandbox, which is good."*
+>
+> The full design, the CDP mapping for all sixteen `Platform` members, which
+> pillars transfer and which must be re-derived, is in
+> `docs/research/04-web.md`. The short version:
+>
+> **Porting the implementation would build a worse Playwright.** The perception
+> layer exists because iOS gives bad handles; the web has
+> `document.querySelector`. **Porting the philosophy is the thing**, and it gets
+> *stronger* — every per-step question this project currently infers from pixels
+> becomes one the browser lets you ask directly, so more can be decided locally,
+> which is the whole thesis.
+>
+> What is new against Playwright is the **engine, not the eyes**: the transition
+> graph, outcome memory, the certainty vocabulary, batching with local recovery,
+> the escalation log, HPI. Playwright is hands and eyes; this is the layer above
+> that decides whether to think.
+>
+> **One pillar must be re-derived from a log rather than copied.** The five
+> escalation reasons are mostly perception failures and largely vanish on the
+> web. Copying that taxonomy would repeat the `doctor` mistake of reporting
+> "input driver: idb" for an Android emulator — another platform's vocabulary
+> asserted about a tool that has never spoken to the device.
+>
+> **Sequenced after the release and the open queue**, at the owner's direction:
+> *"first things first, need passing CI and a publish."* The CDP WebSocket
+> client that network visibility needs is most of the plumbing, so the honest
+> moment to decide is when that works and the cost is measured rather than
+> estimated.
+
+```
+Read docs/research/04-web.md in full, CLAUDE.md's Platform boundary section,
+and src/platform/android.js as the worked example of a second backend.
+
+Task: measure whether the engine is worth anything on a target whose
+perception is already good.
+1. Build the mechanical backend ONLY, behind the existing seam: targets,
+   navigate, screenshot/screencast, AX tree, input. No new perception and no
+   new step types. launchApp/terminateApp are `optional` with a reason — a
+   browser does not launch apps, and it must not borrow that vocabulary.
+2. Run the existing flow suite against a web target. Every layer above the
+   boundary is unmodified, so this measures the engine in isolation. Record
+   model turns, HPI against a human median on the same flows, and the
+   escalation breakdown.
+3. Go if the graph and the batching remove turns on a target with a perfect
+   tree and a queryable DOM — because that is the claim being tested.
+4. Compare against Playwright driven by the same model with no memory, not
+   against a bare model loop. Anything else flatters the result.
+
+Verify: append to BENCHMARKS under "Phase 19"; record the decision in
+DECISIONS.md either way, with its reason.
+
+Do not: add a runtime dependency — the CDP client is hand-rolled, and
+docs/BENCHMARKS.md records the two reasons why (the Origin header a stock
+client cannot set, and no global WebSocket on Node 18 or 20). Do not port the
+five escalation reasons; derive them. Do not weaken the verify barrier — a
+real page can be a production system.
+```
+
+---
+
 ## After Phase 16
 
 Re-run `simframe hpi` and `simframe escalations` across the whole suite.
