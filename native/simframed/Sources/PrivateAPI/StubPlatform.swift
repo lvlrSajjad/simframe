@@ -105,7 +105,7 @@ extension StubPlatform {
     }
     public func type(_ text: String) throws { recorded.append("type(\(text))") }
     public func paste(_ text: String) throws { recorded.append("paste(\(text))") }
-    public func pressKey(usage: UInt32) throws {
+    public func pressKey(usage: UInt32, modifiers: [UInt32]) throws {
         throw PrivateAPIError.frameworksUnavailable("stub platform")
     }
 

@@ -269,6 +269,7 @@ Steps — every place a control is named accepts a selector:
 | `{"swipe": {"from": [x,y], "to": [x,y]}}` | `{"pause": 300}` |
 | `{"button": "HOME"}` — hardware buttons | |
 | `{"key": "return"}` — the **keyboard** return key, which is how a mobile search field submits. Also `escape`, `tab`, `space`, `backspace`, arrows | |
+| `{"clear": "Notes"}` — empty a field. Add `"clear": true` to a `type`/`paste` to **replace** rather than append | |
 | `{"launch": {"value": "com.example.app", "relaunch": true, "args": ["-uiTest","1"]}}` | |
 | `{"openUrl": "myapp://path"}` | |
 | `{"permission": {"value": "photos", "grant": "grant", "bundleId": "com.example.app"}}` | |

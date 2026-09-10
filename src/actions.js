@@ -86,7 +86,7 @@ const MAX_SCROLLS = 20;
  * permission can change what the app shows.
  */
 const ACTION_STEPS = new Set([
-  'tap', 'tapAt', 'type', 'paste', 'swipe', 'scroll', 'scrollTo', 'button', 'key',
+  'tap', 'tapAt', 'type', 'paste', 'clear', 'swipe', 'scroll', 'scrollTo', 'button', 'key',
   'launch', 'terminate', 'openUrl', 'confirm', 'chooseAny', 'permission',
 ]);
 
@@ -2028,9 +2028,28 @@ async function runStep(deviceQuery, udid, step, ctx) {
       await input.tapPoint(udid, x, y, { durationMs: step.durationMs });
       return `tapped ${x},${y}`;
     }
+    case 'clear': {
+      // Empty a field. Item 61's oldest half: re-typing appends, and there was
+      // no way to empty anything — not in simframe, and not in XCUITest, Appium
+      // or idb either, none of which has a clear primitive. Command-A then
+      // Delete over HID is the standard answer, and it is layout-independent
+      // because all three are key positions rather than glyphs.
+      const field = await focusField(deviceQuery, udid, { ...step, into: goalOf(step) }, ctx);
+      await input.clearField(udid);
+      // Verified the same way a write is, and with the same rule: OCR may
+      // confirm, never deny. An empty field reads as absence of text, which is
+      // exactly what a sensor that cannot see the field also reports — so only
+      // the tree's own empty-valued control counts as proof it worked.
+      const seen = await fieldContents(deviceQuery, field.found.target, '', ctx);
+      const emptied = seen && seen.landed === false && String(seen.value) === '';
+      return `cleared ${field.where}${emptied ? ' = ""' : ' [unconfirmed — nothing reads back this field\'s contents]'}`;
+    }
     case 'type': {
       if (step.into) {
         const field = await focusField(deviceQuery, udid, step, ctx);
+        // Replace rather than append, when asked. The field is already focused,
+        // so this costs two key events and no extra resolution.
+        if (step.clear) await input.clearField(udid);
         // With `into` present, `value` is the *selector*, not the text.
         //
         // Reported as `typed into "Asset*" … = "Asset*"` — the field's own
@@ -2074,6 +2093,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
       if (step.into) {
         const field = await focusField(deviceQuery, udid, step, ctx);
         const sent = textToSend(step);
+        if (step.clear) await input.clearField(udid);
         await input.pasteText(udid, sent);
         const seen = await fieldContents(deviceQuery, field.found.target, sent, ctx);
         const back = readbackNote(sent, seen);

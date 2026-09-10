@@ -65,7 +65,7 @@ export const swipe = (udid, from, to, opts = {}) =>
 export const type = (udid, text) => request(udid, { action: 'type', text });
 export const paste = (udid, text) => request(udid, { action: 'paste', text });
 export const press = (udid, button) => request(udid, { action: 'press', button });
-export const key = (udid, usage) => request(udid, { action: 'key', usage });
+export const key = (udid, usage, modifiers = []) => request(udid, { action: 'key', usage, modifiers });
 export const status = (udid) => request(udid, { action: 'status' });
 export const resetInput = (udid) => request(udid, { action: 'resetInput' });
 export const longPress = (udid, x, y, opts = {}) => request(udid, { action: 'longPress', x, y, ...opts });

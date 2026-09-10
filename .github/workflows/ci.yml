@@ -192,8 +192,13 @@ jobs:
           # highest-value single change available for hosted-runner simulator
           # reliability. Timeboxed, because a boot that never completes should
           # fail here with a clear reason rather than as a puzzle further down.
-          timeout 300 xcrun simctl bootstatus "$DEVICE" -b || {
-            echo "::error::the simulator did not report a completed boot within 300s"
+          # No `timeout` wrapper: macOS does not ship GNU coreutils, so `timeout`
+          # is not on a runner's PATH — it is on mine, via Homebrew, which is
+          # why the first version of this line passed locally and failed on the
+          # runner with `timeout: command not found`. The job's own
+          # `timeout-minutes` already bounds a hang, which is the portable answer.
+          xcrun simctl bootstatus "$DEVICE" -b || {
+            echo "::error::the simulator never reported a completed boot"
             exit 1
           }
           xcrun simctl bootstatus "$DEVICE" -b
@@ -437,8 +442,13 @@ jobs:
           # highest-value single change available for hosted-runner simulator
           # reliability. Timeboxed, because a boot that never completes should
           # fail here with a clear reason rather than as a puzzle further down.
-          timeout 300 xcrun simctl bootstatus "$DEVICE" -b || {
-            echo "::error::the simulator did not report a completed boot within 300s"
+          # No `timeout` wrapper: macOS does not ship GNU coreutils, so `timeout`
+          # is not on a runner's PATH — it is on mine, via Homebrew, which is
+          # why the first version of this line passed locally and failed on the
+          # runner with `timeout: command not found`. The job's own
+          # `timeout-minutes` already bounds a hang, which is the portable answer.
+          xcrun simctl bootstatus "$DEVICE" -b || {
+            echo "::error::the simulator never reported a completed boot"
             exit 1
           }
           xcrun simctl bootstatus "$DEVICE" -b

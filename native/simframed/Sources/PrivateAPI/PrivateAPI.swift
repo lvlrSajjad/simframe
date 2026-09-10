@@ -140,7 +140,15 @@ public protocol SimulatorPlatform: AnyObject {
     /// one. Typing "\n" as text goes through the active keyboard layout and
     /// mangles the field instead — measured, it turned "Coke Display" into
     /// "Coke In Display".
-    func pressKey(usage: UInt32) throws
+    /// Press one keyboard key, optionally while holding modifiers.
+    ///
+    /// Modifiers are usage codes too (Left GUI `0xE3`, Shift `0xE1`, Control
+    /// `0xE0`, Alt `0xE2`), held in order and released in reverse. This is what
+    /// makes clearing a field possible at all: nothing in XCUITest, Appium or
+    /// idb has a clear primitive, and the standard answer is Command-A followed
+    /// by Delete — which is layout-independent, because a modifier and Delete
+    /// are key *positions* and so is the `a` in Command-A.
+    func pressKey(usage: UInt32, modifiers: [UInt32]) throws
     /// Rebuild the HID session.
     ///
     /// Input has no feedback channel: a dispatched Indigo message reports

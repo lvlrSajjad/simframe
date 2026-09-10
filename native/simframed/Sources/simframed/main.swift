@@ -145,7 +145,7 @@ case "tap", "swipe", "type", "paste", "press", "key":
             guard let u = positional.first, let usage = UInt32(u) else {
                 fail("usage: simframed key <hid-usage-code>")
             }
-            try platform.pressKey(usage: usage)
+            try platform.pressKey(usage: usage, modifiers: [])
         case "paste":
             guard !positional.isEmpty else { fail("usage: simframed paste <text>") }
             try platform.paste(positional.joined(separator: " "))
@@ -413,7 +413,8 @@ case "run":
                     guard let usage = request["usage"] as? NSNumber else {
                         return ["ok": false, "error": "key needs a HID usage code"]
                     }
-                    try platform.pressKey(usage: usage.uint32Value)
+                    let mods = (request["modifiers"] as? [NSNumber])?.map { $0.uint32Value } ?? []
+                    try platform.pressKey(usage: usage.uint32Value, modifiers: mods)
                     return done()
                 case "resetInput":
                     try platform.resetInput()

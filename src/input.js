@@ -445,7 +445,11 @@ export async function typeKeys(udid, value) {
 export const KEYS = {
   return: 40, enter: 40, escape: 41, esc: 41, backspace: 42, delete: 42,
   tab: 43, space: 44, up: 82, down: 81, left: 80, right: 79,
+  a: 4,
 };
+
+/** Modifier usage codes, held while another key is pressed. */
+export const MODIFIERS = { control: 224, shift: 225, alt: 226, option: 226, command: 227, cmd: 227, gui: 227 };
 
 /** The usage code for a name, a number, or null when it is neither. */
 export function keyUsage(key) {
@@ -454,16 +458,19 @@ export function keyUsage(key) {
   return Object.hasOwn(KEYS, name) ? KEYS[name] : null;
 }
 
-export async function pressKey(udid, keycode) {
+export async function pressKey(udid, keycode, { modifiers = [] } = {}) {
   await ensureFreshSession(udid);
   const usage = keyUsage(keycode);
+  const held = modifiers
+    .map((m) => (Number.isFinite(Number(m)) ? Number(m) : MODIFIERS[String(m).trim().toLowerCase()]))
+    .filter((m) => Number.isFinite(m));
   if (usage == null) {
     throw new Error(`unknown key ${JSON.stringify(String(keycode))} — known names: ${Object.keys(KEYS).join(', ')}`
       + ', or a HID usage code');
   }
   const own = inputDriverFor(udid);
   if (own) {
-    await own.key(udid, usage);
+    await own.key(udid, usage, held);
     return;
   }
   // The daemon owns the keyboard usage path on iOS. It was implemented in the
@@ -471,10 +478,28 @@ export async function pressKey(udid, keycode) {
   // is absent on a machine using the daemon, and so there was no way to press a
   // keyboard key at all.
   if (control.available(udid)) {
-    await control.key(udid, usage);
+    await control.key(udid, usage, held);
     return;
   }
+  if (held.length) throw new Error('modifier keys need the daemon; idb cannot hold one');
   await idb(['ui', 'key', '--udid', udid, String(usage)]);
+}
+
+/**
+ * Empty the focused field.
+ *
+ * Command-A then Delete, over HID. There is no clear primitive anywhere —
+ * XCUITest, Appium and idb all lack one, and re-typing appends — so this is the
+ * standard answer rather than a trick of ours. It is layout-independent for the
+ * reason that matters on a device with Farsi and Armenian keyboards installed:
+ * a modifier and Delete are key *positions*, and so is the `a` in Command-A, so
+ * none of the three is translated by the active layout.
+ *
+ * It clears whatever has focus, which is why every caller focuses first.
+ */
+export async function clearField(udid) {
+  await pressKey(udid, 'a', { modifiers: ['command'] });
+  await pressKey(udid, 'delete');
 }
 
 /**
