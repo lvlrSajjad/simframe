@@ -563,6 +563,38 @@ export async function serve({ device: defaultDevice, options: baseOptions = {} }
  * every check it made. The region arrives in **points** — the same coordinates
  * the element map prints — because that is what a caller has in hand.
  */
+/**
+ * Read a region argument that may not have arrived as an object.
+ *
+ * A client is free to hand a declared-object property over as a JSON string,
+ * and one did: `{"x":0,"y":60,...}` arrived as text, every field read as
+ * undefined, and the crop silently became the whole screen — reported back as
+ * `cropped to 402x874pt at 0,0`, which is a crop that did not happen described
+ * as one that did. An array is accepted too, because [x, y, width, height] is
+ * the shape anyone would try first, and it used to fail exactly as quietly.
+ */
+export function readRegion(region) {
+  let r = region;
+  if (typeof r === 'string') {
+    try { r = JSON.parse(r); } catch { return null; }
+  }
+  if (Array.isArray(r)) {
+    const [x, y, width, height] = r.map(Number);
+    return [x, y, width, height].every(Number.isFinite) ? { x, y, width, height } : null;
+  }
+  if (!r || typeof r !== 'object') return null;
+  const num = (...keys) => {
+    for (const k of keys) if (Number.isFinite(Number(r[k]))) return Number(r[k]);
+    return null;
+  };
+  const width = num('width', 'w');
+  const height = num('height', 'h');
+  // A region with no size is not a region. Saying so beats returning the whole
+  // screen under a caption that claims otherwise.
+  if (width == null && height == null) return null;
+  return { x: num('x') ?? 0, y: num('y') ?? 0, width, height };
+}
+
 async function cropRegion(png, region, points) {
   try {
     const { decodePng, encodePng, cropBitmap, scaleBitmap } = await import('./png.js');
@@ -623,17 +655,22 @@ async function look(target, args, options) {
   if (warn) lines.unshift(warn);
   let png = res.png;
   if (args.region) {
+    const parsed = readRegion(args.region);
+    if (!parsed) {
+      lines.push('that region could not be read (expected {"x":0,"y":260,"width":402,"height":80} in points,'
+        + ' or [x, y, width, height]) — this is the whole screen');
+    }
     // The point size, which the frame does not carry: `state.width/height` are
     // the *captured frame's* pixels (322x700 here), not the screen's points
     // (402x874). Scaling by them gave a 1:1 ratio, so a crop at y=760 clamped
     // to a single pixel row and returned a 119-byte image — which looked like
     // it had worked. `screenIdentity` answers it in ~17ms warm.
     const geo = await api.screenIdentity(target, { options, confirmNovel: false }).catch(() => null);
-    const cropped = await cropRegion(png, args.region, geo?.points);
+    const cropped = parsed ? await cropRegion(png, parsed, geo?.points) : { note: null };
     if (cropped.png) {
       png = cropped.png;
       lines.push(cropped.note);
-    } else {
+    } else if (cropped.note) {
       lines.push(`could not crop that region (${cropped.note}) — this is the whole screen`);
     }
   }

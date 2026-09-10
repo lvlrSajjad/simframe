@@ -2790,7 +2790,9 @@ test('a wait can be a disjunction, and a crop can answer what a screen cannot', 
   // Scaling by them made a crop at y=760 clamp to one pixel row and return a
   // 119-byte image, which looked like success.
   const mcp = readFileSync(new URL('../src/mcp.js', import.meta.url), 'utf8');
-  assert.match(mcp, /cropRegion\(png, args\.region, geo\?\.points\)/);
+  // The points still have to come from the geometry, not from the frame — the
+  // argument is now normalised by `readRegion` first, which is tested on its own.
+  assert.match(mcp, /cropRegion\(png, parsed, geo\?\.points\)/);
   assert.match(mcp, /not the screen's points/);
 
   // And a device named once is remembered, because refusing to *choose* between
@@ -3462,6 +3464,27 @@ test('a control is interactive by evidence when the tree got its role wrong', as
   assert.equal(v.actsInteractive({ type: 'GenericElement' }), false, 'a bare group really is a container');
   assert.equal(v.actsInteractive({ type: 'StaticText', value: '' }), false);
   assert.equal(v.actsInteractive({}), false);
+});
+
+test('a crop region is read in every shape a caller would try, or refused out loud', async () => {
+  const { readRegion } = await import('../src/mcp.js');
+  // A client may hand a declared-object property over as a JSON string, and one
+  // did: every field read as undefined and the crop silently became the whole
+  // screen — captioned `cropped to 402x874pt at 0,0`, a crop that did not
+  // happen described as one that did.
+  const want = { x: 0, y: 60, width: 402, height: 200 };
+  assert.deepEqual(readRegion(want), want);
+  assert.deepEqual(readRegion(JSON.stringify(want)), want);
+  // [x, y, width, height] is what anyone tries first, and it failed as quietly.
+  assert.deepEqual(readRegion([0, 60, 402, 200]), want);
+  assert.deepEqual(readRegion({ x: 0, y: 60, w: 402, h: 200 }), want);
+  // A region with no size is not a region, and neither is a region-shaped
+  // nothing. Both must be refusals so the caller is told, rather than a whole
+  // screen under a caption claiming a crop.
+  assert.equal(readRegion({ x: 0, y: 60 }), null);
+  assert.equal(readRegion('nope'), null);
+  assert.equal(readRegion(null), null);
+  assert.equal(readRegion(42), null);
 });
 
 test('a value simframe wrote and can no longer see is reported, and nothing else is', async () => {
