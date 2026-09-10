@@ -2590,6 +2590,45 @@ test('the graph hands over its vocabulary instead of counting it', async () => {
   assert.match(hint, /Known to work here: tap "Anaheim", tap "4 Casa"/);
 });
 
+test('filling a field is verified once, after the fact', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const graph = await import('../src/graph.js');
+
+  // The measured answer to "why is there a long gap between filling two
+  // fields", and none of it is thinking. Filling one field was verified five
+  // times — the field exists, it took focus, the text landed, the screen
+  // settled, the screen is still the screen — and every one of those is local.
+  //
+  // Two were change-based waits, and an action that changes nothing cannot
+  // satisfy one: measured on a completely still screen, 1.9-2.0 seconds each,
+  // both returning `satisfied: false`. Tapping a text field barely moves the
+  // screen, and with a hardware keyboard attached no software keyboard appears.
+  assert.ok(graph.STAYS_ON_SCREEN.has('type'));
+  assert.ok(graph.STAYS_ON_SCREEN.has('paste'));
+  assert.ok(!graph.STAYS_ON_SCREEN.has('tap'), 'a tap really might navigate');
+
+  // The step settle is capped for those actions, well under the ~1.9s an
+  // unsatisfiable settle used to spend.
+  const budget = Number(/const STAYS_PUT_BUDGET_MS = (\d+)/.exec(src)?.[1]);
+  const stillness = Number(/const STAYS_PUT_STILLNESS_MS = (\d+)/.exec(src)?.[1]);
+  assert.ok(budget > 0 && budget <= 1000, `a stays-put budget of ${budget}ms is not a transition wait`);
+  assert.ok(stillness > 0 && stillness < budget, 'and it can still be satisfied inside it');
+  assert.match(src, /staysPut \? STAYS_PUT_BUDGET_MS : budgetMs/);
+
+  // Focus is one advisory accessibility read, not a wait and not a gate.
+  assert.match(src, /async function focusHint/);
+  assert.match(src, /t\.focused !== true/, 'focus comes from the tree, not from pixels');
+  assert.ok(!/did not visibly take focus/.test(src), 'the old pixel-based claim is gone');
+  assert.ok(!/FOCUS_POLL_BUDGET_MS/.test(src), 'and it is not a poll either');
+
+  // The precondition is not verified; the outcome is — and the race that
+  // justified the old wait is handled by one local retry instead of by an
+  // aborted batch and a model round trip.
+  assert.match(src, /took two attempts/);
+  assert.match(src, /still reads empty/);
+});
+
 test('a stored map is only valid for the rules that hashed it', async () => {
   const screenmap = await import('../src/screenmap.js');
   const fingerprint = await import('../src/fingerprint.js');

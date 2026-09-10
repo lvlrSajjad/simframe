@@ -48,6 +48,16 @@ const FIELD_READBACK_RADIUS = 40;
  */
 const FOCUS_REACTION_MS = 900;
 const FOCUS_TIMEOUT_MS = 3000;
+
+/**
+ * The settle budget for an action that is not supposed to navigate.
+ *
+ * A change-based settle cannot be satisfied by an action that changes nothing,
+ * so the only question is how long to spend finding that out. Long enough for
+ * keystrokes to land and no longer.
+ */
+const STAYS_PUT_STILLNESS_MS = 200;
+const STAYS_PUT_BUDGET_MS = 600;
 const POLL_MS = 250;
 /** A list that has not produced the target in this many screens does not contain it. */
 const MAX_SCROLLS = 20;
@@ -299,11 +309,24 @@ export async function runScript(
         ?? (learned && !learned.cold ? Math.max(learned.timeoutMs, floorMs) : timeoutMs);
       const settleFor = async () => {
         if (!autoSettle || !ACTION_STEPS.has(step.action)) return null;
+        // An action whose correct outcome is that the screen stays put cannot
+        // satisfy a change-based settle, so it pays the whole budget and then
+        // reports failure. Measured on a still screen: 1.9-2.0 seconds burned,
+        // `satisfied: false`, `sawChange: false`. Typing two fields on one form
+        // spent about four seconds waiting for transitions that were never
+        // going to happen, which is most of the gap a user sees between two
+        // fields and none of it is thinking.
+        //
+        // These steps are verified by reading the field back instead — see
+        // `fieldContents` — so the wait only has to cover the keystrokes
+        // landing, not a navigation. A short budget, and no pretence that an
+        // unsatisfied one means anything.
+        const staysPut = graph.STAYS_ON_SCREEN.has(step.action);
         const w = await api.waitFor(deviceQuery, {
           mode: 'settle',
           since: before,
-          stableMs: stillness,
-          timeoutMs: budgetMs,
+          stableMs: staysPut ? Math.min(stillness, STAYS_PUT_STILLNESS_MS) : stillness,
+          timeoutMs: staysPut ? STAYS_PUT_BUDGET_MS : budgetMs,
           options,
         });
         return {
@@ -315,7 +338,7 @@ export async function runScript(
           // What this wait was allowed, and where the number came from. A
           // timeout nobody can explain is how a fixed sleep comes back as a
           // constant with a comment.
-          budgetMs,
+          budgetMs: graph.STAYS_ON_SCREEN.has(step.action) ? STAYS_PUT_BUDGET_MS : budgetMs,
           stillnessMs: stillness,
           quietGapMs: w.quietGapMs,
           // The baseline had already finished moving when the wait began, so it
@@ -726,33 +749,69 @@ export function belowThreshold(verification, settled) {
   };
 }
 
+/**
+ * Is the field focused? One read, and the answer is advisory.
+ *
+ * Filling one field used to be verified five times: the field exists, it took
+ * focus, the text landed, the screen settled, the screen is still the screen.
+ * None of that involves a model — it is all local — which is why several
+ * seconds could pass between two fields with no thinking in them at all.
+ *
+ * Two of the five were change-based waits, and an action that changes nothing
+ * cannot satisfy one: measured on a still screen, 1.9-2.0 seconds each, both
+ * returning `satisfied: false`. Tapping into a text field barely moves the
+ * screen, and with a hardware keyboard attached to the simulator no software
+ * keyboard appears, so there is often nothing to see.
+ *
+ * The collapse is to verify the *result* rather than each precondition. If the
+ * text landed, focus obviously worked, so checking focus first is redundant
+ * with checking the outcome. This stays as a single ~85 ms accessibility read
+ * because typing into an unfocused field loses the keystrokes, so it is worth
+ * one cheap look — but it never blocks and it never fails the step. The
+ * readback after typing decides.
+ */
+async function focusHint(deviceQuery, target, ctx) {
+  try {
+    const { entry } = await api.readScreenWith(deviceQuery, { useOcr: false, options: ctx.options });
+    let elsewhere = false;
+    for (const t of entry.targets ?? []) {
+      if (t.focused !== true) continue;
+      if (Math.hypot((t.x ?? 0) - target.x, (t.y ?? 0) - target.y) <= FIELD_READBACK_RADIUS) {
+        return { focused: true, elsewhere: false };
+      }
+      elsewhere = true;
+    }
+    return { focused: false, elsewhere };
+  } catch {
+    return { focused: false, elsewhere: false };
+  }
+}
+
 async function focusField(deviceQuery, udid, step, ctx) {
   const found = await api.locate(deviceQuery, step.into, { index: step.index, refresh: step.refresh });
-  // What this field has cost to focus before, on this screen. Cold, or with no
-  // verification running, that is exactly the three constants above; measured,
-  // it can only be longer. `graph.focusPlan` carries the reason it is either.
-  const plan = ctx.focus?.plan ?? {
-    reactionMs: FOCUS_REACTION_MS, timeoutMs: FOCUS_TIMEOUT_MS, cold: true, from: 'no timing in hand',
-  };
   const tappedAt = Date.now();
   await input.tapPoint(udid, found.target.x, found.target.y);
-  const focused = await api.waitFor(deviceQuery, {
-    mode: 'settle',
-    stableMs: FOCUS_STABLE_MS,
-    reactionMs: plan.reactionMs,
-    timeoutMs: plan.timeoutMs,
-    options: ctx.options,
-  });
-  // Only a wait that was satisfied is a measurement of how long focus takes. A
-  // reaction window that ran out measures how long we were prepared to watch a
-  // screen that did not move, and banking that would teach the edge the cost of
-  // its own impatience — the estimator mistake learned stillness made.
-  if (ctx.focus && focused.satisfied) ctx.focus.observedMs = Date.now() - tappedAt;
+  const focused = await focusHint(deviceQuery, found.target, ctx);
+  // The focus distribution is no longer collected, and that is deliberate.
+  // It existed to size the focus *wait*, and there is no focus wait any more —
+  // one accessibility read replaced it. Banking the duration of that read under
+  // the same name would keep a number nobody uses, measuring something other
+  // than what its name says, which is the shape of the learned-stillness
+  // mistake. `graph.focusPlan` and the `focusSamples` it reads stay in place
+  // for now, unfed; if nothing claims them they should go.
+  void tappedAt;
   return {
     found,
     where: `"${found.target.label}" at ${found.target.x},${found.target.y}`,
-    quiet: focused.satisfied ? '' : ' [the field did not visibly take focus]',
-    waited: focused.satisfied && !plan.cold ? ` [focus in ${focused.waitedMs}ms, ${plan.from}]` : '',
+    // Only claimed when the tree named a *different* focused element. "The
+    // tree says nothing about focus" is not evidence the tap missed, and
+    // asserting it from a screen that simply did not move is what made this
+    // note wrong on a correctly focused field.
+    // Only claimed when the tree named a *different* focused element. Silence
+    // about focus is not evidence the tap missed, and asserting it from a
+    // screen that simply did not move is what made this note wrong on a
+    // correctly focused field.
+    quiet: focused.elsewhere && !focused.focused ? ' [focus is on another element of this screen]' : '',
   };
 }
 
@@ -785,21 +844,24 @@ async function runStep(deviceQuery, udid, step, ctx) {
         const field = await focusField(deviceQuery, udid, step, ctx);
         const sent = step.text ?? step.value;
         await input.typeText(udid, sent);
-        const seen = await fieldContents(deviceQuery, field.found.target, sent, ctx);
-        const back = readbackNote(sent, seen);
+        let back = readbackNote(sent, await fieldContents(deviceQuery, field.found.target, sent, ctx));
+        // Verifying the outcome instead of the precondition puts the race where
+        // it actually shows up. If the keystrokes arrived before the field had
+        // focus they are simply gone — one local retry costs about 200ms, and
+        // throwing here cost an aborted batch and a model round trip.
         if (back.empty) {
-          throw new Error(
-            `typed into ${field.where} and the field reads empty — the text did not land.`
-            + ' paste is more reliable than type on this path; keys sends literal characters, not named keys.',
-          );
+          await input.tapPoint(udid, field.found.target.x, field.found.target.y);
+          await input.typeText(udid, sent);
+          back = readbackNote(sent, await fieldContents(deviceQuery, field.found.target, sent, ctx));
+          if (back.empty) {
+            throw new Error(
+              `typed into ${field.where} twice and the field still reads empty — the text is not landing.`
+              + ' paste is more reliable than type on this path; keys sends literal characters, not named keys.',
+            );
+          }
+          return `typed into ${field.where}${back.note} [took two attempts; the first keystrokes did not land]`;
         }
-        // The focus warning is suppressed once the readback has confirmed the
-        // text landed. It fires whenever the screen does not visibly react to
-        // the tap, and with a hardware keyboard attached to the simulator none
-        // ever does — so a correctly focused field was reported as unfocused,
-        // the reporter went hunting, and that cascade cost three calls. Where
-        // there is direct evidence, a proxy for it is noise.
-        return `typed into ${field.where}${back.note}${back.landed ? '' : field.quiet}${field.waited}`;
+        return `typed into ${field.where}${back.note}${back.landed ? '' : field.quiet}`;
       }
       await input.typeText(udid, step.text ?? step.value);
       return 'typed text';
@@ -821,7 +883,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
             + ' A first paste can raise the system paste-consent dialog and lose the text; dismiss it and retry.',
           );
         }
-        return `pasted into ${field.where}${back.note}${back.landed ? '' : field.quiet}${field.waited}`;
+        return `pasted into ${field.where}${back.note}${back.landed ? '' : field.quiet}`;
       }
       await input.pasteText(udid, step.text ?? step.value);
       return 'pasted into the focused field';
