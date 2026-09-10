@@ -209,6 +209,100 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
 
+### From a peer driving a React Native app — 2026-09-11
+
+A single app, a single session, heavy async list loading — which is the profile
+that stresses the settle heuristics hardest, and the reporter said so themselves
+rather than leaving it to be discovered.
+
+**Fixed in this round.**
+
+74. **There was no way to press a keyboard key on iOS.** The reporter was
+   blocked outright: half of mobile search fields submit on the return key,
+   `button` covers only HOME/LOCK/SIRI, and `key` fell through to idb, which is
+   absent on a machine using the daemon. Typing `"\n"` as text is not a
+   substitute — text goes through the active keyboard layout, and it turned
+   `Coke Display` into `Coke In Display`. The primitive existed the whole time:
+   `IndigoHID.key(usage:op:)` had been implemented and never exposed as a verb.
+   Now `{"key":"return"}`, by name, on a usage-code path that no layout
+   translates — which is the point on a device whose own `doctor` warns that two
+   extra layouts are installed. **Not yet pressed on a device**: the benchmark
+   simulator had the owner's app in the foreground with a half-built service
+   request on screen, and a stray Return there could submit it.
+
+75. **The count-header heuristic cried wolf, and got itself ignored.** `a header
+   promises 1232 records and only 43 row(s) are here yet` fired on nearly every
+   step of a list whose correct final state was 43 rendered rows. The reporter's
+   verdict is the reason this was capped rather than tuned: *"by the fourth
+   occurrence I was ignoring it, which is the failure mode you least want from a
+   warning."* The flaw was deeper than the threshold — on a paginated or
+   virtualised list the header is a **total**, and a total says nothing about how
+   many rows belong on screen. It now only speaks when the promised count could
+   plausibly be a count of rendered rows (≤30, about a viewport).
+
+76. **A stale ref aborted three remaining steps for want of a label it already
+   had.** `#19 was numbered on a different screen (61b835b7 → 6f34c006)` because
+   dashboard cards finished loading and shifted the layout — the same screen, a
+   new hash. The ref table stores the label behind each number, so the refusal
+   now carries it and the caller is re-resolved **by label**, never by the old
+   coordinates, and told so in the step detail. Their suggestion, and a good one.
+
+77. **The multi-device error pointed at a shell that does not exist over MCP.**
+   *"set SIMFRAME_DEVICE to pick a default for this shell"* — so they passed a
+   36-character UDID on all ~20 calls. The sticky device landed the same day
+   from another report and the message never learned about it; it now says to
+   pass `device` once.
+
+**Open, and the reporter's own ordering is kept.**
+
+78. **A `type` that lands nowhere still returns `ok`** — their most important
+   finding, and the third independent report of it. Two of their three incidents
+   are now covered by the readback (item 1 of this round): an unread field says
+   `unconfirmed`, and the OCR fallback means a web field can be read back at all.
+   The third is not: an iOS Paste/AutoFill bubble intercepted the tap and the
+   field kept its placeholder. Their proposed remedy is worth weighing on its
+   own — *promote "1 of 4 steps unverified" to the first line of the result*
+   rather than leaving it as a per-step trailer.
+
+79. **OCR is winning over the tree on React Native text.** `Q bearch`,
+   `Possible Warrantv`, `Location (AII)`, `MoreR` — cosmetic. `O Records` for
+   `0 Records` is not: a digit read as a letter silently breaks an assertion.
+   Their proposal is that AX should win outright for text content and OCR supply
+   only geometry — and the fusion rule already does exactly that when an ax
+   element covers the text. So the premise needs checking before the fix: if
+   these arrived OCR-only, the tree had no string to prefer, and the answer is
+   **item 21 (OCR confusables)**, a comparison change, not a fusion change.
+   Do not build either until it is known which.
+
+80. **Network visibility — the feature they would add, "by a distance."** They
+   hand-rolled a CDP bridge to Metro's inspector and patched `XMLHttpRequest` to
+   see what the app sent, and *that* is what made the bug diagnosable: the screen
+   looked identical whether the API returned `403`, returned `200 []`, or was
+   never called. Most "is this broken?" questions are answered by the network
+   rather than the pixels. The pairing they describe is the interesting part and
+   it is ours to make: simframe already knows when a screen settled, so
+   "settled, and these three requests fired with these statuses" is a sentence
+   nothing else can say. `http://localhost:8081/json/list` is the plumbing.
+   **A product decision, not a fix** — it is a new capability and a new
+   dependency surface, so it needs an explicit call.
+
+81. **Detect screen changes the agent did not cause.** Their runner-up, and it
+   bit *me* the same afternoon: the owner's app appeared in the foreground of the
+   benchmark device mid-field-test, and I ran 28 swipe gestures before noticing.
+   Their own version was a search field containing `2609251` that they had never
+   typed. Frame hashes and stillness are already tracked, so an unattributed
+   change signal is nearly free — and a human and an agent on one simulator is
+   precisely the QA scenario, not an edge case.
+
+**Praised, recorded because knowing what to keep is as useful as knowing what to
+fix.** Pricing the tools in their own descriptions changed behaviour
+immediately — *"very few tools bother to price themselves, and it works"*: three
+`sim_look` calls all session against constant `sim_ui`. The `next:` trailer was
+called the standout feature, specifically for correcting a wasteful re-plan
+in-band. Cross-session `worked here before:` was called a real differentiator.
+And intent resolution beat numeric refs consistently — `sim_tap "the More tab"`
+first time — which is the fourth round in a row where labels beat refs.
+
 ### From a bug-fixing agent, not a peer round — 2026-09-11
 
 A different agent used simframe to fix a ticket and reported back. Five findings,

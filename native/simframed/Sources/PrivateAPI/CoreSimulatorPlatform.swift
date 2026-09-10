@@ -599,6 +599,18 @@ extension CoreSimulatorPlatform {
         guard hid != nil else { throw PrivateAPIError.hidUnavailable("could not rebuild the HID client") }
     }
 
+    public func pressKey(usage: UInt32) throws {
+        let (hid, _) = try requireHID()
+        // The usage-code path, not the character path. `type` sends characters
+        // and is therefore at the mercy of whichever keyboard layout iOS has
+        // active — which is why this device's own doctor warns about the fa and
+        // hy layouts. A usage code names a key *position* and is not translated,
+        // so Return is Return whatever is installed.
+        hid.key(usage: usage, op: .down)
+        Thread.sleep(forTimeInterval: 0.06)
+        hid.key(usage: usage, op: .up)
+    }
+
     public func press(_ button: HardwareButton) throws {
         let (hid, _) = try requireHID()
         guard let code = HIDKeyboard.buttonCode(button) else {

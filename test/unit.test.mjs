@@ -3466,6 +3466,72 @@ test('a control is interactive by evidence when the tree got its role wrong', as
   assert.equal(v.actsInteractive({}), false);
 });
 
+test('a stale ref offers the label it was numbered against, and says it did', async () => {
+  const actions = await import('../src/actions.js');
+  const { resolveRef, writeRefs } = await import('../src/refs.js');
+  const udid = 'TEST-RELABEL';
+  writeRefs(udid, {
+    structuralHash: 'aaaa1111',
+    layoutHash: 'a'.repeat(72),
+    rows: [{ ref: 19, label: 'Work Orders', x: 40, y: 200, type: 'Button', region: 'content', source: 'ax' }],
+  });
+
+  // Reported: `#19 was numbered on a different screen (61b835b7 → 6f34c006)`
+  // because dashboard cards finished loading and shifted the layout — the same
+  // screen, a new hash — and that one refusal aborted the three remaining steps
+  // in the batch. The table knows what #19 pointed at, so the refusal carries
+  // the label and the caller need not spend a round trip rediscovering it.
+  const err = (() => {
+    try { resolveRef(udid, 19, { structuralHash: 'bbbb2222', structuralDistance: 0 }); return null; } catch (e) { return e; }
+  })();
+  assert.ok(err, 'a genuinely different screen still refuses');
+  assert.equal(err.staleRef, true);
+  assert.equal(err.staleLabel, 'Work Orders');
+
+  // And a ref with no recorded label offers nothing rather than inventing it.
+  const bare = (() => {
+    try { resolveRef(udid, 4, { structuralHash: 'bbbb2222', structuralDistance: 0 }); return null; } catch (e) { return e; }
+  })();
+  assert.equal(bare.staleLabel, null);
+
+  // The recovery is never silent: re-resolving is a recovery, not a fact about
+  // the ref, and a recovery a caller cannot see is the shape of every
+  // silent-success bug this round was about.
+  const note = actions.relabelledNote({ relabelled: { ref: 19, label: 'Work Orders' } });
+  assert.match(note, /#19 was stale/);
+  assert.match(note, /"Work Orders"/);
+  assert.match(note, /the number was not honoured/);
+  assert.equal(actions.relabelledNote({}), '');
+});
+
+test('a count header only warns when the count could be the rows on screen', async () => {
+  const actions = await import('../src/actions.js');
+  const list = (promised, rows) => ({
+    targets: [
+      { region: 'content', label: `${promised} Records` },
+      ...Array.from({ length: rows }, (_, i) => ({ region: 'content', label: `row ${i}` })),
+    ],
+  });
+
+  // The case this heuristic was built for: a `waitFor` on "Records" satisfied
+  // by the header "21 Records" while zero of the 21 rows existed.
+  assert.match(actions.stillFillingIn(list(21, 2)), /only 2 row\(s\)/);
+  assert.equal(actions.stillFillingIn(list(21, 20)), null);
+
+  // And the case that made it cry wolf. On a paginated or virtualised list the
+  // header is a TOTAL, which says nothing about how many rows belong on screen:
+  // `a header promises 1232 records and only 43 row(s) are here yet` fired on
+  // nearly every step of a list whose correct final state was 43 rows. The
+  // reporter's verdict is the reason this is capped rather than tuned — "by the
+  // fourth occurrence I was ignoring it, which is the failure mode you least
+  // want from a warning."
+  assert.equal(actions.stillFillingIn(list(1232, 43)), null);
+  assert.equal(actions.stillFillingIn(list(1232, 0)), null, 'a total is silent even at zero rows');
+
+  // The other signal on this path is untouched: a control that says so.
+  assert.match(actions.stillFillingIn({ targets: [{ region: 'content', label: 'Loading' }] }), /loading/);
+});
+
 test('a crop region is read in every shape a caller would try, or refused out loud', async () => {
   const { readRegion } = await import('../src/mcp.js');
   // A client may hand a declared-object property over as a JSON string, and one

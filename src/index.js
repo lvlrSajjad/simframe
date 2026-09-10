@@ -1183,7 +1183,41 @@ async function locateWith(
     // be checked against structural identity without paying for a perception
     // pass — which is the whole reason a ref exists.
     const near = screenmap.recallNearest(udid, firstState.layoutHash);
-    const hit = refs.resolveRef(udid, selector.ref, {
+    let hit;
+    try {
+      hit = resolveRefHere();
+    } catch (err) {
+      // A stale ref carries the label it was numbered against, so it need not
+      // cost the rest of the batch. Reported: `#19 was numbered on a different
+      // screen (61b835b7 → 6f34c006)` because dashboard cards finished loading
+      // and shifted the layout — the same screen, a new hash — and that one
+      // refusal aborted the three remaining steps.
+      //
+      // It re-resolves by label rather than by coordinate, and it *says so*.
+      // The number is not honoured; the caller's own words are, which is what
+      // they would have written instead. Resolving the old coordinates would be
+      // the dangerous version of this, and is not what happens.
+      if (!err.staleRef || !err.staleLabel) throw err;
+      const again = await locateWith(deviceQuery, err.staleLabel, {
+        index, refresh: true, useAx, useOcr, settleMs, options, escalated,
+      });
+      return {
+        ...again,
+        from: 'ref-relabelled',
+        relabelled: { ref: selector.ref, label: err.staleLabel, why: err.message },
+      };
+    }
+    return {
+      device,
+      state: firstState,
+      target: { ...hit, label: hit.label ?? `#${hit.ref}`, source: hit.source ?? 'ref' },
+      from: 'ref',
+      distance: 0,
+      settled: true,
+    };
+
+    function resolveRefHere() {
+      return refs.resolveRef(udid, selector.ref, {
       layoutHash: firstState.layoutHash,
       structuralHash: near?.entry?.structuralHash ?? null,
       // How far that recall reached. `recallNearest` is deliberately tolerant —
@@ -1194,17 +1228,10 @@ async function locateWith(
       // (0f7b9e3e → 48e5c92d)` where both calls' headers printed the identical
       // screen, because the map named the screen from a tolerant recall while
       // refs treated that same recall as exact.
-      structuralDistance: near?.distance ?? null,
-      screenKnown: Boolean(near),
-    });
-    return {
-      device,
-      state: firstState,
-      target: { ...hit, label: hit.label ?? `#${hit.ref}`, source: hit.source ?? 'ref' },
-      from: 'ref',
-      distance: 0,
-      settled: true,
-    };
+        structuralDistance: near?.distance ?? null,
+        screenKnown: Boolean(near),
+      });
+    }
   }
   if (selector.exact) query = selector.label;
   // Key memory off a settled frame, never off whichever frame happened to be

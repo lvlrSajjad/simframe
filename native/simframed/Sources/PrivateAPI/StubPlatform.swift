@@ -105,6 +105,10 @@ extension StubPlatform {
     }
     public func type(_ text: String) throws { recorded.append("type(\(text))") }
     public func paste(_ text: String) throws { recorded.append("paste(\(text))") }
+    public func pressKey(usage: UInt32) throws {
+        throw PrivateAPIError.frameworksUnavailable("stub platform")
+    }
+
     public func press(_ button: HardwareButton) throws { recorded.append("press(\(button.rawValue))") }
     public func longPress(at point: CGPoint, durationMs: Double) throws {
         recorded.append("longPress(\(Int(point.x)),\(Int(point.y)),\(Int(durationMs)))")

@@ -132,6 +132,15 @@ public protocol SimulatorPlatform: AnyObject {
     /// it is the only reliable route for content that must be exact.
     func paste(_ text: String) throws
     func press(_ button: HardwareButton) throws
+    /// Press one keyboard key by HID usage code.
+    ///
+    /// Separate from `press`, which is the hardware buttons (HOME, LOCK, SIRI).
+    /// A peer was blocked outright for want of this: half of mobile search
+    /// fields submit on the keyboard return key, and there was no way to send
+    /// one. Typing "\n" as text goes through the active keyboard layout and
+    /// mangles the field instead — measured, it turned "Coke Display" into
+    /// "Coke In Display".
+    func pressKey(usage: UInt32) throws
     /// Rebuild the HID session.
     ///
     /// Input has no feedback channel: a dispatched Indigo message reports

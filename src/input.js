@@ -429,14 +429,52 @@ export async function typeKeys(udid, value) {
   await idb(['ui', 'text', '--udid', udid, String(value)]);
 }
 
+/**
+ * Keyboard keys, by name.
+ *
+ * A peer was blocked outright for want of Return: half of mobile search fields
+ * submit on the keyboard return key, `button` covers only the hardware buttons,
+ * and `key` wanted a raw HID usage code that nobody should have to know. Typing
+ * "\n" as text is not a substitute — text goes through whatever keyboard layout
+ * iOS has active, and measured, it turned "Coke Display" into "Coke In Display".
+ *
+ * These are HID keyboard usage codes, which name a key *position* and are never
+ * translated by a layout. That property is the whole reason this path exists on
+ * a device whose own doctor warns that two extra layouts are installed.
+ */
+export const KEYS = {
+  return: 40, enter: 40, escape: 41, esc: 41, backspace: 42, delete: 42,
+  tab: 43, space: 44, up: 82, down: 81, left: 80, right: 79,
+};
+
+/** The usage code for a name, a number, or null when it is neither. */
+export function keyUsage(key) {
+  if (Number.isFinite(Number(key))) return Number(key);
+  const name = String(key ?? '').trim().toLowerCase();
+  return Object.hasOwn(KEYS, name) ? KEYS[name] : null;
+}
+
 export async function pressKey(udid, keycode) {
   await ensureFreshSession(udid);
+  const usage = keyUsage(keycode);
+  if (usage == null) {
+    throw new Error(`unknown key ${JSON.stringify(String(keycode))} — known names: ${Object.keys(KEYS).join(', ')}`
+      + ', or a HID usage code');
+  }
   const own = inputDriverFor(udid);
   if (own) {
-    await own.key(udid, keycode);
+    await own.key(udid, usage);
     return;
   }
-  await idb(['ui', 'key', '--udid', udid, String(keycode)]);
+  // The daemon owns the keyboard usage path on iOS. It was implemented in the
+  // HID layer and never exposed as a verb, so this fell through to idb — which
+  // is absent on a machine using the daemon, and so there was no way to press a
+  // keyboard key at all.
+  if (control.available(udid)) {
+    await control.key(udid, usage);
+    return;
+  }
+  await idb(['ui', 'key', '--udid', udid, String(usage)]);
 }
 
 /**

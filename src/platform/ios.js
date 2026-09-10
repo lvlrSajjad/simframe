@@ -87,7 +87,8 @@ async function resolveDevice(query, opts) {
         new Error(
           `${booted.length} simulators are booted and none was named: ` +
             `${booted.map((d) => `${d.name} (${d.udid})`).join(', ')} — name one with --device, ` +
-            'or set SIMFRAME_DEVICE to pick a default for this shell',
+            'or set SIMFRAME_DEVICE to pick a default for this shell. Over MCP there is no shell: ' +
+            'pass "device" once on any call and the rest of the session remembers it',
         ),
         { ambiguous: true },
       );

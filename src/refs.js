@@ -107,8 +107,15 @@ export function parseSelector(query) {
 export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, structuralDistance = 0, tolerance = REF_TOLERANCE } = {}) {
   const table = readRefs(udid);
   if (!table) throw new Error(`#${n} means nothing yet — read the screen first (sim_ui, or simframe ui)`);
-  const stale = (was, now) =>
-    `#${n} was numbered on a different screen (${was} → ${now}) — read the screen again before using refs`;
+  // The label this number was given to, when there is one. A stale ref is not
+  // nothing: the table records what it pointed at, which is enough for the
+  // caller to be offered the label instead of a bare refusal.
+  const labelFor = table.refs?.find((r) => r.ref === n)?.label ?? null;
+  const stale = (was, now) => Object.assign(
+    new Error(`#${n} was numbered on a different screen (${was} → ${now})`
+      + ' — read the screen again before using refs'),
+    { staleRef: true, staleLabel: labelFor },
+  );
 
   // Structural identity first, because it is the question actually being asked:
   // is this the screen those numbers were assigned on? The caller gets it
@@ -125,7 +132,7 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
   // pixel backstop below is the one that decides, which is what it is for.
   const exactRecall = structuralDistance === 0 || structuralDistance == null;
   if (exactRecall && table.structuralHash && structuralHash && table.structuralHash !== structuralHash) {
-    throw new Error(stale(table.structuralHash.slice(0, 8), structuralHash.slice(0, 8)));
+    throw stale(table.structuralHash.slice(0, 8), structuralHash.slice(0, 8));
   }
   // Nothing recognises the screen we are on, so nothing can vouch for the
   // numbers. Refusing costs a re-read; guessing taps whatever is at those
@@ -141,7 +148,7 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
   // no bits set is not evidence of anything.
   if (layoutHash && table.layoutHash && informative(table.layoutHash) && informative(layoutHash)
     && hashDistance(table.layoutHash, layoutHash) > tolerance) {
-    throw new Error(stale(table.layoutHash.slice(0, 8), layoutHash.slice(0, 8)));
+    throw stale(table.layoutHash.slice(0, 8), layoutHash.slice(0, 8));
   }
   const hit = table.refs.find((r) => r.ref === n);
   if (!hit) {

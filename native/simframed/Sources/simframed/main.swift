@@ -122,7 +122,7 @@ case "input":
         print("     \(device.name): \(device.pixelWidth)x\(device.pixelHeight)px @\(device.scale)x = \(device.pointWidth)x\(device.pointHeight)pt")
     } catch { fail("\(error)") }
 
-case "tap", "swipe", "type", "paste", "press":
+case "tap", "swipe", "type", "paste", "press", "key":
     do {
         _ = try platform.attach(udid: flag("udid"))
         let positional = args.filter { !$0.hasPrefix("--") }.dropFirst()
@@ -141,6 +141,11 @@ case "tap", "swipe", "type", "paste", "press":
         case "type":
             guard !positional.isEmpty else { fail("usage: simframed type <text>") }
             try platform.type(positional.joined(separator: " "))
+        case "key":
+            guard let u = positional.first, let usage = UInt32(u) else {
+                fail("usage: simframed key <hid-usage-code>")
+            }
+            try platform.pressKey(usage: usage)
         case "paste":
             guard !positional.isEmpty else { fail("usage: simframed paste <text>") }
             try platform.paste(positional.joined(separator: " "))
@@ -403,6 +408,12 @@ case "run":
                         return ["ok": false, "error": "press needs a known button name"]
                     }
                     try platform.press(button)
+                    return done()
+                case "key":
+                    guard let usage = request["usage"] as? NSNumber else {
+                        return ["ok": false, "error": "key needs a HID usage code"]
+                    }
+                    try platform.pressKey(usage: usage.uint32Value)
                     return done()
                 case "resetInput":
                     try platform.resetInput()

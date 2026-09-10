@@ -939,6 +939,20 @@ function journalWrite(udid, step, sent, back, ctx) {
   wrote.record(udid, { selector: step.into, value: sent, screen: ctx?.screen ?? null });
 }
 
+/**
+ * Say when a ref was honoured by its label rather than by its number.
+ *
+ * Never silent. Re-resolving is a recovery, not a fact about the ref, and a
+ * recovery a caller cannot see is the shape of every silent-success bug in this
+ * file — so it names the number, the label it fell back to, and why.
+ */
+export function relabelledNote(found) {
+  const r = found?.relabelled;
+  if (!r) return '';
+  return ` [#${r.ref} was stale, so it was re-resolved by the label it was numbered against,`
+    + ` ${JSON.stringify(String(r.label))} — the number was not honoured, the label was]`;
+}
+
 /** Comparison that ignores what OCR adds — a caret, a stray glyph, spacing. */
 const alnum = (v) => String(v ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
@@ -985,6 +999,13 @@ export function readbackNote(sent, seen) {
  */
 const LOADING_LABEL = /^(loading|loading…|loading\.\.\.|please wait|fetching|refreshing)$/i;
 const COUNT_HEADER = /^(\d[\d,]*)\s+(records?|results?|items?|rows?|entries)\b/i;
+/**
+ * The largest promised count that could be a count of rendered rows.
+ *
+ * Above this the header is reporting a total for a list that pages or
+ * virtualises, and the number of rows on screen is unrelated to it.
+ */
+const COUNT_HEADER_MAX = 30;
 
 export function stillFillingIn(entry) {
   const targets = entry?.targets ?? [];
@@ -999,9 +1020,20 @@ export function stillFillingIn(entry) {
     const m = COUNT_HEADER.exec(String(t.label).trim());
     if (!m) continue;
     const promised = Number(String(m[1]).replace(/,/g, ''));
-    // The header itself, plus whatever chrome shares the region. Well short of
-    // what it promised means the rows are still coming.
-    if (Number.isFinite(promised) && promised >= 3 && content.length < promised / 2) {
+    // Only when the promised number could plausibly be the number of *rendered*
+    // rows. This is the correction to the whole idea, and it took a peer
+    // ignoring the warning to see it: on a paginated or virtualised list the
+    // header is a **total**, and a total says nothing at all about how many rows
+    // should be on screen. Measured: `a header promises 1232 records and only 43
+    // row(s) are here yet` fired on nearly every step of a list whose correct,
+    // final state was 43 rendered rows. Their verdict is the one that matters —
+    // *"by the fourth occurrence I was ignoring it, which is the failure mode
+    // you least want from a warning."*
+    //
+    // A viewport holds on the order of twenty rows, so beyond a screenful the
+    // count cannot be a render target and this has nothing to say.
+    if (Number.isFinite(promised) && promised >= 3 && promised <= COUNT_HEADER_MAX
+      && content.length < promised / 2) {
       return `a header promises ${promised} ${m[2].toLowerCase()} and only ${content.length - 1} row(s) are here yet`;
     }
   }
@@ -1978,7 +2010,8 @@ async function runStep(deviceQuery, udid, step, ctx) {
       // Screen memory first: a familiar screen needs no tree read and no OCR.
       const found = await api.locate(deviceQuery, query, { index: step.index, refresh: step.refresh });
       await input.tapPoint(udid, found.target.x, found.target.y, { durationMs: step.durationMs });
-      return `tapped "${found.target.label}" at ${found.target.x},${found.target.y} (${found.from}${found.from === 'memory' ? ` d=${found.distance}` : ''}, via ${found.target.source})`;
+      return `tapped "${found.target.label}" at ${found.target.x},${found.target.y} (${found.from}${found.from === 'memory' ? ` d=${found.distance}` : ''}, via ${found.target.source})`
+        + relabelledNote(found);
     }
     case 'tapAt': {
       const geo = await ctx.screen();
