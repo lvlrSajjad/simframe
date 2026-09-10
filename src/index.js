@@ -1315,6 +1315,11 @@ export async function screenIdentity(deviceQuery, { options, confirmNovel = true
       keyboard: Boolean(entry.keyboard),
       layoutHash: current.layoutHash,
       settled,
+      // Settled and incomplete are different states and used to render
+      // identically. A screen awaiting a network call is perfectly still; a
+      // person sees a spinner and knows to wait. The classifier already says
+      // so, and nothing above this line was asking.
+      loading: current.transition?.kind === 'loading',
       // Carried out so callers that want the elements as well as the identity
       // do not pay for a second perception pass to get them. The compact
       // screen map needs both, and reading twice was the whole cost of it.

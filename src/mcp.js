@@ -636,25 +636,38 @@ async function recall(target, args, options) {
  * is free. Reading the screen a second time to render it was the whole cost of
  * a text-first surface, and it does not have to be paid.
  */
+/**
+ * The map at the end of an action, and why it is re-read rather than recalled.
+ *
+ * It used to be rendered from whatever `screenIdentity` had in hand during
+ * verification, which is memory-first by design — so the trailing map could
+ * describe the screen as it was seconds earlier. Reported from a real session:
+ * *"do's trailing dump is still stale, so I still ran `ui --refresh` after
+ * nearly every call — that remains the biggest speed tax."*
+ *
+ * Saying how old it was (the header does) turned out not to be enough: an agent
+ * that cannot trust the map spends a turn re-reading it, and a turn is the
+ * expensive unit here. So an action pays one perception pass — a few hundred
+ * milliseconds, locally, once — to save a model round trip. That is the whole
+ * trade this phase is about, and it is the right way round.
+ *
+ * `refresh: false` is still available for the read-only tools, where the caller
+ * asked for a map and can ask again.
+ */
 async function mapFrom(target, options, identity, extra = {}) {
   try {
-    const m = await view.screenMap(target, { options, identity: identity?.entry ? identity : undefined });
+    const fresh = extra.refresh !== false;
+    const m = await view.screenMap(target, {
+      options,
+      refresh: fresh,
+      identity: fresh ? undefined : (identity?.entry ? identity : undefined),
+    });
     const rendered = view.render({ ...m, ...extra });
     // The line that decides whether the model stops to think. Everything it
     // needs is already computed for the map above it, so this costs nothing —
     // and "nothing here needs you" is a thing only the daemon can say.
     if (extra.hint === false) return rendered;
-    const hint = view.nextHint({
-      ok: extra.flowOk !== false,
-      escalated: Boolean(extra.escalated),
-      settled: m.identity?.settled !== false,
-      known: m.exits != null,
-      hash: m.identity?.hash ?? null,
-      exits: m.exits ?? 0,
-      elements: m.rows.length,
-      ambiguous: view.ambiguousLabels(m.rows),
-    });
-    return `${rendered}\n${hint}`;
+    return `${rendered}\n${view.hintFor(m, { flowOk: extra.flowOk, escalated: extra.escalated })}`;
   } catch (err) {
     return `(could not read the screen: ${err.message})`;
   }
@@ -806,7 +819,9 @@ async function ui(target, args, options) {
     refresh: args.refresh,
   });
   if (m.identity.state) remember(m.device.udid, m.identity.state);
-  return { content: [text(m.text)] };
+  // The hint belongs here too: the agent has just looked, so "you do not need
+  // to look again" is exactly the thing worth saying at this moment.
+  return { content: [text(`${m.text}\n${view.hintFor(m)}`)] };
 }
 
 async function find(target, args, options) {

@@ -582,13 +582,24 @@ Three things move that number, and simframe does the first two for you:
   step that matters. The asserts are what make it safe not to look in between:
   a step that lands somewhere unplanned halts the flow instead of letting the
   next four run against the wrong screen.
-- **A `next:` line on every action result**, computed locally from what the
-  daemon already knows — whether the screen settled, whether the graph
+- **A `next:` line on every action result** — from the CLI and the MCP server
+  alike — computed locally from what the daemon already knows — whether the screen settled, whether the graph
   recognises it, how many elements it has, whether any labels repeat. When it
   says *nothing ambiguous — chain the next steps in one sim_do without looking
   again*, that is the tool telling the agent it does not need to think.
+- **A trailing map that was re-read, not recalled.** An action pays one
+  perception pass — a few hundred milliseconds, locally — so the map it returns
+  is the screen as it is now. The alternative was an agent spending a whole turn
+  on `ui --refresh` because it could not trust the one it was given.
 - **One goal per session.** Sessions get slower with every turn. A flow that
   runs as one call adds one exchange to the context instead of twelve.
+
+And one thing to know about waiting: `settle` asks whether the screen stopped
+moving, and a screen waiting on a network call has stopped moving. For anything
+that arrives over the network, assert on the content you expect —
+`{"waitFor": {"value": "Kate Bell"}}` — rather than on stillness. The map says
+`STILL LOADING` when the classifier can see a load in flight, but only you know
+what "arrived" means.
 
 And the expensive habit worth naming: in that session, **28 of 62 calls returned
 a screenshot** — about a third of its entire token cost — because the text map

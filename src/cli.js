@@ -171,11 +171,26 @@ function emit(flags, json, lines) {
   if (body != null) console.log(Array.isArray(body) ? body.filter((l) => l != null).join('\n') : body);
 }
 
-/** The end-state screen map, rendered from a reading the flow already took. */
-async function mapText(device, options, identity) {
+/**
+ * The end-state screen map, re-read rather than recalled, with its hint.
+ *
+ * Both halves were reported against Phase 11.5 and both were right. The map was
+ * rendered from whatever reading the flow already had, which is memory-first —
+ * so a trailing map could describe the screen as it was seconds ago, and the
+ * remedy in practice was a `ui --refresh` after nearly every call, which is a
+ * whole extra turn to save a few hundred milliseconds. Wrong way round.
+ *
+ * And the hint was only ever printed by the MCP server, so no CLI user could
+ * see it and no CLI run could test it.
+ */
+async function mapText(device, options, identity, { flowOk = true, escalated = false, refresh = true } = {}) {
   try {
-    const m = await view.screenMap(device, { options, identity: identity?.entry ? identity : undefined });
-    return m.text;
+    const m = await view.screenMap(device, {
+      options,
+      refresh,
+      identity: refresh ? undefined : (identity?.entry ? identity : undefined),
+    });
+    return `${m.text}\n${view.hintFor(m, { flowOk, escalated })}`;
   } catch (err) {
     return `(could not read the screen: ${err.message})`;
   }
@@ -533,6 +548,7 @@ async function main() {
         all: Boolean(flags.all),
         refresh: Boolean(flags.refresh),
       });
+      m.text = `${m.text}\n${view.hintFor(m)}`;
       emit(
         flags,
         {
@@ -592,7 +608,10 @@ async function main() {
         : null;
       // `--map=false` arrives as the string "false"; `--no-map` as true.
       const wantMap = !flags.json && flags.noMap !== true && String(flags.map ?? 'true') !== 'false';
-      const map = wantMap ? await mapText(flags.device, options, res.endScreen) : null;
+      const escalated = (res.results ?? []).some((r) => metrics.ESCALATING_VERDICTS.has(r.verification?.verdict));
+      const map = wantMap
+        ? await mapText(flags.device, options, res.endScreen, { flowOk: res.ok, escalated })
+        : null;
       emit(
         flags,
         {

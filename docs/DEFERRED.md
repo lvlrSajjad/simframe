@@ -23,11 +23,16 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 >
 > Gate A (1, 14, 22) and Gate B (3, 4, 6, 8, 21) are complete. Gate C is
 > complete except **item 11**, with item 10 half done on purpose — its
-> measurement is in and nothing acts on it. **Phase 11.5 is done** and released
-> in 0.11.0: the diagnosis overturned its own premise (batches are short, not
-> absent) and the fixes were tool descriptions under 60 words, a locally
-> computed `next:` line telling the model when it need not think, body prose
-> dropped from the map, and a rewritten SKILL. See `docs/BENCHMARKS.md`.
+> measurement is in and nothing acts on it. **Phase 11.5 is done**: the
+> diagnosis overturned its own premise (batches are short, not absent), and the
+> fixes are tool descriptions under 60 words, a locally computed `next:` line
+> telling the model when it need not think, a trailing map that is re-read
+> rather than recalled, and a rewritten SKILL. The map-shrinking half was
+> **reverted the same day** — see `docs/BENCHMARKS.md`.
+>
+> **Phase 11.5 is on `main` and NOT yet released** — an earlier version of this
+> block said "released in 0.11.0", which was false; the release was waiting on
+> CI and then on a regression report. 0.10.0 is what is on npm.
 >
 > Struck items keep their original diagnosis where the diagnosis was wrong,
 > because that is the instructive half.

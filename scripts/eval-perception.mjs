@@ -36,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import * as fingerprint from '../src/fingerprint.js';
 import * as matching from '../src/matching.js';
 import * as analyze from '../src/analyze.js';
+import * as view from '../src/view.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = path.join(ROOT, 'test', 'perception', 'screens');
@@ -68,6 +69,7 @@ export function checkScreen(fx) {
   const authored = (expect.resolutions?.length ?? 0)
     + (expect.ambiguous?.length ?? 0)
     + (expect.none?.length ?? 0)
+    + (expect.discoverable?.length ?? 0)
     + (fx.frame_pairs?.length ?? 0)
     + (expect.identity ? 1 : 0);
 
@@ -115,6 +117,37 @@ export function checkScreen(fx) {
         want: 'none',
         got: out.status === 'ok' ? `picked "${out.target.label}"` : 'ambiguous',
       });
+    }
+  }
+
+  // Discovery: does the default map still SAY what is on this screen?
+  //
+  // This check exists because of a regression it would have caught. A rule that
+  // dropped long non-interactive rows left every React Native list card out of
+  // the map — the cards expose their children as one concatenated accessibility
+  // label, so they look exactly like a Settings caption. Nothing became
+  // untappable, because `locate` reads targets rather than rows, so every
+  // resolution expectation above still passed. What was lost was the map's
+  // account of what is there, and an agent that cannot see a row falls back to
+  // a ~1600-token screenshot.
+  //
+  // Resolution and discovery are different claims, and the harness could only
+  // make the first one.
+  if (expect.discoverable?.length && screen) {
+    const { rows } = view.rowsFor({ targets }, { screen });
+    const shown = rows.map((r) => String(r.label ?? ''));
+    for (const want of expect.discoverable) {
+      // Compared as a prefix, because a long label is legitimately truncated in
+      // a row — truncated is discoverable, absent is not.
+      const head = want.slice(0, 24);
+      if (!shown.some((got) => got.startsWith(head))) {
+        findings.push({
+          kind: 'discovery',
+          query: `${want.slice(0, 40)}${want.length > 40 ? '…' : ''}`,
+          want: 'listed in the default map',
+          got: `${rows.length} row(s), none starting with it`,
+        });
+      }
     }
   }
 

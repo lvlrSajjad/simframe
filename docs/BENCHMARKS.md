@@ -2725,3 +2725,72 @@ offline and exactly. The turn counts were measured through an MCP server process
 started before today's changes, so those two runs show the *old* result format —
 the turn count is real, the `next:` line and the prose cut are not visible in
 them and are verified by unit test and by the offline measurement instead.
+
+### Phase 11.5, corrected by a test report
+
+Three findings came back against it within hours. Two were right and one of
+them was a regression I shipped to `main`.
+
+**The map cut is reverted.** It dropped non-interactive rows with labels past 45
+characters. A React Native list card exposes all of its children as one
+concatenated accessibility label — `Anaheim | Store # 1020, , 1234 Main St, … |
+Quick Casual Restaurant`, 105 characters, type `GenericElement`, region
+`content`. Every property my rule tested is identical to a Settings caption's,
+and that card is the only tappable thing on its screen. Measured by the
+reporter on one screen, same device, seconds apart: **12 elements before, 9
+after; the location rows gone.**
+
+Nothing became untappable — they verified that, and it holds, because `locate`,
+`assert` and `waitFor` read `entry.targets` rather than the rendered rows. What
+was lost is **discovery**: the map stopped saying what was on screen, so an
+agent could only tap labels it already knew, and the fallback on a screen of
+unknown data is a ~1600-token screenshot. It saved characters on
+settings-shaped screens and spent an image on list-shaped ones — the exact cost
+this phase existed to remove — across every data list in every RN app.
+
+So the −15% is given back. What survives is the reporter's own alternative:
+truncate, do not drop, because position and tappability are the valuable parts
+of a row and not the full text. `MAX_LABEL` already does that.
+
+The lesson is not "find a better discriminator" — there isn't one at that layer,
+and the fixture proves it: the card and the caption differ in no property the
+rule can see. The lesson is that this was a **threshold shipped with no harness
+case that could catch its failure, in the same session as building the
+harness**. Resolution and discovery are different claims and the harness could
+only make the first. So `expect.discoverable` now exists, and reintroducing the
+bad rule fails it:
+
+```
+FAIL  reported/rn-list-card
+        discovery: Anaheim | Store # 1020, , 1234 Main St, …
+          want listed in the default map
+          got  2 row(s), none starting with it
+```
+
+15 screens, 5 apps, 67 expectations.
+
+**The `next:` line was unreachable.** It was called only from `src/mcp.js`, so
+no CLI user could see it — and an MCP server is a long-lived process, so the
+reporter's session was running code from before the change and could not
+exercise the headline feature of the phase at all. It lives in `view.js` now as
+`hintFor`, both front ends call it, and a unit test asserts the CLI does.
+
+**The trailing map is re-read, not recalled.** Reported as the biggest remaining
+speed tax: *"do's trailing dump is still stale, so I still ran `ui --refresh`
+after nearly every call."* Saying how old it was turned out not to be enough —
+an agent that cannot trust a map spends a turn re-reading it, and a turn is the
+expensive unit. An action now pays one perception pass, a few hundred
+milliseconds, locally, to save a model round trip. That is the trade this phase
+is about and it was the wrong way round.
+
+**Settled is not finished.** Their sharpest finding came out of a correction:
+a settle reported success while a list was still arriving over the network, the
+map showed an empty content region, and *empty*, *still-loading* and (under the
+prose cut) *populated* all rendered identically. `screenIdentity` now reports
+`loading` from the transition classifier, the header says `STILL LOADING`, the
+hint says so in words, and `SKILL.md` documents `waitFor` on expected content
+as the default for anything network-backed — `settle` reads as the obvious
+choice and silently races.
+
+Still open from that report and filed rather than fixed: `no-visible-change`
+firing on a modal open, and `strip --device` untested.

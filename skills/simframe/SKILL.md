@@ -48,6 +48,30 @@ So the protocol is four steps, and step 4 is the one that saves the time.
 extended thinking inside a flow. The flow is already planned; executing it is
 not a decision.
 
+### Anything network-backed: `waitFor`, never `settle`
+
+`settle` asks whether the screen has stopped moving. A screen waiting on a
+network call has stopped moving — it is perfectly still and completely empty —
+so `settle` reports success and you act on a list that has not arrived. This
+happened in a real session and cost several calls before the cause was found:
+the settle said settled, the map showed an empty content region, and nothing
+distinguished *empty* from *still loading*.
+
+So for anything that has to come over the network — a list, a search result, a
+login, a screen after a submit — assert on the **content you expect**, not on
+stillness:
+
+```json
+{"waitFor": {"value": "Kate Bell", "timeoutMs": 8000}}
+```
+
+`settle` is right for a local transition: a push, a modal, a tab switch. Two
+signals now help you tell the difference without guessing. The map header says
+`STILL LOADING` when the transition classifier can see a load in progress, and
+the `next:` line says the same in words — *an empty-looking region may be a list
+that has not arrived*. Neither is a substitute for asserting on the string you
+are waiting for, which is the only check that knows what "arrived" means.
+
 ### A six-step flow in two model turns
 
 ```bash

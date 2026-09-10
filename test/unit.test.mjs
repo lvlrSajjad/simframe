@@ -2397,35 +2397,70 @@ test('a result says whether the model needs to stop and think', async () => {
   assert.match(v.nextHint({ ok: false, settled: true, known: true }), /moment to think/);
   assert.match(v.nextHint({ ok: true, escalated: true, settled: true, known: true }), /moment to think/);
   assert.match(v.nextHint({ ok: true, settled: false, known: true }), /still moving/);
+  // Settled and finished are different states, and they used to render
+  // identically: a settle reported success while a list was still coming over
+  // the network, and an empty content region looked exactly like a loading one.
+  assert.match(v.nextHint({ ok: true, settled: true, loading: true, known: true }), /still sees loading/);
+  assert.match(v.nextHint({ ok: true, settled: true, loading: true, known: true }), /waitFor/);
+  // Loading outranks "carry on" but not a stopped flow.
+  assert.match(v.nextHint({ ok: false, loading: true }), /moment to think/);
   assert.match(v.nextHint({ ok: true, settled: true, known: false }), /new screen/);
   assert.match(v.nextHint({ ok: true, settled: true, known: true, ambiguous: 2 }), /2 labels repeat/);
   // A hint that cheerfully said "carry on" into an unknown screen would be
   // worse than no hint at all.
-  for (const bad of [{ ok: false }, { settled: false }, { known: false }, { ambiguous: 1 }]) {
+  for (const bad of [{ ok: false }, { settled: false }, { loading: true }, { known: false }, { ambiguous: 1 }]) {
     assert.ok(!/chain the next steps/.test(v.nextHint({ ok: true, settled: true, known: true, ...bad })));
   }
 
   assert.equal(v.ambiguousLabels([{ label: 'On/Off Labels' }, { label: 'On/Off Labels' }, { label: 'Bold Text' }]), 1);
   assert.equal(v.ambiguousLabels([{ label: 'a' }, { label: 'b' }]), 0);
+
+  // Shared, because it was reachable only from the MCP server — and an MCP
+  // server is a long-lived process, so a session that started before a change
+  // runs the old code and the headline change of a phase cannot be exercised at
+  // all. Both front ends call this one function now.
+  assert.match(
+    v.hintFor({ identity: { hash: 'abc12345', settled: true }, exits: 2, rows: [{ label: 'a' }, { label: 'b' }] }),
+    /chain the next steps/,
+  );
+  const cli = fs.readFileSync(new URL('../src/cli.js', import.meta.url), 'utf8');
+  assert.match(cli, /view\.hintFor/, 'the CLI must print the hint too');
 });
 
-test('body prose is content, not a control, and a map lists controls', async () => {
+test('no row is dropped for being long, and the harness can prove it', async () => {
   const v = await import('../src/view.js');
-  const t = (label, type = 'Text', region = 'content') => ({ label, type, region, x: 1, y: 1 });
+  const screen = { width: 402, height: 874 };
 
-  // Measured on one Settings screen: four of sixteen rows were the explanatory
-  // paragraph under each switch, 31% of the map's characters describing things
-  // nobody can tap.
-  assert.equal(v.isProse(t('Increase color contrast between app foreground and background colours.')), true);
-  assert.equal(v.isProse(t('Bold Text')), false);
-  // A control stays however long its label is — iOS writes whole sentences into
-  // button labels and they are still the thing you tap.
-  assert.equal(v.isProse(t('Apple Account, Sign in to access your iCloud and more on this device', 'Button')), false);
-  // Chrome is how a screen is identified.
-  assert.equal(v.isProse(t('A very long navigation bar title that goes on and on', 'Text', 'nav-bar')), false);
+  // The regression this replaces, from a real measured report. A React Native
+  // list card exposes all its children as ONE concatenated accessibility label:
+  // 105 characters, type GenericElement, region content — every property
+  // identical to a Settings caption's, and the only tappable thing on screen.
+  const card = {
+    label: 'Anaheim | Store # 1020, , 1234 Main St, Anaheim, CA 92806, , +1 (555) 555-1234, , Quick Casual Restaurant',
+    type: 'GenericElement', region: 'content', x: 201, y: 300,
+    frame: { x: 16, y: 252, width: 370, height: 96 },
+  };
+  const caption = {
+    label: 'Increase color contrast between app foreground and background colours to improve legibility.',
+    type: 'GenericElement', region: 'content', x: 201, y: 624,
+    frame: { x: 16, y: 610, width: 370, height: 30 },
+  };
+  const { rows } = v.rowsFor({ targets: [card, caption] }, { screen });
+  assert.equal(rows.length, 2, 'both stay: nothing distinguishes them, so a length rule cannot');
 
-  // Safe because a map is a view: locate/assert/waitFor read entry.targets, so
-  // text dropped here is still findable and still assertable.
-  const src = fs.readFileSync(new URL('../src/view.js', import.meta.url), 'utf8');
-  assert.match(src.slice(src.indexOf('function dropProse')), /targets\.filter/);
+  // What survives of the idea is the reporter's own suggestion — truncate, do
+  // not drop. Position and tappability are the valuable parts of a row.
+  const out = v.render({ device: { name: 'x' }, identity: { hash: 'a' }, screen, rows, exits: 1 });
+  assert.match(out, /Anaheim \| Store # 1020/, 'the row is there and identifiable');
+  assert.match(out, /…/, 'and its label is truncated rather than the row removed');
+
+  // Nothing was ever untappable — locate/assert/waitFor read entry.targets —
+  // so the loss was *discovery*, which is a different claim from resolution
+  // and is why the harness could not catch it. It can now.
+  const fs2 = await import('node:fs');
+  const fx = JSON.parse(fs2.readFileSync(
+    new URL('../test/perception/screens/reported__rn-list-card.json', import.meta.url), 'utf8'));
+  assert.ok(fx.expect.discoverable.length >= 3, 'the reported shape is a fixture');
+  const harness = fs2.readFileSync(new URL('../scripts/eval-perception.mjs', import.meta.url), 'utf8');
+  assert.match(harness, /kind: 'discovery'/);
 });

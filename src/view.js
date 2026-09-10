@@ -161,35 +161,40 @@ const trim = (text) => {
 };
 
 /**
- * Body prose is content, not a control, and a map is a list of controls.
+ * Why no row is dropped for being long — reverted 2026-09-10, same day.
  *
- * Measured on one Settings screen: four of sixteen rows were the explanatory
- * paragraph under each switch — "Increase color contrast between app foreground
- * and background c…" — which is 31% of the map's characters describing things
- * nobody can tap. Every screen of a settings-shaped app carries them, and every
- * call pays for them.
+ * There was a rule here that dropped non-interactive rows whose label ran past
+ * 45 characters, on the evidence that four of sixteen rows on a Settings screen
+ * were the explanatory paragraph under each switch: 31% of that map's
+ * characters describing things nobody can tap. Across fourteen recorded screens
+ * it cut the map 15%.
  *
- * Only non-interactive elements, only outside the chrome regions, and only past
- * a length no label reaches. A heading, a nav title and a tab label all stay:
- * those are how a screen is identified and they are short. `all: true` still
- * returns everything.
+ * It was wrong, and the counter-example is decisive. A React Native list card
+ * exposes all of its children as one concatenated accessibility label —
+ * `Anaheim | Store # 1020, , 1234 Main St, … | Quick Casual Restaurant`, 105
+ * characters, type `GenericElement`, region `content`. Every property my rule
+ * tested is identical to the Settings caption's, and that card is *the only
+ * tappable thing on the screen*.
  *
- * Safe because a map is a *view*. `locate`, `assert` and `waitFor` read
- * `entry.targets`, not these rows, so text dropped here is still findable and
- * still assertable — it simply stops being printed at every caller.
+ * Nothing became untappable — `locate`, `assert` and `waitFor` read
+ * `entry.targets`, so the rows are a view and the data survived. What was lost
+ * is **discovery**: the map stopped saying what was on screen, so an agent
+ * could only tap labels it already knew, and the fallback on a screen of
+ * unknown data is a ~1600-token screenshot. It saved characters on
+ * settings-shaped screens and spent an image on list-shaped ones, which is the
+ * exact cost the phase existed to remove. Blast radius: every data list in
+ * every RN app.
+ *
+ * The lesson is not "find a better discriminator". It is that this was a
+ * threshold shipped with no harness case that could catch its failure, in the
+ * same session as building the harness. So `expect.discoverable` now exists,
+ * and there is a fixture of the reported shape — a rule like this may return
+ * only when it can be gated.
+ *
+ * What survives is what the reporter suggested instead: truncate, do not drop.
+ * Position and tappability are the valuable parts of a row, not the full text.
+ * See `MAX_LABEL`.
  */
-const PROSE_CHARS = 45;
-
-export function isProse(t) {
-  if (INTERACTIVE.test(t?.type || '')) return false;
-  // Chrome is how a screen is identified, and chrome labels are short anyway.
-  if (t?.region === 'nav-bar' || t?.region === 'tab-bar') return false;
-  return String(t?.label ?? '').trim().length > PROSE_CHARS;
-}
-
-function dropProse(targets) {
-  return targets.filter((t) => !isProse(t));
-}
 
 /** Rank and number what is on screen. */
 export function rowsFor(entry, { screen, filter, interactive, all = false, limit = DEFAULT_LIMIT } = {}) {
@@ -205,7 +210,6 @@ export function rowsFor(entry, { screen, filter, interactive, all = false, limit
   if (!all) {
     kept = foldText(kept);
     kept = dropContainers(kept, screen);
-    kept = dropProse(kept);
   }
 
   if (filter) {
@@ -423,9 +427,16 @@ export async function screenMap(deviceQuery, {
  * cheerfully says "carry on" into an unknown screen would be worse than no hint
  * at all.
  */
-export function nextHint({ ok, escalated, settled, known, hash, exits, elements, ambiguous } = {}) {
+export function nextHint({ ok, escalated, settled, loading, known, hash, exits, elements, ambiguous } = {}) {
   if (ok === false || escalated) {
     return 'next: the flow stopped here — this is the moment to think. sim_recall shows how you got here; sim_ui re-reads the screen.';
+  }
+  // A screen awaiting a network call is *settled* — nothing is moving — and
+  // incomplete. Reported: a settle returned satisfied while a list was still
+  // loading, the map showed an empty content region, and an empty region and a
+  // still-loading one produced identical output. A person sees a spinner.
+  if (loading) {
+    return 'next: settled, but the transition classifier still sees loading — an empty-looking region may be a list that has not arrived. waitFor a string you expect rather than acting on this.';
   }
   if (settled === false) {
     return 'next: the screen is still moving. sim_state polls it for a fraction of a map; do not act on this reading yet.';
@@ -434,10 +445,36 @@ export function nextHint({ ok, escalated, settled, known, hash, exits, elements,
     return 'next: new screen, nothing predicted here yet — read it before acting on a label you have not seen on it.';
   }
   if (ambiguous > 0) {
-    return `next: ${ambiguous} label${ambiguous === 1 ? '' : 's'} repeat on this screen — address those by #ref, and the rest can go in one sim_do.`;
+    return ambiguous === 1
+      ? 'next: one label repeats on this screen — address that one by #ref, and the rest can go in one sim_do.'
+      : `next: ${ambiguous} labels repeat on this screen — address those by #ref, and the rest can go in one sim_do.`;
   }
   const known_ = hash ? `known (${hash.slice(0, 8)}${exits ? `, ${exits} known exit${exits === 1 ? '' : 's'}` : ''})` : 'known';
   return `next: settled; screen ${known_}; ${elements} element${elements === 1 ? '' : 's'}; nothing ambiguous — chain the next steps in one sim_do without looking again.`;
+}
+
+/**
+ * The hint for a rendered map, from the map itself.
+ *
+ * Lives here rather than in the MCP server because it was only reachable from
+ * there, and the MCP server is a long-lived process: a session that started
+ * before a change is running the old code, so the headline change of a phase
+ * could not be exercised at all. Reported, correctly, as the first finding
+ * against Phase 11.5. In `view.js` both front ends share one implementation and
+ * a unit test can reach it.
+ */
+export function hintFor(map, { flowOk = true, escalated = false } = {}) {
+  return nextHint({
+    ok: flowOk !== false,
+    escalated: Boolean(escalated),
+    settled: map?.identity?.settled !== false,
+    loading: map?.identity?.loading === true,
+    known: map?.exits != null,
+    hash: map?.identity?.hash ?? null,
+    exits: map?.exits ?? 0,
+    elements: map?.rows?.length ?? 0,
+    ambiguous: ambiguousLabels(map?.rows),
+  });
 }
 
 /** How many labels are worn by more than one element a caller could act on. */
@@ -461,6 +498,8 @@ export function render({ device, identity, rows, truncated, collapsed, screen, n
       : 'screen unidentified',
     identity?.keyboard ? 'keyboard up' : null,
     identity?.settled === false ? 'STILL MOVING' : null,
+    // Still and finished are not the same thing.
+    identity?.loading === true ? 'STILL LOADING' : null,
     recalledNote(identity),
   ].filter(Boolean).join(' · ');
 

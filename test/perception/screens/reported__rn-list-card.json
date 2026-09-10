@@ -1,0 +1,108 @@
+{
+  "app": "reported",
+  "screen": "rn-list-card",
+  "note": "Not recorded on a device: reconstructed from a measured regression report. A React Native list exposes each card's children as ONE concatenated accessibility label, so a card is type GenericElement in region content with a ~105-character label \u2014 indistinguishable by type, region or length from a Settings caption, and the only tappable thing on the screen. A map rule that drops rows by label length removes the entire list.",
+  "recorded_at": "2026-09-10T00:00:00.000Z",
+  "points": {
+    "width": 402,
+    "height": 874
+  },
+  "targets": [
+    {
+      "label": "Locations",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 84,
+      "frame": {
+        "x": 100,
+        "y": 70,
+        "width": 202,
+        "height": 28
+      },
+      "region": "nav-bar",
+      "source": "ax"
+    },
+    {
+      "label": "Anaheim | Store # 1020, , 1234 Main St, Anaheim, CA 92806, , +1 (555) 555-1234, , Quick Casual Restaurant",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 300,
+      "frame": {
+        "x": 16,
+        "y": 252,
+        "width": 370,
+        "height": 96
+      },
+      "region": "content",
+      "source": "ax"
+    },
+    {
+      "label": "B test 1 | Store # 2041, , 900 Elm Road, Fresno, CA 93650, , +1 (555) 555-9876, , Fast Casual",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 404,
+      "frame": {
+        "x": 16,
+        "y": 356,
+        "width": 370,
+        "height": 96
+      },
+      "region": "content",
+      "source": "ax"
+    },
+    {
+      "label": "4 Casa | Store # 3312, , 55 Mission Street, San Jose, CA 95110, , +1 (555) 555-2200, , Quick Service",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 508,
+      "frame": {
+        "x": 16,
+        "y": 460,
+        "width": 370,
+        "height": 96
+      },
+      "region": "content",
+      "source": "ax"
+    },
+    {
+      "label": "Add location",
+      "value": null,
+      "type": "Button",
+      "x": 349,
+      "y": 84,
+      "frame": {
+        "x": 330,
+        "y": 70,
+        "width": 38,
+        "height": 28
+      },
+      "region": "nav-bar",
+      "source": "ax"
+    }
+  ],
+  "expect": {
+    "identity": null,
+    "resolutions": [
+      {
+        "query": "Add location",
+        "label": "Add location"
+      },
+      {
+        "query": "Anaheim",
+        "label": "Anaheim | Store # 1020, , 1234 Main St, Anaheim, CA 92806, , +1 (555) 555-1234, , Quick Casual Restaurant"
+      }
+    ],
+    "ambiguous": [],
+    "none": [],
+    "discoverable": [
+      "Anaheim | Store # 1020, , 1234 Main St, Anaheim, CA 92806, , +1 (555) 555-1234, , Quick Casual Restaurant",
+      "B test 1 | Store # 2041, , 900 Elm Road, Fresno, CA 93650, , +1 (555) 555-9876, , Fast Casual",
+      "4 Casa | Store # 3312, , 55 Mission Street, San Jose, CA 95110, , +1 (555) 555-2200, , Quick Service",
+      "Add location"
+    ]
+  }
+}
