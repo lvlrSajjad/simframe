@@ -1444,18 +1444,60 @@ async function focusHint(deviceQuery, target, ctx) {
   }
 }
 
+/**
+ * How long to wait for the tap to become focus before inserting text.
+ *
+ * Paid only when the tree has not yet said the field is focused, so a field
+ * that focuses instantly costs one read exactly as before.
+ */
+const FOCUS_WAIT_MS = 700;
+const FOCUS_POLL_MS = 80;
+
+/**
+ * Wait for focus to arrive, without treating silence as failure.
+ *
+ * External research settled a symptom two agents reported independently and
+ * neither could reproduce: one insertion primitive returns `ok` into an empty
+ * field, and the other then works. It is a **focus race**, not a defect in
+ * either primitive — a keystroke delivered before a web view commits focus to
+ * its input is simply dropped, and WDA copes by checking `hasKeyboardFocus`
+ * before typing. So the investigation everyone reached for, paste versus type,
+ * was the wrong one and would never have converged.
+ *
+ * The wait ends the moment the tree names our target as focused. If the budget
+ * runs out with the tree saying nothing, we insert anyway — because "the tree
+ * is silent about focus" has never been evidence the tap missed, and this file
+ * has been wrong in that direction before.
+ */
+async function awaitFocus(deviceQuery, target, ctx) {
+  const deadline = Date.now() + FOCUS_WAIT_MS;
+  let last = await focusHint(deviceQuery, target, ctx);
+  while (!last.focused && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, FOCUS_POLL_MS));
+    last = await focusHint(deviceQuery, target, ctx);
+  }
+  return last;
+}
+
 async function focusField(deviceQuery, udid, step, ctx) {
   const found = await api.locate(deviceQuery, step.into, { index: step.index, refresh: step.refresh });
   const tappedAt = Date.now();
   await input.tapPoint(udid, found.target.x, found.target.y);
-  const focused = await focusHint(deviceQuery, found.target, ctx);
-  // The focus distribution is no longer collected, and that is deliberate.
-  // It existed to size the focus *wait*, and there is no focus wait any more —
-  // one accessibility read replaced it. Banking the duration of that read under
-  // the same name would keep a number nobody uses, measuring something other
-  // than what its name says, which is the shape of the learned-stillness
-  // mistake. `graph.focusPlan` and the `focusSamples` it reads stay in place
-  // for now, unfed; if nothing claims them they should go.
+  const focused = await awaitFocus(deviceQuery, found.target, ctx);
+  // There IS a focus wait again, and this comment used to say there was not.
+  // It was removed when one accessibility read replaced it, which was right for
+  // native fields and wrong for web views: a keystroke delivered before a web
+  // view commits focus is dropped, and that is the whole explanation of the
+  // intermittent silent write two agents reported. The wait is bounded, it ends
+  // the moment the tree names the target as focused, and silence still means
+  // proceed — see `awaitFocus`.
+  //
+  // The focus *distribution* is still not collected, and that part stands:
+  // banking the duration of these polls under the old name would keep a number
+  // nobody uses, measuring something other than what its name says, which is
+  // the shape of the learned-stillness mistake. `graph.focusPlan` and the
+  // `focusSamples` it reads stay in place, unfed; if nothing claims them they
+  // should go.
   void tappedAt;
   return {
     found,

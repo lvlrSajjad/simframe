@@ -3482,6 +3482,32 @@ test('a control is interactive by evidence when the tree got its role wrong', as
   assert.equal(v.actsInteractive({}), false);
 });
 
+test('a write waits for focus, and silence about focus still means proceed', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+
+  // Two agents independently reported the same symptom and neither could
+  // reproduce it: one insertion primitive returns ok into an empty field, and
+  // the other then works. External research settled it as a FOCUS RACE — a
+  // keystroke delivered before a web view commits focus to its input is
+  // dropped, and WDA checks hasKeyboardFocus before typing. So "paste versus
+  // type" was the wrong investigation and would never have converged.
+  assert.match(src, /async function awaitFocus/);
+  assert.match(src, /const focused = await awaitFocus\(/);
+  assert.match(src, /const FOCUS_WAIT_MS = \d+/);
+
+  // The wait must END on focus rather than always burning its budget, or every
+  // native field pays for a web view's problem.
+  const fn = src.slice(src.indexOf('async function awaitFocus'), src.indexOf('async function focusField'));
+  assert.match(fn, /while \(!last\.focused && Date\.now\(\) < deadline\)/);
+
+  // And silence is not failure. This file has been wrong in that direction
+  // before — it once claimed a correctly focused field was unfocused because
+  // the screen had not moved — so running out of budget must insert anyway.
+  assert.doesNotMatch(fn, /throw/);
+  assert.match(fn, /return last/);
+});
+
 test('a keyboard boundary reaches the top row of keys, not the edge of its detection window', async () => {
   const regions = await import('../src/regions.js');
   const { readFileSync } = await import('node:fs');
