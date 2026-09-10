@@ -1186,6 +1186,15 @@ async function locateWith(
     const hit = refs.resolveRef(udid, selector.ref, {
       layoutHash: firstState.layoutHash,
       structuralHash: near?.entry?.structuralHash ?? null,
+      // How far that recall reached. `recallNearest` is deliberately tolerant —
+      // a list with new rows is still the same screen — so at any distance
+      // above zero it is a *guess* about which screen this is, and a guess must
+      // not be the sole grounds for refusing a ref. Reported from the field: a
+      // refusal reading `#5 was numbered on a different screen
+      // (0f7b9e3e → 48e5c92d)` where both calls' headers printed the identical
+      // screen, because the map named the screen from a tolerant recall while
+      // refs treated that same recall as exact.
+      structuralDistance: near?.distance ?? null,
       screenKnown: Boolean(near),
     });
     return {

@@ -35,6 +35,23 @@ export function modesFor(base = {}, args = {}) {
 }
 
 /** Offered on every tool that reads or acts, because either can be compared. */
+/**
+ * Which declared-required argument is absent, phrased as advice.
+ *
+ * Reads the tool's own `required` array, so a tool that gains a required
+ * argument gains this for free and cannot drift out of step with it.
+ */
+function missingRequired(name, args) {
+  const tool = TOOLS.find((t) => t.name === name);
+  const need = tool?.inputSchema?.required ?? [];
+  const absent = need.filter((k) => args?.[k] === undefined || args?.[k] === null || args?.[k] === '');
+  if (!absent.length) return null;
+  const known = Object.keys(args ?? {}).filter((k) => k !== 'device');
+  return `${name}: missing required ${absent.map((k) => `"${k}"`).join(', ')}.`
+    + (known.length ? ` You passed: ${known.map((k) => `"${k}"`).join(', ')}.` : '')
+    + ` ${absent.length === 1 ? 'That argument is' : 'Those arguments are'} the one${absent.length === 1 ? '' : 's'} this tool acts on — pass ${absent.map((k) => `"${k}"`).join(' and ')} and retry.`;
+}
+
 const modeProps = {
   sensor: {
     type: 'string',
@@ -106,12 +123,12 @@ const TOOLS = [
         steps: {
           type: 'array',
           description:
-            'Ordered steps. Every selector below accepts "#3" | "Save" | "@120,400". Act: {"tap":"Save"} (add "index" if a label is ambiguous), {"type":{"into":"Name","text":"Fryer 3"}}, {"paste":{"into":"Notes","text":"long text"}}, {"scroll":"down"}, {"scrollTo":"Delete account"}, {"swipe":{"from":[x,y],"to":[x,y]}}, {"button":"HOME"}, {"launch":{"value":"com.example.app","relaunch":true,"args":["-uiTest","1"]}}, {"openUrl":"myapp://x"}, {"permission":{"value":"photos","grant":"grant","bundleId":"com.example.app"}}. Check: {"assert":{"value":"Saved","is":"visible"}} (also gone | enabled | disabled | value with "equals"), {"waitFor":{"value":"Saved","timeoutMs":5000}}, {"settle":{"stableMs":600}}, {"pause":300}. Recover without a round trip: add "or" to any step for fallback selectors tried locally — {"tap":"Save","or":["Done","Confirm"]} — and {"seek":"change username","budget":6} explores for something not on this screen: it OPENS containers (a real action — state changes), checks, and returns to where it started, refusing to open anything that commits, abandons or answers. It does not tap the target; it leaves you on the screen where the target resolves so you tap it next. Do not point it into a flow whose progress you cannot afford to lose. A long screen is only knowable a viewport at a time, so {"sweep":"all","fill":{"Last Name":"Asadi","Email":"a@b.c"}} goes to the top, then reads and fills section by section to the bottom — filling each field while it is on screen, which beats finding one and scrolling back. Add "from":"here" to sweep down from where you are. It reports which section each element was in, what it filled, and what it never found at any scroll position. Prefer it to scrollTo on forms and long lists. Brief the supervisor from the plan: top-level "supervise" is standing guidance for the whole batch ("lists here render a count header before rows; REVIEW stays disabled until a provider is chosen") and per-step "expect" adds to it. When it stops a run the result names the steps it did not attempt — re-issue them with a corrected "supervise" note if the judgement was wrong.',
+            'Ordered steps. Every selector below accepts "#3" | "Save" | "@120,400". Act: {"tap":"Save"} (add "index" if a label is ambiguous), {"type":{"into":"Name","text":"Fryer 3"}}, {"paste":{"into":"Notes","text":"long text"}} (drop "into" to type into whatever already has focus, which is how you follow a browser next-field chevron — nothing can be read back then, and the step says so), {"scroll":"down"}, {"scrollTo":"Delete account"}, {"swipe":{"from":[x,y],"to":[x,y]}}, {"button":"HOME"}, {"launch":{"value":"com.example.app","relaunch":true,"args":["-uiTest","1"]}}, {"openUrl":"myapp://x"}, {"permission":{"value":"photos","grant":"grant","bundleId":"com.example.app"}}. Check: {"assert":{"value":"Saved","is":"visible"}} (also gone | enabled | disabled | value with "equals"), {"waitFor":{"value":"Saved","timeoutMs":5000}}, {"settle":{"stableMs":600}}, {"pause":300}. Recover without a round trip: add "or" to any step for fallback selectors tried locally — {"tap":"Save","or":["Done","Confirm"]} — and {"seek":"change username","budget":6} explores for something not on this screen: it OPENS containers (a real action — state changes), checks, and returns to where it started, refusing to open anything that commits, abandons or answers. It does not tap the target; it leaves you on the screen where the target resolves so you tap it next. Do not point it into a flow whose progress you cannot afford to lose. A long screen is only knowable a viewport at a time, so {"sweep":"all","fill":{"Last Name":"Asadi","Email":"a@b.c"}} goes to the top, then reads and fills section by section to the bottom — filling each field while it is on screen, which beats finding one and scrolling back. Add "from":"here" to sweep down from where you are. It reports which section each element was in, what it filled, and what it never found at any scroll position. Prefer it to scrollTo on forms and long lists. Brief the supervisor from the plan: top-level "supervise" is standing guidance for the whole batch ("lists here render a count header before rows; REVIEW stays disabled until a provider is chosen") and per-step "expect" adds to it. When it stops a run the result names the steps it did not attempt — re-issue them with a corrected "supervise" note if the judgement was wrong.',
           items: { type: 'object' },
         },
         autoSettle: {
           type: 'boolean',
-          description: 'Wait for the screen to settle after each action (default true). Turn off only for deliberate rapid input.',
+          description: 'Wait for the screen to settle after each action (default true). Turn off only for deliberate rapid input — with it off the trailing map is read before the last gesture has finished, so it can describe the screen you were on rather than the one you are on.',
         },
         stableMs: { type: 'number', description: 'How still the screen must be to count as settled (default 500).' },
         timeoutMs: { type: 'number', description: 'Per-step settle timeout (default 8000).' },
@@ -453,6 +470,15 @@ export async function serve({ device: defaultDevice, options: baseOptions = {} }
     // So the modes are arguments. Absent, the environment still decides, so
     // nothing that was working changes.
     const options = modesFor(baseOptions, args);
+    // Name the missing argument, using the tool's own schema.
+    //
+    // Reported: `sim_scroll_to` called with `target:` instead of `sel:` answered
+    // `simframe: empty step` — which names neither the tool, nor the parameter,
+    // nor even that an argument was absent, and cost a schema lookup to decode.
+    // The declared `required` list is right there, so the check is generic
+    // rather than one guard per tool, and it says what to pass.
+    const missing = missingRequired(req.params.name, args);
+    if (missing) return { content: [text(missing)], isError: true };
     try {
       switch (req.params.name) {
         case 'sim_look':
@@ -851,6 +877,15 @@ async function doScript(target, args, options) {
   });
 
   const lines = stepLines(res);
+  // A map read without settling is not a reading of the screen you are now on,
+  // and it used to arrive looking exactly like one. Reported: two taps under
+  // `autoSettle:false` returned a map showing nothing had happened, so the
+  // agent moved on — the page had in fact zoomed all the way out, and they only
+  // found out two calls later when an unrelated failure printed a real map.
+  if (args.autoSettle === false) {
+    lines.push('autoSettle was off, so the map below was read without waiting for the last action to finish'
+      + ' — it may describe the screen before that action landed. Re-read (sim_ui) before acting on it.');
+  }
   // Every local ruling is reported, because a wrong one has to be correctable
   // rather than mysterious — and the model's own stated reason is shown as its
   // claim, not as the ground for what happened.

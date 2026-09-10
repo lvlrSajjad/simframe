@@ -587,13 +587,29 @@ export async function runScript(
           predicted: prediction ? { to: prediction.to.slice(0, 10), kind: prediction.kind, seen: prediction.count } : null,
           observed: { to: afterScreen.hash?.slice(0, 10), kind },
         };
+        // One more look before "nothing happened" is allowed to stand, because
+        // the map printed below the verdict is a later read and has three times
+        // contradicted it in the same response.
+        verification = await confirmNoChange(deviceQuery, verification, {
+          beforeScreen, options, stableMs, timeoutMs,
+        });
+        if (verification.lateArrival) {
+          // The reading the verdict was taken from is now known to be stale, so
+          // nothing downstream may learn a screen or an edge from it.
+          afterReading = verification.lateArrival;
+          verification.observed = { to: verification.lateArrival.hash?.slice(0, 10), kind };
+          delete verification.lateArrival;
+        }
         // Only remember what was seen on a settled screen: an edge recorded
         // mid-transition points at a screen that never really existed.
         // `confirmed` already means the fingerprint held still across two
         // independent readings, which is the thing `settled` was standing in
         // for. Requiring both meant a screen that settled slowly recorded
         // nothing at all.
-        endScreen = afterScreen;
+        // The late-arrival reading when there was one, because that is the
+        // screen we are actually standing on — recording the stale one would
+        // teach the graph an edge to a screen that had already been replaced.
+        endScreen = afterReading ?? afterScreen;
         // An action with no observed effect teaches the graph nothing, and
         // recording it teaches something false.
         //
@@ -1304,6 +1320,51 @@ async function stillOnPlan(deviceQuery, verification, nextStep, options) {
  * The verdict stands — a change too small to move the screen's identity is the
  * finding — but it should say what was actually observed.
  */
+/**
+ * How long a "nothing happened" verdict waits before believing itself.
+ *
+ * Short, because it is paid on a path that is currently often wrong: three
+ * `no-visible-change` verdicts in one field round were contradicted by the
+ * element list printed directly beneath them.
+ */
+const LATE_CHANGE_MS = 700;
+
+/**
+ * Give a "nothing happened" verdict one more look before it stands.
+ *
+ * The verdict reads the screen's identity, and the map underneath it is a
+ * separate, later read — so a web view or a slow list can render in between,
+ * and then the response contradicts itself. Reported from the field, three
+ * times in one round: `no-visible-change: the screen did not change` above a
+ * map whose hash had moved `46a0a26d → 1a8e8be1` and which listed three
+ * dropdown options that had just appeared. The agent's summary of the cost is
+ * the reason this is worth a re-read: *"I was instructed to spend a call
+ * disproving a claim the same response had already disproved."*
+ *
+ * It is also the verdict that must not be wrong in this direction. It escalates
+ * — the hint line tells the caller to stop and check — so a false one buys a
+ * round trip every time, which is exactly what this project is built to remove.
+ *
+ * The test is provable rather than heuristic: if the screen is now different
+ * from how it was *before* the action, the action changed it.
+ */
+async function confirmNoChange(deviceQuery, verification, { beforeScreen, options, stableMs, timeoutMs }) {
+  if (verification?.verdict !== 'no-visible-change' || !beforeScreen?.hash) return verification;
+  await api.waitFor(deviceQuery, {
+    mode: 'settle', stableMs: 250, timeoutMs: LATE_CHANGE_MS, options,
+  }).catch(() => null);
+  const again = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs }).catch(() => null);
+  if (!again?.hash || again.hash === beforeScreen.hash) return verification;
+  return {
+    ...verification,
+    verdict: 'unverified',
+    detail: 'the screen did change, but not until after the verdict had been taken'
+      + ` (${beforeScreen.hash.slice(0, 8)} → ${again.hash.slice(0, 8)})`
+      + ' — a web view or a slow list can render after a settle has reported it still',
+    lateArrival: again,
+  };
+}
+
 export function belowThreshold(verification, settled) {
   if (verification?.verdict !== 'no-visible-change' || !settled?.smallChange) return verification;
   return {

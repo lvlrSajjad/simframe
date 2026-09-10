@@ -104,7 +104,7 @@ export function parseSelector(query) {
  * numbering introduces that labels do not have, and a ref resolved against the
  * wrong screen taps whatever now happens to sit at those coordinates.
  */
-export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, tolerance = REF_TOLERANCE } = {}) {
+export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, structuralDistance = 0, tolerance = REF_TOLERANCE } = {}) {
   const table = readRefs(udid);
   if (!table) throw new Error(`#${n} means nothing yet — read the screen first (sim_ui, or simframe ui)`);
   const stale = (was, now) =>
@@ -113,7 +113,18 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, t
   // Structural identity first, because it is the question actually being asked:
   // is this the screen those numbers were assigned on? The caller gets it
   // cheaply — screen memory is a file read, not a perception pass.
-  if (table.structuralHash && structuralHash && table.structuralHash !== structuralHash) {
+  //
+  // But only when the recall that produced it was exact. The identity arrives
+  // from `recallNearest`, which matches by layout within a tolerance so that a
+  // list with new rows stays one screen; above distance zero it is therefore a
+  // guess about *which* remembered screen this is, and a guess cannot be the
+  // sole reason to refuse. That mismatch was reported from the field as a
+  // refusal on unchanged state — the map had named the screen from the tolerant
+  // recall and printed the same header before and after, while this check read
+  // the same recall as exact and disagreed with it. Beyond distance zero the
+  // pixel backstop below is the one that decides, which is what it is for.
+  const exactRecall = structuralDistance === 0 || structuralDistance == null;
+  if (exactRecall && table.structuralHash && structuralHash && table.structuralHash !== structuralHash) {
     throw new Error(stale(table.structuralHash.slice(0, 8), structuralHash.slice(0, 8)));
   }
   // Nothing recognises the screen we are on, so nothing can vouch for the

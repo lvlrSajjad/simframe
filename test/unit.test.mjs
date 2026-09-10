@@ -690,6 +690,29 @@ test('a ref numbered on one screen refuses to resolve on another', () => {
     layoutHash,
     rows: [{ ref: 1, label: 'Save', x: 10, y: 20, type: 'Button', region: 'nav-bar', source: 'ax' }],
   });
+  // A tolerant recall may not veto a ref on its own. `recallNearest` matches by
+  // layout within a tolerance, so above distance zero it is a guess about which
+  // remembered screen this is — and reported from the field: `#5 was numbered
+  // on a different screen (0f7b9e3e → 48e5c92d)` while both calls printed the
+  // identical header, because the map named the screen from that tolerant
+  // recall and this check read the same recall as exact.
+  assert.equal(
+    resolveRef(udid, 1, { structuralHash: 'something-else', structuralDistance: 7 }).label,
+    'Save',
+    'a guessed identity does not refuse a ref by itself',
+  );
+  // At distance zero the recall is this screen, so a mismatch is real.
+  assert.throws(
+    () => resolveRef(udid, 1, { structuralHash: 'something-else', structuralDistance: 0 }),
+    /numbered on a different screen/,
+  );
+  // ...and the pixel backstop still refuses on its own, which is what covers
+  // the tolerant case above.
+  assert.throws(
+    () => resolveRef(udid, 1, { structuralHash: 'something-else', structuralDistance: 7, layoutHash: '5'.repeat(72) }),
+    /numbered on a different screen/,
+  );
+
   // On the screen it was numbered on, a ref is a tap point.
   assert.equal(resolveRef(udid, 1, { structuralHash: 'aaaa1111' }).label, 'Save');
   assert.equal(resolveRef(udid, 1, { layoutHash }).x, 10);
