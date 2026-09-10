@@ -88,7 +88,30 @@ export async function status(options) {
   if (want !== 'apple') return { supervisor: 'none', detail: `no such supervisor backend: "${want}"` };
   const live = await helper.status();
   if (!live.ok) return { supervisor: 'none', detail: live.reason };
-  return { supervisor: 'apple', detail: 'Apple Foundation Models, on-device; may only answer wait/retry/stop' };
+  // Prove a round trip, not a presence.
+  //
+  // Reporting "available" from a fresh process was true and useless: the model
+  // had stopped answering inside the long-lived MCP server, `doctor` opened its
+  // own process, got a healthy one, and said so — for twenty calls and six
+  // failures during which nothing was being judged. The reporter's fix, and it
+  // is the right one: make it answer something.
+  const probe = await helper.ask({
+    step: 'tap "Probe"',
+    failure: '"Probe" is not on this screen. Visible: Probe',
+    screen: ['Probe'],
+    stillMs: 5000,
+  }, 6000);
+  const decision = String(probe?.decision ?? '').toLowerCase();
+  if (!DECISIONS.has(decision)) {
+    return {
+      supervisor: 'none',
+      detail: 'the model loaded but did not answer a probe — it is present and not working',
+    };
+  }
+  return {
+    supervisor: 'apple',
+    detail: `Apple Foundation Models, on-device; answered a probe in ${probe.ms ?? '?'}ms; may only answer wait/retry/stop`,
+  };
 }
 
 export const close = helper.close;

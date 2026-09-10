@@ -2637,9 +2637,11 @@ test('acting on a ruling re-runs the same step, never a different one', async ()
   assert.ok(!/stepWithTarget/.test(hook), 'a ruling never re-aims a step');
   assert.ok(!/steps\[i \+ 1\]/.test(hook), 'and never skips ahead');
 
-  // `wait` settles first; `retry` goes straight back in.
-  assert.match(hook, /if \(ruling\.decision === 'wait'\)/);
-  assert.match(hook, /SUPERVISOR_WAIT_MS/);
+  // Both settle first, differing only in how long — the one distinction the
+  // model still fumbles is wait against retry, so making it a duration rather
+  // than a behaviour means a wrong choice between them costs milliseconds
+  // instead of the recovery.
+  assert.match(hook, /ruling\.decision === 'wait' \? SUPERVISOR_WAIT_MS : SUPERVISOR_RETRY_MS/);
 
   // A `stop` hands back the steps it did not attempt, so the planner resumes
   // rather than re-plans, and says how to overrule it.
@@ -2651,6 +2653,84 @@ test('acting on a ruling re-runs the same step, never a different one', async ()
   for (const outcome of ['recovered', 'still failed', 'stopped the run']) {
     assert.ok(hook.includes(outcome), `outcome "${outcome}" is reported`);
   }
+});
+
+test('round 7: the supervisor stops going silent, and code answers what code knows', async () => {
+  const actions = await import('../src/actions.js');
+  const { readFileSync } = await import('node:fs');
+
+  // F1, the worst finding of round 7: three rulings, then nothing across twenty
+  // supervised calls and six failures, while `doctor` in a separate process
+  // reported the model healthy. Root cause found on the bench —
+  // `exceededContextWindowSize`, 4,441 tokens against a 4,096 window, after
+  // seven requests, because one `LanguageModelSession` was reused and its
+  // transcript accumulated. A session per judgement fixed it: 15 of 15 answered
+  // at 488-533ms with no growth, where it used to die at 7.
+  const swift = readFileSync(new URL('../native/supervise.swift', import.meta.url), 'utf8');
+  assert.match(swift, /let session = LanguageModelSession\(instructions: instructions\)/);
+  assert.ok(!/let session = LanguageModelSession[\s\S]{0,200}while let line/.test(swift),
+    'the session is created per request, not once before the loop');
+  // A request can also exceed the window on its own, so the cap lives where the
+  // limit is as well as in the caller.
+  assert.match(swift, /let clip = /);
+
+  // The reason field is gone. It confabulated in every observed run — a correct
+  // `stop` justified as "screen is elsewhere" when the screen was exactly where
+  // the plan expected, and reasons repeated verbatim across unrelated failures.
+  assert.ok(!/var reason: String/.test(swift), 'it is no longer asked to explain itself');
+
+  // And it is no longer asked what code already knows. An ambiguous selector
+  // got `stop` with a false reason once and `wait` on a later bench run; an
+  // element in the tree but out of view got `wait` while the error said, in
+  // English, that waiting cannot bring it into view.
+  assert.equal(actions.deterministicRuling({ message: '"X" matches 2 things on this screen' }).decision, 'stop');
+  assert.equal(actions.deterministicRuling({ message: '"Roof" is in the tree but not in view at y=2076' }).decision, 'stop');
+  assert.equal(actions.deterministicRuling({ message: '1 alternative(s) refused locally: "Delete" — destructive vocabulary' }).decision, 'stop');
+  // "Not on this screen" is the one class it has been reliably right about.
+  assert.equal(actions.deterministicRuling({ message: '"X" is not on this screen. Visible: A, B' }), null);
+
+  // A consultation that was attempted and answered nothing is now visible. It
+  // was invisible for a whole round: "had I run flow 2 alone I would have
+  // reported the supervisor makes no difference without realising it had never
+  // run."
+  const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /decision: 'unavailable'/);
+  assert.match(src, /consulted and did not answer/);
+});
+
+test('round 7: a type never sends a selector, and scrollTo follows the offset', async () => {
+  const actions = await import('../src/actions.js');
+
+  // F12. `value` is the selector when `into` is present and the text when it is
+  // not, and reading it as text either way put a field's own label into the
+  // field — reported as `typed into "Asset*" … = "Asset*"`. That is a wrong
+  // write, not a reporting quirk, so it refuses rather than guesses.
+  assert.equal(actions.textToSend({ action: 'type', into: 'Asset*', text: 'Fry' }), 'Fry');
+  assert.equal(actions.textToSend({ action: 'type', value: 'Fry' }), 'Fry', 'without into, value is the text');
+  assert.throws(() => actions.textToSend({ action: 'type', into: 'Asset*', value: 'Asset*' }),
+    /needs "text"/, 'a selector is never sent as text');
+
+  // F2, the most expensive single defect across five runs: the target sat at
+  // y = −693, above the viewport, and it scrolled *down* six times with the
+  // offset printed in its own error each time. It reads the sign now, and an
+  // explicit direction still wins.
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const step = src.slice(src.indexOf("case 'scrollTo': {"), src.indexOf("case 'waitFor': {"));
+  assert.match(step, /if \(y < 0\) return 'up'/);
+  assert.match(step, /if \(y > \(points\?\.height \?\? Infinity\)\) return 'down'/);
+  assert.match(step, /if \(asked\) return asked/, 'an explicit direction still wins');
+
+  // No evidence is not a direction. Guessing "up" without it scrolls to the top
+  // of a web page, which triggers pull-to-refresh — reloading the page, changing
+  // the screen hash, and defeating the end-detection below it. Observed live:
+  // six attempts and 38s, reading from outside as an endless loop. With the
+  // reversal gated on evidence: one attempt, 3.7s, and an honest message.
+  assert.match(step, /if \(evidence\) dir = evidence/);
+  assert.match(step, /if \(reversed \|\| !evidence\)/);
+  assert.match(step, /how a web page\s*\n?\s*\/\/ gets pulled to refresh|gets pulled to refresh/);
+  // And a scroll gets a scroll's budget, not a transition's.
+  assert.match(src, /const SCROLL_SETTLE_MS = 800/);
 });
 
 test('the supervisor may say three words and nothing else', async () => {

@@ -6,6 +6,7 @@ import * as api from './index.js';
 import * as graph from './graph.js';
 import * as input from './input.js';
 import * as intent from './intent.js';
+import * as matching from './matching.js';
 import * as vocabulary from './vocabulary.js';
 import * as supervisor from './supervisor.js';
 import * as view from './view.js';
@@ -300,11 +301,22 @@ export async function runScript(
           goal: supervise ?? flowName, step, expected: step.expect, err, options,
         });
         if (ruling?.decision === 'wait' || ruling?.decision === 'retry') {
-          if (ruling.decision === 'wait') {
-            await api.waitFor(deviceQuery, {
-              mode: 'settle', stableMs: 400, timeoutMs: SUPERVISOR_WAIT_MS, options,
-            }).catch(() => null);
-          }
+          // Both wait and retry settle first, differing only in how long.
+          //
+          // The one distinction the model still fumbles is wait against retry —
+          // it called a loading list `retry` on the bench, which without a
+          // settle would fail again immediately for the same reason. Making the
+          // difference a duration rather than a behaviour means a wrong choice
+          // between them costs milliseconds instead of the recovery. The
+          // decision that actually matters is stop against continue, and on
+          // that it has been right every time it was asked something code could
+          // not already answer.
+          await api.waitFor(deviceQuery, {
+            mode: 'settle',
+            stableMs: 400,
+            timeoutMs: ruling.decision === 'wait' ? SUPERVISOR_WAIT_MS : SUPERVISOR_RETRY_MS,
+            options,
+          }).catch(() => null);
           try {
             detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus });
             detail += ` [the local supervisor said ${ruling.decision}; it worked on the second attempt]`;
@@ -314,8 +326,17 @@ export async function runScript(
             supervisions.push({ index: i, decision: ruling.decision, reason: ruling.reason, outcome: 'still failed' });
             err = again;
           }
+        } else if (!ruling && supervisor.requested(options)) {
+          // Attempted and got nothing. This was invisible for a whole round:
+          // three rulings, then twenty supervised calls and six failures with
+          // no output at all, while `doctor` in a separate process reported the
+          // model healthy. The reporter's own words — *"had I run flow 2 alone
+          // I would have reported the supervisor makes no difference without
+          // realising it had never run"*.
+          supervisions.push({ index: i, decision: 'unavailable', reason: 'the supervisor did not answer', outcome: 'no ruling' });
+          err.message += ' — the local supervisor was consulted and did not answer, so this failure was not judged.';
         } else if (ruling?.decision === 'stop') {
-          supervisions.push({ index: i, decision: 'stop', reason: ruling.reason, outcome: 'stopped the run' });
+          supervisions.push({ index: i, decision: 'stop', reason: ruling.reason, from: ruling.from, outcome: 'stopped the run' });
           const remaining = steps.slice(i);
           err.message += ` — the local supervisor stopped the run here.`
             + ` ${remaining.length} step(s) were not attempted.`
@@ -904,6 +925,71 @@ export function stillFillingIn(entry) {
 }
 
 /**
+ * The text a type/paste step means to send.
+ *
+ * `value` is the selector when `into` is present and the text when it is not,
+ * and reading it as text either way put a field's own label into the field —
+ * reported as `typed into "Asset*" … = "Asset*"`. Refusing beats guessing here:
+ * typing a selector into a form is a wrong write, which is the one class of
+ * mistake this project treats as worse than a failure.
+ */
+export function textToSend(step) {
+  if (step.into != null) {
+    const text = step.text ?? step.value2 ?? step.with;
+    if (text == null) {
+      throw new Error(
+        `${step.action} into ${JSON.stringify(String(step.into))} needs "text" — `
+        + 'with "into" present, "value" is the selector, so there is nothing to send.',
+      );
+    }
+    return String(text);
+  }
+  return String(step.text ?? step.value ?? '');
+}
+
+/** The current screen hash, or null — used to notice a scroll that moved nothing. */
+async function hashNow(deviceQuery, options) {
+  try {
+    return (await api.screenIdentity(deviceQuery, { options, confirmNovel: false })).hash ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Failures that code can already rule on, so the model is never asked.
+ *
+ * Round 7 measured what happens when it is asked anyway. An element *in the
+ * tree but not in view* got `wait` — while the executor's own error said, in
+ * English, "waiting cannot bring it into view". An *ambiguous selector* got
+ * `stop` once with the false reason "screen is elsewhere", and `wait` on a
+ * later bench run. Both are deterministic: no amount of waiting or repeating
+ * makes a selector unique or scrolls a viewport.
+ *
+ * So they are answered here, and the model's remit narrows to the one class it
+ * has been reliably right about — *has this arrived yet?* On the two real
+ * cases of that shape it answered correctly every time, including the one the
+ * field round missed entirely.
+ *
+ * Narrowing a component to where it is reliable is not a workaround. It is the
+ * same move as Phase 17's no-go: ask the local tier only the questions nothing
+ * cheaper can answer.
+ */
+export function deterministicRuling(err) {
+  const m = String(err?.message ?? '');
+  if (/matches \d+ things on this screen/.test(m)) {
+    return { decision: 'stop', why: 'an ambiguous selector cannot be waited or retried into uniqueness — pass index, or a #ref' };
+  }
+  if (/in the tree but not in view/.test(m)) {
+    return { decision: 'stop', why: 'waiting cannot scroll — the element needs scrollTo, or a swipe' };
+  }
+  if (/refused locally|destructive vocabulary/.test(m)) {
+    return { decision: 'stop', why: 'a local retry may not act on this label' };
+  }
+  return null;
+}
+
+/**
  * Ask the local supervisor whether the plan can proceed past this failure.
  *
  * Everything it needs is already in hand: the step, the failure, what is on
@@ -917,9 +1003,14 @@ export function stillFillingIn(entry) {
  * as fact is the mistake `seek`'s documentation already made once.
  */
 const SUPERVISOR_WAIT_MS = 4000;
+const SUPERVISOR_RETRY_MS = 900;
+/** A scroll moves at once or not at all; it does not need a transition's budget. */
+const SCROLL_SETTLE_MS = 800;
 
 async function superviseFailure(deviceQuery, { goal, step, expected, err, options }) {
   if (!supervisor.requested(options)) return null;
+  const settled = deterministicRuling(err);
+  if (settled) return { decision: settled.decision, reason: settled.why, from: 'rule' };
   try {
     const map = await view.screenMap(deviceQuery, { options, refresh: false });
     const stillMs = map.identity?.state?.motion?.stillForMs;
@@ -1508,7 +1599,13 @@ async function runStep(deviceQuery, udid, step, ctx) {
     case 'type': {
       if (step.into) {
         const field = await focusField(deviceQuery, udid, step, ctx);
-        const sent = step.text ?? step.value;
+        // With `into` present, `value` is the *selector*, not the text.
+        //
+        // Reported as `typed into "Asset*" … = "Asset*"` — the field's own
+        // label read back as its contents, because `step.text ?? step.value`
+        // fell through to the selector when no text was given. That is not a
+        // reporting quirk: it means the selector was typed into the field.
+        const sent = textToSend(step);
         await input.typeText(udid, sent);
         let back = readbackNote(sent, await fieldContents(deviceQuery, field.found.target, sent, ctx));
         // Verifying the outcome instead of the precondition puts the race where
@@ -1539,7 +1636,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
       // report success anyway.
       if (step.into) {
         const field = await focusField(deviceQuery, udid, step, ctx);
-        const sent = step.text ?? step.value;
+        const sent = textToSend(step);
         await input.pasteText(udid, sent);
         const seen = await fieldContents(deviceQuery, field.found.target, sent, ctx);
         const back = readbackNote(sent, seen);
@@ -1663,18 +1760,82 @@ async function runStep(deviceQuery, udid, step, ctx) {
     // about it.
     case 'scrollTo': {
       const query = step.value ?? step.target ?? step.label;
-      const dir = String(step.direction ?? 'down').toLowerCase();
+      // Which way, and it now reads the answer instead of assuming it.
+      //
+      // Reported three times in one round and the most expensive single defect
+      // across five runs: the target sat at **y = −693**, above the viewport,
+      // and this scrolled *down* six times — moving away on every iteration,
+      // with the offset printed in its own error each time — then advised the
+      // tool it already is. The operator watching called it "scrolled too much
+      // and trying to scroll more like a loop", which is exactly what it was.
+      //
+      // The tree knows where the element is whenever it is in the tree at all,
+      // so ask before each gesture and follow the sign. An explicit
+      // `direction` still wins, for a caller who knows better.
+      const asked = step.direction ? String(step.direction).toLowerCase() : null;
       const max = Math.min(MAX_SCROLLS, step.maxScrolls ?? 6);
+      let dir = asked ?? 'down';
+      let reversed = false;
+      // Where the target is, when the tree knows. `null` means no evidence, and
+      // that distinction is load bearing: guessing "up" without it scrolls to
+      // the top of a web page, which **triggers pull-to-refresh**, reloads the
+      // page and changes the screen hash — defeating the end-detection below
+      // and reading, from outside, as an endless loop. Observed live.
+      const offsetSays = async () => {
+        if (asked) return asked;
+        try {
+          const { entry, points } = await api.readScreenWith(deviceQuery, { useOcr: false, options: ctx.options });
+          const hit = matching.resolve(entry.targets ?? [], String(query));
+          const y = hit?.target?.y;
+          if (!Number.isFinite(y)) return null;
+          if (y < 0) return 'up';
+          if (y > (points?.height ?? Infinity)) return 'down';
+          return dir;
+        } catch {
+          return null;
+        }
+      };
       for (let i = 0; i <= max; i += 1) {
         try {
           const found = await api.locate(deviceQuery, query, { index: step.index, refresh: i > 0 });
           return `"${found.target.label}" is in view at ${found.target.x},${found.target.y}` +
-            (i ? ` after ${i} scroll${i === 1 ? '' : 's'}` : ' already');
+            (i ? ` after ${i} scroll${i === 1 ? '' : 's'} ${dir}` : ' already');
         } catch (err) {
-          if (i === max) throw new Error(`scrolled ${dir} ${max}x without finding ${query}: ${err.message}`);
+          if (i === max) {
+            throw new Error(`scrolled ${dir} ${max}x without finding ${query}: ${err.message}`);
+          }
         }
+        const evidence = await offsetSays();
+        if (evidence) dir = evidence;
+        const wasAt = await hashNow(deviceQuery, ctx.options);
         await runStep(deviceQuery, udid, { action: 'scroll', value: dir }, ctx);
-        await api.waitFor(deviceQuery, { mode: 'stable', stableMs: 250, timeoutMs: 2500, options: ctx.options });
+        // A scroll either moves immediately or not at all, so it does not need a
+        // transition's budget. Six iterations at 2,500ms was most of why this
+        // read as a loop from outside — *"it looks like a loop"* — rather than
+        // as a search.
+        await api.waitFor(deviceQuery, { mode: 'stable', stableMs: 200, timeoutMs: SCROLL_SETTLE_MS, options: ctx.options });
+        // A scroll that moved nothing means we are against an end. Burning the
+        // rest of the budget against it is what the operator watched happen:
+        // *"your scroll still looks unstable, you're just scrolling past the
+        // page"*. Reverse once — the target may be behind us, and on a page
+        // whose fields never enter the tree there is no offset to follow — then
+        // stop rather than thrash.
+        const nowAt = await hashNow(deviceQuery, ctx.options);
+        if (wasAt && nowAt && wasAt === nowAt) {
+          // Reverse only on evidence. Without it we do not know the target is
+          // behind us, and scrolling blindly the other way is how a web page
+          // gets pulled to refresh.
+          if (reversed || !evidence) {
+            throw new Error(
+              `${query} is not reachable by scrolling: ${dir} stopped moving after ${i + 1} attempt(s)`
+              + (evidence ? ' and so did the other way.' : ' and the tree does not say where it is,'
+                + ' so there is no direction to try.')
+              + ' It may not be in the accessibility tree at all — read the screen, or aim at a coordinate.',
+            );
+          }
+          reversed = true;
+          dir = dir === 'down' ? 'up' : 'down';
+        }
       }
       throw new Error(`could not bring ${query} into view`);
     }

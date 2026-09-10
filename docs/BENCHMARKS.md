@@ -3257,3 +3257,96 @@ That distinction is the lesson of the map cut restated: a cheaper reading may
 drop data nothing misses *until it does*, and the safe form of "approximate" is
 one that notices it was not enough. Vision's own `.fast` would not have had that
 property, which is the second reason it is not the knob to reach for.
+
+---
+
+## Round 7 — the supervisor's first field round, and the bug it was hiding
+
+2026-09-11. Five runs, two flows, order reversed between them so supervision and
+prior knowledge could be separated — the reporter's design, and the only reason
+this round means anything.
+
+| run | flow | mode | knowledge | calls | wall | rulings |
+|---|---|---|---|---|---|---|
+| 1A | CSR | unsupervised | blind | 21 | 391 s | — |
+| 1B | CSR | supervised | informed | **4** | 172 s | 3 |
+| 2B | Add Asset | supervised | **blind** | 14 | 430 s | **0** |
+| 2A | Add Asset | unsupervised | informed | 9 | 286 s | — |
+| 2C | Add Asset | supervised | informed | 6 | 220 s | **0** |
+
+**21 → 4 is not the supervisor**, and the report says so before we could. Flow 1
+confounds supervision with being the second run. Flow 2 ran B-first to break
+that and broke it the other way: **supervised+blind 14 calls, unsupervised+
+informed 9.** In the isolating cell — 2C replaying 2A's exact step sequence with
+only the flag changed — 6 against an adjusted 6. **A dead heat, with zero
+rulings.**
+
+### The reason there were zero rulings
+
+**Three rulings in the whole session, all in the first supervised sequence. Then
+twenty supervised calls and six failures produced nothing**, while `doctor` kept
+reporting the model healthy — because `doctor` runs in its own process.
+
+Root cause, reproduced on the bench in one command: `LanguageModelSession`
+accumulates its transcript and one session was reused for every request, so
+after seven real failures it hit **`exceededContextWindowSize` — 4,441 tokens
+against a 4,096 window** — and every request after that errored.
+
+It degraded before it broke, and both symptoms were sitting in the report
+unrecognised as one cause: latency climbing **987 ms → 1,890 ms** as the
+transcript grew, and reasons collapsing into boilerplate repeated verbatim
+across unrelated failures.
+
+| | before | after a session per judgement |
+|---|---|---|
+| requests answered in one process | **7, then never again** | **15 of 15** |
+| latency | 987 → 1,890 ms, growing | **488–533 ms, flat** |
+
+### Verified live, on a web page rather than an app
+
+Settings could not produce a genuine late-content failure — every screen renders
+instantly — so the check ran in Safari, where a page load is a real race. With
+`autoSettle: false` so every step competes with the load:
+
+```
+supervisor at step 1: wait — recovered
+ok   [0] openUrl: opened https://example.com [no-visible-change]
+```
+
+Step 1's assert failed because the page had not arrived, the supervisor answered
+`wait`, and the step then succeeded. That is the shape of the one save the field
+round did record, reproduced on demand.
+
+### What else changed, all of it from the report's own reasoning
+
+- A consultation that answers nothing now says `supervisor: unavailable`, and
+  `doctor` **proves a round trip** — it answers a probe in ~520 ms or reports
+  "present and not working".
+- **Code answers what code knows.** An ambiguous selector cannot be waited into
+  uniqueness; an element out of view cannot be waited into view. The model said
+  `wait` to both, once while the executor's own error said *"waiting cannot bring
+  it into view"*. Ruled deterministically now, which narrows the model to the one
+  class it has been reliably right about.
+- **It is no longer asked to explain itself.** It confabulated in every observed
+  run, including a correct `stop` justified as "screen is elsewhere" on a screen
+  exactly where the plan expected. The caller is told which rule or which model
+  answered instead — true by construction.
+- **`wait` and `retry` differ only in duration**, so the one distinction it still
+  fumbles costs milliseconds instead of the recovery.
+
+### And the defect that cost more than the supervisor could have saved
+
+`scrollTo` scrolled **away** from its target: y = −693, above the viewport, six
+downward gestures, the offset printed in its own error each time, then advice to
+use the tool it already is. Reproduced three times; the operator watching called
+it *"scrolled too much and trying to scroll more like a loop"*. It reads the sign
+now.
+
+Also fixed: `type` was sending a field's own label into the field when `into` was
+present and `text` was not — reported as `typed into "Asset*" … = "Asset*"`,
+which reads like a display quirk and is a wrong write.
+
+**The instrument to keep from this round** is the operator's vocabulary, which
+tracked invocation count almost perfectly: *"fast"/"fair" = steps inside a batch,
+"taking too much time" = a round trip, "failure" = a defect.* Thirteen complaints
+across 21 calls blind; three across four batched.

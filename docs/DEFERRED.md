@@ -201,6 +201,180 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
 
+### From round 7 — the supervisor's first field round, and it went silent
+
+Five runs across two flows, with the order deliberately reversed between them so
+supervision and prior knowledge could be separated. The reporter designed that
+themselves and it is why this round is worth anything.
+
+| run | flow | mode | knowledge | calls | wall | rulings |
+|---|---|---|---|---|---|---|
+| 1A | CSR | unsupervised | blind | 21 | 391 s | — |
+| 1B | CSR | supervised | informed | **4** | 172 s | 3 |
+| 2B | Add Asset | supervised | **blind** | 14 | 430 s | **0** |
+| 2A | Add Asset | unsupervised | informed | 9 | 286 s | — |
+| 2C | Add Asset | supervised | informed | 6 | 220 s | **0** |
+
+**21 → 4 is not the supervisor.** In flow 1 the supervised run was also the
+second run, so the two variables are perfectly confounded. Flow 2 was run
+B-first to break that and broke it the other way: **supervised+blind cost 14
+calls; unsupervised+informed cost 9.** Knowledge without a supervisor beat a
+supervisor without knowledge. And in the isolating cell — 2C replaying 2A's
+exact step sequence, mistakes included, with only the flag changed — 6 against
+an adjusted 9-minus-3 = **6. A dead heat, with zero rulings.**
+
+The reporter also volunteered the caveat that cuts our way: some of every
+second-run gain is *the graph learning the app*, not them learning it, and this
+design cannot separate those. Their fair headline: **the screen graph and plan
+quality carried the later runs; the supervisor contributed one round trip.**
+
+**F1, and it is the round: the supervisor answered three times and then never
+again.** Twenty supervised calls and six failures produced nothing — including
+failure classes it had already ruled on, and one case the briefing described
+explicitly. `doctor` kept reporting it healthy throughout. Their diagnosis from
+outside was *"a model session established once and then lost, with the loss never
+surfaced"*, and their warning is the part to keep: *"had I run flow 2 alone I
+would have reported the supervisor makes no difference without realising it had
+never run."*
+
+**Root cause, found on the bench and fixed.** `LanguageModelSession` accumulates
+its transcript, and one session was reused for every request — so after seven
+real failures it hit `exceededContextWindowSize`, **4,441 tokens against a 4,096
+window**, and every later request errored. It degraded before it broke: latency
+climbed 987 ms → 1,890 ms, and the reasons collapsed into boilerplate repeated
+verbatim across unrelated failures. Both were visible in the report; neither was
+recognised as one cause. A session per judgement: **15 of 15 answered at
+488–533 ms with no growth**, where it used to die at 7.
+
+**Also fixed, and all three came from the report's own reasoning:**
+
+- **A silent consultation is now visible.** `supervisor: unavailable` on the
+  call, and `doctor` **proves a round trip** rather than a presence — it answers
+  a probe or reports "present and not working". Both were the reporter's asks.
+- **Code answers what code knows.** An ambiguous selector cannot be waited into
+  uniqueness and an element out of view cannot be waited into view — the
+  executor's own error says so in English, and the model answered `wait` anyway.
+  Those are ruled deterministically now, narrowing the model to the one class it
+  has been reliably right about: *has this arrived yet?*
+- **It is no longer asked to explain itself.** It confabulated in every observed
+  run — a correct `stop` justified as "screen is elsewhere" on a screen exactly
+  where the plan expected. The reporter's judgement: *"no reason at all would be
+  better than a confident wrong one."* The caller is told which rule or which
+  model answered, which is true by construction.
+- **`wait` and `retry` now differ only in duration.** That was the one
+  distinction it still fumbled, so a wrong choice between them costs
+  milliseconds instead of the recovery.
+
+**F2 — `scrollTo` scrolled away from its target. Fixed three times over, and it
+was the most expensive defect of the round**, more than the supervisor could have saved
+working perfectly. The target sat at **y = −693**, above the viewport, and it
+scrolled *down* six times with the offset printed in its own error each time,
+then advised the tool it already is. Reproduced three times. The operator called
+it *"scrolled too much and trying to scroll more like a loop"*. It reads the sign
+now; an explicit `direction` still wins.
+
+Two further faults surfaced while verifying that on a live web page, both
+watched in real time by the operator. It **never noticed an end**: six gestures
+against the bottom of a page, each paying a 2,500 ms transition budget for a
+gesture that moves at once or not at all — *"it looks like a loop"*, and it was.
+And the blind reversal I added to fix that **triggered pull-to-refresh**:
+scrolling up at the top of a web page reloads it, which changes the screen hash
+and defeats the very end-detection it was meant to feed — *"now you're scrolling
+to the top which triggers pull-to-refresh too"*.
+
+So a reversal now requires *evidence*: the tree saying where the target is. No
+evidence is not a direction. With that, a target which is not in the tree at all
+— a form field inside an iframe, in the observed case — fails in **one attempt
+and 3.7 seconds** with an honest message, against six attempts and 38 seconds.
+
+**F12 — `type` sent a field's own label into the field. Fixed.** Reported as
+`typed into "Asset*" … = "Asset*"`, which looks like a display quirk and is not:
+`value` is the selector when `into` is present, and `step.text ?? step.value`
+fell through to it. It refuses now rather than guessing, because typing a
+selector into a form is a wrong write.
+
+70. **Browser chrome outranks page content on a prefix match.** Found verifying
+    the supervisor fix on a live web page: `tap "More information"` resolved to
+    Safari's toolbar **`More`** at 344,816 and opened a share sheet, while the
+    page's own "More information..." link went untouched. A four-character
+    chrome label beat a seventeen-character content label that the query names
+    almost exactly. `nav-bar`/`tab-bar` region weighting exists; a browser's
+    bottom toolbar is neither, and the content region should win when the query
+    is longer than the chrome label it matched.
+
+**Still open, worst first:**
+
+61. **F3 — text entry has no correct answer.** `paste` is exact but fires no
+    change handler, so an autocomplete never queries; `type` fires events but
+    corrupts under the installed keyboard layouts (`type "er"` after `Fry` gave
+    `Fry er`); and **nothing can clear a field** — `paste ""` is a silent no-op
+    and paste appends. The reporter left `Fry er a` in a field because there was
+    no way to fix it. Their conclusion, which is the one to act on: *"any app
+    with an autocomplete, a debounced search box or a validated numeric input is
+    not automatable end to end today."* Wants `clear: true` or `replace: true`,
+    and a `key` step with `repeat` for Backspace.
+
+62. **F4 — `unexpected-screen` now fires on successful scrolls too.** Twice,
+    including on a `scroll` that had put the target in view. The
+    `memory disagrees with this screen` warning fired on roughly **11 of 25**
+    maps in one flow and never once changed what the reporter did — at that
+    frequency it is noise. Note the tension with round 5, where the same
+    subsystem correctly caught a confusion on a submit screen: it is more
+    willing to abort a correct flow than to admit a variant.
+
+63. **F5 — a `#ref` was rejected as stale against an identical, freshly-printed
+    element list.** Twice. The same response that refused `#8` then printed
+    `#8 element 346,258 Select`, same label, same coordinates. It also
+    contradicts the map's own closing advice to chain by ref. Validate a ref
+    against the element it named, not only against the screen hash.
+
+64. **F6 — the tree retains phantom controls from closed sheets.** `APPLY` and
+    `Confirm` both resolved at `y=1845` on an 874 pt screen with no sheet
+    present, so `or` chains matched them and then failed on visibility, blaming
+    scrolling for a stale node. This is what made two rounds of `or` fallbacks
+    useless.
+
+65. **F7 — the count-header check is inconsistent.** It fired truthfully on
+    `1630 records / 42 rows` and did **not** fire on `21 Records` with one row
+    present — the same shape. The row count is measured against everything in
+    the content region rather than against the rows below the header. Nor did
+    anything fire on a list that settled **fully empty** in 1,356 ms and then
+    killed a batch, which is the case that costs the most.
+
+66. **F8 — `sim_ui refresh:true all:true` returned nothing** on a static screen
+    mapped one second earlier: *"no elements read on this screen"*. Total
+    perception dropout, seen once, forced a screenshot.
+
+67. **F9 — `autoSettle:true` hid a bottom sheet that `autoSettle:false` saw.**
+    The same tap reported `no-visible-change` twice with no sheet in the map;
+    with auto-settle off and a 700 ms pause the sheet was fully there.
+    Intermittent, and it cost one run about six calls, because
+    `no-visible-change` on a control that *is* a dropdown is indistinguishable
+    from a dead control.
+
+68. **F10 — an `or` chain's failure message miscounts and drops entries.** Seven
+    selectors passed, "none of 5" reported, six named, two never mentioned — so
+    the reporter could not tell whether they had been tried. The loop breaks
+    early on a non-retryable failure and the message does not say which were
+    skipped.
+
+69. **F11 — `{"scroll":"down"}` travels a non-deterministic distance.** Four
+    rows in one run, one row in another. `scrollTo` should absorb it, and now
+    that it reads the offset sign it mostly will — but `scroll` still cannot be
+    planned against.
+
+**What the report says is genuinely working**, unprompted: `assert` reads fresh
+and was correct on every call in all five runs (round 6's item 49); the
+`loading`-control settle warning fired every time and never falsely; the
+count-header warning works where it fires; and **3 standalone reads and 2 images
+across 54 device calls** — the batching primitive and its post-step map are the
+part of this tool that is carrying it.
+
+The operator's own vocabulary is the clearest instrument we have: *"fast"/"fair"
+= steps inside a batch, "taking too much time" = a round trip, "failure" = a
+defect in the report.* Thirteen complaints across 21 calls in the blind run;
+three across four in the batched one.
+
 ### Bench notes on the supervisor, before its first field round — 2026-09-11
 
 What is actually verified, so the field round is read against the right claim.
