@@ -3449,7 +3449,18 @@ test('a typed field is verified by its contents, not by the screen moving', asyn
   // empty field and failed a step whose text was visible in the very map the
   // failure returned — worse than the verdict it replaced, because the tool's
   // own remediation advice would have double-entered the text.
-  assert.deepEqual(actions.readbackNote('x', null), { note: '', empty: false, landed: false });
+  //
+  // So it still must not fail — `empty` stays false. What changed is that it no
+  // longer stays *silent*: two agents in one round reported a confident `ok`
+  // into a field that was empty, both on web fields, where the tree carries no
+  // contents to read back and this note was the only thing that could have
+  // told them. An unconfirmed write must not read like a confirmed one.
+  const noEvidence = actions.readbackNote('x', null);
+  assert.equal(noEvidence.empty, false, 'no evidence must never fail the step');
+  assert.equal(noEvidence.landed, false);
+  assert.match(noEvidence.note, /unconfirmed/);
+  // ...and with nothing sent there is nothing to be unconfirmed about.
+  assert.equal(actions.readbackNote('', null).note, '');
   // `landed` is what lets the caller drop the focus proxy: the note "[the field
   // did not visibly take focus]" fires whenever the screen does not react to
   // the tap, and with a hardware keyboard attached to the simulator none ever

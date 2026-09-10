@@ -42,6 +42,17 @@ const MAX_PAUSE_MS = 5000;
 const FOCUS_STABLE_MS = 250;
 /** How far a control's centre may move between the read and the readback. */
 const FIELD_READBACK_RADIUS = 40;
+// The OCR pass needs a far wider one, and 40 is why measuring mattered: OCR
+// reports a value at the *value's* centre, not the label's tap point, and on a
+// pinch-zoomed page those were 133pt apart on a field that had filled
+// correctly. Generous enough for that, still short of "anywhere on screen",
+// because a match found anywhere would happily confirm text that was already
+// there before the step ran.
+const FIELD_READBACK_OCR_RADIUS = 220;
+// How long the OCR readback waits for a frame that postdates the keystrokes.
+// Focusing a web input makes Safari re-zoom, so the settle here is doing real
+// work rather than padding.
+const READBACK_SETTLE_MS = 900;
 /**
  * The cold defaults, unchanged, for a field this screen has not been measured
  * focusing. `graph.focusPlan` takes over once it has been, and may only make
@@ -829,10 +840,45 @@ export async function runScript(
  * step, because the text may well have landed.
  */
 async function fieldContents(deviceQuery, target, sent, ctx) {
+  const wanted = alnum(sent);
+  // The cheap pass: the tree alone, which is authoritative whenever it answers.
+  const fromTree = await readbackPass(deviceQuery, target, wanted, ctx, false, FIELD_READBACK_RADIUS);
+  if (fromTree) return fromTree;
+  // The tree did not answer — and on a web view it never will. Safari's page
+  // content is not in the accessibility tree at all; a CI run measured
+  // `0 element(s) from ax` on a fully loaded page. That is not a corner case:
+  // **both** silent successes reported from the field were web fields, where
+  // this whole check has always been a no-op that printed a bare success. So
+  // pay for one OCR read before giving up on knowing.
+  //
+  // This pass may only ever *confirm*. OCR fuses a label with its value
+  // ("Telephone: 5551234567"), and on a sub-1x capture it corrupts glyphs
+  // ("saaiad@example.com"), so a miss here is not evidence of an empty field.
+  // The empty-control branch cannot fire on it either, since an OCR text
+  // element carries no `value` — which is the property that makes this safe.
+  if (!wanted) return null;
+  // And it has to look at a frame from *after* the keystrokes. The tree pass is
+  // read live and in-process, so it never had this problem; OCR runs against
+  // the daemon's last published frame, which on the first try was the frame
+  // from before the paste — so the proof arrived, the text was plainly on
+  // screen, and the check still said unconfirmed. Settle first, briefly.
+  await api.waitFor(deviceQuery, {
+    mode: 'settle', stableMs: 250, timeoutMs: READBACK_SETTLE_MS, options: ctx.options,
+  }).catch(() => null);
+  return readbackPass(deviceQuery, target, wanted, ctx, true, FIELD_READBACK_OCR_RADIUS);
+}
+
+/**
+ * One readback attempt against one sensor.
+ *
+ * `useOcr` also decides what a *miss* is allowed to mean: the tree may deny
+ * (an empty valued control is real evidence of absence), OCR may not.
+ */
+async function readbackPass(deviceQuery, target, wanted, ctx, useOcr, radius) {
   try {
-    const { entry } = await api.readScreenWith(deviceQuery, { useOcr: false, options: ctx.options });
+    const { entry } = await api.readScreenWith(deviceQuery, { useOcr, options: ctx.options });
     const near = (entry.targets ?? []).filter(
-      (t) => Math.hypot((t.x ?? 0) - target.x, (t.y ?? 0) - target.y) <= FIELD_READBACK_RADIUS,
+      (t) => Math.hypot((t.x ?? 0) - target.x, (t.y ?? 0) - target.y) <= radius,
     );
     if (!near.length) return null;
     // The text may arrive as the control's `value` or as a sibling's label —
@@ -840,7 +886,6 @@ async function fieldContents(deviceQuery, target, sent, ctx) {
     // look for what was sent across both before concluding anything. Getting
     // this wrong is what made the first version of this check fail a step whose
     // text was visible in the very map the failure returned.
-    const wanted = alnum(sent);
     for (const t of near) {
       for (const seen of [t.value, t.label]) {
         if (!seen) continue;
@@ -852,6 +897,7 @@ async function fieldContents(deviceQuery, target, sent, ctx) {
         }
       }
     }
+    if (useOcr) return null;
     // Not found. Only an *empty* valued control is evidence of absence; a
     // control with no `value` attribute at all is no evidence either way.
     const valued = near.find((t) => t.value != null);
@@ -874,7 +920,16 @@ export function readbackNote(sent, seen) {
   // missing `value` attribute as an empty field and failed a step whose text was
   // visible in the same map the failure returned — reported, correctly, as
   // worse than the verdict it replaced.
-  if (!seen) return { note: '', empty: false, landed: false };
+  // ...but silence about it is what made two agents report a confident success
+  // into an empty field. Not failing is right; saying nothing is not. The note
+  // is the whole fix: an unconfirmed write must not read like a confirmed one.
+  if (!seen) {
+    return {
+      note: sent ? ' [unconfirmed — nothing on this screen reads back the field\'s contents]' : '',
+      empty: false,
+      landed: false,
+    };
+  }
   if (seen.landed) {
     const v = String(seen.value);
     const shown = v.length > 60 ? `${v.slice(0, 60)}…` : v;
@@ -1872,7 +1927,10 @@ async function runStep(deviceQuery, udid, step, ctx) {
         return `typed into ${field.where}${back.note}${back.landed ? '' : field.quiet}`;
       }
       await input.typeText(udid, step.text ?? step.value);
-      return 'typed text';
+      // No selector, so there is nothing to read back — which is a fine trade
+      // for typing into whatever Safari's own form chevrons focused, but it
+      // must not be reported as though the text was seen to land.
+      return 'typed text [unconfirmed — no field named, so nothing was read back]';
     }
     case 'paste': {
       // Long strings are much faster on the pasteboard than through the
@@ -1894,7 +1952,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
         return `pasted into ${field.where}${back.note}${back.landed ? '' : field.quiet}`;
       }
       await input.pasteText(udid, step.text ?? step.value);
-      return 'pasted into the focused field';
+      return 'pasted into the focused field [unconfirmed — no field named, so nothing was read back]';
     }
     case 'swipe': {
       const from = { x: step.from?.[0] ?? step.from?.x, y: step.from?.[1] ?? step.from?.y };
