@@ -175,6 +175,31 @@ Flow refusals carry `flow_name` too, and a `goto` refusal names its
 destination, because "this agent could not route to Settings" and "this flow
 failed" are different rows in the same column.
 
+### Half-fixed, and the other half found by Phase 17's go/no-go — 2026-09-10
+
+Deriving the id from the pid was right for the MCP server, which is one
+long-lived process, and wrong for everything that is not. A CLI-driven agent
+starts a process per command, so it got **one "session" per command**: 33
+session ids for 46 records on the benchmark device, 30 of them holding exactly
+one record. `--session` was therefore unable to answer the only question it
+exists for, and Phase 17's go/no-go — whose first step was "filter to one
+session id" — had nothing to filter.
+
+`SIMFRAME_SESSION` now overrides it. A caller that knows it is one session says
+so once, and every process it spawns writes the same id; the per-process value
+stays the default, so nothing that was working changes. For a peer round:
+
+```bash
+SIMFRAME_SESSION=peer-2026-09-10 simframe flow ...
+```
+
+The second defect from the same investigation: **`verification_failed` carried
+no intent**, and it is the largest reason class in the log. Both escalation
+sites in `actions.js` — the verdict path and the throw path — now read the step
+through one `goalOf(step)` helper, so every reason says what was asked for. A
+breakdown could previously count the expensive decisions without being able to
+say what kind they were.
+
 `simframe escalations` gained three things:
 
 - `--session` narrows to this process, `--session=<id>` to one, `--flow=<name>`

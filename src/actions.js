@@ -91,6 +91,16 @@ export function wrongTurnFrom(verification) {
 }
 
 /**
+ * What a step was asked to act on, in the caller's words.
+ *
+ * Every escalation wants this and two sites were spelling it out separately —
+ * one of them not at all.
+ */
+export function goalOf(step = {}) {
+  return step.value ?? step.target ?? step.label ?? step.into ?? null;
+}
+
+/**
  * What a halted step does to the run as a whole.
  *
  * Both halves matter, and only one of them used to happen: the step is marked
@@ -478,6 +488,11 @@ export async function runScript(
           fingerprint: beforeScreen?.hash ?? null,
           reason: 'verification_failed',
           candidates: [],
+          // `verification_failed` is the largest reason class in the log and it
+          // was the only one carrying no intent, which made most of the corpus
+          // useless for asking what kind of decision costs us. The step knows
+          // what was asked for; there is no reason to drop it here.
+          intent: goalOf(step),
           // A halted run is a decision simframe made and stopped on; a step
           // that moved nothing carries on and leaves the judgement to whoever
           // reads the result.
@@ -507,7 +522,7 @@ export async function runScript(
         tried: why.tried,
         // Carried from the throw site where it exists, and otherwise the step's
         // own target — which is what was asked for either way.
-        intent: why.intent ?? (step.value ?? step.target ?? step.label ?? step.into ?? null),
+        intent: why.intent ?? goalOf(step),
         outcome: 'failed',
         wallMs: Date.now() - stepStart,
         detail: err.message,

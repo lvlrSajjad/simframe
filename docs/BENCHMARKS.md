@@ -2794,3 +2794,83 @@ choice and silently races.
 
 Still open from that report and filed rather than fixed: `no-visible-change`
 firing on a modal open, and `strip --device` untested.
+
+---
+
+## Phase 17 go/no-go — the prize, measured before the model
+
+2026-09-10. `node scripts/phase17-corpus.mjs`. Aggregate output by design: the
+script reads a real device's memory of real third-party apps, so it prints
+counts and never a label, a screen or an app name.
+
+The plan wanted 200 escalations filtered to one session id. Neither half was
+available: `no_plan` has never been logged, `ambiguous_intent` was the reason a
+ranking bug produced all day, and the session id was minted from the pid — so a
+CLI-driven agent got one session per command. **33 session ids for 46 records on
+the benchmark device, 30 of them holding exactly one record.** Both defects are
+fixed; the corpus they build is still a corpus of failures, and the failures
+were being fixed faster than they accumulate.
+
+The corpus that already existed: every verified graph edge is a decision that
+*worked*, carrying its goal, its screen and — via the screen map — the element
+list it was taken against.
+
+| device | edges | joinable | element decisions | matcher ok | ambiguous | not found |
+|---|---|---|---|---|---|---|
+| 326464A4… (iOS, benchmark) | 30 | 30 | 17 | 15 | 1 | 1 |
+| 7B8F8963… (iOS, third-party app) | 63 | 50 | 18 | 17 | 1 | 0 |
+| emulator-5554 (Android) | 15 | 15 | 5 | 5 | 0 | 0 |
+| two others | 10 | 5 | 0 | 0 | 0 | 0 |
+| **total** | **118** | **100** | **40** | **37** | **2** | **1** |
+
+118 edges reduce to 40 decisions because 30 chose no element at all (`launch`,
+hardware `button`, `openUrl`, `scroll`), 27 named a `#ref` or a coordinate, and
+18 could not be joined to a stored screen. The first run of the script did not
+make that distinction and reported 45% "not found", which is the number to
+distrust: it was counting a `launch` step's app name as an element decision.
+
+**37 of 40 — 92.5% — already resolve locally.** Ambiguous: 2 (5.0%). Not found:
+1 (2.5%). A local planner's entire addressable share is the 5%, and only if it
+were perfect.
+
+The threshold in the plan (`agreement ≥85%`) asked how good the model would be.
+It never asked how large the prize was. Measuring the prize took one script and
+no model, and it is a no-go: **by the time a step reaches simframe the decision
+has already been made.** The goal on a verified edge names the option, because
+Claude chose it and then asked for it by name. The thinking this phase set out
+to remove happens upstream of the tool call, where a model reading an element
+list cannot see it.
+
+N is 40 and the caveats are in `docs/PHASES-HUMAN-PARITY.md`. The one that
+matters: the goals were phrased by an agent already using this matcher, so the
+interface trains the caller into the resolvable regime. That makes 92.5% a
+weaker claim about arbitrary phrasing and a stronger one about the no-go.
+
+### The objection, and the second instrument that answers it
+
+A verified graph edge is a decision that *succeeded*, so the graph cannot see
+the decisions the matcher fumbled — those became escalations, Claude fixed them,
+and only then was an edge written with the corrected goal. Measuring the matcher
+on its own successes is partly circular, and the objection is fair.
+
+The escalation log is the other instrument, with a different denominator: the
+resolution failures (`ambiguous_intent` + `unknown_screen`) against total edge
+traversals.
+
+| device | traversals | resolution failures | rate |
+|---|---|---|---|
+| 7B8F8963… (iOS, the real third-party app, both peer rounds) | 73 | 4 | **5.5%** |
+| 326464A4… (iOS, benchmark) | 50 | 69 | 138% — see below |
+| three others (incl. Android) | 40 | 0 | 0% |
+
+**5.5% on the real app, against 5% from the corpus.** Two instruments, two
+denominators, one built from successes and one from failures, and they agree.
+That is the strongest form this result comes in.
+
+The benchmark device's 138% is not a measurement, it is the contamination the
+plan warned about: it is the device the bench and HPI suites hammer all day, its
+graph is discarded whenever `MAP_VERSION` or `GRAPH_VERSION` moves (so
+traversals reset while the append-only log does not), and 51 of its 69 failures
+are the `ambiguous_intent` a ranking bug produced on 2026-09-10 before it was
+fixed. Quoted rather than dropped, because a number that cannot be a rate is
+worth showing as the reason the plan said "collect after the ranking fix".

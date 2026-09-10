@@ -264,7 +264,20 @@ export function fingerprintNow(udid, screenmap) {
  * file is committed to a public repo in summary form, and the question it has
  * to answer is "was this all one agent", which needs no identity to answer.
  */
-const SESSION_ID = `${process.pid.toString(36)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const SESSION_ID = process.env.SIMFRAME_SESSION
+  ? String(process.env.SIMFRAME_SESSION).slice(0, 64)
+  : `${process.pid.toString(36)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+/*
+ * Minting the id from the pid was right for the MCP server, which is one
+ * long-lived process, and wrong for everything else. A CLI-driven agent starts
+ * a process per command, so it got one "session" per command: on the benchmark
+ * device, 33 session ids for 46 records, 30 of them holding a single record.
+ * `escalations --session` was therefore unable to answer the one question it
+ * exists for, and Phase 17's go/no-go step 1 — "filter to one session id" —
+ * had nothing to filter. `SIMFRAME_SESSION` lets a caller that knows it is one
+ * session say so; the per-process id stays the default.
+ */
 
 /** How this process is being used, for reading a breakdown afterwards. */
 function clientKind() {

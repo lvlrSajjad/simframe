@@ -328,10 +328,39 @@ what remains. That document plus BENCHMARKS.md is the evidence for the article.
 
 ---
 
-## Phase 17 — Local planner tier (a plan and a go/no-go, not a build)
+## Phase 17 — Local planner tier (a plan, a go/no-go, and a NO-GO)
 
-Not a build prompt. Nothing here should be written until Phase 16 is done and
-the test below has been run and passed.
+> **Result, 2026-09-10: NO-GO.** The go/no-go was run — see "Go/no-go, as run"
+> below — and it says the prize is 5% of decisions. Not because the candidate
+> model is weak; that was never measured, because it did not need to be. Of the
+> element decisions an agent actually makes on real apps, the local matcher
+> already resolves **37 of 40**. A planner that got every remaining case right
+> would remove two escalations in forty steps.
+>
+> The reason is worth more than the number. **By the time a step reaches
+> simframe, the decision has already been made.** A verified edge's goal *names*
+> the option — `tap "<the option Claude picked>"` — because Claude chose the option and then asked
+> for it by name. The deliberation the user is paying for happens upstream of
+> the tool call, and a model inside the daemon reading an element list would
+> only re-derive a conclusion Claude had already reached. The one shape a local
+> planner could own is the abstract goal, "open this dropdown and pick any
+> option", which is `intent.chooseAny` — already local, already cheap, and 2 of
+> 40 decisions.
+>
+> This is the same class of mistake Phase 11.5's premise made. That phase
+> assumed the agent was not batching and found it batches 84% of the time; this
+> one assumed the expensive decision was visible to the tool and it is not.
+> Both were cheap to check and would have been expensive to build.
+>
+> **What replaces it** is in `docs/DEFERRED.md`: the `next:` hint currently uses
+> familiarity as a proxy for risk and shrinks the batch on exactly the screens
+> where short batches cost most, and a form-shaped read replaces about eight
+> calls with one on a form screen. Those attack the same cost with none of the
+> machinery. The plan below is kept intact — including the amendment it wanted —
+> because a no-go that deletes its own reasoning cannot be revisited.
+
+Not a build prompt, and now not a prompt at all. Kept as the record of a
+question that was asked properly and answered no.
 
 **The idea.** The daemon already turns a screen into text. A small on-device
 model can read that text and answer one narrow question — *given this goal and
@@ -354,8 +383,9 @@ is permitted for step selection only, never for planning a goal and never for
 overriding a verdict.* Recorded here rather than edited in, because a fixed
 decision should not be quietly loosened by the phase that wants it loosened.
 
-**Blockers, checked 2026-09-10.** Two are real, one is the user's, one turned
-out not to be a blocker at all.
+**Blockers, checked 2026-09-10, before the go/no-go was run.** Two are real,
+one is the user's, one turned out not to be a blocker at all. Kept because the
+last of them is what the go/no-go went around rather than waited for.
 
 - **Not a blocker: the candidate exists here.** macOS 26.6.2 and
   `FoundationModels.framework` is in the macOS SDK (26.5). No download, no MLX
@@ -381,7 +411,7 @@ cheap and reads a log, so it can and should be run as soon as the 200 exist — 
 *no-go* changes the plan for Phases 12–16, and finding that out early is worth
 more than tidiness.
 
-**Go/no-go, to be run before any build, using Phase 10's log:**
+**Go/no-go, as planned:**
 
 1. Export 200 real `ambiguous_intent` and `no_plan` escalations, each with the
    goal, the element list, the candidates, and the action Claude eventually took
@@ -393,12 +423,82 @@ more than tidiness.
    zero destructive suggestions, and median latency ≤500 ms. Otherwise stay
    deferred and revisit when the escalation mix has changed.
 
+**Go/no-go, as run — 2026-09-10.** `scripts/phase17-corpus.mjs`, aggregate
+output only because it reads a real device's memory of real third-party apps.
+
+Step 1 as written could not be done, and finding out why is half the result.
+`no_plan` has never been logged once. `ambiguous_intent` is the reason the
+ranking bug produced all day, so the pre-fix records encode a bug. And the
+session id was minted from the pid — right for the MCP server, which is one
+long-lived process, and wrong for a CLI-driven agent, which starts a process per
+command: 33 session ids for 46 records on the benchmark device, 30 of them
+holding one record. "Filter to one session id" had nothing to filter. Both
+logging defects are fixed (`SIMFRAME_SESSION`; `intent` now carried on
+`verification_failed`, which was the largest reason class and the only one
+dropping it), but the corpus they would have built is still months away, because
+it is a corpus of *failures* and the failures were being fixed.
+
+The better corpus was already on disk. **Every verified graph edge is a decision
+that worked**: the goal is in `step`, the screen is the node, and the element
+list for that screen is in the screen map. That is (goal, element list, action)
+for every *successful* step rather than only the rare failures, and the ground
+truth is stronger because the tap was verified.
+
+118 verified edges across five devices — two real third-party apps, Settings,
+and an Android emulator. Of those, 40 were decisions where an element had to be
+chosen; the rest chose no element at all (30: `launch`, hardware `button`,
+`openUrl`, `scroll`) or named a `#ref` or a coordinate (27), and 18 could not be
+joined to a stored screen. Running today's `matching.resolve` on the stored
+element list:
+
+| | n | share |
+|---|---|---|
+| already resolved locally | 37 | 92.5% |
+| ambiguous — a planner could pick | 2 | 5.0% |
+| not found — a planner cannot invent an element | 1 | 2.5% |
+
+The planned threshold asked how accurate the model would be. It never asked how
+large the prize was, which is the question that settles it.
+
+**The objection, and the answer.** A verified edge is a decision that
+*succeeded*, so the graph cannot see the ones the matcher fumbled — those became
+escalations, Claude fixed them, and the edge was written with the corrected
+goal. Measuring the matcher on its own successes is partly circular. The
+escalation log is the second instrument, with the opposite bias: resolution
+failures (`ambiguous_intent` + `unknown_screen`) against total edge traversals.
+On the real third-party app across both peer rounds that is **4 in 73 — 5.5%**,
+against 5% from the corpus. Two instruments, one built from successes and one
+from failures, same answer. The benchmark device reports 69 failures against 50
+traversals, which is not a rate: its graph is discarded on every `MAP_VERSION`
+bump while the log appends, and 51 of the 69 are the ranking bug. That device is
+why the plan said "collect after the ranking fix", and it is why the real app's
+number is the one to read.
+
+**A sibling research pass reached the same place from the build side.**
+`docs/PHASE-17-SUPPLEMENT.md` works out how the planner should be built —
+Apple's 4,096-token budget, constrained `@Generable` output, temperature 0, an
+endpoint abstraction, availability as a `doctor` capability. Its constraints are
+right and worth keeping. But its own ladder rule — *the planner is consulted
+only when the matcher returns ambiguous or no match* — scopes the planner to
+exactly the slice measured above. By that document's own definition, the planner
+runs on 5% of decisions.
+
+**Caveats, because N is 40.** The goals were phrased by an agent already using
+this matcher, so the interface trains the caller into the resolvable regime —
+92.5% is not a claim about arbitrary phrasing, and it cuts toward no-go rather
+than away from it. `resolve` runs against the stored snapshot, which is not
+always the screen at decision time; 18 edges could not be joined at all. Only
+verified edges are recorded, so decisions that failed and were retried are
+under-represented — the escalation log is the other half of that picture, and
+post-ranking-fix it holds two intent-bearing records in total. A larger corpus
+could move 5% to 10%. It cannot move it to a phase.
+
 One caution the log already justifies: at the time of writing, this device's
 escalations are 55 `ambiguous_intent` and 54 `verification_failed`, and
 `ambiguous_intent` is the reason a *ranking* bug produced all day. Export the
 200 after the ranking work has settled, or the ground truth will encode a bug.
 
-**If go, the build phase is:**
+**If it had been a go, the build phase would have been:**
 
 - Ladder: intent matcher → local planner → Claude. The planner receives the
   goal, a compact element list and the last verdict, and returns

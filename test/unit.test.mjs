@@ -2171,6 +2171,50 @@ test('an escalation breakdown says when it is pooling more than one agent', asyn
   assert.ok(metrics.BUILT_FACULTIES.has(metrics.FACULTY.verification_failed));
 });
 
+test('one agent session is one session id, however many processes it takes', async () => {
+  // A pid-derived id gave a CLI-driven agent one "session" per command: 33 ids
+  // for 46 records on the benchmark device, 30 of them holding a single record.
+  // That made `escalations --session` unable to answer the only question it
+  // exists for. A caller that knows it is one session can now say so.
+  const { execFileSync } = await import('node:child_process');
+  const ROOT = new URL('..', import.meta.url).pathname;
+  const run = (env) => {
+    const out = execFileSync(process.execPath, [
+      '-e', "import('./src/metrics.js').then((m) => console.log(m.sessionId()))",
+    ], { cwd: ROOT, env: { ...process.env, ...env }, encoding: 'utf8' });
+    return out.trim();
+  };
+  const a = run({ SIMFRAME_SESSION: 'peer-round-2' });
+  const b = run({ SIMFRAME_SESSION: 'peer-round-2' });
+  assert.equal(a, 'peer-round-2');
+  assert.equal(b, a, 'two processes in one declared session share its id');
+
+  const unset = { ...process.env };
+  delete unset.SIMFRAME_SESSION;
+  const c = execFileSync(process.execPath, [
+    '-e', "import('./src/metrics.js').then((m) => console.log(m.sessionId()))",
+  ], { cwd: ROOT, env: unset, encoding: 'utf8' }).trim();
+  assert.notEqual(c, a, 'without the variable the per-process id is still the default');
+});
+
+test('every escalation reason carries what was asked for', async () => {
+  const actions = await import('../src/actions.js');
+  // `verification_failed` is the largest reason class and was the only one
+  // logging no intent, so most of the corpus could not say what kind of
+  // decision had cost the time. Both escalation sites read the step the same
+  // way now, through one helper.
+  assert.equal(actions.goalOf({ action: 'tap', value: 'Save' }), 'Save');
+  assert.equal(actions.goalOf({ action: 'type', into: 'Requested By' }), 'Requested By');
+  assert.equal(actions.goalOf({ action: 'assert', target: 'Review' }), 'Review');
+  assert.equal(actions.goalOf({ action: 'button', name: 'HOME' }), null);
+  assert.equal(actions.goalOf(), null);
+
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const sites = src.match(/intent: (?:why\.intent \?\? )?goalOf\(step\)/g) ?? [];
+  assert.equal(sites.length, 2, 'the verdict site and the throw site both carry it');
+});
+
 test('a black frame is noticed, and is never called a diagnosis', async () => {
   const a = await import('../src/analyze.js');
   // The wedge: `simctl io screenshot` succeeds and returns 0 non-black pixels

@@ -30,16 +30,27 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > rather than recalled, and a rewritten SKILL. The map-shrinking half was
 > **reverted the same day** — see `docs/BENCHMARKS.md`.
 >
-> **Phase 11.5 is on `main` and NOT yet released** — an earlier version of this
-> block said "released in 0.11.0", which was false; the release was waiting on
-> CI and then on a regression report. 0.10.0 is what is on npm.
+> **Phase 17 is a NO-GO, decided 2026-09-10 by running its own go/no-go.** Of
+> 40 real element decisions, the local matcher already resolves 37. The
+> deliberation the phase set out to remove happens *upstream* of the tool call
+> — a verified edge's goal already names the option Claude picked — so a model
+> inside the daemon would only re-derive a decision already made.
+> `scripts/phase17-corpus.mjs` reproduces it; the reasoning is in
+> `docs/PHASES-HUMAN-PARITY.md` and the numbers in `docs/BENCHMARKS.md`. **The
+> CLAUDE.md amendment it wanted is no longer needed.**
+>
+> **Phase 11.5 and everything after it is on `main` and NOT yet released.**
+> 0.10.0 is what is on npm.
 >
 > Struck items keep their original diagnosis where the diagnosis was wrong,
 > because that is the instructive half.
 >
-> **Next, in order: item 11, then Phase 12.** Phase 17 is planned but must not
-> be built before Phase 16 and before its go/no-go passes — and it needs a
-> CLAUDE.md fixed-decision amendment that is the user's to make, not mine.
+> **Next, in order — reordered by the 2026-09-10 field report, which is the
+> second peer round on a real form-heavy app:** items 23 and 24 (the two HIGH
+> findings, which together stopped that run from finishing), then item 25 (the
+> hint discourages batching, and it is the cheapest thinking-time win left now
+> that Phase 17 is out), then item 26 (the form read), then item 11, then
+> Phase 12.
 >
 > **How we work now (2026-09-10):** a phase ends with tests green and the work
 > pushed, then a **proposed peer test** — not a release. A CI cycle plus a
@@ -121,6 +132,126 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    is already caught by the frame hash. Both measured signature pairs are in
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
+
+### From the second peer round — forms and text entry, 2026-09-10
+
+The first four findings of the previous round all landed and were verified the
+same way they were reported: the map cut is reverted (9 elements → 13, all four
+list rows present and truncated rather than dropped), `next:` is reachable from
+both front ends and is *contextually* right, and the trailing map is fresh —
+proved behaviourally rather than by a flag, because round one ran `ui --refresh`
+after nearly every action and round two ran **zero** follow-up reads across a
+16-step flow.
+
+The headline from that round is the product working as designed: **a flow the
+graph knew ran as 16 steps, one call, 20.2 s, zero images, including 3 asserts.**
+The same app's unseen flow took ~19 calls for ~14 steps and ended with a
+corrupted field. Everything below is from that second half — one theme, forms
+and text entry, which is simply the next surface a real app presents after
+lists and navigation.
+
+23. **`no-visible-change` on the type path caused a wrong write.** HIGH, and a
+    different bug from the modal-open false negative filed below. `type`
+    reported *"the field did not visibly take focus (settled 123ms)
+    [no-visible-change]"* — and the text **had** landed. On the strength of
+    those two warnings the reporter re-typed, and the field became the value
+    twice over. `keys` does the same thing.
+
+    This is no longer a verdict that cries wolf; it is a verdict that **caused a
+    wrong write to the app under test**, which in a form-submission flow is the
+    difference between a valid test and a corrupted record. The detector is
+    sampling after the keystroke burst rather than after the text commits.
+
+    Two fixes and they are not equivalent. Sampling after commit is the right
+    one. The fallback is to **stop asserting absence of change at all** on the
+    type path, because "no change" is the one verdict an agent acts on
+    destructively — a missing verdict costs a read, a wrong one costs the run.
+
+24. **Text inputs are absent from `--interactive`, and their contents are not
+    exposed.** HIGH. On a form with two visible, bordered, *required* text
+    inputs, `ui --interactive --refresh` returned **one element** — a button —
+    and `next:` cheerfully said "1 element; nothing ambiguous — chain the next
+    steps". The placeholders appear in the default map only as `StaticText`, and
+    `find "<field> field"` returns `StaticText/ax|ocr`, not an input.
+
+    So an agent asking "what can I interact with here" is told "one button" on a
+    form it cannot submit, and discovers the block only by tapping the button
+    and watching nothing happen. Type-classify editable fields from the a11y
+    trait and include them; expose the current contents so `assert {is: value}`
+    works. The map already collects `value` — Phase 11.5 added it — so half of
+    this is wiring. `next:` could then say "2 required fields are empty", which
+    the reporter estimates would have replaced about eight calls.
+
+25. **`next:` uses familiarity as a proxy for risk, and shrinks the batch where
+    short batches cost most.** The design finding, and the cheapest
+    thinking-time win left now that Phase 17 is a no-go. On an unseen screen the
+    hint says *"new screen, nothing predicted here yet — read it before acting
+    on a label you have not seen on it."*
+
+    That is correct about **label resolution** and is the right warning against
+    tapping a guessed name. But an agent reads it as *reduce your batch size*,
+    and unseen screens are exactly where short batches hurt — 48 of 62 calls in
+    our own measured session were three steps or fewer. The reporter's planning
+    horizon went from 16 steps to 1 the moment a screen was new, in a wizard
+    where every action was reversible.
+
+    What should govern batch size is **reversibility**; what the hint measures is
+    familiarity. Separate them: on a new screen with no destructive-looking
+    labels, *"new screen — resolve labels from this map rather than from memory,
+    but the next few steps can still be chained."* As written, the hint and the
+    phase goal pull in opposite directions on precisely the screens the phase
+    was about.
+
+26. **A form-shaped read.** Between 23 and 24, the single highest-value addition
+    for driving real apps: labelled inputs, their current contents, which are
+    required, and where the primary action is — including "it is under the
+    keyboard". On the screen in question that is one call replacing roughly
+    eight: a `find` triple, an `--interactive`, a screenshot, a no-op tap, and
+    two type-verify round trips.
+
+27. **No way to clear a field.** MEDIUM, and it ends runs. `keys "BACKSPACE
+    BACKSPACE BACKSPACE"` typed the **literal string**. There are no named keys
+    and no select-all, so once a field holds a wrong value there is no
+    tool-level way to correct it — which is how finding 23's corrupted field
+    ended that run rather than merely annoying it. Named keys (`BACKSPACE`,
+    `ENTER`, `TAB`, `CMD+A`), or a `clear` step, or `type` gaining
+    `replace: true`.
+
+28. **A control behind the keyboard is invisible, with no hint that it might
+    be.** MEDIUM. On two steps the screen's *primary action* sat below the
+    keyboard and was absent from the map. The map does say `keyboard up` and
+    `keyboard: 7 keys`, which is good, but nothing suggests content may be
+    occluded — so three `find` calls guessed at label names and all three
+    returned "not on this screen" before a scroll revealed the button. A false
+    "not on this screen" is the same confidently-wrong class as the map cut.
+    When the keyboard is up, let `next:` say so.
+
+29. **Sticky headers interleave with scrolled content.** MEDIUM. Pinned header
+    text is ordered by y-position among the scrolled rows, so one record's
+    fields appear split around header lines, and an OCR alternate from a header
+    bled into a row below it. Same family as the modal interleaving from round
+    one. Give pinned elements their own region, as `nav-bar` and `tab-bar`
+    already get.
+
+30. **`settle` hard-fails a flow on a screen that is perfectly usable.**
+    LOW/MEDIUM. A screen carrying a persistent animation produced *"screen did
+    not settle within 8028ms"* and failed the run. `waitFor` is the documented
+    answer now, but a `settle` that stops a flow on a readable screen still
+    costs a call and a re-plan. Let it degrade: report "did not settle; changes
+    confined to region X" and continue.
+
+31. **OCR confusables.** LOW, cosmetic, and every label still resolved. Across
+    both rounds: a Cyrillic С for a Latin C, `O` for `0`, `Al` for `AI`, `(2R)`
+    for `(⌘R)`, plus text bleeding in from an image inside a row. A digit/letter
+    confusable pass would clear most of it — note `confusableFold()` already
+    exists in `matching.js` as a last, discounted tier, so this is a question of
+    whether OCR output should be folded at read time too.
+
+Also from that round, and already filed below rather than repeated here:
+`strip --device` returning another device's frames (reproduced twice in round
+one with two simulators booted, unreproducible in round two with one — worth a
+targeted check), and `paste` raising the iOS paste-consent dialog and losing the
+text on the first attempt.
 
 ### P1 — wrong actions and wrong state, all from real-app use
 
