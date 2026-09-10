@@ -47,6 +47,14 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > no-go, the two reverts, the false premises — are indexed in
 > `docs/DECISIONS.md`.
 >
+> **Round 5 fixed the safety hole its own new feature opened** — remembered
+> vocabulary is now checked against the screen, and a disagreement outranks
+> "carry on" — plus `unexpected-screen` while loading, the false focus warning,
+> and the keyboard band with no keys in it. **Next: items 41 + 42 together**
+> (screen identity is too coarse, and it is the root of both), then **43** (the
+> negative verdict on data variation — leave the positive one alone), then
+> **44** (open a `sim_do` against a remembered screen with no read at all).
+>
 > **Round 4 (cold start) fixed T1, T2, T5 and T7, and produced the plan-first
 > change: the graph now names what worked on a screen instead of counting it.**
 > Open next: **item 36** (`unexpected-screen` on legitimate variants — it costs
@@ -144,6 +152,128 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    is already caught by the frame hash. Both measured signature pairs are in
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
+
+### From the fifth peer round — the labels worked, and then pointed at a submit button
+
+2026-09-10. Cold repeat of round 4's task: fresh session, same app, same goal,
+one variable changed (the `worked here before:` line plus the T1 fix). Task
+completed.
+
+| | round 4 | round 5 |
+|---|---|---|
+| invocations | 25 | **19** |
+| reads | 11 | **4** |
+| images | 2 | **1** |
+| wall | 6m 16s | **5m 10s** |
+| calls per step | 0.81 | 0.86 |
+| `unexpected-screen` | 2 | **3, wrong all 3** |
+
+**Calls down 24%, reads down 64%, and my predicted metric did not move.** I
+predicted 0.4–0.5 calls-per-step and got 0.86. The prediction was against the
+wrong yardstick: calls-per-step divides by how many steps you chose to batch, so
+batching harder makes it *worse*. Round 5 executed 22 steps against round 4's 31
+for the same completed task, which is the improvement, and the ratio hid it.
+**Calls per completed task is the metric.** Recorded rather than quietly
+replaced, because picking a metric that moves the way you hoped is the easiest
+mistake here.
+
+**The feature earned its place.** The reporter's accounting: right or useful 5
+times, wrong once. Best single case — on a screen whose list had not loaded, the
+remembered `tap "Anaheim" (10x)` let them write `waitFor "Anaheim"` → `tap
+"Anaheim"` in one call *for a control they could not yet see*, replacing a
+read-wait-read-tap cycle. **The line's value is that it lets an agent write
+chains past screens it has not seen**, which is a stronger claim than "it saved a
+read". Two reads saved there, six or seven across the run.
+
+Also learned: the line is **frequency-ranked, not goal-ranked**, and the
+most-tapped control on a screen is often what previous runs used to *back out*.
+The reporter ignored it correctly twice for that reason. That is the right way to
+read it and it is why it stays framed as evidence.
+
+**And then it pointed at a submit button. Fixed.** The wizard's read-only review
+screen had been given the **same identity as its step 1**, so it inherited step
+1's entire vocabulary. The map offered `tap "APPLY"`, `tap "No Power"`,
+`tap "PLACE A SERVICE REQUEST"` — **not one of which exists on it** — and the
+hint said *"nothing ambiguous, chain the next steps without looking again"*. The
+only control on that screen files a real work order.
+
+The line was right and the identity was wrong, so **the line now checks**:
+remembered actions are offered only when their label is on the screen in front
+of us. When memory and screen disagree, that disagreement is reported and
+outranks "carry on" — *"this screen is recognised but 3 remembered controls are
+not on it, so the identity is probably wrong … act only on the element list, and
+re-read before anything irreversible."* Memory that contradicts the screen is
+the most useful thing to say, not something to swallow.
+
+**Also fixed this round:**
+
+- **`unexpected-screen` while a region is still loading** (cause (a) of the three
+  false alarms). A tap applied a selection correctly and enabled the submit
+  button, but an async panel had not returned, so the structure differed from the
+  settled screen the edge remembered. A settle can be satisfied while content is
+  still arriving — that is Phase 11.5's own finding — so the two are now read
+  together, and an incomplete screen reports `unverified` rather than a wrong
+  turn.
+- **The false "did not visibly take focus"**, which is what started the run's
+  most expensive cascade. It fires whenever the screen does not visibly react to
+  the tap, and the simulator has a **hardware keyboard attached**, so none ever
+  does. The note is now suppressed once the readback has confirmed the text
+  landed: where there is direct evidence, a proxy for it is noise.
+- **A band called `keyboard` with no keyboard in it.** Review-summary rows were
+  filed under it, followed by `keyboard: 1 keys (tap by label or type directly)`
+  — wrong advice about page content. The band is relabelled from its contents
+  rather than its position. Fifth bug from positional region bands.
+
+**Still open, worst first:**
+
+41. **Screen identity is too coarse, and it is now the root of three findings.**
+    Two screens in one wizard — a form step and a read-only review — collapsed
+    into one hash, sharing a header and a step indicator. Whatever the
+    fingerprint weights, it is weighting chrome over content. This causes: the
+    wrong-vocabulary case above (now *detected*, not cured); item 42 below; and
+    every `unexpected-screen` argument about "which screen did we reach". The
+    cross-check makes it safe and visible. It does not make it right.
+
+42. **`assert` and `find` read a staler, truncated view than `sim_ui` does, in
+    the same response.** `assert` said a string was absent while the map printed
+    it at `#21` four lines below, and the `Visible:` list was a 15-item prefix
+    identical to one `find` had returned four calls earlier. The reporter's
+    conclusion: *"`assert` is unusable on anything in the lower ~60% of a
+    scrolling screen, which is where form fields and submit buttons live."* Cost
+    3 calls — the most expensive finding of the run. Very likely the same root as
+    41: `locate` resolves against the *stored* map for the screen's identity, and
+    a wrong identity loads another screen's elements. **Do this one with 41.**
+
+43. **`unexpected-screen` on data variation** — cause (b), unfixed. Picking a
+    different test asset changes the content, and the check reads it as a wrong
+    turn. *"This will fire on every run that varies its test data — i.e. every
+    useful run."* Needs structural comparison rather than content comparison. Two
+    of the three false alarms were this. Note the reporter's own assessment moved
+    between rounds: round 4 called the verdict the most valuable thing in the
+    tool, round 5 calls it a net negative in its current form (3 false, 0 true).
+    Both readings are right about different halves — **positive confirmation was
+    accurate every time** (`matches the outcome seen 7x before`), and it is the
+    negative verdict that is broken. Fix the negative case; do not touch the
+    positive one.
+
+44. **`sim_do` cannot open with a step against a remembered screen without a
+    preceding read.** The reporter's one "habit" read: they pulled a 26-element
+    map of the home screen and used exactly one line of it — the remembered
+    `tap "CREATE A SERVICE REQUEST" (7x)` printed in the same breath. If a first
+    step could be written against a recognised screen, that call disappears.
+    This is the smallest remaining piece of "plan first, then act".
+
+45. **A sticky footer sorts by y into the middle of the form.** `SUBMIT SERVICE
+    REQUEST` at y=815 lands between two form rows. Technically honest, reads as
+    though the button is inside the form. Same family as items 29 and 38.
+
+**Named as working, again:** every `sim_do` returning its resulting map — *"the
+single highest-value thing in the tool. Do not make maps opt-in."* — `waitFor`
+chained ahead of a control not yet on screen, positive verification, the
+`disabled` marker, and the step annotations. On the annotations the reporter was
+precise and it is worth keeping: one of them misled them, and the answer is to
+make them **more accurate rather than to remove them**, because telling you an
+action landed but looked odd beats a bare `ok`.
 
 ### From the fourth peer round — cold start, and the map lied by omission
 

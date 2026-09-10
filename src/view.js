@@ -293,10 +293,24 @@ export function rowsFor(entry, { screen, filter, interactive, all = false, limit
   };
   kept.sort((a, b) => order(a) - order(b) || a.y - b.y || a.x - b.x);
 
+  // A band is only the keyboard if there is a keyboard in it.
+  //
+  // Region bands are positional, so on a screen with no keyboard at all the
+  // bottom band was still called `keyboard` and review-summary rows were filed
+  // under it, followed by `keyboard: 1 keys (tap by label or type directly)` —
+  // advice that is actively wrong about page content. Reported as noise on
+  // every map of two screens. Relabelled from the contents rather than the
+  // position, which is the only evidence available here.
+  const keysPresent = kept.some((t) => COLLAPSE_REGIONS.has(t.region ?? '') && isKey(t));
+  const bandOf = (t) => {
+    const region = t.region ?? 'content';
+    return COLLAPSE_REGIONS.has(region) && !keysPresent ? 'content' : region;
+  };
+
   const rows = [];
   const collapsed = new Map();
   for (const t of kept) {
-    const region = t.region ?? 'content';
+    const region = bandOf(t);
     if (COLLAPSE_REGIONS.has(region) && isKey(t)) {
       collapsed.set(region, (collapsed.get(region) ?? 0) + 1);
       continue;
@@ -463,7 +477,23 @@ export async function screenMap(deviceQuery, {
   // Not just how many — which. The graph has always known what worked here and
   // only ever reported a count, so an agent on a screen simframe had driven ten
   // times still read it to learn what was tappable.
-  const exitList = node ? graph.exitsOf(node) : [];
+  const remembered = node ? graph.exitsOf(node) : [];
+  // Memory intersected with what is actually here, never memory alone.
+  //
+  // This is the correction to the feature above, and it was reported with the
+  // consequence spelled out. A wizard's read-only *review* screen had been given
+  // the same identity as its step 1, so it inherited step 1's entire vocabulary:
+  // the map offered `tap "APPLY"`, `tap "No Power"`, `tap "PLACE A SERVICE
+  // REQUEST"` — **not one of which exists on it** — while the hint said "nothing
+  // ambiguous, chain the next steps without looking again". The only control on
+  // that screen files a real work order. Confident advice pointed at a
+  // destructive button on a screen it had misidentified.
+  //
+  // The line was right and the identity was wrong, so the line now checks. A
+  // remembered action is only offered when its label is on the screen in front
+  // of us; the rest are counted and reported as a disagreement, because memory
+  // that does not match what is here is itself the most useful thing to say.
+  const { exitList, stale: staleExits } = presentOnly(remembered, rows);
 
   return {
     device,
@@ -480,7 +510,8 @@ export async function screenMap(deviceQuery, {
     name,
     exits,
     exitList,
-    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList }),
+    staleExits,
+    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits }),
   };
 }
 
@@ -505,7 +536,7 @@ export async function screenMap(deviceQuery, {
  * cheerfully says "carry on" into an unknown screen would be worse than no hint
  * at all.
  */
-export function nextHint({ ok, escalated, settled, loading, known, hash, exits, elements, ambiguous, filtered, exitList } = {}) {
+export function nextHint({ ok, escalated, settled, loading, known, hash, exits, elements, ambiguous, filtered, exitList, staleExits } = {}) {
   if (ok === false) {
     return 'next: the flow stopped here — this is the moment to think. sim_recall shows how you got here; sim_ui re-reads the screen.';
   }
@@ -548,13 +579,23 @@ export function nextHint({ ok, escalated, settled, loading, known, hash, exits, 
     // it as the screen concludes a form has nothing to fill in.
     return `next: settled; screen ${known_}; ${elements} element${elements === 1 ? '' : 's'} **matching your filter** — this is not the whole screen, and an empty text input can look like a caption. Read it unfiltered before concluding something is absent.`;
   }
+  // Memory that contradicts the screen outranks "carry on", because the reason
+  // it contradicts is usually that this screen has been confused with another —
+  // and a confident "chain without looking again" on a misidentified screen is
+  // how remembered advice ends up pointing at a control that files a work order.
+  const offerable = (exitList ?? []).filter((e) => e.label);
+  if (!offerable.length && staleExits) {
+    return `next: this screen is recognised but ${staleExits} remembered control${staleExits === 1 ? ' is' : 's are'} not on it,`
+      + ' so the identity is probably wrong — two screens sharing one hash. Act only on the element list, and re-read before anything irreversible.';
+  }
   // Naming the vocabulary is what makes "chain" actionable. A hint that says
   // "chain the next steps" without saying what the steps could be is asking the
   // agent to plan from a map it has to keep re-reading.
-  const vocab = (exitList ?? []).filter((e) => e.label).slice(0, 6)
+  const vocab = offerable.slice(0, 6)
     .map((e) => `${e.action} ${JSON.stringify(String(e.label).slice(0, 28))}`).join(', ');
   return `next: settled; screen ${known_}; ${elements} element${elements === 1 ? '' : 's'}; nothing ambiguous — chain the next steps in one sim_do without looking again.`
-    + (vocab ? ` Known to work here: ${vocab}.` : '');
+    + (vocab ? ` Known to work here: ${vocab}.` : '')
+    + (staleExits ? ` (${staleExits} other remembered control${staleExits === 1 ? '' : 's'} not on this screen — the graph may be conflating it with another.)` : '');
 }
 
 /**
@@ -578,9 +619,38 @@ export function hintFor(map, { flowOk = true, escalated = false } = {}) {
     hash: map?.identity?.hash ?? null,
     exits: map?.exits ?? 0,
     exitList: map?.exitList ?? [],
+    staleExits: map?.staleExits ?? 0,
     elements: map?.rows?.length ?? 0,
     ambiguous: ambiguousLabels(map?.rows),
   });
+}
+
+/**
+ * Keep only the remembered actions whose control is actually on this screen.
+ *
+ * @returns {{exitList: Array, stale: number}} what can be offered, and how many
+ *   remembered actions found nothing here — which is evidence the screen has
+ *   been misidentified, and worth saying out loud.
+ */
+export function presentOnly(remembered, rows) {
+  const here = new Set();
+  for (const r of rows ?? []) {
+    for (const name of [r.label, ...(r.aliases ?? [])]) {
+      const k = alnum(name);
+      if (k) here.add(k);
+    }
+  }
+  const has = (label) => {
+    const k = alnum(label);
+    if (!k) return false;
+    if (here.has(k)) return true;
+    // A row may carry the label inside a longer one — a list card concatenates
+    // its children, and truncation adds an ellipsis.
+    for (const seen of here) if (seen.includes(k) || k.includes(seen)) return true;
+    return false;
+  };
+  const exitList = (remembered ?? []).filter((e) => has(e.label));
+  return { exitList, stale: (remembered ?? []).length - exitList.length };
 }
 
 /**
@@ -595,9 +665,17 @@ export function hintFor(map, { flowOk = true, escalated = false } = {}) {
  * previously worked here, with how often — evidence for a plan, not a
  * guarantee, and the destructive-label rules apply to them exactly as before.
  */
-export function exitsLine(exitList, { limit = 6 } = {}) {
+export function exitsLine(exitList, { limit = 6, stale = 0 } = {}) {
   const list = (exitList ?? []).filter((e) => e.label).slice(0, limit);
-  if (!list.length) return null;
+  if (!list.length) {
+    // Everything remembered here is missing. That is not "no memory" — it is
+    // memory that contradicts the screen, which usually means two screens have
+    // collapsed into one identity, and it is the most useful thing to say.
+    return stale
+      ? `memory disagrees with this screen: ${stale} remembered control${stale === 1 ? '' : 's'} not present`
+      + ' — this screen has probably been confused with another. Trust the element list, not the graph.'
+      : null;
+  }
   const parts = list.map((e) => {
     const label = String(e.label).length > 28 ? `${String(e.label).slice(0, 28)}…` : String(e.label);
     return `${e.action} ${JSON.stringify(label)}${e.count > 1 ? ` (${e.count}x)` : ''}`;
@@ -616,7 +694,7 @@ export function ambiguousLabels(rows) {
   return [...seen.values()].filter((n) => n > 1).length;
 }
 
-export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, verdictLine, ambiguities }) {
+export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, verdictLine, ambiguities }) {
   const head = [
     device?.name,
     screen?.width ? `${screen.width}x${screen.height}pt` : null,
@@ -633,7 +711,7 @@ export function render({ device, identity, rows, truncated, collapsed, screen, n
 
   const lines = [head];
   if (verdictLine) lines.push(verdictLine);
-  const worked = exitsLine(exitList);
+  const worked = exitsLine(exitList, { stale: staleExits });
   if (worked) lines.push(worked);
 
   let region = null;

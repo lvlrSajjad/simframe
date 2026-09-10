@@ -2991,3 +2991,63 @@ disk. Stated as evidence rather than a promise, and the destructive-label rules
 are untouched. This is the smallest version of "orchestrate a plan and then do
 the job", and the next measurement to take is whether it moves calls-per-step on
 a cold run.
+
+---
+
+## Round 5 — the labels worked, the metric did not, and the feature found a submit button
+
+2026-09-10. Cold repeat of round 4's task: fresh session, same app, same goal,
+one variable changed — the `worked here before:` line plus the T1 fix.
+
+| | round 4 | round 5 |
+|---|---|---|
+| invocations | 25 | **19** |
+| reads | 11 | **4** |
+| images | 2 | **1** |
+| wall | 6m 16s | **5m 10s** |
+| steps executed | 31 | 22 |
+| calls per step | 0.81 | 0.86 |
+| `unexpected-screen` | 2 | 3, wrong all 3 |
+
+**Calls down 24%, reads down 64%, and the metric I predicted went the wrong
+way.** I predicted 0.4–0.5 calls-per-step and got 0.86.
+
+The prediction was against the wrong yardstick, and this is worth stating
+plainly because it is the easiest mistake available here. Calls-per-step divides
+by how many steps you chose to batch, so an agent that batches harder scores
+*worse*. Round 5 completed the same task in 22 steps against round 4's 31 — that
+is the improvement, and the ratio hid it. **Calls per completed task is the
+metric.** Recorded rather than quietly swapped, because choosing the measure
+after seeing the result is how a benchmark stops meaning anything.
+
+**What the feature bought**, in the reporter's accounting: right or useful 5
+times, wrong once, six or seven reads removed. The best case was not a saved
+read at all — on a screen whose list had not yet loaded, the remembered
+`tap "Anaheim" (10x)` let them write `waitFor "Anaheim"` → `tap "Anaheim"` in one
+call **for a control they could not yet see**, collapsing a read-wait-read-tap
+cycle. The line's real value is that it lets an agent write chains *past* screens
+it has not seen.
+
+It is also **frequency-ranked, not goal-ranked**, and the most-tapped control on
+a screen is often the one earlier runs used to back out. The reporter ignored it
+correctly twice on those grounds, which is the right way to read it.
+
+**Then it pointed at a submit button.** The wizard's read-only review screen had
+been given the same identity as its step 1 and inherited step 1's whole
+vocabulary: the map offered three controls that do not exist on it, and the hint
+said "nothing ambiguous, chain the next steps without looking again". The only
+control on that screen files a real work order.
+
+The line was right and the identity was wrong, so the line now checks — offered
+only where the label is present, and a memory/screen disagreement outranks
+"carry on" and says the identity is probably wrong. That makes it safe and makes
+the underlying fingerprint problem *visible*; it does not fix it. Screen identity
+weighting chrome over content is now the root of three separate findings, and it
+is next.
+
+Three `unexpected-screen` alarms, all wrong: one comparing against a screen with
+an async panel still in flight (fixed — a settle can be satisfied while content
+is still arriving, so an incomplete screen now reports `unverified`), two from
+picking different test data (filed; needs structural comparison). Positive
+verification — `matches the outcome seen 7x before` — was accurate every time.
+It is the negative verdict that is broken, and only that one should change.

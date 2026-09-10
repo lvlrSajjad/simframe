@@ -2489,6 +2489,68 @@ test('a caption never wins over the control it names', async () => {
   assert.equal(m.resolve([caption], 'Problem').status, 'ok');
 });
 
+test('remembered vocabulary is checked against the screen in front of us', async () => {
+  const v = await import('../src/view.js');
+
+  // Reported with the consequence spelled out. A wizard's read-only review
+  // screen had been given the same identity as its step 1, so it inherited step
+  // 1's vocabulary: the map offered `tap "APPLY"`, `tap "No Power"`,
+  // `tap "PLACE A SERVICE REQUEST"` — not one of which exists on it — while the
+  // hint said "nothing ambiguous, chain the next steps without looking again".
+  // The only control on that screen files a real work order.
+  const remembered = [
+    { action: 'tap', label: 'APPLY', count: 4 },
+    { action: 'tap', label: 'No Power', count: 3 },
+    { action: 'tap', label: 'PLACE A SERVICE REQUEST', count: 2 },
+  ];
+  const reviewRows = [{ label: 'Requested By' }, { label: 'SUBMIT SERVICE REQUEST' }];
+
+  const wrong = v.presentOnly(remembered, reviewRows);
+  assert.deepEqual(wrong.exitList, [], 'nothing remembered is offered');
+  assert.equal(wrong.stale, 3);
+
+  // And the disagreement is stated rather than swallowed: silence would leave
+  // the caller with no reason to distrust the identity.
+  const line = v.exitsLine(wrong.exitList, { stale: wrong.stale });
+  assert.match(line, /memory disagrees with this screen/);
+  assert.match(line, /confused with another/);
+
+  const hint = v.nextHint({
+    ok: true, settled: true, known: true, hash: 'a6606e1000', exits: 13,
+    elements: 24, ambiguous: 0, exitList: wrong.exitList, staleExits: wrong.stale,
+  });
+  assert.ok(!/chain the next steps/.test(hint), 'never "chain without looking" on a misidentified screen');
+  assert.match(hint, /identity is probably wrong/);
+  assert.match(hint, /before anything irreversible/);
+
+  // On the screen it really is, everything is offered and nothing is stale.
+  const step1Rows = [{ label: 'APPLY' }, { label: 'No Power' }, { label: 'PLACE A SERVICE REQUEST' }];
+  const right = v.presentOnly(remembered, step1Rows);
+  assert.equal(right.exitList.length, 3);
+  assert.equal(right.stale, 0);
+  assert.match(v.nextHint({
+    ok: true, settled: true, known: true, hash: 'aabbccddee', exits: 3,
+    elements: 3, ambiguous: 0, exitList: right.exitList, staleExits: 0,
+  }), /chain the next steps/);
+
+  // A partial match still offers what is there and flags the rest, because
+  // "some of this is missing" is weaker evidence than "all of it is".
+  const partial = v.presentOnly(remembered, [{ label: 'APPLY' }, { label: 'Requested By' }]);
+  assert.deepEqual(partial.exitList.map((e) => e.label), ['APPLY']);
+  assert.equal(partial.stale, 2);
+  const mixed = v.nextHint({
+    ok: true, settled: true, known: true, hash: 'aabbccddee', exits: 3,
+    elements: 2, ambiguous: 0, exitList: partial.exitList, staleExits: 2,
+  });
+  assert.match(mixed, /Known to work here: tap "APPLY"/);
+  assert.match(mixed, /2 other remembered controls not on this screen/);
+
+  // A remembered label inside a longer row still counts as present — a list
+  // card concatenates its children, and truncation adds an ellipsis.
+  assert.equal(v.presentOnly([{ action: 'tap', label: 'Anaheim' }],
+    [{ label: 'Anaheim | Store # 1020, 1234 Main St,…' }]).exitList.length, 1);
+});
+
 test('the graph hands over its vocabulary instead of counting it', async () => {
   const v = await import('../src/view.js');
   const g = await import('../src/graph.js');
@@ -2526,6 +2588,28 @@ test('the graph hands over its vocabulary instead of counting it', async () => {
   });
   assert.match(hint, /chain the next steps/);
   assert.match(hint, /Known to work here: tap "Anaheim", tap "4 Casa"/);
+});
+
+test('a band is only the keyboard if there is a keyboard in it', async () => {
+  const v = await import('../src/view.js');
+  // Region bands are positional, so on screens with no keyboard the bottom band
+  // was still called `keyboard`: review-summary rows were filed under it and
+  // followed by `keyboard: 1 keys (tap by label or type directly)`, which is
+  // actively wrong advice about page content.
+  const summary = [
+    { label: 'Priority', type: 'StaticText', x: 34, y: 664, frame: { x: 20, y: 654, width: 60, height: 20 }, region: 'keyboard' },
+    { label: 'L3 - 24 Hours', type: 'StaticText', x: 207, y: 686, frame: { x: 120, y: 676, width: 174, height: 20 }, region: 'keyboard' },
+  ];
+  const out = v.rowsFor({ targets: summary }, { screen: { width: 402, height: 874 } });
+  assert.equal(out.rows.length, 2, 'content is not collapsed away');
+  assert.deepEqual([...new Set(out.rows.map((r) => r.region))], ['content'], 'and it is not called the keyboard');
+  assert.equal(out.collapsed.size, 0);
+
+  // With even one real key present the band is genuine and behaves as before.
+  const withKey = [...summary, { label: 'a', type: 'Key', x: 30, y: 850, frame: { x: 14, y: 830, width: 32, height: 42 }, region: 'keyboard' }];
+  const real = v.rowsFor({ targets: withKey }, { screen: { width: 402, height: 874 } });
+  assert.equal(real.collapsed.get('keyboard'), 1);
+  assert.ok(real.rows.every((r) => r.region === 'keyboard'), 'the band stands when a key is in it');
 });
 
 test('the two change sensors stop contradicting each other', async () => {
@@ -2612,7 +2696,7 @@ test('a typed field is verified by its contents, not by the screen moving', asyn
   // a field that has no way to be cleared.
   assert.deepEqual(
     actions.readbackNote('Mo Hatami', { value: 'Mo Hatami', landed: true, focused: true }),
-    { note: ' = "Mo Hatami"', empty: false },
+    { note: ' = "Mo Hatami"', empty: false, landed: true },
   );
   // The false `ok`: a valued control that reads empty after text was sent.
   assert.equal(actions.readbackNote('Mo Hatami', { value: '', landed: false }).empty, true);
@@ -2623,7 +2707,14 @@ test('a typed field is verified by its contents, not by the screen moving', asyn
   // empty field and failed a step whose text was visible in the very map the
   // failure returned — worse than the verdict it replaced, because the tool's
   // own remediation advice would have double-entered the text.
-  assert.deepEqual(actions.readbackNote('x', null), { note: '', empty: false });
+  assert.deepEqual(actions.readbackNote('x', null), { note: '', empty: false, landed: false });
+  // `landed` is what lets the caller drop the focus proxy: the note "[the field
+  // did not visibly take focus]" fires whenever the screen does not react to
+  // the tap, and with a hardware keyboard attached to the simulator none ever
+  // does — so a correctly focused field was reported as unfocused and the
+  // reporter went hunting, at a cost of three calls.
+  assert.equal(actions.readbackNote('Mo', { value: 'Mo', landed: true }).landed, true);
+  assert.equal(actions.readbackNote('Mo', { value: '', landed: false }).landed, false);
   // Long values are shown truncated rather than dropped — the same call the
   // map cut got wrong on list rows.
   const long = actions.readbackNote('x', { value: 'y'.repeat(200), landed: true });

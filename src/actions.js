@@ -402,9 +402,12 @@ export async function runScript(
         const kind = afterState.transition?.kind;
         const afterScreen = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, confirmNovel });
         verification = {
-          ...belowThreshold(
-            graph.verdict({ udid, prediction, before: beforeScreen.hash, after: afterScreen.hash, kind, action: step.action }),
-            settled,
+          ...stillArriving(
+            belowThreshold(
+              graph.verdict({ udid, prediction, before: beforeScreen.hash, after: afterScreen.hash, kind, action: step.action }),
+              settled,
+            ),
+            afterScreen,
           ),
           predicted: prediction ? { to: prediction.to.slice(0, 10), kind: prediction.kind, seen: prediction.count } : null,
           observed: { to: afterScreen.hash?.slice(0, 10), kind },
@@ -652,13 +655,42 @@ export function readbackNote(sent, seen) {
   // missing `value` attribute as an empty field and failed a step whose text was
   // visible in the same map the failure returned — reported, correctly, as
   // worse than the verdict it replaced.
-  if (!seen) return { note: '', empty: false };
+  if (!seen) return { note: '', empty: false, landed: false };
   if (seen.landed) {
     const v = String(seen.value);
     const shown = v.length > 60 ? `${v.slice(0, 60)}…` : v;
-    return { note: ` = ${JSON.stringify(shown)}`, empty: false };
+    return { note: ` = ${JSON.stringify(shown)}`, empty: false, landed: true };
   }
-  return { note: ' [the field reads empty]', empty: Boolean(sent) };
+  return { note: ' [the field reads empty]', empty: Boolean(sent), landed: false };
+}
+
+/**
+ * Do not call a screen a wrong turn while it is still arriving.
+ *
+ * `unexpected-screen` fired three times in one reported run and was wrong all
+ * three. One cause was this: a tap applied a selection correctly and enabled
+ * the submit button, but an async panel on the same screen had not come back
+ * yet, so the structure differed from the settled screen the edge remembered.
+ * Nothing had gone wrong; the screen was half there.
+ *
+ * A settle can be satisfied while content is still loading — that is Phase
+ * 11.5's finding and the reason `loading` exists — so the two must be read
+ * together. An incomplete screen cannot contradict a prediction, and
+ * `unverified` is the honest verdict: we do not know yet.
+ *
+ * The other cause was data variation, which this does not address: picking a
+ * different test asset changes the content and the check reads it as a wrong
+ * turn. That needs structural comparison and is filed, not fixed.
+ */
+export function stillArriving(verification, afterScreen) {
+  if (verification?.verdict !== 'unexpected-screen') return verification;
+  if (afterScreen?.loading !== true) return verification;
+  return {
+    ...verification,
+    verdict: 'unverified',
+    detail: 'the screen this reached is still loading, so it cannot be compared yet'
+      + ' — re-read it, or waitFor the content you expect, before treating this as a wrong turn',
+  };
 }
 
 /**
@@ -749,7 +781,13 @@ async function runStep(deviceQuery, udid, step, ctx) {
             + ' paste is more reliable than type on this path; keys sends literal characters, not named keys.',
           );
         }
-        return `typed into ${field.where}${back.note}${field.quiet}${field.waited}`;
+        // The focus warning is suppressed once the readback has confirmed the
+        // text landed. It fires whenever the screen does not visibly react to
+        // the tap, and with a hardware keyboard attached to the simulator none
+        // ever does — so a correctly focused field was reported as unfocused,
+        // the reporter went hunting, and that cascade cost three calls. Where
+        // there is direct evidence, a proxy for it is noise.
+        return `typed into ${field.where}${back.note}${back.landed ? '' : field.quiet}${field.waited}`;
       }
       await input.typeText(udid, step.text ?? step.value);
       return 'typed text';
@@ -771,7 +809,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
             + ' A first paste can raise the system paste-consent dialog and lose the text; dismiss it and retry.',
           );
         }
-        return `pasted into ${field.where}${back.note}${field.quiet}${field.waited}`;
+        return `pasted into ${field.where}${back.note}${back.landed ? '' : field.quiet}${field.waited}`;
       }
       await input.pasteText(udid, step.text ?? step.value);
       return 'pasted into the focused field';
