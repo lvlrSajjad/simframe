@@ -13,6 +13,7 @@ import { REGION_COLS, REGION_ROWS, regionMap } from './analyze.js';
 import * as actions from './actions.js';
 import * as api from './index.js';
 import * as input from './input.js';
+import * as metrics from './metrics.js';
 import * as navigate from './navigate.js';
 import { bootedDevices, permissionServices } from './platform/index.js';
 import * as store from './store.js';
@@ -42,7 +43,7 @@ const TOOLS = [
   {
     name: 'sim_ui',
     description:
-      'READ THE SCREEN. Returns a compact text map: every element with a number, its region (nav-bar / content / tab-bar), type, label, state and tap point, plus which screen this is and how much simframe already knows about it. Roughly a tenth the cost of a screenshot and strictly more useful, because it says what is tappable and where — no measuring pixels by eye. The numbers are selectors: whatever this returns as #3, you can tap as "#3". Start here, not with sim_look.',
+      'READ THE SCREEN as text: every element numbered, with region, type, label, state, contents and tap point, plus which screen this is and what simframe knows about it. A tenth the cost of a screenshot and more useful, because it says what is tappable and where. Whatever it calls #3, you can tap as "#3". Start here, never with sim_look.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -57,7 +58,7 @@ const TOOLS = [
   {
     name: 'sim_do',
     description:
-      'THE MAIN TOOL. Run a whole flow in ONE call: tap, type, scroll, wait and assert, in order. Each step waits for the screen to settle against a baseline captured before it, and is verified against what that action did here last time — so a step that navigated somewhere unintended stops the flow instead of tapping on into the wrong screen. A twelve-step flow costs one round trip instead of twelve. Prefer this over the single-action tools whenever you know more than one step ahead, and put asserts in the flow rather than checking between calls. Returns the compact screen map of where the flow ended; no image.',
+      'THE MAIN TOOL, and the cheapest path. Plan the WHOLE flow and run it in one call — tap, type, scroll, wait, assert — asserting after each step that matters. Every step settles and is checked against what that action did here before, so a wrong turn halts the flow instead of tapping on. Single-action tools are for recovery.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -149,7 +150,7 @@ const TOOLS = [
   {
     name: 'sim_goto',
     description:
-      'Walk to a screen simframe has already been to, by name, planning the route through remembered transitions and verifying every step. Zero reasoning and zero images: the graph knows which taps lead where. Refuses rather than guesses — if the destination is unknown, ambiguous, or unreachable through known transitions, it says which and lists what it does know. Call it with no target to see the known screens.',
+      'Walk to a screen simframe already knows, over edges it has already verified, with no model call per step. Names come from sim_recall or a previous map. Refuses rather than guesses when the route is unknown or the name is ambiguous — a refusal is cheap and a wrong walk is not.',
     inputSchema: {
       type: 'object',
       properties: { ...deviceProp, screen: { type: 'string', description: 'What the screen is called, e.g. "Settings" or an 8-character screen hash. Omit to list what is known.' } },
@@ -204,7 +205,7 @@ const TOOLS = [
   {
     name: 'sim_find',
     description:
-      'Resolve an intent to one control: "tap Save", "the Assets tab", "back". Understands verbs, typos, where on screen you meant, and icon-only controls by their common name. When two things answer equally well it says so and lists them rather than guessing — a wrong tap is worse than a question, because it can do something and leave you believing it did the right thing. Use it when you are unsure a selector will resolve; otherwise just tap.',
+      'Resolve one intent to one control: "tap Save", "the Assets tab", "back". Understands verbs, typos, and where on screen you meant. When two things answer equally well it says so and lists them rather than guessing. Use it when you doubt a selector will resolve; otherwise just tap. Prefer a label or a #ref over coordinates.',
     inputSchema: {
       type: 'object',
       properties: { ...deviceProp, intent: { type: 'string', description: 'What you want to act on, in your own words.' } },
@@ -226,7 +227,7 @@ const TOOLS = [
   {
     name: 'sim_wait',
     description:
-      'Block until the screen finishes reacting. Default mode "settle" waits for the screen to CHANGE and then hold still, which is what you want after acting — plain "stable" can return instantly in the moment before an animation starts. Returns the compact screen map by default, not an image. Inside a flow you rarely need this: sim_do settles after every step already.',
+      'Wait for the screen to change, settle, or both. sim_do already settles after every step, so you rarely need this inside a flow — reach for it when something moves without you acting, like a push or a background load. Pass `since` from a hash captured before the thing you are waiting on.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -246,7 +247,7 @@ const TOOLS = [
   {
     name: 'sim_look',
     description:
-      'THE ONLY TOOL THAT RETURNS AN IMAGE, and the most expensive one. Returns the newest buffered frame immediately — no screenshot wait. Call it only when the text map is genuinely not enough: checking visual layout, colour, spacing, an animation, or something the accessibility tree and OCR both cannot see. For "what is on screen and what can I tap", sim_ui answers better and costs a tenth as much.',
+      'A screenshot: ~1600 tokens, the most expensive call here. Only for what text cannot answer — layout, colour, spacing, a control the map omits. NOT for what a field contains, whether a button is enabled, or whether an action worked: sim_ui reports the first two and the flow\'s own verdict already answered the third.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -277,7 +278,7 @@ const TOOLS = [
   {
     name: 'sim_recall',
     description:
-      'Look BACKWARDS in time. simframe remembers roughly the last 60 seconds of the screen. action "timeline" (default) returns a TEXT-ONLY summary of what happened and when: each change, how long ago, how long it took, how much of the screen moved. action "at" returns the buffered frame from a past moment — an image. Use this when you look up and find the screen already different, instead of re-running the action.',
+      'What happened recently, as text: the screens visited, the actions taken, and what each one did. Use it to re-orient after a failure instead of taking a screenshot, and to learn the screen names sim_goto accepts.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -638,7 +639,22 @@ async function recall(target, args, options) {
 async function mapFrom(target, options, identity, extra = {}) {
   try {
     const m = await view.screenMap(target, { options, identity: identity?.entry ? identity : undefined });
-    return view.render({ ...m, ...extra });
+    const rendered = view.render({ ...m, ...extra });
+    // The line that decides whether the model stops to think. Everything it
+    // needs is already computed for the map above it, so this costs nothing —
+    // and "nothing here needs you" is a thing only the daemon can say.
+    if (extra.hint === false) return rendered;
+    const hint = view.nextHint({
+      ok: extra.flowOk !== false,
+      escalated: Boolean(extra.escalated),
+      settled: m.identity?.settled !== false,
+      known: m.exits != null,
+      hash: m.identity?.hash ?? null,
+      exits: m.exits ?? 0,
+      elements: m.rows.length,
+      ambiguous: view.ambiguousLabels(m.rows),
+    });
+    return `${rendered}\n${hint}`;
   } catch (err) {
     return `(could not read the screen: ${err.message})`;
   }
@@ -691,7 +707,12 @@ async function doScript(target, args, options) {
         : `NOT saved as "${args.saveAs}": ${saved.reason}${saved.verdicts ? ` (${saved.verdicts.join(', ')})` : ''}`,
     );
   }
-  lines.push('', await mapFrom(target, options, res.endScreen, { verdictLine: verdictLineFor(res.results) }));
+  const escalated = (res.results ?? []).some((r) => metrics.ESCALATING_VERDICTS.has(r.verification?.verdict));
+  lines.push('', await mapFrom(target, options, res.endScreen, {
+    verdictLine: verdictLineFor(res.results),
+    flowOk: res.ok,
+    escalated,
+  }));
 
   const content = [text(lines.join('\n'))];
   // Images only when explicitly asked for. A frame attached to every flow was

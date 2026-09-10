@@ -18,6 +18,80 @@ and CV alone. Tapping by label works; screen recognition is thinner, so prefer
 naming a device explicitly and re-reading the screen after a step you are unsure
 about.
 
+## The protocol: plan once, execute once, think only when told to
+
+The expensive thing in a simulator session is not the tapping. It is you —
+observe, think, tap, observe, think. Measured over a real session: 62 tool
+calls for 179 steps, and 48 of those calls were three steps or fewer. A
+twelve-step flow arrived as five calls, and every boundary between them was a
+think that nothing had asked for.
+
+So the protocol is four steps, and step 4 is the one that saves the time.
+
+1. **State the goal, then read the screen once.** `simframe ui`, or `sim_find`
+   if you doubt a selector will resolve. Once — not per step.
+2. **Write the entire flow as one `sim_do`**, with an assert after each step
+   whose success you would otherwise have checked by looking.
+3. **Run it. Read only the verdict line per step.**
+4. **Think again only when the result tells you to.** Every action result ends
+   with a `next:` line the daemon computed locally, and it says which case you
+   are in:
+
+   - `next: settled; screen known (…); N elements; nothing ambiguous — chain the
+     next steps in one sim_do without looking again` → **do not look. Act.**
+   - `next: new screen, nothing predicted here yet` → read it before acting on a
+     label you have not seen on it.
+   - `next: N labels repeat on this screen` → address those by `#ref`.
+   - `next: the flow stopped here` → this is the moment to think.
+
+**Do not** narrate each step, re-read the screen after every action, or use
+extended thinking inside a flow. The flow is already planned; executing it is
+not a decision.
+
+### A six-step flow in two model turns
+
+```bash
+simframe ui                                     # turn 1: look once
+```
+```bash
+simframe do '[                                  # turn 2: everything else
+  {"launch": {"value": "com.example.app"}},
+  {"tap": "Sign in"},
+  {"type": {"into": "Email", "text": "a@b.com"}},
+  {"type": {"into": "Password", "text": "hunter2"}},
+  {"assert": {"value": "Sign in", "is": "enabled"}},
+  {"tap": "Sign in"},
+  {"waitFor": {"value": "Inbox", "timeoutMs": 8000}}
+]'
+```
+
+Seven steps, one call. The asserts are what make it safe to not look between
+them: if the email did not land, the `assert` halts the flow at that step rather
+than letting the next four run against a screen you were wrong about.
+
+### Recovering from `unexpected-screen`, without starting over
+
+```
+FLOW FAILED — 2/5 steps in 3184ms
+  ok   [0] tap: tapped "Assets" at 62,835 · settled in 412ms
+  FAIL [1] tap: unexpected-screen: expected the screen this action reached 3x
+       before, and landed somewhere else
+next: the flow stopped here — this is the moment to think. sim_recall shows how
+you got here; sim_ui re-reads the screen.
+```
+
+That verdict is the tool doing its job: it stopped instead of running three more
+taps on a screen you did not plan for. Recover in two calls, not ten:
+
+```bash
+simframe recall            # what happened, as text — not a screenshot
+simframe ui                # where you actually are
+```
+
+Then write the *remaining* steps as one new `sim_do`. Do not re-run the steps
+that already succeeded, and do not switch to single taps "to be careful" —
+single taps are the expensive mode, and the asserts are what make batching safe.
+
 ## Read the screen as text, not as an image
 
 ```bash
@@ -150,6 +224,21 @@ simframe do /tmp/flow.json --json | jq '.results[] | select(.ok==false)'
 2. `simframe ui` — what is on screen and what can I tap? Text.
 3. `simframe do` — act, in a batch, with asserts inside the batch.
 4. `simframe frame` / `sim_look` — pixels. Only for a question about pixels.
+
+A screenshot is about 1600 tokens and it is the most expensive call here. Before
+reaching for one, check it is not a question the text already answers: a map row
+carries the element's **contents** (`= Fryer 3`) and its **state** (`disabled`),
+and the flow's own verdict already said whether the action worked. Those three
+account for nearly every screenshot taken in the session that was measured —
+28 of 62 calls returned an image, about a third of that session's entire token
+cost.
+
+## One goal per session
+
+A session gets slower with every turn: more context to carry, and later turns
+run measurably longer than early ones. Where you can, give one test goal its own
+session and finish it. `sim_do` is what keeps a session short — a flow that runs
+as one call adds one exchange to the context instead of twelve.
 
 ## When something is wrong with simframe itself
 

@@ -568,6 +568,35 @@ first: the space form set the flag to `true` and then resolved a device named
 "true", which is a poor answer to a flag `doctor`'s own advice tells you to
 type.
 
+### Keeping a session cheap
+
+The expensive part of driving a simulator with an agent is not the tapping, it
+is the thinking between taps — observe, think, tap, observe, think. Measured
+over one real session against a third-party app: **62 tool calls for 179 steps**,
+and 48 of those calls were three steps or fewer. A twelve-step flow arrived as
+five calls, and every boundary between them was a think.
+
+Three things move that number, and simframe does the first two for you:
+
+- **Batch.** `sim_do` runs a whole flow in one call, with an assert after each
+  step that matters. The asserts are what make it safe not to look in between:
+  a step that lands somewhere unplanned halts the flow instead of letting the
+  next four run against the wrong screen.
+- **A `next:` line on every action result**, computed locally from what the
+  daemon already knows — whether the screen settled, whether the graph
+  recognises it, how many elements it has, whether any labels repeat. When it
+  says *nothing ambiguous — chain the next steps in one sim_do without looking
+  again*, that is the tool telling the agent it does not need to think.
+- **One goal per session.** Sessions get slower with every turn. A flow that
+  runs as one call adds one exchange to the context instead of twelve.
+
+And the expensive habit worth naming: in that session, **28 of 62 calls returned
+a screenshot** — about a third of its entire token cost — because the text map
+could not report what a text field contained. It can now, so check the map
+before reaching for pixels: a row carries the element's contents (`= Fryer 3`)
+and its state (`disabled`), and the flow's own verdict already said whether the
+action worked.
+
 ### The Claude Code skill
 
 [`skills/simframe/SKILL.md`](skills/simframe/SKILL.md) teaches the CLI path

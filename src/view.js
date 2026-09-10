@@ -160,6 +160,37 @@ const trim = (text) => {
   return one.length > MAX_LABEL ? `${one.slice(0, MAX_LABEL - 1)}…` : one;
 };
 
+/**
+ * Body prose is content, not a control, and a map is a list of controls.
+ *
+ * Measured on one Settings screen: four of sixteen rows were the explanatory
+ * paragraph under each switch — "Increase color contrast between app foreground
+ * and background c…" — which is 31% of the map's characters describing things
+ * nobody can tap. Every screen of a settings-shaped app carries them, and every
+ * call pays for them.
+ *
+ * Only non-interactive elements, only outside the chrome regions, and only past
+ * a length no label reaches. A heading, a nav title and a tab label all stay:
+ * those are how a screen is identified and they are short. `all: true` still
+ * returns everything.
+ *
+ * Safe because a map is a *view*. `locate`, `assert` and `waitFor` read
+ * `entry.targets`, not these rows, so text dropped here is still findable and
+ * still assertable — it simply stops being printed at every caller.
+ */
+const PROSE_CHARS = 45;
+
+export function isProse(t) {
+  if (INTERACTIVE.test(t?.type || '')) return false;
+  // Chrome is how a screen is identified, and chrome labels are short anyway.
+  if (t?.region === 'nav-bar' || t?.region === 'tab-bar') return false;
+  return String(t?.label ?? '').trim().length > PROSE_CHARS;
+}
+
+function dropProse(targets) {
+  return targets.filter((t) => !isProse(t));
+}
+
 /** Rank and number what is on screen. */
 export function rowsFor(entry, { screen, filter, interactive, all = false, limit = DEFAULT_LIMIT } = {}) {
   let kept = (entry?.targets ?? []).map((t) => ({ ...t })).filter((t) => {
@@ -174,6 +205,7 @@ export function rowsFor(entry, { screen, filter, interactive, all = false, limit
   if (!all) {
     kept = foldText(kept);
     kept = dropContainers(kept, screen);
+    kept = dropProse(kept);
   }
 
   if (filter) {
@@ -368,6 +400,55 @@ export async function screenMap(deviceQuery, {
     exits,
     text: render({ device, identity, rows, truncated, collapsed, screen, name, exits }),
   };
+}
+
+/**
+ * One line saying whether the model needs to stop and think.
+ *
+ * The measured loop in a real session is observe → think → tap → observe →
+ * think, and the thinking dominates wall time. Phases 11–16 reduce how *often*
+ * a decision has to reach the model; this reduces how often the model *believes*
+ * it has to decide. Measured: 48 of 62 real calls were three steps or fewer, so
+ * a twelve-step flow arrived as four or five calls and every boundary was a
+ * think — not because anything was ambiguous, but because nothing said it was
+ * not.
+ *
+ * Everything here is already in hand when the result is assembled: whether the
+ * flow stopped, whether the screen settled, whether the graph recognises it,
+ * how many elements there are, and whether any two of them answer to the same
+ * label. No perception pass, no model call, no new state.
+ *
+ * The order is deliberate. It reports the *strongest reason to think* first,
+ * and only says "keep going" when it can rule all of them out — a hint that
+ * cheerfully says "carry on" into an unknown screen would be worse than no hint
+ * at all.
+ */
+export function nextHint({ ok, escalated, settled, known, hash, exits, elements, ambiguous } = {}) {
+  if (ok === false || escalated) {
+    return 'next: the flow stopped here — this is the moment to think. sim_recall shows how you got here; sim_ui re-reads the screen.';
+  }
+  if (settled === false) {
+    return 'next: the screen is still moving. sim_state polls it for a fraction of a map; do not act on this reading yet.';
+  }
+  if (known === false) {
+    return 'next: new screen, nothing predicted here yet — read it before acting on a label you have not seen on it.';
+  }
+  if (ambiguous > 0) {
+    return `next: ${ambiguous} label${ambiguous === 1 ? '' : 's'} repeat on this screen — address those by #ref, and the rest can go in one sim_do.`;
+  }
+  const known_ = hash ? `known (${hash.slice(0, 8)}${exits ? `, ${exits} known exit${exits === 1 ? '' : 's'}` : ''})` : 'known';
+  return `next: settled; screen ${known_}; ${elements} element${elements === 1 ? '' : 's'}; nothing ambiguous — chain the next steps in one sim_do without looking again.`;
+}
+
+/** How many labels are worn by more than one element a caller could act on. */
+export function ambiguousLabels(rows) {
+  const seen = new Map();
+  for (const r of rows ?? []) {
+    const key = alnum(r.label);
+    if (!key) continue;
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  return [...seen.values()].filter((n) => n > 1).length;
 }
 
 export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, verdictLine, ambiguities }) {

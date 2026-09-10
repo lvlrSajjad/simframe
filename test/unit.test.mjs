@@ -2379,3 +2379,53 @@ test('the pause statistic is measured after the transition, or not at all', asyn
   assert.ok(!/stillnessFor[\s\S]{0,400}trueGap/.test(graphSrc),
     'the stillness window must not consult trueGaps until it has been watched');
 });
+
+test('a result says whether the model needs to stop and think', async () => {
+  const v = await import('../src/view.js');
+
+  // The measured loop is observe -> think -> tap -> observe -> think, and the
+  // thinking dominates. 48 of 62 real calls were three steps or fewer, so a
+  // twelve-step flow arrived as four or five calls and every boundary was a
+  // think — not because anything was ambiguous, but because nothing said it
+  // was not.
+  const clear = v.nextHint({ ok: true, settled: true, known: true, hash: '0f660efbaa', exits: 2, elements: 16, ambiguous: 0 });
+  assert.match(clear, /chain the next steps in one sim_do/);
+  assert.match(clear, /0f660efb/);
+
+  // Order matters: the strongest reason to think wins, and "carry on" is only
+  // ever said when every reason has been ruled out.
+  assert.match(v.nextHint({ ok: false, settled: true, known: true }), /moment to think/);
+  assert.match(v.nextHint({ ok: true, escalated: true, settled: true, known: true }), /moment to think/);
+  assert.match(v.nextHint({ ok: true, settled: false, known: true }), /still moving/);
+  assert.match(v.nextHint({ ok: true, settled: true, known: false }), /new screen/);
+  assert.match(v.nextHint({ ok: true, settled: true, known: true, ambiguous: 2 }), /2 labels repeat/);
+  // A hint that cheerfully said "carry on" into an unknown screen would be
+  // worse than no hint at all.
+  for (const bad of [{ ok: false }, { settled: false }, { known: false }, { ambiguous: 1 }]) {
+    assert.ok(!/chain the next steps/.test(v.nextHint({ ok: true, settled: true, known: true, ...bad })));
+  }
+
+  assert.equal(v.ambiguousLabels([{ label: 'On/Off Labels' }, { label: 'On/Off Labels' }, { label: 'Bold Text' }]), 1);
+  assert.equal(v.ambiguousLabels([{ label: 'a' }, { label: 'b' }]), 0);
+});
+
+test('body prose is content, not a control, and a map lists controls', async () => {
+  const v = await import('../src/view.js');
+  const t = (label, type = 'Text', region = 'content') => ({ label, type, region, x: 1, y: 1 });
+
+  // Measured on one Settings screen: four of sixteen rows were the explanatory
+  // paragraph under each switch, 31% of the map's characters describing things
+  // nobody can tap.
+  assert.equal(v.isProse(t('Increase color contrast between app foreground and background colours.')), true);
+  assert.equal(v.isProse(t('Bold Text')), false);
+  // A control stays however long its label is — iOS writes whole sentences into
+  // button labels and they are still the thing you tap.
+  assert.equal(v.isProse(t('Apple Account, Sign in to access your iCloud and more on this device', 'Button')), false);
+  // Chrome is how a screen is identified.
+  assert.equal(v.isProse(t('A very long navigation bar title that goes on and on', 'Text', 'nav-bar')), false);
+
+  // Safe because a map is a view: locate/assert/waitFor read entry.targets, so
+  // text dropped here is still findable and still assertable.
+  const src = fs.readFileSync(new URL('../src/view.js', import.meta.url), 'utf8');
+  assert.match(src.slice(src.indexOf('function dropProse')), /targets\.filter/);
+});
