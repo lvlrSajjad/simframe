@@ -103,10 +103,14 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 >    do. 99 swaps our improvised warm for `prewarm()` and adds a `tokenCount`
 >    budget check against the now-queryable `contextSize`, so we never re-enter
 >    the context-window failure we hit at seven judgements.
-> 8. **101's measurement, which is free.** What fraction of past `wait`/`retry`
->    rulings would a p95-per-edge lookup have got right? It runs on logs we
->    already have, and above ~70% the component's shape changes: the graph
->    answers first and the model is consulted mainly for `stop`.
+> 8. **101a, then 101.** I claimed 101's measurement was free and it is not:
+>    rulings are returned on the result and **never written down**, so there is
+>    no log to mine and three rulings have ever existed. 101a persists them —
+>    decision, edge, `stillMs`, and the outcome the executor saw afterwards — and
+>    it gates 101, 106 and 96 alike. Then the measurement: what fraction of past
+>    `wait`/`retry` rulings would a p95-per-edge lookup have got right? Above
+>    ~70% the component's shape changes — the graph answers first and the model
+>    is consulted mainly for `stop`.
 > 9. **96 before any further supervisor claim.** The A/B is inside the noise
 >    band and needs the full 2x2 with repeated cells — its critical arm being
 >    **briefing, no model**. Pre-registered threshold: if briefing-only recovers
@@ -525,11 +529,31 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    per edge already is a learned wait policy**. "Has this edge historically taken
    longer than this?" is a lookup, not a judgement, and `retry` is similarly
    amenable to a history-and-backoff rule. `stop` is the one that genuinely reads
-   plan-level intent. The measurement comes first and is cheap: **what fraction
-   of our past `wait`/`retry` rulings would a p95 lookup have got right?** It runs
-   on logs we already have. Above roughly 70%, restructure into a cheap-first
+   plan-level intent. The measurement comes first: **what fraction of our past
+   `wait`/`retry` rulings would a p95 lookup have got right?** Above roughly 70%,
+   restructure into a cheap-first
    cascade — graph answers, model sees only the remainder — which is FrugalGPT's
    shape applied to our own stack.
+
+   **Correction, made the same day this was written: that measurement is not
+   free, and saying it was is the exact fault this list exists to record.** I
+   wrote "it runs on logs we already have" and then went to look. Rulings are
+   returned in a `supervisions` array on the result and **nothing writes them
+   anywhere**; `escalations.jsonl` does not carry them. Three rulings have ever
+   been produced and none survive. So the real first step is 101a below, and the
+   prize cannot be counted before it exists — which is the whole of
+   `measure-the-prize-before-the-solution`, committed against me again.
+
+101a. **Persist supervisor rulings, because three of the next four items need
+   them.** One line per consultation, alongside the escalation log: the screen
+   hash and the graph edge, the decision, `stillMs` at the time, the step's
+   `expect` note if it had one, and the outcome the executor observed
+   afterwards — recovered, still failed, stopped. That last field is what makes
+   a ruling *scoreable* rather than merely recorded. With it, **101** becomes a
+   replay against p95, **106** can price the steps a `stop` did not attempt, and
+   **96** gets a response variable that is not a hand-counted call total. Without
+   it, all three are stories. This is the smallest item on the list and it gates
+   the three largest.
 
 102. **Move the vocabulary into the schema and cut the instruction.** Our ~350-word
    instruction is re-tokenised and re-prefilled on **every** judgement, because
