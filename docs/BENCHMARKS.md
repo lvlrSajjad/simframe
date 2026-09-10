@@ -3101,3 +3101,51 @@ whole reading now. A genuinely different screen still stops the run.
 That matters for latency as much as correctness: a failed step abandons the rest
 of its batch, so **every false alarm costs a round trip** — the exact currency
 the design is trying to save.
+
+---
+
+## Apple's on-device model, measured — the first local-model numbers in this project
+
+2026-09-10. `native/spikes/afm-rank-spike.swift`. macOS 26.6.2, M-series,
+`FoundationModels` from the macOS SDK. Asked because the owner asked the fair
+question: *"are we using Apple's AI anywhere or does it still sit as a theory?"*
+It was theory — zero lines of code — and this is what turned it into a number.
+
+**It is available here.** `SystemLanguageModel.default.availability` returns
+`.available`, a trivial program compiles against the framework with the stock
+toolchain, and constrained output via `@Generable` works as documented.
+
+The task is Phase 15's: a goal, and a list of on-screen labels that **none of
+them lexically match**. This is the case the string matcher cannot do at all —
+"change my username" shares no prefix, synonym or typo distance with "Account".
+
+| goal | top-3 returned | ground truth | top-1 |
+|---|---|---|---|
+| change my username | Account > General > Privacy & Security | Account | ✓ |
+| turn on dark mode | Display & Brightness > General > Accessibility | Display & Brightness | ✓ |
+| stop the app tracking me | Privacy & Security > Screen Time > General | Privacy & Security | ✓ |
+| delete my saved cards | Wallet & Apple Pay > Passwords > General | Wallet & Apple Pay | ✓ |
+| make the text bigger | Accessibility > Display & Brightness > General | either | ✓ |
+| find previous orders | Home > Assets > Work Orders | Work Orders | ✗ (3rd) |
+
+**5 of 6 top-1, 6 of 6 top-3. Median 564 ms warm** (519–579 ms over six),
+884 ms for the first call in a process, which is model load.
+
+Against the alternatives: a model round trip in the field rounds cost 10–16 s,
+so this is roughly twenty times cheaper. Against the honest baseline —
+breadth-first ordering, which needs no model — it beats it on five of six.
+
+**The failure is the instructive one.** The only miss was the third-party app's
+own vocabulary: `Home / Assets / Work Orders / Profile`, where it put the right
+answer third. It has no knowledge of this app, which is exactly what you would
+expect and exactly where the graph, not the model, is the right instrument — the
+graph knows what is behind each of those, because it has been through them.
+
+So the division of labour the numbers suggest: the model for *unfamiliar*
+vocabulary, the graph for *familiar*. That is the same shape as everything else
+here — the local tier should be asked the questions nothing cheaper can answer.
+
+One caveat worth keeping: N is 6, hand-written, and five of them are Apple's own
+Settings, which is the most conventional UI in existence. The offline corpus
+Phase 15 describes — 129 stored screens, 3,915 labelled targets, ground truth
+free from the graph — is what would make this a result rather than a signal.
