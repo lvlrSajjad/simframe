@@ -197,3 +197,64 @@ The 92 records already in the bench device's log stay unattributable, and the
 breakdown says so every time it prints them rather than quietly averaging them.
 The Phase 10 breakdown above was collected on a device one session owned and is
 still good; anything measured on that device between then and now is a pool.
+
+## Phase 11.5 — thinking cost baseline, 2026-09-10
+
+From `flows.jsonl`, separating the real session driving a third-party app from
+the bench device, because only the first has a model in the loop. 62 real calls,
+179 steps.
+
+| | real session | bench (scripted) |
+|---|---|---|
+| flow records (= MCP calls) | **62** | 254 |
+| steps | 179 | 657 |
+| `model_turns` / step | 0.56 | 0.58 |
+| single-step calls | 10 (16%) | 46 (18%) |
+| batched calls | 52 (84%) | 208 (81%) |
+| median batch | **3 steps** | 3 steps |
+| images returned | **29, in 28 of 62 calls** | 0 |
+
+### The stated hypothesis is not what the data says
+
+Phase 11.5's prompt says "if turns/step is near 1.0 on flows the graph already
+knows, that is the bug this phase fixes". It is **0.56**, and 84% of calls are
+already batched. The model is not calling one step at a time.
+
+What it is doing is planning *three steps ahead*: 48 of 62 calls are three steps
+or fewer, and only 11 are five or more. So the cost is not un-batched calls, it
+is **short batches** — a flow of a dozen steps arrives as four or five calls
+instead of one, and each boundary is a think.
+
+### The larger cost is images, and the reason is known
+
+**28 of 62 calls (45%) returned an image.** At roughly 1.6k tokens each that is
+~46k tokens against ~87k for all the text results put together — a third of the
+session's tool output, spent on the one call the text map exists to avoid.
+
+The reporter said exactly why, and it was not a preference: *"because the map
+cannot be trusted, every verification becomes a `{"look": true}` image."* The map
+could not report a text field's contents at all — the accessibility `value` was
+read by the daemon and dropped at two boundaries. That shipped this morning, so
+the largest single driver of image cost has already been removed; this phase has
+to make the model *notice*.
+
+### And what the model was reading
+
+| verdict | count |
+|---|---|
+| `unverified` | 43 |
+| `no-visible-change` | 25 |
+| `ok` | **6** |
+
+Six `ok` verdicts in 179 steps. On an app the graph had never seen, almost
+nothing was predicted, so almost every step returned something the model had to
+interpret. 35 of the 39 escalations were `verification_failed`, and 14 of 62
+calls (23%) did not complete — each of those forces a re-plan, which is the most
+expensive thing that can happen to a batch.
+
+### What this phase can and cannot move
+
+It can shorten what a turn carries and make longer batches the obvious path. It
+cannot manufacture `ok` verdicts on an app nobody has driven before — that is
+the graph warming up, and it is Phase 12–16 work. So the number to watch is
+**calls per completed task**, not turns per step.
