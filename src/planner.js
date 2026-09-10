@@ -37,8 +37,12 @@ const SOURCE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'na
 const BIN = path.join(store.ROOT, 'bin', 'rank');
 
 /** Which backend the caller asked for. Absent means no local planner. */
-export function requested() {
-  const raw = String(process.env.SIMFRAME_PLANNER ?? '').trim().toLowerCase();
+export function requested(options) {
+  // Per call first, then the environment, for the reason in `sensorMode`: an
+  // MCP server's environment is fixed when it spawns, so a tester could not
+  // switch backends inside one session and a round came back with one arm of
+  // its A/B unrun.
+  const raw = String(options?.planner ?? process.env.SIMFRAME_PLANNER ?? '').trim().toLowerCase();
   if (!raw || raw === 'none' || raw === 'off' || raw === '0' || raw === 'false') return null;
   return raw;
 }
@@ -128,8 +132,8 @@ async function open() {
  *   is null, which is every failure mode: flag off, no model, a timeout, a
  *   parse problem, a paraphrasing answer. Never throws.
  */
-export async function rank(goal, options, { timeoutMs = 3000 } = {}) {
-  if (!requested()) return null;
+export async function rank(goal, options, { timeoutMs = 3000, deviceOptions } = {}) {
+  if (!requested(deviceOptions)) return null;
   if (!goal || !Array.isArray(options) || options.length < 2) return null;
   let live;
   try {
@@ -175,8 +179,8 @@ export async function rank(goal, options, { timeoutMs = 3000 } = {}) {
 }
 
 /** For `doctor`: what the planner layer is, in one line. */
-export async function status() {
-  const want = requested();
+export async function status(options) {
+  const want = requested(options);
   if (!want) return { planner: 'none', detail: 'not requested (SIMFRAME_PLANNER is unset)' };
   if (want !== 'apple') return { planner: 'none', detail: `no such planner backend: "${want}"` };
   const live = await open();

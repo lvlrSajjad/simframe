@@ -250,6 +250,10 @@ async function main() {
   if (flags.maxDim) options.maxDim = num(flags.maxDim);
   if (flags.ringSize) options.ringSize = num(flags.ringSize);
   if (flags.engine) options.engine = String(flags.engine);
+  // Per-command overrides for the two experiment knobs, so an A/B is an
+  // argument rather than a restart. `--sensor=ax-first`, `--planner=apple`.
+  if (flags.sensor) options.sensor = String(flags.sensor);
+  if (flags.planner) options.planner = String(flags.planner);
 
   switch (command) {
     case undefined:
@@ -1070,6 +1074,10 @@ async function main() {
         json: Boolean(flags.json),
         strict: Boolean(flags.strict) || process.env.SIMFRAME_STRICT === '1',
         device: flags.device,
+        // So `doctor --sensor=ax-first --planner=apple` reports the mode the
+        // caller is about to use, not the one the environment happens to hold.
+        // Confirming the mode before a run is the whole reason to read this.
+        options,
       });
       return;
     }
@@ -1146,7 +1154,7 @@ async function blackScreenProbe(udid) {
   }
 }
 
-async function doctor({ json = false, strict = false, device } = {}) {
+async function doctor({ json = false, strict = false, device, options = {} } = {}) {
   const checks = [];
   // `level` is 'ok' | 'warn' | 'fail'. A warn means it works but not the way it
   // should — the exact state that used to be invisible.
@@ -1203,7 +1211,7 @@ async function doctor({ json = false, strict = false, device } = {}) {
   try {
     const api = await import('./index.js');
     const ocrMod = await import('./ocr.js');
-    const mode = api.sensorMode();
+    const mode = api.sensorMode(options);
     add('sensor mode', 'ok',
       mode === 'ax-first'
         ? 'ax-first — the tree alone (~50ms), paying for OCR only when a resolve fails'
@@ -1220,7 +1228,7 @@ async function doctor({ json = false, strict = false, device } = {}) {
   // candidates that exploration was going to try anyway.
   try {
     const planner = await import('./planner.js');
-    const st = await planner.status();
+    const st = await planner.status(options);
     add('local planner', 'ok', `${st.planner} — ${st.detail}`, {
       key: 'planner.backend',
       value: st.planner,

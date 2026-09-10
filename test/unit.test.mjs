@@ -2637,6 +2637,35 @@ test('a step can carry its own fallbacks, and only some failures earn one', asyn
   );
 });
 
+test('an experiment mode is an argument, not a server restart', async () => {
+  const api = await import('../src/index.js');
+  const planner = await import('../src/planner.js');
+  const mcp = await import('../src/mcp.js');
+
+  // Round 6 came back with one arm of its A/B unrun. An MCP server's
+  // environment is fixed when it spawns, so a tester driving through it could
+  // not switch modes inside a session — and the workaround suggested was three
+  // server entries with three env blocks, which is worse: three servers on one
+  // device is three writers, against the one-writer-per-device rule.
+  //
+  // So the call decides, and the environment is the fallback rather than the
+  // only voice.
+  assert.equal(api.sensorMode({ sensor: 'ax-first' }), 'ax-first');
+  assert.equal(api.sensorMode({ sensor: 'full' }), 'full');
+  assert.equal(api.sensorMode({}), 'full', 'and the default is unchanged');
+  assert.equal(api.sensorMode(), 'full');
+  assert.equal(planner.requested({ planner: 'apple' }), 'apple');
+  assert.equal(planner.requested({ planner: 'none' }), null);
+  assert.equal(planner.requested({}), null);
+
+  // The MCP side merges them into the options every handler already takes, and
+  // an absent argument leaves the server's own defaults alone.
+  assert.deepEqual(mcp.modesFor({ fps: 2 }, { sensor: 'ax-first', planner: 'apple' }),
+    { fps: 2, sensor: 'ax-first', planner: 'apple' });
+  assert.deepEqual(mcp.modesFor({ fps: 2 }, {}), { fps: 2 });
+  assert.deepEqual(mcp.modesFor(undefined, undefined), {});
+});
+
 test('a cheaper sensor is allowed to be cheaper, not to be wrong', async () => {
   const api = await import('../src/index.js');
   const ocr = await import('../src/ocr.js');

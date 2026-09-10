@@ -1101,15 +1101,25 @@ export function offScreenMatch(targets, query, points) {
  * before anyone is told the target is absent. Wrong guesses cost a second read;
  * they cannot cost a wrong answer.
  */
-export function sensorMode() {
-  const raw = String(process.env.SIMFRAME_SENSOR ?? '').trim().toLowerCase();
+export function sensorMode(options) {
+  // Per call first, then the environment. The environment is fixed when a
+  // process starts, and an MCP server is one long-lived process — so a tester
+  // asked to compare two sensor modes in one session could not do it, which is
+  // exactly what happened: round 6's A was run and B and C could not be. Their
+  // own suggestion was three server entries with three env blocks, and it is
+  // the worse fix: three servers on one device means three writers, against the
+  // one-writer-per-device rule, and it makes an A/B a configuration change
+  // rather than an argument.
+  const asked = options?.sensor;
+  const raw = String(asked ?? process.env.SIMFRAME_SENSOR ?? '').trim().toLowerCase();
   return raw === 'ax-first' || raw === 'axfirst' ? 'ax-first' : 'full';
 }
 
-export async function locate(deviceQuery, query, options = {}) {
-  if (sensorMode() !== 'ax-first' || options.useOcr === false || options.escalated) {
-    return locateWith(deviceQuery, query, options);
+export async function locate(deviceQuery, query, opts = {}) {
+  if (sensorMode(opts.options) !== 'ax-first' || opts.useOcr === false || opts.escalated) {
+    return locateWith(deviceQuery, query, opts);
   }
+  const options = opts;
   try {
     return await locateWith(deviceQuery, query, { ...options, useOcr: false, escalated: true });
   } catch (err) {

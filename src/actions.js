@@ -1115,7 +1115,7 @@ async function seek(deviceQuery, udid, step, ctx) {
     // to answer and the budget will never reach the tail anyway; and the model
     // is asked about candidates, not given the screen.
     const asked = labels.slice(0, SEEK_RANK_CANDIDATES);
-    const ranked = await planner.rank(String(goal), asked);
+    const ranked = await planner.rank(String(goal), asked, { deviceOptions: options });
     const ordered = ranked ? [...ranked, ...labels.slice(SEEK_RANK_CANDIDATES)] : labels;
     const pick = ordered[0];
     visited.add(pick);
@@ -1141,7 +1141,7 @@ async function seek(deviceQuery, udid, step, ctx) {
     if (hit) {
       return `found "${goal}" as "${hit.target.label}" at ${hit.target.x},${hit.target.y}`
         + ` after opening ${opened.concat(pick).map((l) => JSON.stringify(l)).join(' -> ')}`
-        + ` (${spent} of ${budget} step(s)${planner.requested() ? ', planner-ordered' : ''})`;
+        + ` (${spent} of ${budget} step(s)${planner.requested(options) ? ', planner-ordered' : ''})`;
     }
     opened.push(pick);
   }

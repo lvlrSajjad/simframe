@@ -19,6 +19,34 @@ import { bootedDevices, permissionServices } from './platform/index.js';
 import * as store from './store.js';
 import * as view from './view.js';
 
+/**
+ * Per-call overrides for the two experiment knobs.
+ *
+ * Both are read from the call first and the environment second, so an A/B is an
+ * argument rather than a server restart — and a run in the wrong mode stops
+ * being a thing that can silently happen.
+ */
+export function modesFor(base = {}, args = {}) {
+  const out = { ...base };
+  if (args.sensor) out.sensor = String(args.sensor);
+  if (args.planner) out.planner = String(args.planner);
+  return out;
+}
+
+/** Offered on every tool that reads or acts, because either can be compared. */
+const modeProps = {
+  sensor: {
+    type: 'string',
+    enum: ['full', 'ax-first'],
+    description: 'Perception for this call. "full" fuses accessibility and OCR (~164ms). "ax-first" reads the tree alone (~50ms) and pays for OCR only when something fails to resolve. Omit to keep the server default.',
+  },
+  planner: {
+    type: 'string',
+    enum: ['none', 'apple'],
+    description: 'Local model for this call. Orders the containers seek opens; it cannot choose an action. Omit to keep the server default.',
+  },
+};
+
 const deviceProp = {
   device: {
     type: 'string',
@@ -48,6 +76,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ...deviceProp,
+        ...modeProps,
         filter: { type: 'string', description: 'Only elements whose label or read text contains this.' },
         interactive: { type: 'boolean', description: 'Only elements that look tappable.' },
         all: { type: 'boolean', description: 'Include the status bar and every collapsed region (default false).' },
@@ -63,6 +92,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ...deviceProp,
+        ...modeProps,
         steps: {
           type: 'array',
           description:
@@ -93,7 +123,7 @@ const TOOLS = [
     description: 'Tap one thing. For more than one step, use sim_do — it batches the verification and costs one round trip. Returns the screen map afterwards.',
     inputSchema: {
       type: 'object',
-      properties: { ...deviceProp, ...selectorProp('What to tap'), index: { type: 'number', description: 'Which match, when the selector fits several.' } },
+      properties: { ...deviceProp, ...modeProps, ...selectorProp('What to tap'), index: { type: 'number', description: 'Which match, when the selector fits several.' } },
       required: ['sel'],
     },
   },
@@ -102,7 +132,7 @@ const TOOLS = [
     description: 'Focus a field and type into it. Prefer a sim_do step when this is part of a sequence.',
     inputSchema: {
       type: 'object',
-      properties: { ...deviceProp, ...selectorProp('The field'), text: { type: 'string' }, paste: { type: 'boolean', description: 'Use the pasteboard instead of the keyboard — much faster for long strings.' } },
+      properties: { ...deviceProp, ...modeProps, ...selectorProp('The field'), text: { type: 'string' }, paste: { type: 'boolean', description: 'Use the pasteboard instead of the keyboard — much faster for long strings.' } },
       required: ['sel', 'text'],
     },
   },
@@ -113,6 +143,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ...deviceProp,
+        ...modeProps,
         ...selectorProp('What to bring into view'),
         direction: { type: 'string', enum: ['down', 'up', 'left', 'right'] },
         maxScrolls: { type: 'number', description: 'Give up after this many screens (default 6).' },
@@ -125,7 +156,7 @@ const TOOLS = [
     description: 'Block until something appears on screen, then return the screen map. Use this instead of pausing and re-reading.',
     inputSchema: {
       type: 'object',
-      properties: { ...deviceProp, ...selectorProp('What to wait for'), timeoutMs: { type: 'number', description: 'Default 8000.' } },
+      properties: { ...deviceProp, ...modeProps, ...selectorProp('What to wait for'), timeoutMs: { type: 'number', description: 'Default 8000.' } },
       required: ['sel'],
     },
   },
@@ -136,6 +167,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ...deviceProp,
+        ...modeProps,
         ...selectorProp('What to check'),
         is: {
           type: 'string',
@@ -153,7 +185,7 @@ const TOOLS = [
       'Walk to a screen simframe already knows, over edges it has already verified, with no model call per step. Names come from sim_recall or a previous map. Refuses rather than guesses when the route is unknown or the name is ambiguous — a refusal is cheap and a wrong walk is not.',
     inputSchema: {
       type: 'object',
-      properties: { ...deviceProp, screen: { type: 'string', description: 'What the screen is called, e.g. "Settings" or an 8-character screen hash. Omit to list what is known.' } },
+      properties: { ...deviceProp, ...modeProps, screen: { type: 'string', description: 'What the screen is called, e.g. "Settings" or an 8-character screen hash. Omit to list what is known.' } },
     },
   },
   {
@@ -161,7 +193,7 @@ const TOOLS = [
     description: 'Replay a saved flow by name, verifying each step. Omit `name` to list the saved flows. Save one with sim_do\'s `saveAs`.',
     inputSchema: {
       type: 'object',
-      properties: { ...deviceProp, name: { type: 'string', description: 'Flow to run. Omit to list.' } },
+      properties: { ...deviceProp, ...modeProps, name: { type: 'string', description: 'Flow to run. Omit to list.' } },
     },
   },
   {
@@ -171,6 +203,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ...deviceProp,
+        ...modeProps,
         bundleId: { type: 'string' },
         relaunch: { type: 'boolean', description: 'Terminate first. Without this, launching an already-running app silently does nothing and you test the screen you were already on.' },
         args: { type: 'array', items: { type: 'string' }, description: 'Launch arguments passed to the app.' },
@@ -184,7 +217,7 @@ const TOOLS = [
     description: 'Open a URL or deep link on the device — the fastest way to reach a screen when the app has a link for it.',
     inputSchema: {
       type: 'object',
-      properties: { ...deviceProp, url: { type: 'string' } },
+      properties: { ...deviceProp, ...modeProps, url: { type: 'string' } },
       required: ['url'],
     },
   },
@@ -195,6 +228,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ...deviceProp,
+        ...modeProps,
         action: { type: 'string', enum: ['grant', 'revoke', 'reset'] },
         service: { type: 'string' },
         bundleId: { type: 'string' },
@@ -208,7 +242,7 @@ const TOOLS = [
       'Resolve one intent to one control: "tap Save", "the Assets tab", "back". Understands verbs, typos, and where on screen you meant. When two things answer equally well it says so and lists them rather than guessing. Use it when you doubt a selector will resolve; otherwise just tap. Prefer a label or a #ref over coordinates.',
     inputSchema: {
       type: 'object',
-      properties: { ...deviceProp, intent: { type: 'string', description: 'What you want to act on, in your own words.' } },
+      properties: { ...deviceProp, ...modeProps, intent: { type: 'string', description: 'What you want to act on, in your own words.' } },
       required: ['intent'],
     },
   },
@@ -220,6 +254,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ...deviceProp,
+        ...modeProps,
         since: { type: 'string', description: 'Compare against this frame hash instead of your last look.' },
       },
     },
@@ -232,6 +267,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ...deviceProp,
+        ...modeProps,
         mode: {
           type: 'string',
           enum: ['settle', 'change', 'stable'],
@@ -252,6 +288,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ...deviceProp,
+        ...modeProps,
         detail: {
           type: 'string',
           enum: ['low', 'normal', 'high'],
@@ -269,6 +306,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ...deviceProp,
+        ...modeProps,
         count: { type: 'number', description: 'How many frames to tile (default 5, max 12).' },
         spanMs: { type: 'number', description: 'Only include frames from the last N milliseconds.' },
         thumbMaxDim: { type: 'number', description: 'Height budget per frame in pixels (default 240).' },
@@ -283,6 +321,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         ...deviceProp,
+        ...modeProps,
         action: { type: 'string', enum: ['timeline', 'at'], description: 'timeline (default) or at.' },
         spanMs: { type: 'number', description: 'For timeline: how far back to summarise (default 60000).' },
         msAgo: { type: 'number', description: 'For at: how long ago the moment of interest was, in milliseconds.' },
@@ -298,6 +337,7 @@ const TOOLS = [
       properties: {
         action: { type: 'string', enum: ['status', 'start', 'stop'] },
         ...deviceProp,
+        ...modeProps,
         fps: { type: 'number', description: 'Capture rate while the screen is moving (default 4).' },
       },
       required: ['action'],
@@ -365,7 +405,7 @@ function sinceLine(since) {
     : `unchanged since your last look ${since.ageMs}ms ago`;
 }
 
-export async function serve({ device: defaultDevice, options = {} } = {}) {
+export async function serve({ device: defaultDevice, options: baseOptions = {} } = {}) {
   const server = new Server(
     { name: 'simframe', version: packageVersion() },
     { capabilities: { tools: {} } },
@@ -376,6 +416,15 @@ export async function serve({ device: defaultDevice, options = {} } = {}) {
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const args = req.params.arguments || {};
     const target = args.device || defaultDevice;
+    // An MCP server's environment is fixed when it spawns, so a tester asked to
+    // compare two sensor modes inside one session could not: round 6 ran its
+    // baseline and could not run either variant. The suggested workaround was
+    // three server entries with three env blocks, which is worse — three servers
+    // on one device is three writers, against the one-writer-per-device rule.
+    //
+    // So the modes are arguments. Absent, the environment still decides, so
+    // nothing that was working changes.
+    const options = modesFor(baseOptions, args);
     try {
       switch (req.params.name) {
         case 'sim_look':
