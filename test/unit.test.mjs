@@ -2590,6 +2590,35 @@ test('the graph hands over its vocabulary instead of counting it', async () => {
   assert.match(hint, /Known to work here: tap "Anaheim", tap "4 Casa"/);
 });
 
+test('a stored map is only valid for the rules that hashed it', async () => {
+  const screenmap = await import('../src/screenmap.js');
+  const fingerprint = await import('../src/fingerprint.js');
+  const store = await import('../src/store.js');
+  const path = await import('node:path');
+  const udid = 'TEST-mapversion';
+
+  // A stored map carries a `structuralHash` produced by the *fingerprint*
+  // rules, so a token-rule change invalidates it — and relying on someone to
+  // remember to bump MAP_VERSION as well is exactly how the phantom keyboard
+  // survived a fix that looked like it addressed it: two copies of one
+  // dependency, one of them updated.
+  const fs = await import('node:fs');
+  const dir = path.join(store.deviceDir(udid), 'screens');
+  fs.mkdirSync(dir, { recursive: true });
+  const write = (hash, extra) => store.writeAtomic(path.join(dir, `${hash}.json`), JSON.stringify({
+    version: 9, hash, layoutHash: 'ff'.repeat(16), targets: [{ label: 'x', x: 1, y: 1 }], ...extra,
+  }));
+
+  write('aa11', { fingerprintVersion: fingerprint.TOKEN_RULES_VERSION });
+  assert.ok(screenmap.recall(udid, 'aa11'), 'a map hashed by the current rules is usable');
+
+  write('bb22', { fingerprintVersion: fingerprint.TOKEN_RULES_VERSION - 1 });
+  assert.equal(screenmap.recall(udid, 'bb22'), null, 'one hashed by older rules is not');
+
+  write('cc33', {});
+  assert.equal(screenmap.recall(udid, 'cc33'), null, 'and neither is one that does not say');
+});
+
 test('a screen whose data changed is still the screen it is', async () => {
   const graph = await import('../src/graph.js');
   const fingerprint = await import('../src/fingerprint.js');

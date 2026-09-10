@@ -19,6 +19,19 @@ import * as store from './store.js';
 
 const MAP_VERSION = 9; // ax targets carry value, selected and focused
 
+/**
+ * A stored map also holds a `structuralHash`, which the *fingerprint* rules
+ * produced. So a token-rule change invalidates every stored map, and relying on
+ * someone to remember to bump `MAP_VERSION` too is exactly how the phantom
+ * keyboard survived a fix: two copies of one dependency, one of them updated.
+ *
+ * Stating the dependency instead of remembering it. A map is only valid for the
+ * token rules that hashed it.
+ */
+const usable = (e) => Boolean(e)
+  && e.version === MAP_VERSION
+  && e.fingerprintVersion === fingerprint.TOKEN_RULES_VERSION;
+
 function mapDir(udid) {
   return path.join(store.deviceDir(udid), 'screens');
 }
@@ -41,7 +54,7 @@ export const DEFAULT_TOLERANCE = 20;
 export function recall(udid, hash) {
   if (!hash) return null;
   const entry = store.readJson(path.join(mapDir(udid), `${hash}.json`));
-  return entry && entry.version === MAP_VERSION ? entry : null;
+  return usable(entry) ? entry : null;
 }
 
 function loadAll(udid) {
@@ -53,7 +66,7 @@ function loadAll(udid) {
   }
   return files
     .map((f) => store.readJson(path.join(mapDir(udid), f)))
-    .filter((e) => e && e.version === MAP_VERSION);
+    .filter(usable);
 }
 
 /**
@@ -323,6 +336,7 @@ export async function build(udid, {
       : { hash: null, tokens: [], keyboard: false };
     const entry = {
       version: MAP_VERSION,
+      fingerprintVersion: fingerprint.TOKEN_RULES_VERSION,
       hash,
       layoutHash,
       structuralHash: structure.hash,
