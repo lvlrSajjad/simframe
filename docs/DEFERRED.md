@@ -76,9 +76,36 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > the recovery be wired to the wrong branch in the first place. Both now run
 > the thing.
 >
+> **START HERE, 2026-09-12.** 0.11.0 shipped last night — npm `latest`, MCP
+> Registry, green. The owner's instruction for the next session, verbatim in
+> effect: **do the cheap wins first, then the model comparison, then everything
+> else.** Nothing below needs re-deciding; it needs doing.
+>
+> **Push 1 — the cheap wins** (offline-testable, no device sweep):
+> **101a** persist supervisor rulings with the outcome the executor observed,
+> because it gates 101, 106 and 96 alike · **98** put a score floor and a
+> published-region check on the relabel recovery, which today accepted 0.64 and
+> a status-bar target · **88** the MCP tool descriptions still open with `#3`
+> instead of intent.
+>
+> **Push 2 — the supervisor's reliability**: **99** `prewarm()` plus a
+> `tokenCount`/`contextSize` budget check and per-`GenerationError` triage ·
+> **100** the `abstain` token.
+>
+> **Then 109a**, which is the good idea: replay bottled rulings against
+> candidate models offline, so the model question needs dozens of *rulings*
+> rather than dozens of *runs*. Then **109**'s four live arms, then 101, 96,
+> 89+92, 93+94.
+>
 > **Next, in order.**
 >
-> 1. **The release.** 0.11.0 is authorised and gated on a green `integration`.
+> 1. ~~**The release.**~~ **DONE, 2026-09-11.** 0.11.0 is on npm as `latest` and
+>    in the MCP Registry. `release [v0.11.0]` passed every gate it owns — tests,
+>    `check:package`, a Swift build of the tarball's own sources, version
+>    consistency across `package.json`/`server.json`/tag, the publish, and the
+>    "actually resolvable on npm" wait that `v0.5.1` taught us to add.
+>    **It has not had a peer round**, and the supervisor in it has been driven
+>    only by its own author.
 > 2. **89 and 92** — `custom_actions` and `AXTraits`. Both are already in the
 >    tree, we have never asked for either, and between them they answer the
 >    modality bug (85) and offer a way to act on an element that is not a
@@ -111,15 +138,24 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 >    `wait`/`retry` rulings would a p95-per-edge lookup have got right? Above
 >    ~70% the component's shape changes — the graph answers first and the model
 >    is consulted mainly for `stop`.
-> 9. **96 before any further supervisor claim.** The A/B is inside the noise
+> 9. **109a then 109 — the model question, settled by numbers.** The owner's
+>    call, and it overrides our recommendation not to look: run **no supervisor
+>    vs Apple's ~3B vs one larger local model** that a 32 GB laptop runs
+>    comfortably. 109a first, because bottled rulings replayed offline answer it
+>    with dozens of rulings instead of dozens of runs. **An experiment, not an
+>    adoption** — nothing enters the shipped dependency graph without its own
+>    decision. Both model arms must be constrained to the same closed vocabulary
+>    or we measure formatting rather than judgement.
+> 10. **96 before any further supervisor claim.** The A/B is inside the noise
 >    band and needs the full 2x2 with repeated cells — its critical arm being
->    **briefing, no model**. Pre-registered threshold: if briefing-only recovers
->    ≥80% of what briefing-plus-model does, the model becomes a `stop`-only,
->    abstain-capable cascade stage.
-> 10. **102-105** — trim the instruction into the schema, accumulate briefings
->    against `screen_hash` *and expire them*, report cost on five axes, and
->    instrument the benign guardrail-refusal rate.
-> 11. **97** — the rest of conformal abstention and Dempster-Shafer, beyond the
+>    **briefing, no model**, which 109's four arms now include. Pre-registered
+>    threshold: if briefing-only recovers ≥80% of what briefing-plus-model does,
+>    the model becomes a `stop`-only, abstain-capable cascade stage.
+> 11. **102-108** — trim the instruction into the schema, accumulate briefings
+>    against `screen_hash` *and expire them*, report cost on five axes,
+>    instrument the benign guardrail-refusal rate, price what a `stop` did not
+>    attempt, test option-order sensitivity, and instrument model residency.
+> 12. **97** — the rest of conformal abstention and Dempster-Shafer, beyond the
 >    abstain token that 100 lands. The weight-free subset is adoptable under the
 >    no-shipped-weights non-goal.
 >
@@ -634,6 +670,50 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    time-since-last-judgement against latency, so a slow call after a long idle
    shows up as a shape rather than as a mystery. Pairs with 99, which is already
    touching the warm path.
+
+109. **Settle the model question by measurement, not by our reasoning — the
+   owner's call, 2026-09-11, and it overrides the recommendation above.**
+   Research says capacity is very unlikely to be our constraint at k=3, and
+   research also admits **nobody has run that comparison for a task like ours**.
+   So we run it. Arms: **no supervisor**, **Apple's ~3B**, and **one larger local
+   model** — constrained to what a 32 GB laptop runs comfortably, so roughly a
+   4-bit 8-14B (~5-9 GB resident) with 24B at 4-bit (~14 GB) as the ceiling.
+
+   **This is an experiment, not an adoption.** The decision above stands: no
+   third-party model enters the shipped dependency graph without a separate,
+   explicit decision. A model used to *measure* whether capacity matters is not
+   a model we ship, and conflating the two is how a non-goal erodes. If the
+   larger model wins by a margin that matters, that is the evidence the decision
+   asked for — and the decision gets re-made on purpose.
+
+   **Fairness condition, or the test measures the wrong thing.** Both model arms
+   must be **constrained to the same closed vocabulary** — schema or grammar
+   enforced, not prose-requested. Fable's own finding is that most small-model
+   errors are invalid-output faults, which Apple's guided generation eliminates
+   at the sampling layer. An unconstrained challenger would lose on formatting
+   and we would read it as losing on judgement.
+
+   **Design.** Four arms, not six: **neither**, **briefing only**, **briefing +
+   Apple**, **briefing + larger**. The model-without-briefing cell is dropped
+   with cause rather than for convenience — asked cold, the supervisor called an
+   arriving list a dead end and scored about one in four, so that cell's answer
+   is already known and would spend device time confirming it. Arms 1 and 2 are
+   96's attribution question; arms 3 and 4 are this one.
+
+109a. **Score the rulings offline, and let the live arms only count calls.**
+   The far better half of this, and the one to build first. Once 101a persists
+   rulings, every consultation can be captured as a **fixture** — step, expected,
+   failure, screen labels, `stillMs`, the `expect` note — and replayed against
+   any candidate model with **no device and no live page at all**. Then a model
+   comparison needs *dozens of rulings*, not dozens of runs, and it is
+   repeatable, cheap and free of the flakiness that puts our live A/B inside the
+   noise band. Judge the judge directly; make the live arms answer only "did it
+   save calls".
+
+   This is `build-perception-fixes-offline-not-live` applied before the mistake
+   rather than after it — the keyboard bug went from two failed guesses to an
+   exact measurement the moment it stopped being tested against a live page, and
+   a ruling is far easier to bottle than a screen.
 
 **Ordering, revised — and the reason is a habit we said we would break.** Fable's
 recommendation is explicit: **promote 97 ahead of 96.** Both of our problematic

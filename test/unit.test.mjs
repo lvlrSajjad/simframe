@@ -841,15 +841,30 @@ test('a --json call reports failure as JSON, not as prose', async () => {
   // source is not asserting the behaviour: the same habit made a test pass
   // against a genuinely broken OCR guard earlier, and this one went red the day
   // the literal moved into a shared function while the output was unchanged.
-  // So it runs the thing. An unresolvable device is the cheapest real failure —
-  // no daemon, no simulator, ~250 ms — and what is under test is the envelope,
-  // never the sentence inside it.
+  // So it runs the thing. A missing argument is the cheapest real failure:
+  // it is refused before any device work, so this test never enumerates
+  // simulators, never starts a daemon and never waits on a device.
+  //
+  // The first version used an unresolvable *device*, which cost 0.26s here and
+  // **timed out at 30s on two of three CI runners** — device enumeration is
+  // fast on a laptop with five simulators and slow on a hosted runner with
+  // every runtime installed. A unit test asserting an output envelope had been
+  // made to depend on how many simulators the machine has.
   const { execFile } = await import('node:child_process');
   const cliPath = new URL('../src/cli.js', import.meta.url).pathname;
   const out = await new Promise((resolve) => {
-    execFile(process.execPath, [cliPath, 'find', '#1', '--device=simframe-no-such-device', '--json'],
-      { timeout: 30_000 }, (err, stdout, stderr) => resolve({ code: err?.code ?? 0, stdout, stderr }));
+    execFile(process.execPath, [cliPath, 'do', '--json'], { timeout: 30_000 },
+      (err, stdout, stderr) => resolve({
+        // A timeout has no exit code, and mapping it to 0 reported a hang as
+        // "expected non-zero, got 0" — which is how the real fault above spent
+        // a CI round disguised as an assertion about exit codes.
+        timedOut: Boolean(err?.killed),
+        code: err?.code ?? 0,
+        stdout,
+        stderr,
+      }));
   });
+  assert.ok(!out.timedOut, 'the CLI answered rather than hanging');
   assert.notEqual(out.code, 0, 'a failure exits non-zero');
   const parsed = JSON.parse(out.stdout);
   assert.equal(parsed.ok, false);
