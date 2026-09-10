@@ -421,3 +421,32 @@ briefing-only recovers ≥80% of the calls that briefing-plus-model does, the
 model becomes a `stop`-only, abstain-capable cascade stage. If a p95-per-edge
 graph lookup would have got ≥70% of past `wait`/`retry` rulings right, the graph
 answers first and the model sees only the remainder.
+
+## 2026-09-11 — the local model stays the system's, and what we are turning down
+
+**Decided: no Ollama, no llama.cpp, no MLX, no community Node bridge.** All of
+them break a hard non-goal — a runtime dependency, shipped or downloaded
+weights, or both — and the research says what we would be buying: a larger
+context window, and a bigger model whose advantage is *marginal at k=3*, since
+the large-model edge concentrates on uncertain inputs and most small-model
+errors are invalid-output faults that constrained decoding already eliminates
+for us. Revisit only if a **measured** k=3 accuracy gap appears, or a context
+need the system model cannot meet. Not before.
+
+`SystemLanguageModel` is the only system-provided general LLM on macOS, which is
+precisely why it satisfies both non-goals at once. The Swift helper we
+hand-rolled is what keeps "the only runtime dependency is the MCP SDK" true; a
+community npm bridge would end that quietly.
+
+**Noted and not taken: Private Cloud Compute.** `PrivateCloudComputeLanguageModel`
+is system-provided with a 32K context, which would dissolve our 4,096-token
+budget — but it is off-device, needs the network and an entitlement, and a
+supervisor that phones home is a different product from the one described in
+CLAUDE.md. Recorded so the option is a decision rather than an oversight.
+
+**macOS 27 surfaces are forthcoming, not shipped.** The `fm` CLI, the Python
+SDK, and the `LanguageModelExecutor` provider protocol are described in WWDC26
+sessions against a release still in beta. The provider protocol is the
+interesting one — it would let a different model sit behind the same Swift API —
+but it is still a dependency-and-weights decision, taken deliberately or not at
+all. Nothing we ship today may depend on any of it.

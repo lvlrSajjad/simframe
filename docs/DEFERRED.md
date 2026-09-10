@@ -575,6 +575,42 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    same instrumentation answers it: log the literal reason string, since the
    concrete types behind these cases have shifted across 26.x dot-releases.
 
+106. **The `stop` truncation is a saving nobody has isolated, including us.**
+   When the supervisor says `stop`, the rest of the batch is abandoned rather
+   than run, and the steps not attempted are named back to the planner. That is
+   early abandonment, and our call counts fold it in with per-step correction so
+   neither can be read separately. Fable's search found it **widely used and
+   rarely isolated as a figure** — OSWorld-Human's finding that agents take
+   1.4-2.7x (up to 4.3x) the human-minimum step count implies large headroom for
+   abandoning doomed trajectories, but the savings-from-abandonment-alone number
+   is not published by anyone. So measuring it cleanly is not just bookkeeping
+   for us; it is a number the field does not have. Cheap to add to 96's
+   reporting: count the steps a `stop` did not attempt, and price them at the
+   arm's own per-step call cost.
+
+107. **Check the supervisor for option-order and phrasing sensitivity.** The
+   classic LLM-as-judge pathologies mostly do **not** apply to us: position and
+   verbosity bias are studied for pairwise comparison, and ours is single-item
+   classification into a fixed vocabulary with no candidate ordering and no
+   length comparison. What survives is **sensitivity to the order the three
+   words are presented in** and to the instruction's phrasing — and neither has
+   been tested. Both mitigations are affordable inside a 640ms budget:
+   randomise the option order across calls, and take self-consistency over a
+   few samples where the decision matters. Worth pairing with 102, since that
+   rewrites the instruction anyway and would otherwise change two things at
+   once.
+
+108. **The model's residency is undocumented, and we depend on it.** A session
+   handles one request at a time, the ~3B model is a shared system resource of
+   roughly 3 GB, and the OS loads and unloads it — but **Apple documents neither
+   an idle-unload interval nor cross-app eviction behaviour, and nobody has
+   published a measurement of either**. Our warm-process design assumes
+   residency survives between judgements. It probably does; we have not shown
+   it. The fix is instrumentation rather than architecture: record
+   time-since-last-judgement against latency, so a slow call after a long idle
+   shows up as a shape rather than as a mystery. Pairs with 99, which is already
+   touching the warm path.
+
 **Ordering, revised — and the reason is a habit we said we would break.** Fable's
 recommendation is explicit: **promote 97 ahead of 96.** Both of our problematic
 rulings were abstention cases, not experiment-design questions; the abstain token
@@ -584,7 +620,8 @@ instead-of-act habit you're trying to break", which is fair and is exactly what
 the owner caught us doing last round. So: **100 (abstain) and 99 (prewarm and the
 token budget) first**, then **101's log measurement**, which is free and could
 restructure the component, then **96** with its critical "briefing, no model" arm,
-then 102-105.
+then 102-108. 106 rides along inside 96's reporting rather than being its own
+errand, and 107 pairs with 102 so the instruction is not changed twice.
 
 The threshold that would change the design, stated in advance so we cannot move
 it afterwards: **if briefing-only recovers 80% or more of the calls that
