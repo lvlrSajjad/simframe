@@ -19,7 +19,60 @@ orphaned HID session** (the staleness gate was keyed on the process, so it
 could not fire in the MCP server; `simframe input reset` now exists and is what
 `doctor` prints).
 
-> **Status, end of 2026-09-10 — read this first after a compact.**
+> **Status, end of 2026-09-11 — read this first after a compact.** Supersedes
+> the 2026-09-10 block below, which is kept for its reasoning.
+>
+> **Three peer rounds and an external research brief landed in one day**, and
+> the shape of the day is worth stating before the list: every serious bug found
+> was a component reporting more certainty than it had, and not one of them
+> would have failed a test. Items 82-88 are the third round; **89-97 are the
+> research answers** (`docs/research/05-private-api-and-uncertainty.md`).
+>
+> **Done today**, all verified on a device rather than on a bench: the field
+> readback works on web content at all (it never had), a value simframe wrote
+> and can no longer see is announced, `detail:"high"` serves a real
+> full-resolution frame, `sweep` no longer pull-to-refreshes at the top, a look
+> cannot claim an image is fresher than its bytes, the stale-ref message no
+> longer prints 8 characters of a 72-character hash, an alias cannot pair two
+> z-layers, the keyboard boundary reaches its own top row (`TOKEN_RULES_VERSION`
+> 6), **a keyboard key can be pressed on iOS at all** for the first time, **a
+> field can be cleared** (90), and text insertion waits for focus (91).
+>
+> **CI went from 28 minutes to about 10** by taking `bench` off the push path —
+> it cost 28 of a 28-minute run and could only ever emit a warning — plus a
+> daemon-build cache and `cancel-in-progress`. `bootstatus -b` now waits for the
+> boot to finish, which is the best available explanation for three different
+> integration failures in four runs (95).
+>
+> **Next, in order.**
+>
+> 1. **The release.** 0.11.0 is authorised and gated on a green `integration`.
+> 2. **89 and 92** — `custom_actions` and `AXTraits`. Both are already in the
+>    tree, we have never asked for either, and between them they answer the
+>    modality bug (85) and offer a way to act on an element that is not a
+>    keystroke and so cannot be corrupted by a keyboard layout.
+> 3. **93 + 94 together** — the sweep. Sections do not overlap because the
+>    gesture flings; the answer is a dwell before lift plus computing the next
+>    step from a measured content-anchor delta. One closed-loop piece, and built
+>    **offline against the perception harness** rather than by swiping at a live
+>    page — that mistake cost two wrong fixes today, one of which made it worse.
+> 4. **86** — `memory disagrees` fires on nearly every call because screens
+>    carrying live numbers and dates do not hash stably. Wants numeric and
+>    date-shaped text out of the fingerprint, so another `TOKEN_RULES_VERSION`.
+> 5. **78, 87** — promote "1 of 4 steps unverified" to the first line of a
+>    result, and flag low-confidence taps on partially occluded elements.
+> 6. **88** — lead with intent resolution rather than refs. **Done for the
+>    README and the SKILL**; the MCP tool descriptions still lead with `#3`.
+> 7. **96 before any further supervisor claim.** The A/B is inside the noise
+>    band and needs the full 2x2 with repeated cells.
+> 8. **97** — conformal abstention and Dempster-Shafer. Least urgent, most
+>    likely to matter in a year, and the weight-free subset is adoptable under
+>    the no-shipped-weights non-goal.
+>
+> Older queue, unchanged: item 11 (the structural window), 71 (`choose`), 72
+> (`sweep` measured with `ax-first`), 61's remaining half, and 62-70.
+
+> **Status, end of 2026-09-10 — superseded by the block above.**
 >
 > Gate A (1, 14, 22) and Gate B (3, 4, 6, 8, 21) are complete. Gate C is
 > complete except **item 11**, with item 10 half done on purpose — its
@@ -227,7 +280,7 @@ signature is not confirmed until the binary states its own prototype.
    candidate answer to item 61: an action performed on an element is not a
    keystroke and cannot be corrupted by a keyboard layout.
 
-90. **Clearing a field: ⌘A then Delete over HID.** Left-GUI usage `0xE3` plus
+90. ~~**Clearing a field: ⌘A then Delete over HID.**~~ **DONE, same day.** Left-GUI usage `0xE3` plus
    `a` usage `0x04`, release, then Delete usage `0x2A`. Layout-independent,
    because the modifier and Delete are key *positions*, and `a` in ⌘A is a
    position too. We already have the key path — it shipped today for Return
@@ -236,7 +289,7 @@ signature is not confirmed until the binary states its own prototype.
    XCUITest, Appium and idb all lack one, so this is the standard workaround
    rather than a hack of ours.
 
-91. **Gate every text insertion on a confirmed focus read**, and stop
+91. ~~**Gate every text insertion on a confirmed focus read**~~ **DONE, same day** — and stop
    investigating paste-versus-type. Two verified causes, and neither is a
    primitive defect. iOS 16's **paste-consent prompt** can swallow a first
    programmatic paste (Apple confirmed the early-iOS-16 over-firing was
@@ -294,6 +347,15 @@ signature is not confirmed until the binary states its own prototype.
    `bootstatus -b` now blocks until the boot completes — named in #11874 as the
    fix for exactly this, and the best available explanation for three different
    failures in four runs of our own integration job.
+
+   **The `bootstatus -b` half is done, same day.** The rest of Q5's mitigations
+   are not, and are worth reaching for when this job next misbehaves: keep the
+   simulator warm across the whole job rather than re-booting, disable
+   animations and pre-dismiss SpringBoard's first run, quiet the app under test
+   with `SIMCTL_CHILD_*`, consider GitHub's larger macOS runners (the slowdown
+   reports correlate with the smallest images), and pre-launch the Simulator GUI
+   with `xcrun instruments -w <udid>` — openradar 27524047 documents that
+   `simctl` alone is unreliable under load.
 
 96. **Our supervisor A/B is inside the noise band until replicated**, and this
    is the correction worth taking on the chin. Single-run agent measurements
