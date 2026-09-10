@@ -2624,6 +2624,35 @@ test('a variant that satisfies the next step is a note, not a halt', async () =>
   assert.equal(actions.haltDecision({ verification: { verdict: 'ok' } }).halt, false);
 });
 
+test('acting on a ruling re-runs the same step, never a different one', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const hook = src.slice(src.indexOf('const ruling = await superviseFailure'), src.indexOf('const { allowed, refused }'));
+
+  // The safety-critical half of the wiring. `wait` and `retry` may only cause
+  // the *same* step to run again — the ruling is about whether the plan can
+  // proceed, never about what to do instead. If this ever passed a modified
+  // step, the three-word vocabulary would be decorative.
+  assert.match(hook, /runStep\(deviceQuery, udid, step, \{ screen, options, frames, focus \}\)/);
+  assert.ok(!/stepWithTarget/.test(hook), 'a ruling never re-aims a step');
+  assert.ok(!/steps\[i \+ 1\]/.test(hook), 'and never skips ahead');
+
+  // `wait` settles first; `retry` goes straight back in.
+  assert.match(hook, /if \(ruling\.decision === 'wait'\)/);
+  assert.match(hook, /SUPERVISOR_WAIT_MS/);
+
+  // A `stop` hands back the steps it did not attempt, so the planner resumes
+  // rather than re-plans, and says how to overrule it.
+  assert.match(hook, /err\.remainingSteps = remaining/);
+  assert.match(hook, /supervise` note/);
+
+  // Every ruling is recorded, including one that did not help — a supervisor
+  // whose mistakes are invisible cannot be corrected.
+  for (const outcome of ['recovered', 'still failed', 'stopped the run']) {
+    assert.ok(hook.includes(outcome), `outcome "${outcome}" is reported`);
+  }
+});
+
 test('the supervisor may say three words and nothing else', async () => {
   const supervisor = await import('../src/supervisor.js');
   const { readFileSync } = await import('node:fs');

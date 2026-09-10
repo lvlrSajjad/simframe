@@ -201,6 +201,38 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
 
+### Bench notes on the supervisor, before its first field round — 2026-09-11
+
+What is actually verified, so the field round is read against the right claim.
+
+**Verified.** The decision quality on the four real batch-killers from round 6,
+once the plan briefs it: a list still arriving → `wait`, a control disabled for a
+reason → `stop`, a flow that has landed in a support chat → `stop`, a screen
+still for 300 ms → `wait`. 689–751 ms warm, ~1.5 s for the first call in a
+process. Asked *cold*, without the briefing, it got the first one wrong — which
+is the whole case for `supervise` being part of the plan.
+
+The `stop` path is verified end to end on a device: the ruling is printed, its
+stated reason is quoted as a claim, the unattempted steps are named, and the
+message says how to overrule it. And a unit test asserts the safety-critical
+half — a `wait` or `retry` may only re-run **the same step**, never a re-aimed
+or skipped one.
+
+**Not verified, and this is the gap the field round exists to close.** The
+`wait` path end to end. It needs an app whose content genuinely arrives late, and
+iOS Settings does not have one — every screen renders instantly. So the branch is
+wired, unit-covered and unexercised against a real load.
+
+60. **An off-screen match only helps when the element is in the tree, and a
+    virtualised list does not put it there.** Found trying to build a `wait`
+    case: "Software Update" is two screens down in General and appears **nowhere**
+    in the accessibility tree — iOS publishes the rendered window plus a little,
+    so of 15 targets exactly one was off-screen. Item N7's *"in the tree but not
+    in view"* message is therefore correct but rarer than it sounds, and the
+    honest answer for a virtualised list is `scrollTo` and nothing else. Worth
+    saying in the tool description, because "not on this screen" and "not
+    rendered yet" read identically and only one of them is about naming.
+
 ### From round 6 — the round that measured everything and indicted `seek`
 
 2026-09-10. Three runs on a real form-heavy app: **A** baseline (MCP), **B**
