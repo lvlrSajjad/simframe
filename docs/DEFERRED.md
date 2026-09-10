@@ -177,6 +177,144 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
 
+### From round 6 — the round that measured everything and indicted `seek`
+
+2026-09-10. Three runs on a real form-heavy app: **A** baseline (MCP), **B**
+`ax-first`, **C** `ax-first` + `planner: apple` (both CLI, because the running
+MCP server predated the per-call arguments — see item 55).
+
+| | A | B | C |
+|---|---|---|---|
+| calls per completed task | 31 | 9 | **3** |
+| steps per call | 1.5 | 7.4 | **11.0** |
+| images | 2 | 0 | 0 |
+| wall | 514 s | 431 s | **136 s** |
+| largest successful batch | 5 | 12 | **18** |
+
+**Read that table only with its caveat, which the reporter supplied unprompted:
+the dominant variable is not the sensor or the planner, it is that they learned
+the app.** By C they had the selectors, the coordinates, the `index` for the
+ambiguous radio and the right `waitFor` sentinel for every async list. The graph
+was also *not* cleared as I had predicted, so B started warm off A and C warmer
+still, and the harness differed (A over MCP, B and C over the CLI). The one
+attributable number is **steps per call: 1.5 → 7.4 → 11.0**, which is batching.
+
+**The sensor made no behavioural difference, stated plainly.** One small
+regression and one small win, both real: stripping OCR removed the extra text
+that distinguished two stacked controls sharing an AX label, so a `waitFor`
+became ambiguous and needed `index: 0` (the refusal was correct — it did not
+guess); and on the review page `ax-first` reported a row honestly as `loading`
+where full mode fused stale OCR over it and **invented the word "hanuynan"**. My
+own prediction that `ax-first` would fix the modal-fusion problem was **wrong** —
+the reporter checked, the fusion is identical, so it is a layering problem and
+not an OCR one.
+
+**Fixed from this round:**
+
+- **`seek` opened CANCEL, then pressed "YES, THIS FIXED MY PROBLEM"** — see
+  `docs/DECISIONS.md`. Three faults: one permission list answering two
+  questions, a comment claiming it "does not act" when opening a door plainly
+  is acting, and no return to origin on failure. All three fixed, and candidacy
+  is now permissive about shape and strict about vocabulary because requiring
+  `actsInteractive` had found *zero* doors on a screen holding two real pickers.
+- **G1, `unexpected-screen` discarding a flow whose action worked.** Twice, and
+  the direct cause of B and C needing 9 and 3 calls instead of 5 and 1. A
+  variant that satisfies the next step's selector is now a note, not a halt.
+  The verdict is still reported and logged; only the batch survives.
+
+**Still open, worst first:**
+
+49. **`assert` reads a stale snapshot and killed a six-step batch — the single
+    most expensive finding in run A (~120 s, 3 calls).** `assert REVIEW is
+    enabled` failed, and the map printed by that same call, three lines below,
+    shows `#24 button REVIEW` with **no `disabled` marker**. The assert was
+    measured against a state that no longer existed. `tap` already re-takes a
+    stale baseline and says so — *"[baseline had already settled; re-taken from
+    the live screen]"* — and `assert` needs the same. The reporter's framing is
+    the reason this is top of the list: *"I put an assert in to be careful, and
+    being careful is what broke the flow. The lesson an agent learns is 'do not
+    assert inside batches', which is the opposite of what you want learned."*
+
+50. **`find`'s "Visible:" list is a stale cache and does not say so.** It
+    omitted the very control asked about, which `ui` listed seconds either side
+    — and it carried a status-bar clock reading `3:21` when the wall clock was
+    `3:23`. `ui` warns when it serves recalled elements; `find` must warn or
+    refresh. A false "not on this screen" from the tool whose whole job is
+    resolving intent is indistinguishable from the app being broken.
+
+51. **A settle that has seen an unpopulated list should say so.** Three
+    separate times, every list in the app arrived *after* the settle declared
+    the screen stable. `waitFor` on a row label fixes it, but that requires
+    already knowing a string that only exists once loaded — solvable only by
+    having failed once. The raw material is there: the tree exposed
+    `#13 element 201,263 loading`. Sharpest version, from run B: a `waitFor` on
+    `Records` was satisfied by the header **"21 Records"** while zero of the 21
+    rows existed. Even a correctly written wait can be satisfied by a promise of
+    content.
+
+52. **`continueOnError` pays out every timeout on an unchanged screen.** After
+    one step failed, ten more failed against the same unchanged hash, two
+    `waitFor`s serving their full 9,000 ms — 79 seconds of certain failure, and
+    what the operator saw as *"you look stuck"*. After N consecutive failures on
+    an unchanged screen hash, stop.
+
+53. **Fallback selectors solve the wrong failure.** `{"tap":"Ceiling","or":[…]}`
+    failed all three, for one reason that had nothing to do with labels: the
+    list had not loaded. The three-label failure message reads like a naming
+    problem and pointed away from the cause. When every selector in an `or`
+    chain misses *and the screen changed within the last second*, say the screen
+    was still loading rather than naming the last label tried. The reporter's
+    summary: *"fallbacks are a cure for 'I named it wrong'. Almost everything
+    that actually failed failed because 'it is not there yet'."*
+
+54. **`or` cannot express a disambiguator.** Two `SELECT` buttons, same label,
+    different jobs — one inline, one the bottom CTA. What was wanted is not an
+    alternative label but `{"tap":"SELECT","prefer":"enabled"}`. `index` is
+    positional and fragile across a reload, and this is the one place in the run
+    where they fell back to raw `#ref`s knowing they might shift.
+
+55. **An MCP server must be restarted to pick up a change to its own tool
+    schema, and I said "nothing needs restarting".** True of the design, false
+    of a long-lived session: the running server predated the per-call arguments,
+    so `sensor`/`planner` were not in its advertised schema and passing them
+    would either be rejected by client validation or *sail through into an old
+    build that ignores them* — a run in the wrong mode reporting itself as
+    correct. The reporter caught it by comparing file mtime against process
+    start time and ran B and C over the CLI instead. Document it next to the
+    override.
+
+56. **`ref`s are only safe inside a single batch.** Correct refusals, twice —
+    `#2 was numbered on a different screen` — triggered by nothing but a row
+    finishing its load. Right trade, but their cheapness invites reuse across
+    calls, so the tool description should say the lifetime out loud.
+
+57. **`all: true` without `refresh` silently serves stale data.** `all` reads as
+    "give me everything"; it does not mean "as of now". Fold `refresh` into
+    `all`, or make the staleness warning impossible to skim past — it is
+    currently one clause at the end of a line the reporter had stopped reading.
+
+58. **`seek` asks the wrong question for a wizard.** It answers "the thing I
+    want is behind a container on this screen", and the two places the reporter
+    was genuinely stuck were neither: a dropdown that was visible and inert, and
+    a REVIEW button that was visible and disabled. What was wanted:
+    `{"seek": "what is blocking REVIEW"}` — walk the form and report *"Service
+    Provider has no value and is required"*. Their estimate: 90 seconds and four
+    calls. That is the expensive question in every wizard.
+
+59. **`sim_state` is never suggested.** The reporter never called it once across
+    three runs, and wanted exactly its niche — cheap polling while a list loads —
+    four separate times, reaching for a full `ui` each time. The `next:` hints
+    suggest plenty of other things.
+
+**The number to keep from this round**, because it decides what to work on next:
+of run A's 514 seconds, **~128 s was measured tool and device time and ~386 s
+(75%) was the agent thinking and the MCP round trip.** Every pause the operator
+flagged in real time was a call boundary, and every call boundary they flagged
+was forced by one of the items above. The reporter's conclusion, which is also
+the answer to "why does it feel slow": *"the only lever simframe has on
+perceived speed is steps-per-call."* Where one call carried the work, the
+operator wrote *"third page looked awesome"*.
+
 ### The "read approximately, like a human" theory — right layer, wrong sensor
 
 The owner's theory, 2026-09-10: *"about your OCR — what you probably do is 100%

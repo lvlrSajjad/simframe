@@ -15,6 +15,7 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 | 2026-09-10 | Phase 12 next, per the default order | **REORDERED** | `novel_dialog`: 0 of 173, ever |
 | 2026-09-10 | Phase 15 — exploration, and the first real local-model job | **PROMOTED** | Semantic ranking is beyond a matcher |
 | 2026-09-10 | Phase 18 — local triage, not local planning | **PROPOSED** | The recovery class cannot be enumerated |
+| 2026-09-10 | `seek` may open any label a retry may substitute | **WRONG, fixed** | It opened CANCEL, then answered a prompt |
 | 2026-09-10 | A structural "dead end" rule | **REVERTED before shipping** | It cannot tell unfinished from unfinishable |
 | 2026-09-10 | Phase 17 — local planner tier | **NO-GO** | The prize is 5% of decisions |
 | 2026-09-10 | Phase 11.5's premise (the agent is not batching) | **OVERTURNED** | It batches 84% of the time |
@@ -25,6 +26,55 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 | earlier | Phase 9 — tier-2 local model | **DEFERRED, gate unmet** | Cheaper tool for the same gap, unbuilt |
 
 ---
+
+## 2026-09-10 — one permission list cannot answer two questions
+
+**What happened.** `seek`, exploring for a service provider, opened **CANCEL**,
+then AI TROUBLESHOOTING, then pressed **"YES, THIS FIXED MY PROBLEM"**, then HELP
+CENTER — ending five screens deep in a live customer-support chat, with a
+half-completed service request destroyed and the tester left there to rebuild it
+from the home screen. One label further along was SUBMIT SERVICE REQUEST. The
+operator, watching without knowing why, wrote: *"you just went back to the first
+page, chose wrong stuff, and now you're interacting with support. Completely off
+basically."*
+
+**Why, and it is not that the list was too short.** `"cancel"` is on the
+*safe* list, deliberately, so that a local tier can **decline** a dialog instead
+of stranding on every confirmation it meets. That was the right call for that
+question. `seek` asked the same list a different question — *may I open this as a
+door?* — and got the first question's answer.
+
+**May-I-tap-this-to-decline and may-I-open-this-as-a-door are different
+permissions.** One list answering both is the whole defect, and no amount of
+adding words to it would have found that.
+
+**Three faults, not one, and the second is the instructive one.**
+
+1. The permission. Exploration has its own list now, which refuses anything that
+   commits, abandons, answers or leaves, and patterns for labels that read as
+   answers or instructions. Substitution is unchanged.
+2. **The documentation.** It said `seek` *"finds and does not act"*. I meant it
+   does not tap the *target*. A reader took it to mean what it says, and handed
+   it a flow it could destroy — correctly, on the documented contract. Opening a
+   door is an action. A safety property that is true only under the author's
+   private reading is not a safety property.
+3. No return. The contract said depth-first *with return* and on failure it
+   returned nowhere. It now walks back and says plainly when it could not.
+
+**The fix that came with it, from the same report.** Candidacy required
+`actsInteractive` and found **zero doors** on a screen holding two real
+pickers — a React Native picker is a generic element with no value, and the tree
+has been wrong about roles in every single round. So container detection was
+wrong in *both* directions on one app: nothing on a screen full of doors, then
+CANCEL as a door on the next screen along. It is permissive about shape and
+strict about vocabulary now: the tree is unreliable about what is tappable, the
+label is reliable about what must not be opened.
+
+**Consequence for Phase 15.** The local ranker could not be evaluated at all,
+because ranking cannot rescue a candidate set that does not contain the answer —
+the correct door was never a candidate in either arm. The A/B stands as
+*inconclusive on the model* rather than negative, and the go/no-go has to wait
+for candidacy to work.
 
 ## 2026-09-10 — Phase 18 proposed, and the rule that would have made it unnecessary
 
