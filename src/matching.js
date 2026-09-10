@@ -337,7 +337,65 @@ function sameControl(a, b) {
   // and a map built before that still resolves.
   if (isAxTarget(a) && !isAxTarget(b) && sameElementSeenTwice(a, b)) return true;
   if (isAxTarget(b) && !isAxTarget(a) && sameElementSeenTwice(b, a)) return true;
+  // And a caption sitting on the control it names. Containment above requires
+  // the container to be a recognised hit target, and a React Native composite
+  // is a generic element — so a form row published its caption and its select
+  // with the same label, 152 points apart, and nothing merged them. They are
+  // one control seen twice, not two candidates: answering `ambiguous` here
+  // costs a round trip to choose between a thing and its own name.
+  if (isCaptionFor(a, b) || isCaptionFor(b, a)) return true;
   return false;
+}
+
+/** Does `caption` merely name `control`, overlapping it, with the same label? */
+function isCaptionFor(caption, control) {
+  if (!namesOnly(caption) || namesOnly(control)) return false;
+  if (norm(caption.label) !== norm(control.label)) return false;
+  return overlaps(caption.frame, control.frame);
+}
+
+/** Any shared area at all — a caption's box often clears its control's by a point or two. */
+function overlaps(a, b) {
+  if (!a || !b) return false;
+  return a.x < b.x + b.width && b.x < a.x + a.width
+    && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+/**
+ * Roles that only ever *name* a control, never are one.
+ *
+ * The tree publishes a caption and the control it captions with the same label,
+ * and a React Native composite (a `native-base` Select, say) surfaces as a
+ * generic element that `INTERACTIVE_ROLE` does not recognise. So `tap "Problem"`
+ * resolved to the caption at (49,486) and did nothing, while the select sat at
+ * (201,496) — reported as half of the single largest cost in a real-app run,
+ * because it means neither selector can be trusted.
+ *
+ * `collapseSamePlace` already prefers a hit target over the text printed on it,
+ * but only once `sameControl` has decided they are the same place. These two
+ * were 152 points apart with a generic role, so nothing merged them.
+ */
+const NAMING_ONLY_ROLE = /^(statictext|text|label|heading|image)$/i;
+
+const namesOnly = (t) => NAMING_ONLY_ROLE.test(t?.type ?? '');
+
+/**
+ * A caption never wins over a control that answers the same name.
+ *
+ * Applied only when the two are close enough in score to be answering the same
+ * question — a heading is still reachable when nothing else matches, which is
+ * why this promotes rather than filters. Anything further apart than
+ * `CAPTION_MARGIN` is a different match, not the same match seen twice.
+ */
+export const CAPTION_MARGIN = 0.2;
+
+export function preferTheControl(ranked) {
+  if (!ranked.length || !namesOnly(ranked[0].target)) return ranked;
+  const lead = ranked[0].score;
+  const i = ranked.findIndex((c, idx) => idx > 0 && !namesOnly(c.target) && lead - c.score <= CAPTION_MARGIN);
+  if (i < 0) return ranked;
+  const promoted = { ...ranked[i], reasons: [...ranked[i].reasons, 'the control, not the caption naming it'] };
+  return [promoted, ...ranked.filter((_, idx) => idx !== i)];
 }
 
 function collapseSamePlace(ranked) {
@@ -351,6 +409,11 @@ function collapseSamePlace(ranked) {
     // Prefer the real hit target: an accessibility element over OCR's reading of
     // it, and an interactive role over a caption sitting inside it.
     const better = (candidate, incumbent) => {
+      // A caption loses to what it names before anything else is considered:
+      // a `StaticText` is never the tap target when the control it labels is
+      // right there, whatever either one's source.
+      if (namesOnly(incumbent.target) && !namesOnly(candidate.target)) return true;
+      if (namesOnly(candidate.target) && !namesOnly(incumbent.target)) return false;
       if (isAxTarget(candidate.target) && !isAxTarget(incumbent.target)) return true;
       if (!isAxTarget(candidate.target) && isAxTarget(incumbent.target)) return false;
       return INTERACTIVE_ROLE.test(candidate.target.type ?? '')
@@ -368,7 +431,7 @@ function collapseSamePlace(ranked) {
  * @returns {{status: 'ok'|'ambiguous'|'none', target?, score?, reasons?, alternatives?}}
  */
 export function resolve(targets, intent, options = {}) {
-  const ranked = collapseSamePlace(rank(targets, intent, options).filter((c) => c.score >= MINIMUM_SCORE));
+  const ranked = preferTheControl(collapseSamePlace(rank(targets, intent, options).filter((c) => c.score >= MINIMUM_SCORE)));
   if (!ranked.length) return { status: 'none', alternatives: [] };
   const [best, second] = ranked;
   if (second && best.score - second.score < AMBIGUITY_MARGIN) {

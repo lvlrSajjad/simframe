@@ -2434,6 +2434,116 @@ test('the pause statistic is measured after the transition, or not at all', asyn
     'the stillness window must not consult trueGaps until it has been watched');
 });
 
+test('a control below the fold is not absent, and waiting will not help', async () => {
+  const api = await import('../src/index.js');
+  const points = { width: 402, height: 874 };
+  const inView = { label: 'Description', type: 'StaticText', x: 60, y: 620, frame: { x: 18, y: 610, width: 80, height: 20 } };
+  const below = { label: 'REVIEW', type: 'Button', x: 201, y: 1140, frame: { x: 18, y: 1120, width: 366, height: 44 } };
+
+  // Reported: `waitFor REVIEW` spent its whole 15s timeout and stopped the
+  // flow while REVIEW sat one scroll below the fold. "Not on this screen" and
+  // "not in view" call for opposite actions — waiting cannot bring a thing into
+  // view, and scrolling can.
+  const hit = api.offScreenMatch([inView, below], 'REVIEW', points);
+  assert.ok(hit, 'the off-screen control is found');
+  assert.equal(hit.y, 1140);
+
+  // Something genuinely absent stays absent.
+  assert.equal(api.offScreenMatch([inView, below], 'Submit order', points), null);
+  // Nothing off-screen at all is not an off-screen answer.
+  assert.equal(api.offScreenMatch([inView], 'Description', points), null);
+  assert.equal(api.offScreenMatch([], 'REVIEW', points), null);
+  // Above the fold counts too — a scrolled-past header is equally out of view.
+  const above = { ...below, y: -40, frame: { x: 18, y: -60, width: 366, height: 44 } };
+  assert.equal(api.offScreenMatch([above], 'REVIEW', points)?.y, -40);
+});
+
+test('a caption never wins over the control it names', async () => {
+  const m = await import('../src/matching.js');
+  // Reported: `tap "Problem"` hit the caption at (49,486) and did nothing,
+  // while the select sat at (201,496). Containment in `sameControl` requires
+  // the container to be a recognised hit target, and a React Native composite
+  // is a generic element — so nothing merged them and the caption outranked it.
+  const caption = {
+    label: 'Problem', type: 'StaticText', x: 49, y: 486, source: 'ax|ocr',
+    frame: { x: 18, y: 476, width: 62, height: 20 }, region: 'content',
+  };
+  const control = {
+    label: 'Problem', type: 'GenericElement', x: 201, y: 496, source: 'ax',
+    frame: { x: 18, y: 478, width: 366, height: 44 }, region: 'content',
+  };
+  for (const targets of [[caption, control], [control, caption]]) {
+    const r = m.resolve(targets, 'Problem');
+    assert.equal(r.status, 'ok', 'a thing and its own name are not two candidates');
+    assert.equal(r.target.type, 'GenericElement');
+    assert.equal(r.target.x, 201);
+  }
+
+  // Two genuinely different controls sharing a label still refuse, because
+  // refusing is the house style and this must not become a way to guess.
+  const other = { ...control, y: 700, frame: { x: 18, y: 682, width: 366, height: 44 } };
+  assert.equal(m.resolve([control, other], 'Problem').status, 'ambiguous');
+
+  // And a caption with no control to name is still reachable — the rule
+  // promotes, it does not filter.
+  assert.equal(m.resolve([caption], 'Problem').status, 'ok');
+});
+
+test('a control is interactive by evidence when the tree got its role wrong', async () => {
+  const v = await import('../src/view.js');
+  // `--interactive` answered "1 element" on a form with two visible, bordered,
+  // *required* text inputs. A React Native composite select surfaces as a
+  // generic element and an input shows only its placeholder as StaticText, so
+  // the role is exactly the thing that was wrong.
+  assert.equal(v.actsInteractive({ type: 'Button' }), true);
+  assert.equal(v.actsInteractive({ type: 'GenericElement', value: '4 Casa' }), true, 'a select that holds a value');
+  assert.equal(v.actsInteractive({ type: 'StaticText', focused: true }), true, 'an input with the caret in it');
+  assert.equal(v.actsInteractive({ type: 'GenericElement', enabled: false }), true, 'a disabled control is still a control');
+  assert.equal(v.actsInteractive({ type: 'GenericElement' }), false, 'a bare group really is a container');
+  assert.equal(v.actsInteractive({ type: 'StaticText', value: '' }), false);
+  assert.equal(v.actsInteractive({}), false);
+});
+
+test('a typed field is verified by its contents, not by the screen moving', async () => {
+  const actions = await import('../src/actions.js');
+  const graph = await import('../src/graph.js');
+
+  // The verdict was wrong in *both* directions across three rounds: a step
+  // reporting a clean `ok` had silently done nothing, while the step warned
+  // about as `no-visible-change` had landed. Anti-correlated with reality, on
+  // the one path where acting on the warning is destructive — re-typing doubles
+  // a field that has no way to be cleared.
+  assert.deepEqual(
+    actions.readbackNote('Mo Hatami', { value: 'Mo Hatami', focused: true }),
+    { note: ' = "Mo Hatami"', empty: false },
+  );
+  // The false `ok`: the field is readable and holds nothing, and text was sent.
+  assert.equal(actions.readbackNote('Mo Hatami', { value: '', focused: true }).empty, true);
+  assert.equal(actions.readbackNote('Mo Hatami', { value: null }).empty, true);
+  // Nothing was sent, so an empty field is not a contradiction.
+  assert.equal(actions.readbackNote('', { value: '' }).empty, false);
+  // A readback that could not be taken must never fail the step: the text may
+  // well have landed, and best-effort evidence is not counter-evidence.
+  assert.deepEqual(actions.readbackNote('x', null), { note: '', empty: false });
+  // Long values are shown truncated rather than dropped — the same call the
+  // map cut got wrong on list rows.
+  const long = actions.readbackNote('x', { value: 'y'.repeat(200) });
+  assert.match(long.note, /…"$/);
+  assert.ok(long.note.length < 80);
+
+  // Typing does not navigate, so screen-identity movement cannot say whether it
+  // worked. Answering `no-visible-change` contradicted the wait's own
+  // observation on the same line, escalated a clean flow, and invited the
+  // re-type.
+  for (const action of ['type', 'paste', 'key']) {
+    const v = graph.verdict({ udid: 'TEST-stays', before: 'aa', after: 'aa', action });
+    assert.equal(v.verdict, 'ok', `${action} on the same screen is not a change failure`);
+    assert.ok(!graph.STAYS_ON_SCREEN.has('tap'));
+  }
+  // A tap that moves nothing is still a real finding, and unchanged.
+  assert.equal(graph.verdict({ udid: 'TEST-stays', before: 'aa', after: 'aa', action: 'tap' }).verdict, 'no-visible-change');
+});
+
 test('a result says whether the model needs to stop and think', async () => {
   const v = await import('../src/view.js');
 
@@ -2449,7 +2559,17 @@ test('a result says whether the model needs to stop and think', async () => {
   // Order matters: the strongest reason to think wins, and "carry on" is only
   // ever said when every reason has been ruled out.
   assert.match(v.nextHint({ ok: false, settled: true, known: true }), /moment to think/);
-  assert.match(v.nextHint({ ok: true, escalated: true, settled: true, known: true }), /moment to think/);
+
+  // A stopped flow and a completed flow carrying a soft verdict are different
+  // things, and conflating them printed `flow completed — 16/16 steps` directly
+  // above `next: the flow stopped here` on a run where nothing stopped. It was
+  // not cosmetic: `no-visible-change` escalates and fires falsely, so one wrong
+  // verdict anywhere in a clean flow told the agent to abandon batching — the
+  // exact failure this hint exists to prevent, caused by the hint.
+  const soft = v.nextHint({ ok: true, escalated: true, settled: true, known: true, elements: 14 });
+  assert.match(soft, /every step ran/);
+  assert.ok(!/stopped here/.test(soft), 'a completed flow is never told it stopped');
+  assert.ok(!/chain the next steps/.test(soft), 'but an unconfirmed step still earns one look');
   assert.match(v.nextHint({ ok: true, settled: false, known: true }), /still moving/);
   // Settled and finished are different states, and they used to render
   // identically: a settle reported success while a list was still coming over
@@ -2465,6 +2585,23 @@ test('a result says whether the model needs to stop and think', async () => {
   for (const bad of [{ ok: false }, { settled: false }, { loading: true }, { known: false }, { ambiguous: 1 }]) {
     assert.ok(!/chain the next steps/.test(v.nextHint({ ok: true, settled: true, known: true, ...bad })));
   }
+
+  // Reported verbatim: `flow completed — 16/16 steps in 24202ms` followed by
+  // `next: the flow stopped here`. Both front ends feed the hint from the same
+  // place, so asserting on `hintFor` covers the shape the reporter saw.
+  const completed = v.hintFor(
+    { identity: { settled: true, hash: 'df24fd3200' }, exits: 2, rows: new Array(14).fill({ label: 'x' }) },
+    { flowOk: true, escalated: true },
+  );
+  assert.ok(!/stopped here/.test(completed));
+
+  // A filtered view is not the screen. `--interactive` on a form reported
+  // "1 element; nothing ambiguous — chain the next steps" while two required
+  // text inputs sat unseen, and an agent concluded there was nothing to fill
+  // in. The over-claim was the harmful half, not the filter.
+  const filtered = v.nextHint({ ok: true, settled: true, known: true, hash: 'aabbccddee', exits: 1, elements: 1, ambiguous: 0, filtered: true });
+  assert.match(filtered, /not the whole screen/);
+  assert.ok(!/chain the next steps/.test(filtered));
 
   assert.equal(v.ambiguousLabels([{ label: 'On/Off Labels' }, { label: 'On/Off Labels' }, { label: 'Bold Text' }]), 1);
   assert.equal(v.ambiguousLabels([{ label: 'a' }, { label: 'b' }]), 0);

@@ -35,6 +35,8 @@ const MAX_PAUSE_MS = 5000;
  * transitions that never happened. See docs/BENCHMARKS.md, Phase 11.
  */
 const FOCUS_STABLE_MS = 250;
+/** How far a control's centre may move between the read and the readback. */
+const FIELD_READBACK_RADIUS = 40;
 /**
  * The cold defaults, unchanged, for a field this screen has not been measured
  * focusing. `graph.focusPlan` takes over once it has been, and may only make
@@ -400,7 +402,7 @@ export async function runScript(
         const kind = afterState.transition?.kind;
         const afterScreen = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, confirmNovel });
         verification = {
-          ...graph.verdict({ udid, prediction, before: beforeScreen.hash, after: afterScreen.hash, kind }),
+          ...graph.verdict({ udid, prediction, before: beforeScreen.hash, after: afterScreen.hash, kind, action: step.action }),
           predicted: prediction ? { to: prediction.to.slice(0, 10), kind: prediction.kind, seen: prediction.count } : null,
           observed: { to: afterScreen.hash?.slice(0, 10), kind },
         };
@@ -582,6 +584,59 @@ export async function runScript(
  * focus — usually fine, since a field that already had focus does not move, but
  * also exactly what a tap that missed looks like, so the caller should be told.
  */
+/**
+ * What the field holds now, read back from the tree after the text commits.
+ *
+ * Reported three rounds running, and the third round is what forced this: the
+ * `type` verdict is wrong in *both* directions. A step that reported a clean
+ * `ok` had silently done nothing, while the step warned about as
+ * `no-visible-change` had landed — anti-correlated with reality, on the one
+ * path where acting on the warning is destructive. An operator who re-types on
+ * that warning doubles the field, and there is no way to clear it.
+ *
+ * A change verdict is the wrong instrument. Typing does not change the screen,
+ * so screen-identity movement can only ever answer a question nobody asked.
+ * The field's own contents answer the real one, and the tree already carries
+ * them — `value` has been on an AX target since MAP_VERSION 9.
+ *
+ * Accessibility only: `value` never comes from OCR, and skipping OCR keeps this
+ * to one cheap read. Best effort — a readback that fails must not fail the
+ * step, because the text may well have landed.
+ */
+async function fieldContents(deviceQuery, target, ctx) {
+  try {
+    const { entry } = await api.readScreenWith(deviceQuery, { useOcr: false, options: ctx.options });
+    let best = null;
+    let bestD = Infinity;
+    for (const t of entry.targets ?? []) {
+      const d = Math.hypot((t.x ?? 0) - target.x, (t.y ?? 0) - target.y);
+      // Same control, allowing for the caret and a placeholder giving way to
+      // text — both of which move a label's centre by a few points.
+      if (d > FIELD_READBACK_RADIUS) continue;
+      const scored = d - (t.value != null ? 12 : 0) - (t.focused ? 8 : 0);
+      if (scored < bestD) { bestD = scored; best = t; }
+    }
+    if (!best) return null;
+    return { value: best.value ?? null, label: best.label ?? null, focused: Boolean(best.focused) };
+  } catch {
+    return null;
+  }
+}
+
+/** How the readback is reported, and whether it contradicts what was sent. */
+export function readbackNote(sent, seen) {
+  if (!seen) return { note: '', empty: false };
+  const value = seen.value;
+  if (value == null || value === '') {
+    // The field is readable and holds nothing. If text was sent, it did not
+    // land — which is the false `ok` this exists to catch. Said plainly rather
+    // than inferred from a verdict.
+    return { note: ' [the field reads empty]', empty: Boolean(sent) };
+  }
+  const shown = value.length > 60 ? `${value.slice(0, 60)}…` : value;
+  return { note: ` = ${JSON.stringify(shown)}`, empty: false };
+}
+
 async function focusField(deviceQuery, udid, step, ctx) {
   const found = await api.locate(deviceQuery, step.into, { index: step.index, refresh: step.refresh });
   // What this field has cost to focus before, on this screen. Cold, or with no
@@ -639,8 +694,17 @@ async function runStep(deviceQuery, udid, step, ctx) {
     case 'type': {
       if (step.into) {
         const field = await focusField(deviceQuery, udid, step, ctx);
-        await input.typeText(udid, step.text ?? step.value);
-        return `typed into ${field.where}${field.quiet}${field.waited}`;
+        const sent = step.text ?? step.value;
+        await input.typeText(udid, sent);
+        const seen = await fieldContents(deviceQuery, field.found.target, ctx);
+        const back = readbackNote(sent, seen);
+        if (back.empty) {
+          throw new Error(
+            `typed into ${field.where} and the field reads empty — the text did not land.`
+            + ' paste is more reliable than type on this path; keys sends literal characters, not named keys.',
+          );
+        }
+        return `typed into ${field.where}${back.note}${field.quiet}${field.waited}`;
       }
       await input.typeText(udid, step.text ?? step.value);
       return 'typed text';
@@ -652,8 +716,17 @@ async function runStep(deviceQuery, udid, step, ctx) {
       // report success anyway.
       if (step.into) {
         const field = await focusField(deviceQuery, udid, step, ctx);
-        await input.pasteText(udid, step.text ?? step.value);
-        return `pasted into ${field.where}${field.quiet}${field.waited}`;
+        const sent = step.text ?? step.value;
+        await input.pasteText(udid, sent);
+        const seen = await fieldContents(deviceQuery, field.found.target, ctx);
+        const back = readbackNote(sent, seen);
+        if (back.empty) {
+          throw new Error(
+            `pasted into ${field.where} and the field reads empty — the text did not land.`
+            + ' A first paste can raise the system paste-consent dialog and lose the text; dismiss it and retry.',
+          );
+        }
+        return `pasted into ${field.where}${back.note}${field.quiet}${field.waited}`;
       }
       await input.pasteText(udid, step.text ?? step.value);
       return 'pasted into the focused field';

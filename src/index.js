@@ -1068,6 +1068,23 @@ export async function readScreenWith(deviceQuery, { useAx = true, useOcr = true,
   return { device, entry, points: { width: geo.pointWidth, height: geo.pointHeight } };
 }
 
+/**
+ * A target that answers the query but sits outside the viewport.
+ *
+ * The off-screen filter above is right — an element in the tree below the fold
+ * is untappable in fact — but "not on this screen" was the wrong way to say so.
+ * Reported: a `waitFor` spent its full 15s timeout and stopped the flow while
+ * the control sat one scroll down. Waiting cannot fix that and scrolling can.
+ */
+export function offScreenMatch(targets, query, points) {
+  const off = (targets ?? []).filter((t) => t.label && (t.y < 0 || t.y > (points?.height ?? Infinity)));
+  if (!off.length) return null;
+  const hit = matching.resolve(off, query);
+  if (hit.status === 'ok') return hit.target;
+  // Ambiguous off-screen is still an answer to "why is it not here".
+  return hit.status === 'ambiguous' && hit.alternatives?.length ? hit.alternatives[0] : null;
+}
+
 export async function locate(
   deviceQuery,
   query,
@@ -1183,6 +1200,23 @@ export async function locate(
     // "back". "Not found" is the correct answer.
     const visible = entry.targets.filter((t) => t.label && t.y >= 0 && t.y <= points.height);
     const sample = visible.slice(0, 12).map((t) => t.label.slice(0, 24)).join(', ');
+    // "Not on this screen" and "not in view" are different answers, and giving
+    // the first for the second cost a reported 15 seconds: a `waitFor REVIEW`
+    // burned its whole timeout while REVIEW sat one scroll below the fold, and
+    // then stopped the flow. Waiting cannot bring a thing into view, and
+    // scrolling can — so the difference is the whole of what to do next.
+    const offScreen = offScreenMatch(entry.targets, query, points);
+    if (offScreen) {
+      throw metrics.tag(
+        new Error(
+          `"${query}" is in the tree but not in view — it is at y=${Math.round(offScreen.y)}`
+          + ` on a ${Math.round(points.height)}pt screen. Scroll to it (sim_scroll_to) rather than waiting;`
+          + ' waiting cannot bring it into view.',
+        ),
+        from === 'memory' ? 'ambiguous_intent' : 'unknown_screen',
+        { candidates: visible.slice(0, 8), intent: query },
+      );
+    }
     // Which escalation this is depends on whether the screen was recognised.
     // Screen memory had nothing for it (`from` is one of the built values) and
     // the target is missing: that is not knowing the screen. On a screen

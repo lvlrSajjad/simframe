@@ -197,6 +197,33 @@ const trim = (text) => {
  */
 
 /** Rank and number what is on screen. */
+/**
+ * Whether a target can be acted on, by role *or* by evidence.
+ *
+ * The role alone was wrong twice on real forms. A React Native composite select
+ * surfaces as a generic element, and a text input shows only its placeholder as
+ * `StaticText` — so `--interactive` answered "1 element" on a form with two
+ * visible, bordered, *required* inputs and an agent concluded there was nothing
+ * to fill in.
+ *
+ * Evidence is used rather than a longer list of role names, because the roles
+ * are what the tree got wrong. Only a control carries a `value`, only a
+ * focusable thing is `focused`, and `enabled` is a state a caption never
+ * declares. A generic element that is none of those really is a container.
+ *
+ * The case this still cannot see: an empty, unfocused input whose placeholder is
+ * its only text. Nothing in the tree distinguishes it from a caption, which is
+ * why a filtered view now says it is filtered rather than implying it is the
+ * whole screen.
+ */
+export function actsInteractive(t) {
+  if (INTERACTIVE.test(t?.type || '')) return true;
+  if (t?.value != null && t.value !== '') return true;
+  if (t?.focused) return true;
+  if (t?.enabled === false) return true;
+  return false;
+}
+
 export function rowsFor(entry, { screen, filter, interactive, all = false, limit = DEFAULT_LIMIT } = {}) {
   let kept = (entry?.targets ?? []).map((t) => ({ ...t })).filter((t) => {
     if (!isNum(t.x) || !isNum(t.y)) return false;
@@ -217,7 +244,7 @@ export function rowsFor(entry, { screen, filter, interactive, all = false, limit
     kept = kept.filter((t) =>
       [t.label, ...(t.aliases ?? [])].filter(Boolean).join(' ').toLowerCase().includes(q));
   }
-  if (interactive) kept = kept.filter((t) => INTERACTIVE.test(t.type || ''));
+  if (interactive) kept = kept.filter(actsInteractive);
 
   const order = (t) => {
     const i = REGION_ORDER.indexOf(t.region ?? 'content');
@@ -399,6 +426,11 @@ export async function screenMap(deviceQuery, {
     rows,
     truncated,
     collapsed,
+    // A filtered view is not the screen, and the hint used to report its count
+    // as though it were: `--interactive` on a form said "1 element; nothing
+    // ambiguous — chain the next steps" while two required inputs sat unseen
+    // below it. The over-claim was the harmful half, not the filter.
+    filtered: Boolean(filter || interactive),
     screen,
     name,
     exits,
@@ -427,9 +459,24 @@ export async function screenMap(deviceQuery, {
  * cheerfully says "carry on" into an unknown screen would be worse than no hint
  * at all.
  */
-export function nextHint({ ok, escalated, settled, loading, known, hash, exits, elements, ambiguous } = {}) {
-  if (ok === false || escalated) {
+export function nextHint({ ok, escalated, settled, loading, known, hash, exits, elements, ambiguous, filtered } = {}) {
+  if (ok === false) {
     return 'next: the flow stopped here — this is the moment to think. sim_recall shows how you got here; sim_ui re-reads the screen.';
+  }
+  // A stopped flow and a completed flow carrying a soft verdict are different
+  // things, and conflating them printed `flow completed — 16/16 steps` directly
+  // above `next: the flow stopped here` on a run where nothing stopped.
+  //
+  // The conflation was load-bearing, not cosmetic. `no-visible-change` is an
+  // escalating verdict and it fires falsely — reported three rounds running —
+  // so **one** wrong verdict anywhere in a clean flow told the agent to abandon
+  // batching and re-read. That is the exact failure this hint exists to
+  // prevent, caused by the hint.
+  //
+  // A completed flow with an unconfirmed step is worth one targeted look, not a
+  // re-plan, so the hint says which and keeps the horizon open.
+  if (escalated) {
+    return 'next: every step ran, but at least one could not be confirmed — check that one thing landed (re-read the field, or assert it) rather than re-planning the flow.';
   }
   // A screen awaiting a network call is *settled* — nothing is moving — and
   // incomplete. Reported: a settle returned satisfied while a list was still
@@ -450,6 +497,11 @@ export function nextHint({ ok, escalated, settled, loading, known, hash, exits, 
       : `next: ${ambiguous} labels repeat on this screen — address those by #ref, and the rest can go in one sim_do.`;
   }
   const known_ = hash ? `known (${hash.slice(0, 8)}${exits ? `, ${exits} known exit${exits === 1 ? '' : 's'}` : ''})` : 'known';
+  if (filtered) {
+    // The count belongs to the filter, not to the screen. An agent that reads
+    // it as the screen concludes a form has nothing to fill in.
+    return `next: settled; screen ${known_}; ${elements} element${elements === 1 ? '' : 's'} **matching your filter** — this is not the whole screen, and an empty text input can look like a caption. Read it unfiltered before concluding something is absent.`;
+  }
   return `next: settled; screen ${known_}; ${elements} element${elements === 1 ? '' : 's'}; nothing ambiguous — chain the next steps in one sim_do without looking again.`;
 }
 
@@ -467,6 +519,7 @@ export function hintFor(map, { flowOk = true, escalated = false } = {}) {
   return nextHint({
     ok: flowOk !== false,
     escalated: Boolean(escalated),
+    filtered: map?.filtered === true,
     settled: map?.identity?.settled !== false,
     loading: map?.identity?.loading === true,
     known: map?.exits != null,

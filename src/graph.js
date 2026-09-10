@@ -777,9 +777,29 @@ function sameScreen(udid, a, b) {
  */
 export const CONFIDENT_OBSERVATIONS = 2;
 
-export function verdict({ udid, prediction, before, after, kind }) {
+/**
+ * Actions whose correct outcome is that the screen stays where it is.
+ *
+ * Typing into a field does not navigate, so screen-identity movement cannot
+ * say whether it worked — and answering with `no-visible-change` was actively
+ * harmful three ways. It printed a verdict contradicting the wait's own
+ * observation on the same line (`[a small change, in one region only] …
+ * [no-visible-change]`, both true, of different questions). It is an escalating
+ * verdict, so a clean flow that typed anything told the caller to stop and
+ * think. And it invited a re-type, which doubles a field that cannot be
+ * cleared.
+ *
+ * These steps are verified by reading the field back instead — see
+ * `fieldContents` in actions.js.
+ */
+export const STAYS_ON_SCREEN = new Set(['type', 'paste', 'key']);
+
+export function verdict({ udid, prediction, before, after, kind, action }) {
   if (!before || !after) return { verdict: 'unverified', detail: 'no state to compare' };
   const moved = before !== after;
+  if (STAYS_ON_SCREEN.has(action) && !moved) {
+    return { verdict: 'ok', detail: 'the screen was not expected to change, and did not' };
+  }
   if (!prediction) {
     if (!moved) return { verdict: 'no-visible-change', detail: 'the screen did not change, and nothing predicted it would' };
     return { verdict: 'unverified', detail: 'this action has not been seen on this screen before' };

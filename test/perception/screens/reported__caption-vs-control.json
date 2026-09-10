@@ -1,0 +1,81 @@
+{
+  "app": "reported",
+  "screen": "caption-vs-control",
+  "note": "Not recorded on a device: reconstructed from a measured field report. A form row publishes its caption and the control it names with the SAME label, and a React Native composite select surfaces as a generic element that INTERACTIVE_ROLE does not match. The caption sat 152 points left of the control, so sameControl merged nothing and the caption outranked it: `tap \"Problem\"` hit the text at (49,486) and did nothing. Reported as half of the single largest cost in a real-app run, because it means neither a label nor a ref can be trusted. The enabled/disabled pair is the same screen's second finding: the vocabulary is applied to the Button and not to the Select.",
+  "recorded_at": "2026-09-10T00:00:00.000Z",
+  "points": { "width": 402, "height": 874 },
+  "targets": [
+    {
+      "label": "Create Service Request",
+      "value": null,
+      "type": "Heading",
+      "x": 201,
+      "y": 90,
+      "frame": { "x": 100, "y": 76, "width": 202, "height": 28 },
+      "region": "nav-bar",
+      "source": "ax"
+    },
+    {
+      "label": "Location",
+      "value": null,
+      "type": "StaticText",
+      "x": 49,
+      "y": 300,
+      "frame": { "x": 18, "y": 290, "width": 62, "height": 20 },
+      "region": "content",
+      "source": "ax|ocr"
+    },
+    {
+      "label": "Location",
+      "value": "4 Casa",
+      "type": "GenericElement",
+      "x": 201,
+      "y": 310,
+      "frame": { "x": 18, "y": 292, "width": 366, "height": 44 },
+      "region": "content",
+      "source": "ax"
+    },
+    {
+      "label": "Problem",
+      "value": null,
+      "type": "StaticText",
+      "x": 49,
+      "y": 486,
+      "frame": { "x": 18, "y": 476, "width": 62, "height": 20 },
+      "region": "content",
+      "source": "ax|ocr"
+    },
+    {
+      "label": "Problem",
+      "value": null,
+      "type": "GenericElement",
+      "x": 201,
+      "y": 496,
+      "frame": { "x": 18, "y": 478, "width": 366, "height": 44 },
+      "region": "content",
+      "source": "ax"
+    },
+    {
+      "label": "PLACE A SERVICE REQUEST",
+      "value": null,
+      "type": "Button",
+      "enabled": false,
+      "x": 201,
+      "y": 808,
+      "frame": { "x": 18, "y": 788, "width": 366, "height": 44 },
+      "region": "content",
+      "source": "ax"
+    }
+  ],
+  "expect": {
+    "identity": null,
+    "resolutions": [
+      { "query": "Problem", "label": "Problem", "type": "GenericElement" },
+      { "query": "Location", "label": "Location", "type": "GenericElement" },
+      { "query": "PLACE A SERVICE REQUEST", "label": "PLACE A SERVICE REQUEST" }
+    ],
+    "ambiguous": [],
+    "none": [],
+    "discoverable": ["Problem", "Location", "PLACE A SERVICE REQUEST"]
+  }
+}

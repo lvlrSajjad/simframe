@@ -47,12 +47,15 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > no-go, the two reverts, the false premises — are indexed in
 > `docs/DECISIONS.md`.
 >
-> **Next, in order — reordered by the 2026-09-10 field report, which is the
-> second peer round on a real form-heavy app:** items 23 and 24 (the two HIGH
-> findings, which together stopped that run from finishing), then item 25 (the
-> hint discourages batching, and it is the cheapest thinking-time win left now
-> that Phase 17 is out), then item 26 (the form read), then item 11, then
-> Phase 12.
+> **Next, in order — reset by the third peer round.** Round 3 fixed N1, N2, N3,
+> N5, half of N6 and N7, which covers round 2's items 23 and 24. It also
+> **disconfirmed item 25**: every screen in the surprise flow reported `known`
+> and calls-per-step was still 7× worse, so unfamiliarity is not the cost and
+> the hint is not what to fix next. Open, in order: **item 32** (refs churn — but
+> measure again first, since N5 is fixed), **item 35** (value and state on
+> selects and inputs), **item 33** (`settle` should degrade), **item 34**
+> (`no-visible-change` on tap is intermittent), **item 26** (the form read),
+> then item 11, then Phase 12.
 >
 > **How we work now (2026-09-10):** a phase ends with tests green and the work
 > pushed, then a **proposed peer test** — not a release. A CI cycle plus a
@@ -134,6 +137,132 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    is already caught by the frame hash. Both measured signature pairs are in
    the harness as `frame_pairs`, so the calibration is regression-tested even
    though the path is not yet exercised in anger.
+
+### From the third peer round — the batching hypothesis dies, 2026-09-10
+
+Run cold-ish on a real form-heavy app, one session (`SIMFRAME_SESSION` set), on
+the working tree at `e85a517`. **Zero images across both tasks** — text answered
+everything, and twice the reporter read the app's own source rather than take a
+screenshot.
+
+| | familiar flow | surprise flow |
+|---|---|---|
+| invocations | **1** | **23** (14 `do`, 8 `ui`, 1 `find`) |
+| steps | 16 (3 asserts) | 52 |
+| **calls per step** | **0.06** | **0.44** |
+| images | 0 | 0 |
+| wall | 24.2 s | ~130 s of `do` plus reads |
+
+**My prediction was wrong, and the way it was wrong is the finding.** I predicted
+the agent would collapse to 1–3 steps per call on *unseen* screens, because
+`next:` tells it to read first — item 25. The split could not be computed:
+**every screen in the surprise flow reported `known`**, the graph having learned
+them in earlier rounds. Unseen screens ≈ 0, and calls-per-step was still **7×
+worse**. So unfamiliarity is not the cost, and **item 25 drops** from "cheapest
+thinking-time win" to a wording nit. It stays filed because the hint is still
+using familiarity as a proxy for risk, but it is not what is costing the calls.
+
+What is costing them, in the reporter's order: neither selector is dependable so
+every action needs a fresh read (N4 + N5); type verdicts cannot be trusted in
+either direction (N1); `waitFor` burns its timeout on content that exists but is
+off-screen (N7); `settle` hard-fails a usable screen (N8).
+
+The observation worth keeping above all of them: *"on the familiar flow I knew
+every label in advance, so I never needed a read. The graph knowing the screen
+did not substitute for **me** knowing the labels."* The graph's knowledge is
+currently spent on verdicts and routing. It is not spent on telling the caller
+what it already knows is tappable there — which is the same conclusion Phase
+17's no-go reached from the other end: the tool holds knowledge it does not hand
+over, and the model pays for that in reads.
+
+**Fixed this round** (all with tests, and a fixture for the matcher one):
+
+- **N1 — the `type` verdict was wrong in *both* directions.** Round 2 reported
+  false negatives; this round produced a false *positive* in the same batch — a
+  clean `ok` that had silently done nothing, beside a `no-visible-change`
+  warning on the step that had actually landed. Anti-correlated with reality on
+  the one path where acting on the warning is destructive.
+  **Fixed at the root:** a change verdict was the wrong instrument, because
+  typing does not change the screen. `type` and `paste` now read the field back
+  from the tree and report its contents (`= "…"`), and **fail** when the field
+  reads empty after text was sent. The tree has carried `value` since
+  MAP_VERSION 9; it was simply never consulted. This removes the mandatory
+  verifying read *and* makes the destructive re-type structurally impossible.
+- **N2 — `flow completed — 16/16 steps` printed directly above `next: the flow
+  stopped here`.** A regression I shipped in Phase 11.5, and not cosmetic:
+  `no-visible-change` is an escalating verdict and it fires falsely, so **one**
+  wrong verdict anywhere in a clean flow told the agent to abandon batching and
+  re-read — the exact failure the hint exists to prevent, caused by the hint. A
+  stopped flow and a completed flow carrying an unconfirmed step are now
+  different hints, and the second keeps the horizon open.
+- **N3 — a verdict contradicting itself inside one line**
+  (`[a small change, in one region only] … [no-visible-change]`). Both halves
+  were true, of different questions: the wait watches regions, the verdict
+  compares screen identity. `type`, `paste` and `key` no longer receive a
+  screen-movement verdict at all (`graph.STAYS_ON_SCREEN`), since staying put is
+  their correct outcome.
+- **N5 — label resolution preferred the caption over the control it names.**
+  `tap "Problem"` hit the text at (49,486) and did nothing while the select sat
+  at (201,496). `collapseSamePlace` already prefers a hit target over the text
+  printed on it, but only after `sameControl` agrees they are the same place —
+  and these were 152 points apart with a generic role, so nothing merged them.
+  A caption overlapping a control with the same label now merges into it, and a
+  caption loses to what it names before source or role is considered. Two
+  genuinely distinct controls sharing a label still refuse, and a caption with
+  nothing to name is still reachable. Fixture:
+  `test/perception/screens/reported__caption-vs-control.json`.
+- **N6, half — `--interactive` under-reported the controls**, and the *hint*
+  was the harmful half. It reported the filtered count as the screen: "1
+  element; nothing ambiguous — chain the next steps" on a form with two
+  required inputs. Interactivity is now decided by evidence as well as role — a
+  `value`, `focused`, or a declared `enabled` state, since the roles are exactly
+  what the tree got wrong — and a filtered view says it is filtered.
+  **Still open:** an empty, unfocused input whose placeholder is its only text
+  is genuinely indistinguishable from a caption in the tree. That is why the
+  hint now warns instead of pretending.
+- **N7 — `waitFor` could not tell absent from off-screen**, and spent 15 s
+  proving it before stopping the flow. `locate` now says *"in the tree but not
+  in view — it is at y=1140 on an 874pt screen. Scroll to it rather than
+  waiting; waiting cannot bring it into view."*
+
+**Still open from this round:**
+
+32. **N4 — refs expire between consecutive invocations, with no visible change.**
+    `#16 was numbered on a different screen (01f66613 → 73ddfcb0)` on calls
+    seconds apart with nothing visibly different; a blinking caret is the
+    reporter's guess at the hash churn. **Refusing is correct** and must not be
+    softened — the complaint is the churn that triggers it, not the refusal.
+    Together with N5 it meant no selector could be trusted, which is the single
+    largest cost in the run. Ask: key refs to a screen *identity* rather than a
+    frame hash, or tolerate cosmetic deltas (caret, clock, spinner) when
+    validating one. N5 is fixed, so measure again before designing this.
+
+33. **N8 — `settle` hard-fails on an animated but usable screen.** Third round
+    running. A screen with a permanent animation returns *"did not settle within
+    8053ms"* and stops the flow; the screen was perfectly readable. `waitFor` is
+    the documented answer and works, but a `settle` that fails on a healthy
+    screen still costs a call and a re-plan. Ask: degrade — *"did not settle;
+    changes confined to region X"* — and continue.
+
+34. **N9 — `no-visible-change` on `tap` is intermittent, not fixed.** The
+    identical step in the identical flow reported it this round and not last.
+    Round 2's "fixed for modal-opening taps" is downgraded to **intermittent**.
+    Note this is now less damaging than it was: it no longer poisons the hint
+    (N2) and no longer fires on the type path at all (N3).
+
+35. **N6, the other half — expose current value and enabled state on `Select`
+    and `TextInput`.** The vocabulary exists and is applied to a `Button` on the
+    same screen but not to the select beside it, so text could not distinguish
+    "no options available for this asset" from "my tap missed" — two calls and a
+    wrong hypothesis. Same root as round 2's item 24.
+
+**Working, and worth protecting** — the reporter was explicit about this:
+`unexpected-screen` is the most valuable verdict in the tool ("expected the
+screen this action reached 6x before, and landed somewhere else"), it stopped a
+compounding error, and that stop exposed a real bug in the app under test. Do
+not soften it. Refusing a stale ref and refusing an unknown label are both
+correct. Round 2's three fixes all held, including **zero** follow-up
+`ui --refresh` calls across the 16-step flow.
 
 ### From the second peer round — forms and text entry, 2026-09-10
 

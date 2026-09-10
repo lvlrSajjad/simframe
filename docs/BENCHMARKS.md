@@ -2874,3 +2874,55 @@ traversals reset while the append-only log does not), and 51 of its 69 failures
 are the `ambiguous_intent` a ranking bug produced on 2026-09-10 before it was
 fixed. Quoted rather than dropped, because a number that cannot be a rate is
 worth showing as the reason the plan said "collect after the ranking fix".
+
+---
+
+## Round 3 — the batching hypothesis dies, and the verdict was the bug
+
+2026-09-10. One peer session on a real form-heavy app, working tree at
+`e85a517`, `SIMFRAME_SESSION` set so the log is one session.
+
+| | familiar flow | surprise flow |
+|---|---|---|
+| invocations | **1** | **23** (14 `do`, 8 `ui`, 1 `find`) |
+| steps | 16 (3 asserts) | 52 |
+| **calls per step** | **0.06** | **0.44** |
+| images | **0** | **0** |
+| wall | 24.2 s | ~130 s of `do` plus reads |
+
+**A prediction, stated in advance and disconfirmed.** I predicted the agent
+would collapse to 1–3 steps per call on *unseen* screens, because `next:` tells
+it to read before acting. The split could not be computed: **every screen in
+the surprise flow reported `known`**, the graph having learned them in earlier
+rounds. Unseen screens ≈ 0, and calls-per-step was still 7× worse. Unfamiliarity
+is not the cost. Recorded because a disconfirmed prediction is worth more than
+an untested one, and because it took one round to find out.
+
+**What the calls were actually spent on**, in the reporter's order: neither
+selector dependable, so every action needed a fresh read; type verdicts
+untrustworthy in both directions; `waitFor` burning a full timeout on
+off-screen content; `settle` hard-failing a usable screen.
+
+**The verdict was the bug, three times over.** `type` reported a clean `ok` on
+a step that had silently done nothing, beside a `no-visible-change` warning on
+the step that *had* landed — anti-correlated with reality on the one path where
+acting on the warning is destructive. The same verdict printed
+`[a small change, in one region only] … [no-visible-change]` on one line, both
+halves true of different questions. And because `no-visible-change` escalates,
+one false firing anywhere in a clean 16/16 flow printed
+`flow completed — 16/16 steps` directly above `next: the flow stopped here` —
+a regression from Phase 11.5 that told the agent to abandon batching, which is
+the exact failure that hint exists to prevent.
+
+The root was one wrong instrument: typing does not change the screen, so screen
+movement can only answer a question nobody asked. `type` and `paste` now read
+the field back and report its contents, and fail when it reads empty after text
+was sent. `value` has been on an AX target since MAP_VERSION 9 and was never
+consulted.
+
+**The observation to keep.** *"On the familiar flow I knew every label in
+advance, so I never needed a read. The graph knowing the screen did not
+substitute for me knowing the labels."* The graph spends its knowledge on
+verdicts and routing, not on telling the caller what it already knows is
+tappable. That is Phase 17's no-go from the other end: the tool holds knowledge
+it does not hand over, and the model pays for it in reads.
