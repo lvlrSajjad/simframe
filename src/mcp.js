@@ -413,9 +413,38 @@ function baselineFor(udid, explicit) {
 const text = (s) => ({ type: 'text', text: s });
 const image = (png) => ({ type: 'image', data: png.toString('base64'), mimeType: 'image/png' });
 
+/**
+ * The device's name, and its UDID when the name cannot identify it.
+ *
+ * Two booted simulators can share a name — measured on this machine: two called
+ * "iPhone 17 Pro" at once, which is the default state after creating a second
+ * device of the same model. A caller reading a header that says only
+ * "iPhone 17 Pro" has no way to tell which one answered, and a reporter spent a
+ * session unsure whether they were looking at their own app. `xcrun simctl list
+ * devices booted` makes the collision trivial to see, so the header says which.
+ */
+function deviceLabel(device) {
+  if (!device?.udid) return device?.name ?? 'unknown device';
+  const clash = (lastBooted ?? []).filter((d) => d.name === device.name).length > 1;
+  return clash ? `${device.name} (${device.udid.slice(0, 8)})` : device.name;
+}
+
+/** What the last device listing saw, so a name collision can be noticed at all. */
+let lastBooted = null;
+export function noteBooted(devices) {
+  lastBooted = Array.isArray(devices) ? devices.map((d) => ({ name: d.name, udid: d.udid })) : null;
+  const names = new Map();
+  for (const d of lastBooted ?? []) names.set(d.name, (names.get(d.name) ?? 0) + 1);
+  const shared = [...names].filter(([, n]) => n > 1).map(([name]) => name);
+  return shared.length
+    ? `WARNING: ${shared.map((n) => JSON.stringify(n)).join(', ')} names more than one booted device`
+      + ' — pass "device" with a UDID, because a name cannot identify which one you mean'
+    : null;
+}
+
 function header(device, state, ageMs, extra = '') {
   return (
-    `${device.name} · ${device.runtime} · frame #${state.seq} · ${ageMs}ms old · ` +
+    `${deviceLabel(device)} · ${device.runtime} · frame #${state.seq} · ${ageMs}ms old · ` +
     `${state.width}x${state.height} · still for ${state.stableForMs}ms${extra ? ` · ${extra}` : ''}`
   );
 }
@@ -651,6 +680,13 @@ async function look(target, args, options) {
   const st = await api.getState(target, { since: prior, options });
   remember(res.device.udid, res.state);
   const lines = [header(res.device, res.state, res.ageMs), sinceLine(st.since)];
+  // Louder than a trailing note, because it invalidates the image itself rather
+  // than qualifying it.
+  if (res.frameBehindMs) {
+    lines.unshift(`WARNING: this image is ${Math.round(res.frameBehindMs / 100) / 10}s older than the screen state`
+      + ' — it is very likely NOT what is on the device now. Read sim_ui, which is read live,'
+      + ' or look again in a moment.');
+  }
   const warn = livenessLine(st.live);
   if (warn) lines.unshift(warn);
   let png = res.png;
@@ -1094,7 +1130,9 @@ function listStateDirs() {
 async function devices() {
   const booted = await bootedDevices();
   if (!booted.length) return { content: [text('no booted devices')] };
-  return {
-    content: [text(booted.map((d) => `${d.name} · ${d.runtime} · ${d.udid}`).join('\n'))],
-  };
+  // Noticing a name collision here is what lets every later header disambiguate
+  // itself, and it costs nothing: this listing is already being made.
+  const clash = noteBooted(booted);
+  const list = booted.map((d) => `${d.name} · ${d.runtime} · ${d.udid}`).join('\n');
+  return { content: [text(clash ? `${clash}\n\n${list}` : list)] };
 }

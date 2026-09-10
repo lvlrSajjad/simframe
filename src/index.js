@@ -573,16 +573,49 @@ export async function getFrame(deviceQuery, { detail = 'normal', options } = {})
 
   const png = fs.readFileSync(file);
   const bmp = pngSize(png);
+  // The age must describe the *bytes*, not the state that dates them.
+  //
+  // These are two different files. `state.json` is written when a frame is
+  // recorded; the image is a separate write. A freshly started daemon publishes
+  // fresh state while `latest.png` is still the previous session's — which is
+  // when a caller's first look of a session happens. Reported, and it is the
+  // worst failure this tool can have: a header reading `frame #714 · 84ms old ·
+  // still for 17173ms` above an image whose status-bar clock said 6:11 when the
+  // real time was 11:10. `sim_ui` was right in the same session because the
+  // accessibility tree is read live and in-process; only the image comes from a
+  // file, so only the image can be hours stale while the header says otherwise.
+  //
+  // Taking the *larger* of the two ages cannot overstate freshness. It can
+  // overstate staleness by however long the two writes are apart, which is 6ms
+  // measured on a healthy daemon — the right direction to be wrong in.
+  let fileAgeMs = null;
+  try { fileAgeMs = Date.now() - fs.statSync(file).mtimeMs; } catch { /* stat is advisory */ }
+  const stateAgeMs = Date.now() - state.capturedAt;
+  const ageMs = Number.isFinite(fileAgeMs) ? Math.max(stateAgeMs, fileAgeMs) : stateAgeMs;
   return {
     device,
     state,
     png,
     width: bmp.width,
     height: bmp.height,
-    ageMs: Date.now() - state.capturedAt,
+    ageMs,
+    // Said out loud when the image is materially older than the state, because
+    // "this picture is not of the screen the rest of this response describes" is
+    // not something a caller can work out for themselves.
+    frameBehindMs: Number.isFinite(fileAgeMs) && fileAgeMs - stateAgeMs > FRAME_BEHIND_MS
+      ? Math.round(fileAgeMs - stateAgeMs)
+      : null,
     scaledOnRead,
   };
 }
+
+/**
+ * How far the image may lag the state before it is worth saying so.
+ *
+ * Measured on a healthy daemon, the two writes land 6ms apart. A second is far
+ * outside that and far inside the hours-stale case this exists to catch.
+ */
+const FRAME_BEHIND_MS = 1000;
 
 function pngSize(png) {
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };

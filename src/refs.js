@@ -111,9 +111,11 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
   // nothing: the table records what it pointed at, which is enough for the
   // caller to be offered the label instead of a bare refusal.
   const labelFor = table.refs?.find((r) => r.ref === n)?.label ?? null;
-  const stale = (was, now) => Object.assign(
-    new Error(`#${n} was numbered on a different screen (${was} → ${now})`
-      + ' — read the screen again before using refs'),
+  // How long ago these numbers were handed out. Asked for by name: "refs
+  // expired (issued 4 calls ago) is actionable in a way this isn't".
+  const issued = Number.isFinite(table.at) ? ` refs were numbered ${Math.round((Date.now() - table.at) / 1000)}s ago;` : '';
+  const staleError = (why) => Object.assign(
+    new Error(`#${n} cannot be trusted here —${issued} ${why}. Read the screen again (sim_ui) to renumber`),
     { staleRef: true, staleLabel: labelFor },
   );
 
@@ -132,7 +134,8 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
   // pixel backstop below is the one that decides, which is what it is for.
   const exactRecall = structuralDistance === 0 || structuralDistance == null;
   if (exactRecall && table.structuralHash && structuralHash && table.structuralHash !== structuralHash) {
-    throw stale(table.structuralHash.slice(0, 8), structuralHash.slice(0, 8));
+    throw staleError(`this is a different screen (${table.structuralHash.slice(0, 8)}`
+      + ` → ${structuralHash.slice(0, 8)})`);
   }
   // Nothing recognises the screen we are on, so nothing can vouch for the
   // numbers. Refusing costs a re-read; guessing taps whatever is at those
@@ -146,9 +149,23 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
   // other — measured: refs numbered on the springboard resolved happily on a
   // different screen because both hashes were degenerate. A hash with almost
   // no bits set is not evidence of anything.
-  if (layoutHash && table.layoutHash && informative(table.layoutHash) && informative(layoutHash)
-    && hashDistance(table.layoutHash, layoutHash) > tolerance) {
-    throw stale(table.layoutHash.slice(0, 8), layoutHash.slice(0, 8));
+  // Reported three times in one session as `#4 was numbered on a different
+  // screen (03003714 → 03003714)` — a message that says the screen changed
+  // while showing that it did not, and left the reporter unable to tell a real
+  // move from a false positive. The cause was this branch printing eight
+  // characters of a **72-character** perceptual hash: its leading characters
+  // encode coarse structure, which is the very reason this comparison is a
+  // distance against a tolerance rather than an equality, so prefixes coincide
+  // routinely while the hashes differ. So this says the distance, and says that
+  // it is pixels rather than identity — a different thing from the branch above,
+  // which had been wearing the same sentence.
+  const drift = layoutHash && table.layoutHash && informative(table.layoutHash) && informative(layoutHash)
+    ? hashDistance(table.layoutHash, layoutHash)
+    : null;
+  if (drift != null && drift > tolerance) {
+    throw staleError(`the screen has moved too far from where these refs were numbered`
+      + ` (layout distance ${drift}, tolerance ${tolerance}) — the identity may be unchanged;`
+      + ' this is a pixel measurement, not a different screen');
   }
   const hit = table.refs.find((r) => r.ref === n);
   if (!hit) {

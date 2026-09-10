@@ -701,17 +701,29 @@ test('a ref numbered on one screen refuses to resolve on another', () => {
     'Save',
     'a guessed identity does not refuse a ref by itself',
   );
-  // At distance zero the recall is this screen, so a mismatch is real.
+  // At distance zero the recall is this screen, so a mismatch is real — and it
+  // says identity, because that is what it measured.
   assert.throws(
     () => resolveRef(udid, 1, { structuralHash: 'something-else', structuralDistance: 0 }),
-    /numbered on a different screen/,
+    /this is a different screen/,
   );
   // ...and the pixel backstop still refuses on its own, which is what covers
-  // the tolerant case above.
+  // the tolerant case above. It must NOT claim a different screen: reported
+  // three times in one session as `#4 was numbered on a different screen
+  // (03003714 → 03003714)`, a message asserting the screen changed while
+  // showing that it had not, because it printed eight characters of a
+  // 72-character perceptual hash whose leading characters routinely coincide.
+  // That is the whole reason this comparison is a distance against a tolerance.
   assert.throws(
     () => resolveRef(udid, 1, { structuralHash: 'something-else', structuralDistance: 7, layoutHash: '5'.repeat(72) }),
-    /numbered on a different screen/,
+    /moved too far from where these refs were numbered/,
   );
+  const drifted = (() => {
+    try { resolveRef(udid, 1, { structuralDistance: 7, layoutHash: '5'.repeat(72) }); return null; } catch (e) { return e.message; }
+  })();
+  assert.match(drifted, /layout distance \d+, tolerance \d+/, 'the measurement is shown, not a truncated hash');
+  assert.match(drifted, /not a different screen/);
+  assert.doesNotMatch(drifted, /→/, 'no hash prefixes, because they mislead here');
 
   // On the screen it was numbered on, a ref is a tap point.
   assert.equal(resolveRef(udid, 1, { structuralHash: 'aaaa1111' }).label, 'Save');
