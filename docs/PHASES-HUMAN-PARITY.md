@@ -97,6 +97,34 @@ we wait and how we describe it.
 
 ---
 
+## Phase 11.5 — Cheaper thinking: fewer, shorter model turns — **done 2026-09-10**
+
+Inserted before Phase 12 because it is not a faculty. Phases 11–16 reduce how
+*often* a decision reaches the model; this reduced how often the model believes
+it has to decide, and how much each turn carries. No new perception or action
+capability, and none of the verdict logic touched.
+
+The diagnosis is the part worth keeping, because it overturned the phase's own
+premise. `model_turns`/step in a real session is **0.56**, not the ~1.0 the
+prompt predicted, and 84% of calls were already batched. The cost is **short
+batches**: 48 of 62 calls were three steps or fewer, so a twelve-step flow
+arrived as five calls and every boundary was a think. And the largest single
+token cost was images — 28 of 62 calls returned one, roughly a third of the
+session — for a reason since fixed: the map could not report what a text field
+contained.
+
+Shipped: every tool description under 60 words with `sim_do` named as the
+cheapest path and `sim_look` leading with its price; a locally-computed `next:`
+line on every action result that says whether the model needs to think at all;
+body prose dropped from the default map (−15% across 14 recorded screens); and
+`SKILL.md` rebuilt around plan-once-execute-once with a worked recovery.
+
+Verified: both suite flows run end-to-end as **one** model turn each, asserts
+included, zero images. Numbers in `docs/BENCHMARKS.md`, baseline in
+`docs/ESCALATIONS.md`.
+
+---
+
 > **Before Phase 12, and before Phase 13, read the route in
 > `docs/DEFERRED.md`.** Five things now sit between here and Phase 12, and one
 > of them changes this file: the perception eval harness is written into Phase
@@ -297,3 +325,68 @@ Re-run `simframe hpi` and `simframe escalations` across the whole suite.
 Write `docs/HUMAN-PARITY.md`: the HPI trend from Phase 10 to now, the
 avoidable escalation rate trend, which faculties moved which numbers, and
 what remains. That document plus BENCHMARKS.md is the evidence for the article.
+
+---
+
+## Phase 17 — Local planner tier (a plan and a go/no-go, not a build)
+
+Not a build prompt. Nothing here should be written until Phase 16 is done and
+the test below has been run and passed.
+
+**The idea.** The daemon already turns a screen into text. A small on-device
+model can read that text and answer one narrow question — *given this goal and
+this element list, which element is the next action?* — in a few hundred
+milliseconds, with no network. It sits between the local intent matcher and
+Claude in the escalation ladder. Claude keeps every decision that needs real
+intelligence: new goals, unknown screens, failed verifications, anything wearing
+a destructive label.
+
+**Candidate.** Apple Foundation Models framework (macOS 26): an on-device ~3B
+text model, nothing to download, tool calling, constrained JSON via
+`@Generable`. Text-only, which is exactly right — it never sees pixels, only the
+element list. Fallback if AFM is unavailable or too weak: a ≤4B instruct model
+via MLX, Apache/MIT licence only, behind the same interface.
+
+**A rule has to change first, and it is not mine to change.** CLAUDE.md's fixed
+decisions forbid model calls inside the daemon. Phase 17 needs that amended to:
+*no **remote** model calls inside the daemon; an on-device model behind a flag
+is permitted for step selection only, never for planning a goal and never for
+overriding a verdict.* Recorded here rather than edited in, because a fixed
+decision should not be quietly loosened by the phase that wants it loosened.
+
+**Go/no-go, to be run before any build, using Phase 10's log:**
+
+1. Export 200 real `ambiguous_intent` and `no_plan` escalations, each with the
+   goal, the element list, the candidates, and the action Claude eventually took
+   as ground truth. Filter to one session id — the log pools agents, and the
+   breakdown warns when it might be doing so.
+2. Prompt the candidate offline with the same inputs. Measure top-1 agreement
+   with Claude's action, refusal rate, and latency.
+3. **Go** if agreement ≥85% on cases where Claude's action was verified `ok`,
+   zero destructive suggestions, and median latency ≤500 ms. Otherwise stay
+   deferred and revisit when the escalation mix has changed.
+
+One caution the log already justifies: at the time of writing, this device's
+escalations are 55 `ambiguous_intent` and 54 `verification_failed`, and
+`ambiguous_intent` is the reason a *ranking* bug produced all day. Export the
+200 after the ranking work has settled, or the ground truth will encode a bug.
+
+**If go, the build phase is:**
+
+- Ladder: intent matcher → local planner → Claude. The planner receives the
+  goal, a compact element list and the last verdict, and returns
+  `{element_ref, confidence}` or `{escalate: reason}`.
+- Hard limits: a confidence threshold taken from the go/no-go data; never on a
+  destructive label; never on an edge with a prior `unexpected-*`; at most one
+  planner attempt per step, then Claude.
+- Every planner decision is logged with a new outcome
+  `resolved_by_local_planner` and verified by verify-after-tap like any other
+  action. A wrong planner action counts against HPI_accuracy exactly as a wrong
+  Claude action would — the ladder does not get its own scoring.
+- Success metric: model turns per flow, `ambiguous_intent` and `no_plan` counts
+  before and after, HPI delta, planner precision.
+
+**Why not a full local agent.** A 7–8B model on an M-series machine is 1–3 s per
+decision — barely faster than Claude over the network, and far weaker at exactly
+the milestone decisions that matter. Narrow, fast, verifiable step selection is
+the only local job here with a clear payoff.

@@ -19,12 +19,29 @@ orphaned HID session** (the staleness gate was keyed on the process, so it
 could not fire in the MCP server; `simframe input reset` now exists and is what
 `doctor` prints).
 
-> **Status, end of 2026-09-10.** Everything down to Phase 12 is done except
-> item 11. Gate A (1, 14, 22) and Gate B (3, 4, 6, 8, 21) are complete; Gate C
-> is complete except item 11, with item 10 half done on purpose — its
-> measurement is in and nothing acts on it. Struck items keep their original
-> diagnosis where the diagnosis was wrong, because that is the instructive half.
-> **Phase 12 is the next thing.**
+> **Status, end of 2026-09-10 — read this first after a compact.**
+>
+> Gate A (1, 14, 22) and Gate B (3, 4, 6, 8, 21) are complete. Gate C is
+> complete except **item 11**, with item 10 half done on purpose — its
+> measurement is in and nothing acts on it. **Phase 11.5 is done** and released
+> in 0.11.0: the diagnosis overturned its own premise (batches are short, not
+> absent) and the fixes were tool descriptions under 60 words, a locally
+> computed `next:` line telling the model when it need not think, body prose
+> dropped from the map, and a rewritten SKILL. See `docs/BENCHMARKS.md`.
+>
+> Struck items keep their original diagnosis where the diagnosis was wrong,
+> because that is the instructive half.
+>
+> **Next, in order: item 11, then Phase 12.** Phase 17 is planned but must not
+> be built before Phase 16 and before its go/no-go passes — and it needs a
+> CLAUDE.md fixed-decision amendment that is the user's to make, not mine.
+>
+> After that, the CI speed work, which the user asked to confirm before it
+> lands: `concurrency: cancel-in-progress`; move the fingerprint distribution
+> check into the offline harness (−4.8 min and it stops flaking); take `bench`
+> off the push trigger (−15.2 min, it never gated); make the memory-layer
+> assertion tolerate a device that legitimately learned nothing. ~32 minutes of
+> simulator time per push down to ~11.
 
 ### P0 — the engine is learning wrong things, and everything else measures on top
 

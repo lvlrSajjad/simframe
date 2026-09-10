@@ -2657,3 +2657,71 @@ biased version and corrupted the graph inside an afternoon; the lesson taken was
 not "use a better estimator" but that a number earns the right to act by first
 being watched for a while doing nothing. Four edges over two runs is the start
 of that, not the end of it.
+
+## Phase 11.5 — cheaper thinking
+
+M4 Max, Xcode 26.0, iOS 26.5, iPhone 17 Pro. Baseline in `docs/ESCALATIONS.md`,
+"Phase 11.5 — thinking cost baseline".
+
+The phase's own hypothesis was that flows arrive one step at a time. They do
+not: `model_turns`/step is 0.56 and 84% of real calls are already batched. What
+the data shows instead is **short batches** — 48 of 62 calls were three steps or
+fewer, so a twelve-step flow arrived as five calls and every boundary was a
+think nothing had asked for.
+
+### What each change is worth
+
+| | before | after |
+|---|---|---|
+| tool descriptions, longest | 109 words | **60** |
+| tool descriptions over 60 words | 5 of 19 | **0** |
+| default screen map, 14 recorded screens | 8495 chars | **7202** (−15%) |
+| map rows | 167 | **154** |
+
+The map cut is body prose. On one Settings screen four of sixteen rows were the
+explanatory paragraph under each switch — 31% of that map's characters spent
+describing things nobody can tap. The rule is narrow on purpose: non-interactive
+only, outside the chrome regions only, and only past a length no label reaches,
+so a long *button* label survives. iOS writes whole sentences into those and
+they are still the thing you tap.
+
+### The `next:` line is a call saving, not a size saving
+
+It adds ~130 characters to a result, and on a single call it is roughly break-even
+against the map cut. That is not where its value is. It answers, locally and for
+free, the question that was producing the extra calls:
+
+```
+next: settled; screen known (0f660efb, 2 known exits); 16 elements;
+      nothing ambiguous — chain the next steps in one sim_do without looking again.
+```
+
+Everything in it was already computed while assembling the result. It reports
+the strongest reason to think first — flow stopped, screen still moving, screen
+unknown, labels repeat — and says "carry on" only when it can rule all four out.
+
+### Verified
+
+Both suite flows, run through the MCP tools as an agent would, each as a single
+call:
+
+| flow | steps | model turns | images |
+|---|---|---|---|
+| Settings → Accessibility → Display & Text Size → Larger Text + assert | 5/5 | **1** | 0 |
+| Contacts → Kate Bell + 2 asserts | 4/4 | **1** | 0 |
+
+Against a target of ≤2 turns each. Both include asserts, which is the point:
+the asserts are what make it safe not to look between steps.
+
+### What this phase cannot move, said plainly
+
+It cannot manufacture `ok` verdicts on an app nobody has driven before. The
+measured session had 6 `ok` against 43 `unverified` in 179 steps, because the
+graph was cold — and a cold graph means almost every step returns something the
+model has to interpret. That is Phase 12–16 work, not tool-surface work.
+
+Two caveats on the numbers above. The map and description figures are measured
+offline and exactly. The turn counts were measured through an MCP server process
+started before today's changes, so those two runs show the *old* result format —
+the turn count is real, the `next:` line and the prose cut are not visible in
+them and are verified by unit test and by the offline measurement instead.
