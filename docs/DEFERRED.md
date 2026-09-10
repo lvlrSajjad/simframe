@@ -163,10 +163,18 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
    must mean "changed after the dispatch returned", so the baseline has to be a
    frame captured after the action, not before the step. First thing to do.
 
-2. **The Phase 5 perception eval harness** — fifteen screens, three apps. It
-   gates 3, 4 and 11 below, Phase 13's ROI safety valve, and Phase 9. Every
-   threshold change since Phase 5 has shipped on unit tests and one eval run
-   because this does not exist.
+2. ~~**The Phase 5 perception eval harness** — fifteen screens, three apps.~~
+   **Done — `scripts/eval-perception.mjs`, 16 screens across 5 apps, 73
+   expectations, and it gates in CI.** Struck here rather than deleted because
+   the shape changed: the harness this entry described cannot exist. It wanted
+   to replay stored frames through perception and diff the element lists, and a
+   frame on disk is half the input — the tree is not in the frame and OCR runs
+   in the daemon against a live framebuffer. So the machine records the *input*
+   (the fused element list, as perception produced it) and a person authors the
+   *expected output*; everything downstream is a pure function, so resolution,
+   identity and change all check offline in a second with no simulator. What it
+   deliberately does **not** measure is whether perception found the elements at
+   all, which stays live in `eval-fingerprint.mjs` and the integration job.
 
 3. ~~**Small-delta taps are invisible to the change detector.**~~ **Done,
    2026-09-10 — and my own framing of it was wrong in a way worth keeping.**
@@ -2668,8 +2676,14 @@ rather than merely slowing a flow, so this needs the perception eval harness
 before it is trusted with a wait — which is the third phase in a row to want
 that harness.
 
-### The eval harness this project keeps needing does not exist
-Phase 5's perception eval harness — fifteen screens, three apps — is still
+### The eval harness this project keeps needing does not exist — it does now
+
+**Fixed. `scripts/eval-perception.mjs`, 73 expectations, green in CI** (see item
+2 in the priority list for why its shape is not the one this entry assumed). The
+original text is kept below because it is the record of what four separate fixes
+had to settle for in the meantime.
+
+Phase 5's perception eval harness — fifteen screens, three apps — was
 unbuilt, and the de-duplication fix wanted it. What that fix got instead: unit
 tests carrying the exact frames measured on the Contacts list, the tab-bar
 negative case that the old size cap existed to protect, and a re-run of
