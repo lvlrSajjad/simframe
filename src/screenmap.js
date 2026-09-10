@@ -54,6 +54,31 @@ export const DEFAULT_TOLERANCE = 20;
 /** Comparison that ignores what OCR adds — a caret, a stray glyph, spacing. */
 const alnum = (v) => String(v ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
+/**
+ * May an OCR word be recorded as an alias of the element enclosing it?
+ *
+ * Only when they are plausibly the same thing. A row labelled "Kate Bell"
+ * containing OCR's "Kate Bell" is one element two sensors saw; a sheet's
+ * "Area (Optional)" enclosing a dimmed page's "Exterior Building" is two things
+ * at one coordinate on different z-layers, and aliasing them reads as though
+ * the field contains that value.
+ *
+ * An element with **no label** takes the text outright — that is how an
+ * icon-only control gets a name, and it cannot contradict a label it does not
+ * have.
+ *
+ * A function rather than three lines inline, because the inline version read
+ * `covering.label` before anything checked that `covering` existed, and the
+ * TypeError that followed was swallowed by the OCR try/catch — silently
+ * disabling the sensor. A pure function can be tested with the value that broke
+ * it, and the source-shape assertion this replaces could not.
+ */
+export function aliasRelates(coveringLabel, text) {
+  const own = alnum(coveringLabel);
+  const seen = alnum(text);
+  return !own || !seen || own.includes(seen) || seen.includes(own);
+}
+
 export function recall(udid, hash) {
   if (!hash) return null;
   const entry = store.readJson(path.join(mapDir(udid), `${hash}.json`));
@@ -318,20 +343,26 @@ export async function build(udid, {
         // that still holds. An *unlabelled* element still takes the text
         // outright, because that is how an icon-only control gets a name at all,
         // and it cannot contradict a label it does not have.
-        const own = alnum(covering.label);
-        const seen = alnum(w.text);
-        const relates = !own || !seen || own.includes(seen) || seen.includes(own);
-        if (covering && relates) {
-          covering.aliases = [...(covering.aliases || []), w.text];
-          // Keep the ax role and frame — it is the hit target — and record that
-          // both sensors saw it. Anything asking "is this the tree's element?"
-          // must ask matching.isAxTarget, not `=== 'ax'`.
-          if (!String(covering.source ?? '').includes('ocr')) {
-            covering.source = `${covering.source ?? 'ax'}|ocr`;
+        // NOTE the nesting, which is the whole point of this shape: `covering`
+        // is undefined whenever no ax element encloses this word, which is most
+        // words on most screens. Reading `covering.label` before checking that
+        // threw a TypeError inside the OCR try/catch — so the entire OCR pass
+        // was swallowed and reported as `degraded: text recognition`, silently
+        // disabling the sensor on every screen with one uncovered word. Neither
+        // the unit tests nor the perception harness caught it: the harness feeds
+        // *already fused* element lists, so it never runs this loop. The
+        // integration job caught it, which is what it is for.
+        if (covering) {
+          if (aliasRelates(covering.label, w.text)) {
+            covering.aliases = [...(covering.aliases || []), w.text];
+            // Keep the ax role and frame — it is the hit target — and record
+            // that both sensors saw it. Anything asking "is this the tree's
+            // element?" must ask matching.isAxTarget, not `=== 'ax'`.
+            if (!String(covering.source ?? '').includes('ocr')) {
+              covering.source = `${covering.source ?? 'ax'}|ocr`;
+            }
+            continue;
           }
-          continue;
-        }
-        if (covering && !relates) {
           // Rejected as an alias, so it falls through and becomes an element of
           // its own — which is what it is. Marked, because "these two things
           // overlap and disagree" is exactly the shape of an occluding layer,

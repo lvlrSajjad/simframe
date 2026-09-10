@@ -3529,9 +3529,27 @@ test('an alias must be the same thing read twice, not two layers at one point', 
   // takes an alias related to its own label. An unlabelled one still takes the
   // text outright, because that is how an icon-only control gets a name, and it
   // cannot contradict a label it does not have.
-  assert.match(src, /const relates = !own \|\| !seen \|\| own\.includes\(seen\) \|\| seen\.includes\(own\)/);
-  assert.match(src, /if \(covering && relates\)/);
+  const { aliasRelates } = await import('../src/screenmap.js');
+  assert.equal(aliasRelates('Kate Bell', 'Kate Bell'), true, 'one element, two sensors');
+  assert.equal(aliasRelates('Area (Optional)', 'Exterior Building'), false, 'two layers at one point');
+  assert.equal(aliasRelates('Telephone:', 'Telephone: 5551234567'), true, 'OCR fuses a value onto its label');
+  // An unlabelled element takes the text outright: that is how an icon-only
+  // control gets a name, and it cannot contradict a label it does not have.
+  assert.equal(aliasRelates(undefined, 'Search'), true);
+  assert.equal(aliasRelates('', 'Search'), true);
+  assert.equal(aliasRelates('Save', ''), true);
   assert.match(src, /occluded\.push\(/);
+
+  // This is a function rather than three lines inline for a reason worth
+  // keeping. Inline, it read `covering.label` BEFORE anything checked that
+  // `covering` existed — and it is undefined whenever no ax element encloses
+  // the word, which is most words on most screens. The TypeError was swallowed
+  // by the OCR try/catch, so the whole sensor went quiet and reported itself as
+  // `degraded: text recognition`. Neither the unit tests nor the perception
+  // harness caught it, because the harness feeds ALREADY FUSED element lists
+  // and never runs that loop; the integration job caught it, which is what it
+  // is for. The previous version of this test asserted the buggy source shape.
+  assert.doesNotThrow(() => aliasRelates(undefined, 'anything'));
 
   // And the disagreement is reported, because "these two overlap and disagree"
   // is the signature of a covering layer and a caller counting options needs it.
