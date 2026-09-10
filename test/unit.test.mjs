@@ -3511,6 +3511,15 @@ test('a value simframe wrote and can no longer see is reported, and nothing else
     [{ label: 'Telephone:' }, { label: '5551234567' }],
   ]) assert.deepEqual(wrote.missing(udid, rows), [], JSON.stringify(rows));
 
+  // A longer label that merely contains the selector is a different field. The
+  // first field run after this shipped matched a journalled "Email" against the
+  // page footer's newsletter box, "Enter your email address", and announced a
+  // value gone that was simply elsewhere on the page.
+  wrote.record(udid, { selector: 'Email', value: 'sadjad@example.com' });
+  assert.deepEqual(wrote.missing(udid, [{ label: 'Enter your email address' }, { label: 'Subscribe Now' }]), []);
+  // ...while the field's own row, which begins with the label, still counts.
+  assert.equal(wrote.missing(udid, [{ label: 'Email' }, { label: 'Your email address' }]).length, 1);
+
   // Somewhere else entirely says nothing. Without the label there is no way to
   // tell "the field was cleared" from "we navigated away", and guessing would
   // put a false alarm on every screen change.
@@ -3524,7 +3533,7 @@ test('a value simframe wrote and can no longer see is reported, and nothing else
   // Re-filling a field replaces its entry, so a field filled twice cannot warn
   // about its own earlier contents.
   wrote.record(udid, { selector: 'Telephone:', value: '9998887777' });
-  assert.equal(wrote.read(udid).length, 1);
+  assert.equal(wrote.read(udid).filter((e) => e.selector === 'Telephone:').length, 1, 'one entry per field');
   assert.deepEqual(wrote.missing(udid, [{ label: 'Telephone: 9998887777' }]), []);
   assert.equal(wrote.missing(udid, emptied).length, 1);
 

@@ -100,7 +100,15 @@ export function missing(udid, targets, { now = Date.now() } = {}) {
     const label = alnum(e.selector);
     const value = alnum(e.value);
     if (!label || !value) continue;
-    if (!haystack.some((h) => h.includes(label))) continue;
+    // `startsWith`, not `includes`. A field's row begins with its own label —
+    // and OCR fuses the value onto the end of it ("Telephone: 5551234567"),
+    // which is why this cannot be an equality test. A substring test looked
+    // equivalent and was not: on the very first field run after this shipped, a
+    // journalled "Email" matched the page footer's newsletter box, "Enter your
+    // email address", and announced a value gone that was merely on a different
+    // part of the page. A false alarm here teaches an agent to ignore the line,
+    // which costs more than the line is worth.
+    if (!haystack.some((h) => h.startsWith(label))) continue;
     if (haystack.some((h) => h.includes(value))) continue;
     gone.push(e);
   }
