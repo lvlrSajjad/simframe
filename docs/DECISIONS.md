@@ -385,3 +385,39 @@ expectations, offline, one second in CI (`scripts/eval-perception.mjs`). One of
 the three reasons has therefore expired. The other two have not, and the order
 that respects them is unchanged: template bank and contours, then a real recall
 number on a11y-poor screens, then Phase 9 is a decision with evidence behind it.
+
+## 2026-09-11 — the supervisor's answer space: verified, and one word to be added
+
+**The safety property is real at the sampling layer.** `@Generable` enum
+constraints are enforced by logit masking during decoding — Apple's own words,
+WWDC25 session 301 and Tech Report arXiv:2507.13575 §7 — so a word outside
+`wait`/`retry`/`stop` is not rejected after generation, it is unrepresentable.
+"The answer space *is* the safety property" was a design intention when it was
+written and is now a mechanical fact. Registered because we have been wrong
+before about claims we found appealing, and this one turned out to be true.
+
+**Decided: add an `abstain`, and never a fourth action.** Both of the
+supervisor's non-clean rulings were missing-vocabulary cases — a control needing
+the page zoomed out, content a scroll had gone past. The tempting fix is a
+fourth action word, which would widen what the component can do and spend
+exactly the property above. An abstain does not: it raises coverage while
+mapping onto the safe default we already have, where no answer means the
+executor proceeds as if unsupervised. Selective prediction is the name for it
+(Chow 1970; El-Yaniv & Wiener 2010).
+
+**Decided: 97 is promoted ahead of 96.** The abstain token is cheap and lands a
+reliability win; the 2x2 is four cells of device time that settles attribution
+rather than improving anything. Filing the cheap fix behind the expensive
+experiment is the "research instead of act" habit the owner has already caught
+us in once, and Fable named it independently.
+
+**Not decided, and flagged.** A guided-generation regression — empty token
+masks, severe slowdowns — is reported on macOS 27 betas 5-7 (FB24310823). Our
+safety claim rests on that mechanism, so it is re-verified before we move to 27,
+not assumed.
+
+**Pre-registered thresholds**, written down now so they cannot move later. If
+briefing-only recovers ≥80% of the calls that briefing-plus-model does, the
+model becomes a `stop`-only, abstain-capable cascade stage. If a p95-per-edge
+graph lookup would have got ≥70% of past `wait`/`retry` rulings right, the graph
+answers first and the model sees only the remainder.

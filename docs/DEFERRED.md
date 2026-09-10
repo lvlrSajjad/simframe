@@ -95,11 +95,34 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 >    result, and flag low-confidence taps on partially occluded elements.
 > 6. **88** — lead with intent resolution rather than refs. **Done for the
 >    README and the SKILL**; the MCP tool descriptions still lead with `#3`.
-> 7. **96 before any further supervisor claim.** The A/B is inside the noise
->    band and needs the full 2x2 with repeated cells.
-> 8. **97** — conformal abstention and Dempster-Shafer. Least urgent, most
->    likely to matter in a year, and the weight-free subset is adoptable under
->    the no-shipped-weights non-goal.
+> 7. **100 and 99 — the supervisor's cheap reliability wins**, and they come
+>    *before* the experiment now. A second research round (06) says so
+>    explicitly, and it is right: both of our problem rulings were **abstention**
+>    cases, not experiment-design questions. 100 adds an `abstain` token — the
+>    one addition that raises coverage without widening what the component can
+>    do. 99 swaps our improvised warm for `prewarm()` and adds a `tokenCount`
+>    budget check against the now-queryable `contextSize`, so we never re-enter
+>    the context-window failure we hit at seven judgements.
+> 8. **101's measurement, which is free.** What fraction of past `wait`/`retry`
+>    rulings would a p95-per-edge lookup have got right? It runs on logs we
+>    already have, and above ~70% the component's shape changes: the graph
+>    answers first and the model is consulted mainly for `stop`.
+> 9. **96 before any further supervisor claim.** The A/B is inside the noise
+>    band and needs the full 2x2 with repeated cells — its critical arm being
+>    **briefing, no model**. Pre-registered threshold: if briefing-only recovers
+>    ≥80% of what briefing-plus-model does, the model becomes a `stop`-only,
+>    abstain-capable cascade stage.
+> 10. **102-105** — trim the instruction into the schema, accumulate briefings
+>    against `screen_hash` *and expire them*, report cost on five axes, and
+>    instrument the benign guardrail-refusal rate.
+> 11. **97** — the rest of conformal abstention and Dempster-Shafer, beyond the
+>    abstain token that 100 lands. The weight-free subset is adoptable under the
+>    no-shipped-weights non-goal.
+>
+> **The `@Generable` safety claim is verified**, and at the layer we hoped:
+> constraints are enforced by **logit masking at sampling** (Apple's own words,
+> WWDC25 301), so a fourth word is unrepresentable rather than rejected after the
+> fact. Watch FB24310823 — a guided-generation regression on macOS 27 betas 5-7.
 >
 > Older queue, unchanged: item 11 (the structural window), 71 (`choose`), 72
 > (`sweep` measured with `ax-first`), 61's remaining half, and 62-70.
@@ -439,6 +462,134 @@ signature is not confirmed until the binary states its own prototype.
    actually asked for; and a refusal to land in a region the map itself will not
    publish. Cheap, and the second one is a rule we already state elsewhere and
    do not enforce on this path. Worth doing before the next peer round.
+
+### The supervisor mechanism answered — `docs/research/06-supervisor-mechanism.md`, 2026-09-11
+
+A second brief, asked after the owner pointed out that **speed was never the
+only metric — tokens are one too**, which is right and is our own headline
+number. Seven questions about the mechanism itself, not about how to measure it;
+the experimental design was already settled by 05. Items 99-105, and it
+**reorders the queue**, which is the part that matters.
+
+**The safety claim is verified, at the layer we hoped.** `@Generable` enum
+constraints are enforced by **logit masking at sampling**, in Apple's own words
+(WWDC25 session 301; Tech Report arXiv:2507.13575 §7): invalid tokens are masked
+out of the distribution at every step, so a fourth word is not rejected after the
+fact — it is unrepresentable. "The answer space *is* the safety property" was
+written as a design intention and is now a mechanical fact. Two caveats travel
+with it: a guided-generation regression (empty token masks, severe slowdowns) is
+reported on **macOS 27 betas 5-7** (FB24310823), and this claim is worth
+re-verifying before we move; and guardrails do refuse benign prompts, at a rate
+nobody has published.
+
+**Three of our own findings were confirmed from outside.** The briefing is doing
+most of the work, and the literature agrees emphatically — Voyager without its
+skill library lost **15.3x** in milestone speed, AWM reports **24.6% and 51.1%**
+relative success-rate gains, Contextual Experience Replay **~51%**. A model is
+the wrong mechanism for most of `wait`. And **k=3 is a good number**: AutoGuide's
+own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
+"overthink".
+
+99. **`prewarm()` and a token budget, replacing what we improvised.** Both halves
+   of the context-window bug now have supported answers. **4,096 tokens is the
+   fixed, documented ceiling, input and output combined** — and since 26.4 it is
+   *queryable*: `SystemLanguageModel.contextSize` and `model.tokenCount(for:)`,
+   so the budget can be checked before a call rather than discovered at the
+   failure. The error can fire below the limit because the response needs
+   headroom too. There is **no transcript-pruning API**, so fresh-session-per-
+   judgement is not our workaround — it is the intended pattern, confirmed.
+   And `LanguageModelSession.prewarm()` is the supported warm; our throwaway
+   `respond` is heavier than needed and loads the same weights the hard way.
+   Model residency is process- and system-managed, so the expensive part
+   survives a session's disposal. Also worth acting on: a session handles
+   **exactly one request at a time** (`isResponding`; concurrent calls throw
+   `rateLimited`), and the `GenerationError` cases want different triage —
+   `exceededContextWindowSize` is recoverable by rebuilding, `guardrailViolation`
+   and `unsupportedLanguageOrLocale` are not, so a blanket retry burns battery
+   for nothing.
+
+100. **An `abstain` token is the one word worth adding**, and it is the concrete
+   first move of 97 rather than a fourth item of vocabulary. Both of our
+   problem rulings were **missing-vocabulary** cases — a control needing the page
+   zoomed out, content a scroll had gone past — not reasoning failures. Adding a
+   fourth *action* word widens what the component can do and costs the safety
+   property. Adding an *abstain* does not: it raises coverage while mapping onto
+   the safe default we already have, where no answer means the executor behaves
+   exactly as it does unsupervised. This is textbook selective prediction
+   (Chow 1970; El-Yaniv & Wiener 2010), and the risk-coverage threshold is
+   calibrated on a small held-out set rather than learned.
+
+101. **The graph should answer `wait` before the model is asked.** Deterministic
+   waiting is a solved pattern outside us — Selenium's explicit and fluent waits,
+   Playwright's actionability auto-waiting — and **our transition graph with p95
+   per edge already is a learned wait policy**. "Has this edge historically taken
+   longer than this?" is a lookup, not a judgement, and `retry` is similarly
+   amenable to a history-and-backoff rule. `stop` is the one that genuinely reads
+   plan-level intent. The measurement comes first and is cheap: **what fraction
+   of our past `wait`/`retry` rulings would a p95 lookup have got right?** It runs
+   on logs we already have. Above roughly 70%, restructure into a cheap-first
+   cascade — graph answers, model sees only the remainder — which is FrugalGPT's
+   shape applied to our own stack.
+
+102. **Move the vocabulary into the schema and cut the instruction.** Our ~350-word
+   instruction is re-tokenised and re-prefilled on **every** judgement, because
+   each is a fresh session and there is no cross-session KV reuse. Guided
+   generation exists precisely so format and vocabulary need not be stated in
+   prose — the schema carries them. Cut to the evidence-ordering rule alone, and
+   measure decision quality and per-call latency with `tokenCount`. Cheapest
+   experiment on the list and it attacks a per-call cost.
+
+103. **Briefings should accumulate, and they must expire.** The accumulation half
+   is well-trodden — AutoGuide, ExpeL, AWM, Voyager's skill library, CLIN, ACE —
+   and our per-screen graph is the natural store: attach the note that would have
+   prevented a failure to a `screen_hash` node and offer it to the next run's
+   planner. The expiry half is the one we would otherwise get wrong. **"Honest
+   Lying: Understanding Memory Confabulation in Reflexive Agents"** (arXiv:
+   2605.29463) reports a no-memory ablation solving environments a
+   memory-augmented agent could not, and a confabulated rule with two votes
+   becoming entrenched and misapplied everywhere. That is this project's own
+   recurring failure wearing a new coat. So: version briefings against
+   `screen_hash`, revalidate when the signature changes, and prefer parsed
+   failure signals to open-ended self-diagnosis — the same paper raised
+   correct-object mention from 0% to 86% by making exactly that swap. We already
+   hide the supervisor's prose reason; this is the same instinct, generalised.
+
+104. **Report cost on five axes and stop collapsing them.** The convention worth
+   adopting: model calls, input tokens, output tokens, wall clock, and a
+   step-efficiency ratio, kept separate — precisely because a saved call also
+   removes a screenshot, so calls and tokens are not proportional. That is the
+   owner's point, formalised. OSWorld-Human's **Weighted Efficiency Score**
+   penalises inefficient successful and failed trajectories separately and is the
+   nearest published convention. **Our "recovery-call fraction" is a coinage** —
+   the field measures the same quantity as a time or step fraction, and
+   OSWorld-Human's finding that planning and reflection consume **75-94% of total
+   task time** is the analogous published result. Keep the name, define it
+   explicitly, and cite the analogue rather than implying a standard.
+
+105. **Instrument the benign guardrail-refusal rate.** Guardrails do refuse
+   ordinary content, sometimes for a Siri locale mismatch rather than anything in
+   the prompt, and **the rate is not published for anyone's corpus, let alone UI
+   text**. Our handling is already the safe one — a refusal becomes "no answer"
+   and the executor proceeds unsupervised — but we cannot currently say how often
+   it happens, which means we cannot tell a quiet model from a working one. The
+   same instrumentation answers it: log the literal reason string, since the
+   concrete types behind these cases have shifted across 26.x dot-releases.
+
+**Ordering, revised — and the reason is a habit we said we would break.** Fable's
+recommendation is explicit: **promote 97 ahead of 96.** Both of our problematic
+rulings were abstention cases, not experiment-design questions; the abstain token
+is cheap, preserves the safety property, and is the highest reliability-per-effort
+change available. Filing it behind a four-cell experiment "repeats the research-
+instead-of-act habit you're trying to break", which is fair and is exactly what
+the owner caught us doing last round. So: **100 (abstain) and 99 (prewarm and the
+token budget) first**, then **101's log measurement**, which is free and could
+restructure the component, then **96** with its critical "briefing, no model" arm,
+then 102-105.
+
+The threshold that would change the design, stated in advance so we cannot move
+it afterwards: **if briefing-only recovers 80% or more of the calls that
+briefing-plus-model does, the model becomes a `stop`-only, abstain-capable
+cascade stage.** And for 101: **at 70% or more, the graph answers first.**
 
 **Ordering.** 89-92 are cheap and independent; 91 changes what we investigate
 rather than adding work. 93 and 94 together are the sweep fix and should be done
