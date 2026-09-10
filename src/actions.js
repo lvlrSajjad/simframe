@@ -425,24 +425,27 @@ export async function runScript(
         const kind = afterState.transition?.kind;
         const afterScreen = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, confirmNovel });
         verification = {
-          ...stillArriving(
-            belowThreshold(
-              graph.verdict({
-                udid,
-                prediction,
-                before: beforeScreen,
-                // The whole reading, not just its name: it carries the tokens
-                // that let `nearestScreen`'s similarity tolerance recognise a
-                // screen whose content has changed. Passing hashes here is what
-                // made `unexpected-screen` fire on every run that varied its
-                // test data.
-                after: afterScreen,
-                kind,
-                action: step.action,
-              }),
-              settled,
+          ...withWayBack(
+            stillArriving(
+              belowThreshold(
+                graph.verdict({
+                  udid,
+                  prediction,
+                  before: beforeScreen,
+                  // The whole reading, not just its name: it carries the tokens
+                  // that let `nearestScreen`'s similarity tolerance recognise a
+                  // screen whose content has changed. Passing hashes here is
+                  // what made `unexpected-screen` fire on every run that varied
+                  // its test data.
+                  after: afterScreen,
+                  kind,
+                  action: step.action,
+                }),
+                settled,
+              ),
+              afterScreen,
             ),
-            afterScreen,
+            { udid, from: beforeScreen, landed: afterScreen },
           ),
           predicted: prediction ? { to: prediction.to.slice(0, 10), kind: prediction.kind, seen: prediction.count } : null,
           observed: { to: afterScreen.hash?.slice(0, 10), kind },
@@ -700,6 +703,45 @@ export function readbackNote(sent, seen) {
 }
 
 /**
+ * Say the way back, in the same breath as saying we went the wrong way.
+ *
+ * The owner's generalisation of the recovery problem, and it is the right one:
+ * *"I go to Instagram, misclick a like button — humans aren't as accurate as
+ * bots. I notice immediately, I go back or I remove the like. No need to think
+ * for minutes and scan the whole of Instagram's philosophy. I use what I see."*
+ *
+ * That recovery needs no knowledge of the app at all. It needs to notice, and
+ * to know the way back — and simframe already has both. `unexpected-screen`
+ * notices in about 200ms, and `graph.route` can compute a path from where we
+ * landed to where we were, from edges already recorded.
+ *
+ * It just never said so. The step threw, the batch died, and a model round trip
+ * was spent deciding something the graph could already answer. This does not
+ * remove the round trip — going back changes what happens next, so a person
+ * should still choose it — but it makes one round trip sufficient instead of the
+ * three to six the field reports spent working out where they were.
+ */
+export function wayBack(udid, from, landed, { graph: g = graph } = {}) {
+  const fromHash = typeof from === 'string' ? from : from?.hash;
+  const landedHash = typeof landed === 'string' ? landed : landed?.hash;
+  if (!udid || !fromHash || !landedHash || fromHash === landedHash) return null;
+  let path;
+  try {
+    path = g.route(udid, landedHash, fromHash, { maxDepth: 3 });
+  } catch {
+    return null;
+  }
+  if (!path?.length) return null;
+  const steps = path.map((e) => {
+    const st = e.step ?? {};
+    const label = st.value ?? st.target ?? st.label ?? st.into;
+    return label ? `${st.action ?? 'tap'} ${JSON.stringify(String(label).slice(0, 28))}` : (st.action ?? 'tap');
+  });
+  return `back to where you were: ${steps.join(' then ')}`
+    + (path.length === 1 && path[0].count > 1 ? ` (seen ${path[0].count}x)` : '');
+}
+
+/**
  * Do not call a screen a wrong turn while it is still arriving.
  *
  * `unexpected-screen` fired three times in one reported run and was wrong all
@@ -717,6 +759,12 @@ export function readbackNote(sent, seen) {
  * different test asset changes the content and the check reads it as a wrong
  * turn. That needs structural comparison and is filed, not fixed.
  */
+export function withWayBack(verification, { udid, from, landed, graph: g } = {}) {
+  if (verification?.verdict !== 'unexpected-screen') return verification;
+  const route = wayBack(udid, from, landed, g ? { graph: g } : undefined);
+  return route ? { ...verification, detail: `${verification.detail} — ${route}` } : verification;
+}
+
 export function stillArriving(verification, afterScreen) {
   if (verification?.verdict !== 'unexpected-screen') return verification;
   if (afterScreen?.loading !== true) return verification;

@@ -2590,6 +2590,54 @@ test('the graph hands over its vocabulary instead of counting it', async () => {
   assert.match(hint, /Known to work here: tap "Anaheim", tap "4 Casa"/);
 });
 
+test('a wrong turn is reported with the way back', async () => {
+  const actions = await import('../src/actions.js');
+
+  // The owner's generalisation, and it is the right one: "I go to Instagram,
+  // misclick a like button — humans aren't as accurate as bots. I notice
+  // immediately, I go back or I remove the like. No need to think for minutes
+  // and scan the whole of Instagram's philosophy. I use what I see."
+  //
+  // That recovery needs no knowledge of the app. It needs to notice and to know
+  // the way back, and simframe has both already: `unexpected-screen` notices in
+  // about 200ms, and `graph.route` can compute a path from where we landed to
+  // where we were, out of edges already recorded. It simply never said so — the
+  // step threw and a round trip was spent deciding what the graph could answer.
+  const fakeGraph = {
+    route: (udid, from, to) => (from === 'landed' && to === 'origin'
+      ? [{ step: { action: 'tap', value: 'Back' }, count: 6 }]
+      : null),
+  };
+  const route = actions.wayBack('TEST-back', { hash: 'origin' }, { hash: 'landed' }, { graph: fakeGraph });
+  assert.match(route, /back to where you were: tap "Back"/);
+  assert.match(route, /seen 6x/);
+
+  // No route, no claim. Guessing a way back is worse than saying nothing.
+  assert.equal(actions.wayBack('TEST-back', { hash: 'origin' }, { hash: 'elsewhere' }, { graph: fakeGraph }), null);
+  // And nothing to say when we did not move.
+  assert.equal(actions.wayBack('TEST-back', { hash: 'origin' }, { hash: 'origin' }, { graph: fakeGraph }), null);
+  assert.equal(actions.wayBack(null, { hash: 'a' }, { hash: 'b' }, { graph: fakeGraph }), null);
+
+  // It rides on the verdict that reports the wrong turn, and on no other.
+  const wrong = actions.withWayBack(
+    { verdict: 'unexpected-screen', detail: 'expected the screen this action reached 6x before, and landed somewhere else' },
+    { udid: 'TEST-back', from: { hash: 'origin' }, landed: { hash: 'landed' }, graph: fakeGraph },
+  );
+  assert.match(wrong.detail, /landed somewhere else — back to where you were/);
+  const fine = { verdict: 'ok', detail: 'matches the outcome seen 7x before' };
+  assert.equal(actions.withWayBack(fine, { udid: 'TEST-back', from: { hash: 'origin' }, landed: { hash: 'landed' }, graph: fakeGraph }).detail, fine.detail);
+
+  // And the real graph answers it too, from edges it recorded itself.
+  const graph = await import('../src/graph.js');
+  const udid = 'TEST-wayback';
+  const origin = { hash: 'a'.repeat(32), tokens: ['text:nav-bar:@title:w5:h1:x5:y2#1"feed"'] };
+  const landed = { hash: 'b'.repeat(32), tokens: ['text:nav-bar:@title:w5:h1:x5:y2#1"profile"'] };
+  for (let i = 0; i < 2; i += 1) {
+    graph.record(udid, { from: landed, action: { action: 'tap', value: 'Back' }, to: origin, kind: 'pop' });
+  }
+  assert.match(actions.wayBack(udid, origin, landed) ?? '', /tap "Back"/);
+});
+
 test('filling a field is verified once, after the fact', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');

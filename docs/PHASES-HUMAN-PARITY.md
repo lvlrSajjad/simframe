@@ -414,6 +414,43 @@ rather than folded into Phase 12. Recorded with the failed rule attached,
 because a rule that cries wolf on every unfinished form is exactly the kind of
 threshold this project has shipped before and had to revert.
 
+**And the owner generalised it, which split the problem in two.** *"It was an
+example — I can act like that in any new environment. I go to Instagram, misclick
+a like button; humans aren't as accurate as bots. I notice immediately, I go back
+or I remove the like. No need to think for minutes and scan the whole of
+Instagram's philosophy. I use what I see."*
+
+That is a different class from the location example, and the difference is the
+whole design:
+
+- **Convention-recoverable.** A misclick, a wrong push, an accidental toggle.
+  Recovery needs no knowledge of the app — back, undo, tap it again. Every app
+  has these because every UI toolkit has these.
+- **Rule-blocked.** The empty asset list. Recovery needs to know the app's
+  rules, and no amount of looking at the screen supplies them.
+
+The first class was **already answerable and simply unsaid**, which is the more
+embarrassing finding. `unexpected-screen` notices a wrong turn in about 200ms,
+and `graph.route` can compute a path from where we landed back to where we were
+out of edges already recorded. The step threw anyway, the batch died, and a model
+round trip was spent deciding what the graph could have answered. So a wrong turn
+now reports the way back with it:
+
+```
+FAIL [0] tap: unexpected-screen: expected the screen this action reached 6x
+     before, and landed somewhere else — back to where you were: tap "Back" (seen 6x)
+```
+
+No model, no new state, and it does not take the action — going back changes what
+happens next, so the reasoner still chooses. It makes **one** round trip
+sufficient instead of the three to six the field reports spent working out where
+they were.
+
+Which sharpens what is actually left for a local model: not noticing, and not
+the conventional recovery. What is left is the tail where convention does not
+apply and the app's rules do — and the **compression** job below, which is
+class-independent.
+
 **The safety property that makes it buildable: one-directional authority.**
 
 The local tier may only ever move a decision *toward* caution:
