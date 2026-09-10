@@ -30,8 +30,16 @@ import * as regions from './regions.js';
  *     list screen. Same rules, different input, therefore different hashes —
  *     and a stored hash that can never match again is the quietest kind of
  *     wrong, which is what this counter exists to prevent.
+ * 5 — a phantom keyboard was deleting screens' content from their identity. A
+ *     dozen short text rows of uniform height stacked low on a read-only
+ *     summary satisfied every size-and-uniformity test for a keyboard, and
+ *     `tokens` discards everything below `keyboardTop` — so two screens of one
+ *     wizard, sharing a nav title and a step indicator, collapsed onto a single
+ *     hash. `detectKeyboardTop` now requires the small uniform boxes to be
+ *     key-shaped. Every screen with content in its lower half hashes
+ *     differently, so the stored graph and maps must go.
  */
-export const TOKEN_RULES_VERSION = 4;
+export const TOKEN_RULES_VERSION = 5;
 
 /** Frames are quantised to this, so sub-pixel drift and a nudged row do not matter. */
 export const GRID = 24;

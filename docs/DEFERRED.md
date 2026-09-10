@@ -47,6 +47,24 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > no-go, the two reverts, the false premises — are indexed in
 > `docs/DECISIONS.md`.
 >
+> **Items 41, 42 and 43 are done — one root cause, three findings, 2026-09-10.**
+> A phantom keyboard was deleting screens' content from their own identity: a
+> dozen short text rows of uniform height stacked low on a read-only summary
+> satisfied every size-and-uniformity test for a keyboard, and
+> `fingerprint.tokens` discards everything below `keyboardTop`. So two screens
+> of one wizard, sharing a nav title and a step indicator, collapsed onto one
+> hash — which is what offered one screen's remembered controls on the other,
+> and what made `locate` resolve against the wrong screen's stored elements so
+> `assert` denied a string the map printed four lines below. `detectKeyboardTop`
+> now requires the small uniform boxes to be **keys**, and `TOKEN_RULES_VERSION`
+> is 5 so the stored graph and maps are discarded.
+>
+> Item 43 separately: `nearestScreen` has always had a token-similarity
+> tolerance for content variation, and the verification path threw it away by
+> passing bare hash strings. It passes the whole reading now. **Next: item 44**
+> (open a batch against a remembered screen with no read), then the local-triage
+> question, then Phase 12's cheap half.
+>
 > **Round 5 fixed the safety hole its own new feature opened** — remembered
 > vocabulary is now checked against the screen, and a disagreement outranks
 > "carry on" — plus `unexpected-screen` while loading, the false focus warning,

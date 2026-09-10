@@ -2590,6 +2590,116 @@ test('the graph hands over its vocabulary instead of counting it', async () => {
   assert.match(hint, /Known to work here: tap "Anaheim", tap "4 Casa"/);
 });
 
+test('a screen whose data changed is still the screen it is', async () => {
+  const graph = await import('../src/graph.js');
+  const fingerprint = await import('../src/fingerprint.js');
+  const udid = 'TEST-variance';
+
+  // `unexpected-screen` fired three times in one reported run and was wrong all
+  // three; two were this. The tester picked a different asset than earlier runs
+  // had, so the content differed, so the hash differed, so a correct navigation
+  // was called a wrong turn: "this will fire on every run that varies its test
+  // data — i.e. every useful run." And a failed step abandons the rest of its
+  // batch, so each false alarm costs a round trip.
+  //
+  // `nearestScreen` has always had a token-similarity tolerance for exactly
+  // this. The verification path threw it away by passing bare hash strings, and
+  // a string carries no tokens, so only an exact hash could match.
+  const base = ['group:content:w17:h6:x0:y16#many', 'text:content:w0:h1:x1:y4#many',
+    'button:content:w9:h2:x1:y19#1', 'text:nav-bar:@title:w5:h1:x5:y2#1"create service request"'];
+  const varied = [...base.slice(0, 3), 'text:nav-bar:@title:w5:h1:x5:y2#1"create service request"',
+    'text:content:w3:h1:x2:y11#1'];
+
+  const from = { hash: fingerprint.hashTokens(base), tokens: base };
+  const reached = { hash: fingerprint.hashTokens(varied), tokens: varied };
+  assert.notEqual(from.hash, reached.hash, 'different data really is a different hash');
+
+  // The target has to exist as a node for its tokens to be on file — a node is
+  // created for the screen an action was taken *on*.
+  graph.record(udid, { from, action: { action: 'tap', value: 'REVIEW' }, to: { hash: 'bbbb2222', tokens: ['y:content:w1:h1:x1:y1#1'] }, kind: 'push' });
+
+  const prediction = { to: from.hash, count: 3, kind: 'push' };
+  // Passing the reading lets the tolerance recognise it; passing the bare hash
+  // is the old behaviour and is kept for a stored prediction with no tokens.
+  const withTokens = graph.verdict({ udid, prediction, before: { hash: 'aaaa1111', tokens: ['x:content:w1:h1:x1:y1#1'] }, after: reached, kind: 'push', action: 'tap' });
+  assert.notEqual(withTokens.verdict, 'unexpected-screen',
+    'a content-varied screen is not a wrong turn');
+
+  // A genuinely different screen still is one.
+  const elsewhere = ['text:nav-bar:@title:w4:h1:x6:y2#1"settings"', 'cell:content:w20:h3:x0:y8#many'];
+  const wrong = graph.verdict({
+    udid, prediction,
+    before: { hash: 'aaaa1111', tokens: ['x:content:w1:h1:x1:y1#1'] },
+    after: { hash: fingerprint.hashTokens(elsewhere), tokens: elsewhere },
+    kind: 'push', action: 'tap',
+  });
+  assert.equal(wrong.verdict, 'unexpected-screen', 'and a real wrong turn still stops the run');
+
+  // No reading at all is still unverified, not a wrong turn.
+  assert.equal(graph.verdict({ udid, prediction, before: null, after: reached }).verdict, 'unverified');
+});
+
+test('a summary screen is not a keyboard, and its content stays in its identity', async () => {
+  const regions = await import('../src/regions.js');
+  const fingerprint = await import('../src/fingerprint.js');
+  const screen = { width: 402, height: 874 };
+
+  // The reported shape: a read-only review screen stacks a dozen short text
+  // rows of near-identical height in its lower half. That satisfied every
+  // size-and-uniformity test for a keyboard, and `tokens` discards everything
+  // below `keyboardTop` — so the screen's whole content left its own identity
+  // and a wizard's form step and its review screen, which share a nav title and
+  // a step indicator, collapsed onto ONE hash. From there the graph offered one
+  // screen's remembered controls on the other, next to a button that submits
+  // for real.
+  const row = (i, label) => ({
+    label, type: 'StaticText',
+    x: 201, y: 520 + i * 26,
+    frame: { x: 20, y: 510 + i * 26, width: 360, height: 20 },
+  });
+  const summary = [
+    'Priority', 'L3 - 24 Hours', 'Over Time Approved', 'No', 'Requested By',
+    'Trade', 'Category', 'Repair', 'Area', 'Asset', 'Location', 'Description',
+  ].map((l, i) => row(i, l));
+  const chrome = [
+    { label: 'Create Service Request', type: 'StaticText', navSlot: 'title', x: 201, y: 90, frame: { x: 100, y: 76, width: 202, height: 28 } },
+    { label: 'Back', type: 'Button', x: 24, y: 90, frame: { x: 12, y: 76, width: 44, height: 28 } },
+  ];
+
+  assert.equal(regions.detectKeyboardTop([...chrome, ...summary], screen), null,
+    'a dozen short text rows are not a keyboard');
+
+  // Content survives into the identity, which is the property that was lost.
+  const { tokens } = fingerprint.tokens([...chrome, ...summary], screen);
+  assert.ok(tokens.some((t) => /:content:/.test(t)), 'the summary rows are part of what this screen is');
+
+  // And the two screens no longer share a hash. The form step has the same
+  // chrome and different content.
+  const formRows = [
+    { label: 'Requested By', type: 'GenericElement', x: 201, y: 520, frame: { x: 18, y: 500, width: 366, height: 44 } },
+    { label: 'Description', type: 'GenericElement', x: 201, y: 600, frame: { x: 18, y: 578, width: 366, height: 88 } },
+    { label: 'REVIEW', type: 'Button', x: 201, y: 800, frame: { x: 18, y: 780, width: 366, height: 44 } },
+  ];
+  const a = fingerprint.hashTokens(fingerprint.tokens([...chrome, ...summary], screen).tokens);
+  const b = fingerprint.hashTokens(fingerprint.tokens([...chrome, ...formRows], screen).tokens);
+  assert.ok(a && b, 'both screens have an identity');
+  assert.notEqual(a, b, 'two screens of one wizard are two screens');
+
+  // A real keyboard is still detected: many small key-shaped boxes.
+  const keys = [];
+  for (let i = 0; i < 20; i += 1) {
+    keys.push({
+      label: 'qwertyuiopasdfghjklz'[i], type: 'Key',
+      x: 20 + (i % 10) * 38, y: 700 + Math.floor(i / 10) * 46,
+      frame: { x: 6 + (i % 10) * 38, y: 690 + Math.floor(i / 10) * 46, width: 32, height: 42 },
+    });
+  }
+  assert.ok(regions.detectKeyboardTop([...chrome, ...keys], screen) != null, 'a real keyboard still registers');
+
+  // The token rules changed, so stored fingerprints must be discarded.
+  assert.equal(fingerprint.TOKEN_RULES_VERSION, 5);
+});
+
 test('a band is only the keyboard if there is a keyboard in it', async () => {
   const v = await import('../src/view.js');
   // Region bands are positional, so on screens with no keyboard the bottom band

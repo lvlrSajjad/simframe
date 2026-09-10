@@ -12,6 +12,7 @@
 // app published and one OCR read off the pixels deserve different amounts of
 // trust.
 import * as api from './index.js';
+import * as regions from './regions.js';
 import * as graph from './graph.js';
 import { writeRefs } from './refs.js';
 import * as matching from './matching.js';
@@ -196,47 +197,24 @@ const trim = (text) => {
  * See `MAX_LABEL`.
  */
 
-/** Rank and number what is on screen. */
 /**
  * Whether a target in the keyboard band really is a key.
  *
- * Region bands are positional, and this is the fourth bug they have produced.
- * When the keyboard is up, the bottom band is called `keyboard` and collapsed to
- * one line — thirty keys nobody refers to by name. A primary action pinned above
- * the keyboard lands in that band and was collapsed with them, so on a
- * four-step wizard the map printed `keyboard: 6 keys` and **no forward
- * control**, four reads running, `all` and `refresh` included, while the hint
- * said "nothing ambiguous — chain the next steps without looking again".
+ * Region bands are positional, and this was the fourth and fifth bug they
+ * produced. With the keyboard up, the bottom band is collapsed to one line —
+ * thirty keys nobody names — and a primary action pinned above the keyboard was
+ * collapsed with them: four reads running printed `keyboard: 6 keys` and **no
+ * forward control**, while the hint said "nothing ambiguous — chain the next
+ * steps without looking again". That it was an emission bug and not a
+ * perception one was proved by the next call, which hit the button instantly at
+ * a coordinate the map had never printed.
  *
- * That it was an emission bug and not a perception one was proved by the next
- * call: `tap "NEXT"` hit it instantly at 201,800 `via ax|ocr, memory d=0` — a
- * coordinate the map had never printed. Reported as ~40% of a cold run's calls,
- * and it is the same root as "a control behind the keyboard is invisible" from
- * the round before.
- *
- * A key is small, unlabelled or single-character, and there are dozens. Anything
- * carrying a real label or a non-key role is a control that happens to be
- * sitting near the keyboard, and it belongs in the map.
+ * Delegates to `regions.looksLikeKey`, which is the canonical test. These two
+ * having separate copies is what let a phantom keyboard survive in the
+ * fingerprint after it had already been fixed in the map — and there it was
+ * deleting screens' content from their own identity.
  */
-export const KEY_MAX_WIDTH = 120;
-
-const NAMED_KEY = /^(space|return|enter|shift|delete|backspace|done|globe|dictate|emoji|caps ?lock|number|numbers|symbols|letters|more|search|go|send|join|route|abc|123)$/i;
-
-export function isKey(t) {
-  if (/^key$/i.test(t?.type ?? '')) return true;
-  // Width settles it before any label does. A key is finger-sized; a primary
-  // action pinned above the keyboard runs the width of the screen, and the one
-  // this was reported on was 366pt against a key's ~35. This is also what keeps
-  // an icon-only pinned control — no label to reason about — in the map.
-  const width = t?.frame?.width;
-  if (isNum(width) && width > KEY_MAX_WIDTH) return false;
-  const label = String(t?.label ?? '').trim();
-  // A wide-enough control is already out; a narrow unlabelled one among thirty
-  // others is a key.
-  if (!label) return true;
-  if (label.length <= 2) return true;
-  return NAMED_KEY.test(label);
-}
+export const isKey = regions.looksLikeKey;
 
 /**
  * Whether a target can be acted on, by role *or* by evidence.

@@ -788,12 +788,36 @@ export const VERDICTS = ['ok', 'no-visible-change', 'unexpected-screen', 'unveri
  * app and the verdict still said `unexpected-screen`, because the verdict never
  * asked the graph.
  */
+/**
+ * Are these two readings the same screen?
+ *
+ * `nearestScreen` has always had a token-similarity tolerance, precisely so
+ * that a screen whose *content* differs — a list with different rows, a form
+ * showing a different record — still resolves to the screen it is. The
+ * verification path threw that away: it passed bare hash strings, and a string
+ * carries no tokens, so only an exact hash could ever match.
+ *
+ * The cost was measured. `unexpected-screen` fired three times in one reported
+ * run and was wrong all three; two were this — the tester picked a different
+ * asset than earlier runs had, so the content differed, so the hash differed,
+ * so a correct navigation was called a wrong turn. Their conclusion: *"this
+ * will fire on every run that varies its test data — i.e. every useful run."*
+ * And because a failed step abandons the rest of its batch, each false alarm
+ * costs a round trip, which is the thing the whole design is trying to buy.
+ *
+ * So pass the reading, not just its name: `{hash, tokens}` lets the tolerance
+ * that already exists do its job. A string still works and still means "exact
+ * match only", which is right for a stored prediction that has no tokens.
+ */
 function sameScreen(udid, a, b) {
-  if (!a || !b) return false;
-  if (a === b) return true;
+  const hashOf = (v) => (typeof v === 'string' ? v : v?.hash);
+  const ha = hashOf(a);
+  const hb = hashOf(b);
+  if (!ha || !hb) return false;
+  if (ha === hb) return true;
   if (!udid) return false;
-  const nodeA = nearestScreen(udid, a)?.node;
-  const nodeB = nearestScreen(udid, b)?.node;
+  const nodeA = nearestScreen(udid, typeof a === 'string' ? a : { hash: ha, tokens: a?.tokens })?.node;
+  const nodeB = nearestScreen(udid, typeof b === 'string' ? b : { hash: hb, tokens: b?.tokens })?.node;
   return Boolean(nodeA && nodeB && nodeA.hash === nodeB.hash);
 }
 
@@ -827,8 +851,14 @@ export const CONFIDENT_OBSERVATIONS = 2;
 export const STAYS_ON_SCREEN = new Set(['type', 'paste', 'key']);
 
 export function verdict({ udid, prediction, before, after, kind, action }) {
-  if (!before || !after) return { verdict: 'unverified', detail: 'no state to compare' };
-  const moved = before !== after;
+  // `before`/`after` may be a hash or a whole reading. A reading carries its
+  // tokens, which is what lets a content-varied screen still be recognised as
+  // the screen it is.
+  const hashOf = (v) => (typeof v === 'string' ? v : v?.hash);
+  const beforeHash = hashOf(before);
+  const afterHash = hashOf(after);
+  if (!beforeHash || !afterHash) return { verdict: 'unverified', detail: 'no state to compare' };
+  const moved = beforeHash !== afterHash;
   if (STAYS_ON_SCREEN.has(action) && !moved) {
     return { verdict: 'ok', detail: 'the screen was not expected to change, and did not' };
   }

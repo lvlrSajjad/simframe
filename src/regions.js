@@ -36,6 +36,8 @@ const STATUS_BAR_FRACTION = 0.065;
 
 /** Keyboards occupy the bottom of the screen and are unusually tall. */
 const KEYBOARD_MIN_FRACTION = 0.28;
+/** Most of a keyboard is keys. Below this it is a list that happens to be small. */
+const KEYBOARD_MIN_KEYISH = 0.6;
 
 /** Chrome is short. A 90pt list cell is not a tab item however low it sits. */
 const CHROME_MAX_HEIGHT_FRACTION = 0.075;
@@ -243,6 +245,50 @@ export function navSlot(frame, screen) {
  * common case and must stay cheap. This was the first band derived from the
  * elements rather than from a fraction, and it is the model the rest now follow.
  */
+/**
+ * Whether an element is shaped like a key rather than like content.
+ *
+ * The canonical version of this test, because two places need it and getting
+ * them out of step is what produced the bug below. A key is finger-sized and
+ * says almost nothing: a single character, a short named key, or nothing at
+ * all. A row of content is wider, or carries words.
+ */
+export const KEY_MAX_WIDTH = 120;
+
+const NAMED_KEY = /^(space|return|enter|shift|delete|backspace|done|globe|dictate|emoji|caps ?lock|number|numbers|symbols|letters|more|search|go|send|join|route|abc|123)$/i;
+
+export function looksLikeKey(t) {
+  if (/^key$/i.test(String(t?.type ?? ''))) return true;
+  const width = t?.frame?.width;
+  if (Number.isFinite(width) && width > KEY_MAX_WIDTH) return false;
+  const label = String(t?.label ?? '').trim();
+  if (!label) return true;
+  if (label.length <= 2) return true;
+  return NAMED_KEY.test(label);
+}
+
+/**
+ * Where the software keyboard starts, or null.
+ *
+ * Size and uniformity alone were not enough, and the failure was expensive. A
+ * read-only summary screen stacks a dozen short text rows of near-identical
+ * height in the bottom half — which satisfied every test here, so a keyboard
+ * was detected on a screen that had none.
+ *
+ * That mattered far beyond a mislabelled band, because `fingerprint.tokens`
+ * discards everything below `keyboardTop`. A phantom keyboard therefore
+ * deleted the screen's entire content from its own identity, leaving only
+ * chrome — so a wizard's form step and its read-only review screen, which
+ * share a nav title and a step indicator, **collapsed onto one hash**. From
+ * there: the graph offered one screen's remembered controls on the other (three
+ * absent controls, one of them beside a button that submits for real), and
+ * `locate` resolved against the wrong screen's stored element list, which is
+ * why `assert` insisted a string was absent while the map printed it four lines
+ * below. One phantom, three findings.
+ *
+ * So the test is now what a keyboard actually is: keys. A dozen small uniform
+ * boxes are a keyboard only if most of them are key-shaped.
+ */
 export function detectKeyboardTop(elements, screen) {
   if (!screen?.height || elements.length < 12) return null;
   const threshold = screen.height * (1 - KEYBOARD_MIN_FRACTION);
@@ -253,6 +299,9 @@ export function detectKeyboardTop(elements, screen) {
   // Keys are small and uniform; a list of cells down there is not.
   const uniform = heights.filter((h) => Math.abs(h - median) <= Math.max(3, median * 0.4)).length;
   if (uniform / low.length < 0.7 || median > screen.height * 0.07) return null;
+  // And they are keys. Uniformity says "a grid of something"; this says of what.
+  const keyish = low.filter(looksLikeKey).length;
+  if (keyish / low.length < KEYBOARD_MIN_KEYISH) return null;
   return Math.min(...low.map((e) => e.frame.y));
 }
 

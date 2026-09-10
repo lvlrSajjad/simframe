@@ -404,7 +404,19 @@ export async function runScript(
         verification = {
           ...stillArriving(
             belowThreshold(
-              graph.verdict({ udid, prediction, before: beforeScreen.hash, after: afterScreen.hash, kind, action: step.action }),
+              graph.verdict({
+                udid,
+                prediction,
+                before: beforeScreen,
+                // The whole reading, not just its name: it carries the tokens
+                // that let `nearestScreen`'s similarity tolerance recognise a
+                // screen whose content has changed. Passing hashes here is what
+                // made `unexpected-screen` fire on every run that varied its
+                // test data.
+                after: afterScreen,
+                kind,
+                action: step.action,
+              }),
               settled,
             ),
             afterScreen,

@@ -3051,3 +3051,53 @@ is still arriving, so an incomplete screen now reports `unverified`), two from
 picking different test data (filed; needs structural comparison). Positive
 verification — `matches the outcome seen 7x before` — was accurate every time.
 It is the negative verdict that is broken, and only that one should change.
+
+---
+
+## One phantom, three findings — the false verification, root-caused
+
+2026-09-10. Rounds 4 and 5 produced a cluster of verification failures that
+looked like four separate bugs: remembered controls offered on a screen that has
+none of them, `assert` denying a string the map printed four lines below, a
+`keyboard: 1 keys` header on a screen with no keyboard, and `unexpected-screen`
+wrong three times out of three. Three of those were one cause.
+
+**A keyboard was being detected where there was none.** `detectKeyboardTop`
+asked only whether there were a dozen small boxes of uniform height low on the
+screen. A read-only summary — `Priority`, `L3 - 24 Hours`, `Over Time
+Approved`, twelve rows of ~20pt text — satisfies that exactly.
+
+**And `fingerprint.tokens` discards everything below `keyboardTop`.** So a
+phantom keyboard deleted the screen's whole content from its own identity,
+leaving chrome. A wizard's form step and its review screen share a nav title and
+a step indicator, so with their content removed they **hashed identically**.
+
+Everything downstream followed from that one hash:
+
+| symptom | mechanism |
+|---|---|
+| remembered controls offered on the wrong screen | the graph node was shared, so its vocabulary was |
+| `assert`/`find` denying visible text | `locate` resolves against the stored map *for that identity* — the other screen's elements |
+| `keyboard: 1 keys` over page content | the same phantom, in the map instead of the fingerprint |
+
+The fix is one line of intent: a keyboard has **keys**. Uniformity says "a grid
+of something"; `looksLikeKey` says of what — finger-sized, and labelled with a
+character, a named key, or nothing. `TOKEN_RULES_VERSION` goes to 5, so every
+stored fingerprint and graph node is discarded rather than silently never
+matching again.
+
+Worth noting how it hid: two copies of the key test existed, one in the map and
+one implied in the region detector. The map's was fixed in round 4 and the
+fingerprint's was not, so the phantom survived a fix that appeared to address
+it. There is one `regions.looksLikeKey` now and `view.isKey` delegates to it.
+
+**Separately, `unexpected-screen` on data variation.** `nearestScreen` has
+always carried a token-similarity tolerance — 0.36, and a content-varied screen
+scores ~0.8 — precisely so a list with different rows still resolves to the
+screen it is. The verification path threw it away: it passed bare hash strings,
+and a string carries no tokens, so only an exact hash could match. It passes the
+whole reading now. A genuinely different screen still stops the run.
+
+That matters for latency as much as correctness: a failed step abandons the rest
+of its batch, so **every false alarm costs a round trip** — the exact currency
+the design is trying to save.
