@@ -306,17 +306,28 @@ if (first) {
   // screen, which is a false accusation against the one layer this file exists
   // to defend — and it is how this check has failed twice.
   if (moved) {
-    const stale = await cli(['find', `#${first.ref}`], { expectFail: true });
-    // Matched on prose, which is this check's weakness: simframe refused
-    // correctly with "#1 cannot be trusted here — simframe does not recognise
-    // this screen. Read it again", and the check failed because that wording was
-    // not one of the two it knew. The refusal is what matters, so the
-    // alternation covers how a refusal is actually phrased; the durable fix is a
-    // machine-readable reason on the failure, which `find --json` does not yet
-    // carry.
-    check(/different screen|read the screen|read it again|does not recognise this screen|cannot be trusted/i.test(stale),
+    // This matched on prose twice and went red twice, both times for a refusal
+    // that was correct and better worded than the alternation knew — most
+    // recently `"Welcome to Reminders" is not on this screen`, which refuses
+    // *and* names what the number stood for. `find --json` now carries the
+    // reason as a field, so the check reads the contract instead of the
+    // sentence. What is under test is unchanged: the ref must not resolve to
+    // the coordinates it was numbered at on the screen we have left.
+    // A refusal that cannot be parsed is a failed check, not a dead script:
+    // `json` throws on anything non-JSON reaching the stream, and this is the
+    // one call site that expects a failure, so it is the one that would take
+    // the whole file down with it.
+    let stale;
+    try {
+      stale = await json(['find', `#${first.ref}`], { expectFail: true });
+    } catch (err) {
+      stale = { ok: null, error: err.message };
+    }
+    const refused = stale.ok === false
+      && (stale.staleRef === true || stale.reason === 'unknown_screen' || stale.reason === 'ambiguous_intent');
+    check(refused,
       'a ref numbered on another screen refuses instead of tapping those coordinates',
-      stale.trim().split('\n')[0]?.slice(0, 90));
+      `${stale.reason ?? 'no reason'}${stale.staleRef ? ' staleRef' : ''} — ${String(stale.error ?? '').split('\n')[0].slice(0, 70)}`);
   }
 } else {
   check(false, 'element refs', 'no elements to number');

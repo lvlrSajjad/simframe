@@ -836,17 +836,28 @@ test('a --json call reports failure as JSON, not as prose', async () => {
   // failures, so a caller that asked for machine-readable output and hit an
   // error got `simframe: ...` on stderr and a SyntaxError from JSON.parse. It
   // could not tell "the daemon lost the display" from "simframe is broken".
-  const src = await fs.promises.readFile(new URL('../src/cli.js', import.meta.url), 'utf8');
-  // Anchored on the last `.catch((err)` rather than on `main().catch(`, which
-  // was the exact expression until the CLI grew a step that closes a long-lived
-  // local helper before reporting. Pinning the call shape made this test fail
-  // for a change that did not touch what it is about.
-  const at = src.lastIndexOf('.catch((err)');
-  assert.ok(at > 0, 'there is a top-level error handler');
-  const handler = src.slice(at);
-  assert.match(handler, /--json/, 'the top-level error handler must honour --json');
-  assert.match(handler, /JSON\.stringify/);
-  assert.match(handler, /ok: false/);
+  // This used to read cli.js and assert that its source contained `--json`,
+  // `JSON.stringify` and the literal `ok: false`. Asserting the shape of the
+  // source is not asserting the behaviour: the same habit made a test pass
+  // against a genuinely broken OCR guard earlier, and this one went red the day
+  // the literal moved into a shared function while the output was unchanged.
+  // So it runs the thing. An unresolvable device is the cheapest real failure —
+  // no daemon, no simulator, ~250 ms — and what is under test is the envelope,
+  // never the sentence inside it.
+  const { execFile } = await import('node:child_process');
+  const cliPath = new URL('../src/cli.js', import.meta.url).pathname;
+  const out = await new Promise((resolve) => {
+    execFile(process.execPath, [cliPath, 'find', '#1', '--device=simframe-no-such-device', '--json'],
+      { timeout: 30_000 }, (err, stdout, stderr) => resolve({ code: err?.code ?? 0, stdout, stderr }));
+  });
+  assert.notEqual(out.code, 0, 'a failure exits non-zero');
+  const parsed = JSON.parse(out.stdout);
+  assert.equal(parsed.ok, false);
+  assert.equal(typeof parsed.error, 'string');
+  // And the reason travels as a field. A refusal recognisable only by reading
+  // its prose is one nobody can depend on: the CI check for the stale-ref guard
+  // matched three phrasings and went red when a fourth, better one arrived.
+  assert.ok('reason' in parsed, 'a failure carries a machine-readable reason, even when null');
 });
 
 import { bands, rowsOf } from '../src/regions.js';
@@ -3620,6 +3631,25 @@ test('a stale ref offers the label it was numbered against, and says it did', as
   assert.ok(err, 'a genuinely different screen still refuses');
   assert.equal(err.staleRef, true);
   assert.equal(err.staleLabel, 'Work Orders');
+  // This case is an *identity* mismatch, and the comment above describes
+  // *drift* — the same screen with a new hash. Both were true of the report and
+  // the two were left wearing one flag, so the recovery built for the second
+  // fired on the first: `#1` numbered "Reminders" in Reminders re-resolved in
+  // Contacts onto the status-bar back-to-app breadcrumb "• Reminders", scored
+  // 0.64, and was returned as a tap point in the status bar. Only drift may be
+  // recovered; a different screen must refuse.
+  assert.equal(err.staleKind, 'identity');
+
+  const drifted = (() => {
+    try {
+      resolveRef(udid, 19, { structuralHash: 'aaaa1111', structuralDistance: 0, layoutHash: '5'.repeat(72) });
+      return null;
+    } catch (e) { return e; }
+  })();
+  assert.ok(drifted, 'a layout that has moved too far still refuses the number');
+  assert.equal(drifted.staleKind, 'drift');
+  assert.equal(drifted.staleLabel, 'Work Orders');
+  assert.match(drifted.message, /not a different screen/);
 
   // And a ref with no recorded label offers nothing rather than inventing it.
   const bare = (() => {

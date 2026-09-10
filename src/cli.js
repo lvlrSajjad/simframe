@@ -166,6 +166,25 @@ const num = (v, fallback) => (v == null ? fallback : Number(v));
  * script that has to parse one command's prose and another's JSON will parse
  * the prose wrong exactly once and then be trusted anyway.
  */
+/**
+ * The machine-readable half of a failure.
+ *
+ * A refusal recognisable only by reading its prose is a refusal nobody can
+ * depend on. Our own CI asserted the stale-ref guard by matching three
+ * phrasings and went red when a fourth arrived — a *better* one, naming the
+ * label the number stood for. The sentence is for a person; these fields are
+ * the contract, and they live in one function because `find` reports its own
+ * failures and the top-level handler reports the rest.
+ */
+function failureJson(err) {
+  return {
+    ok: false,
+    error: err.message,
+    reason: metrics.escalationOf(err)?.reason ?? null,
+    ...(err.staleRef ? { staleRef: true, staleKind: err.staleKind ?? null, staleLabel: err.staleLabel ?? null } : {}),
+  };
+}
+
 function emit(flags, json, lines) {
   if (flags.json) {
     console.log(JSON.stringify(json, null, 2));
@@ -847,7 +866,7 @@ async function main() {
           ],
         );
       } catch (err) {
-        emit(flags, { ok: false, error: err.message }, err.message);
+        emit(flags, failureJson(err), err.message);
         process.exitCode = 1;
       }
       return;
@@ -1507,7 +1526,7 @@ main().then(closeHelpers, async (err) => {
   // could not tell "the daemon lost the display" from "simframe is broken" —
   // which is the whole point of a machine-readable interface.
   if (process.argv.includes('--json')) {
-    process.stdout.write(`${JSON.stringify({ ok: false, error: err.message }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(failureJson(err), null, 2)}\n`);
   } else {
     process.stderr.write(`simframe: ${err.message}\n`);
   }

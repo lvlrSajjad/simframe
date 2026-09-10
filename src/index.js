@@ -1230,10 +1230,27 @@ async function locateWith(
       // The number is not honoured; the caller's own words are, which is what
       // they would have written instead. Resolving the old coordinates would be
       // the dangerous version of this, and is not what happens.
-      if (!err.staleRef || !err.staleLabel) throw err;
-      const again = await locateWith(deviceQuery, err.staleLabel, {
-        index, refresh: true, useAx, useOcr, settleMs, options, escalated,
-      });
+      // Only layout drift is recoverable. `identity` means the numbers were
+      // drawn somewhere else, and the label they stood for appearing here is
+      // coincidence rather than evidence — measured: `#1` numbered "Reminders"
+      // in Reminders re-resolved in Contacts onto the status-bar back-to-app
+      // breadcrumb "• Reminders", and reported ok.
+      if (!err.staleRef || !err.staleLabel || err.staleKind !== 'drift') throw err;
+      let again;
+      try {
+        again = await locateWith(deviceQuery, err.staleLabel, {
+          index, refresh: true, useAx, useOcr, settleMs, options, escalated,
+        });
+      } catch (second) {
+        // The number was not honoured and the label it stood for is not here
+        // either. That is still a refusal to tap stale coordinates, but by the
+        // time it surfaces it looks like an ordinary "not on this screen" and a
+        // caller cannot tell the two apart. Carrying the marker across says
+        // which question was actually asked.
+        second.staleRef = true;
+        second.staleLabel = err.staleLabel;
+        throw second;
+      }
       return {
         ...again,
         from: 'ref-relabelled',

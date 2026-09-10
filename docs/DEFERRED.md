@@ -44,6 +44,38 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > boot to finish, which is the best available explanation for three different
 > integration failures in four runs (95).
 >
+> **The red CI was hiding a worse bug than itself (2026-09-11, late).** The
+> `integration` job failed one check: the stale-ref guard, which asserts that a
+> `#n` numbered on one screen refuses rather than tapping those coordinates on
+> another. It failed on **prose** — it matched three phrasings and simframe had
+> answered with a fourth. That looked like a test-only fault. It was not.
+>
+> Re-running the scenario on a device rather than reasoning about it: `find #1`,
+> numbered "Reminders" in Reminders and asked for in Contacts, **returned
+> `ok: true`** — it re-resolved the label onto the status-bar back-to-app
+> breadcrumb "• Reminders", scored 0.64, and handed back a tap point at (47,40)
+> in the status bar, a region the screen map explicitly refuses to offer. The
+> harness had caught a confident wrong answer and reported it as a wording
+> mismatch, and in CI the same bug happened to fail loudly only because the
+> label was absent there.
+>
+> The cause was mine, from earlier the same day. `refs.js` distinguishes three
+> refusals — a **different screen**, an **unrecognised** screen, and **layout
+> drift on the same screen** — and the relabel recovery was built for the third
+> (the reported case: dashboard cards finished loading, same screen, new hash).
+> Identity and drift wore one flag, so it fired on the first as well. Fixed by
+> discriminating them (`staleKind`), and the recovery now runs on drift only.
+>
+> Two things came out of it worth keeping. `find --json` now carries `reason`,
+> `staleRef` and `staleKind` as **fields**, in one shared `failureJson` — a
+> refusal recognisable only by reading its prose is one nobody can depend on,
+> and this check had now gone red twice for exactly that. And two tests were
+> asserting the **shape of the source** rather than the behaviour: one grepped
+> `cli.js` for the literal `ok: false`, and the stale-ref test constructed an
+> identity mismatch while its own comment described drift — which is what let
+> the recovery be wired to the wrong branch in the first place. Both now run
+> the thing.
+>
 > **Next, in order.**
 >
 > 1. **The release.** 0.11.0 is authorised and gated on a green `integration`.
@@ -396,10 +428,22 @@ signature is not confirmed until the binary states its own prototype.
    precisely what would stop a footer with live content thrashing our
    fingerprint.
 
+98. **The relabel recovery still trusts a weak match, even on drift.** Fixed
+   today so it only runs when the screen is the same one and the layout has
+   moved (`staleKind: 'drift'`), which removes the case that hurt. What remains
+   is that the re-resolution is an ordinary label lookup: it accepted **0.64**
+   and a target in the **status bar** — a region `sim_ui` refuses to offer as
+   something to tap, because taps there open the clock or scroll to top. Two
+   guards it should have and does not: a floor on the score, since a recovery is
+   a *guess* and should be held to a higher bar than a lookup the caller
+   actually asked for; and a refusal to land in a region the map itself will not
+   publish. Cheap, and the second one is a rule we already state elsewhere and
+   do not enforce on this path. Worth doing before the next peer round.
+
 **Ordering.** 89-92 are cheap and independent; 91 changes what we investigate
 rather than adding work. 93 and 94 together are the sweep fix and should be done
-as one piece, closed-loop. 96 gates any further claim about the supervisor. 97 is
-a reading list that could reshape the verdict layer and is the least urgent and
+as one piece, closed-loop. 98 is small and sits next to them. 96 gates any
+further claim about the supervisor. 97 is a reading list that could reshape the verdict layer and is the least urgent and
 most likely to matter in a year.
 
 ### From a second peer on the same RN app — three confidently-wrong headers, 2026-09-11

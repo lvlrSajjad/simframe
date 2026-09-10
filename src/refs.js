@@ -114,9 +114,17 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
   // How long ago these numbers were handed out. Asked for by name: "refs
   // expired (issued 4 calls ago) is actionable in a way this isn't".
   const issued = Number.isFinite(table.at) ? ` refs were numbered ${Math.round((Date.now() - table.at) / 1000)}s ago;` : '';
-  const staleError = (why) => Object.assign(
+  // `staleKind` is the difference between "these numbers were drawn on a screen
+  // that has since shifted" and "you are somewhere else entirely", and only the
+  // first may be recovered by re-resolving the label the number stood for.
+  // Both wore the same flag once, and the caller re-resolved across an app
+  // switch: `#1` had been "Reminders" in Contacts, matched the status-bar
+  // back-to-app breadcrumb "• Reminders" at 0.64, and returned a tappable point
+  // in the status bar — a region the map itself refuses to offer. A refusal had
+  // become a confident wrong answer.
+  const staleError = (why, kind) => Object.assign(
     new Error(`#${n} cannot be trusted here —${issued} ${why}. Read the screen again (sim_ui) to renumber`),
-    { staleRef: true, staleLabel: labelFor },
+    { staleRef: true, staleLabel: labelFor, staleKind: kind },
   );
 
   // Structural identity first, because it is the question actually being asked:
@@ -135,7 +143,7 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
   const exactRecall = structuralDistance === 0 || structuralDistance == null;
   if (exactRecall && table.structuralHash && structuralHash && table.structuralHash !== structuralHash) {
     throw staleError(`this is a different screen (${table.structuralHash.slice(0, 8)}`
-      + ` → ${structuralHash.slice(0, 8)})`);
+      + ` → ${structuralHash.slice(0, 8)})`, 'identity');
   }
   // Nothing recognises the screen we are on, so nothing can vouch for the
   // numbers. Refusing costs a re-read; guessing taps whatever is at those
@@ -165,7 +173,7 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
   if (drift != null && drift > tolerance) {
     throw staleError(`the screen has moved too far from where these refs were numbered`
       + ` (layout distance ${drift}, tolerance ${tolerance}) — the identity may be unchanged;`
-      + ' this is a pixel measurement, not a different screen');
+      + ' this is a pixel measurement, not a different screen', 'drift');
   }
   const hit = table.refs.find((r) => r.ref === n);
   if (!hit) {
