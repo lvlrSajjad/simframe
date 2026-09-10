@@ -563,7 +563,33 @@ export async function runScript(
         detail: `${detail}${note}${wrongTurn ? ` [${verification.verdict}: ${verification.detail}]` : ''}`,
         settled,
       });
-      const halt = haltDecision({ verification, stopOnUnexpected, continueOnError });
+      // A variant that satisfies the next step is a note, not a halt.
+      //
+      // Reported twice in one round, and it is the direct cause of two flows
+      // needing three calls instead of one. A tap landed on a *hash variant* of
+      // the screen the edge remembered — the action had plainly worked, the
+      // state was right, the CTA was enabled — and 26 remaining steps were
+      // thrown away. Variant absorption cannot help once the variant has been
+      // recorded as a node of its own, because absorption only claims an
+      // unclaimed reading, so the mismatch becomes permanent.
+      //
+      // The evidence that settles it is the flow itself: if the next step's
+      // target is on the screen we actually reached, we are somewhere the plan
+      // can continue from, whatever the fingerprint thinks. That costs one
+      // resolve on a path that otherwise costs a whole round trip, and it does
+      // not soften the verdict — the mismatch is still reported and still
+      // logged, because it is still the thing that found a real bug for a
+      // reporter twice.
+      const canContinue = await stillOnPlan(deviceQuery, verification, steps[i + 1], options);
+      const halt = haltDecision({
+        verification: canContinue ? { ...verification, verdict: 'unverified' } : verification,
+        stopOnUnexpected,
+        continueOnError,
+      });
+      if (canContinue) {
+        results[results.length - 1].detail +=
+          ` [landed on a variant of the expected screen; the next step resolves here, so continuing]`;
+      }
       if (verification?.verdict) verdicts.push(verification.verdict);
       if (metrics.ESCALATING_VERDICTS.has(verification?.verdict)) {
         noteEscalation({
@@ -890,6 +916,28 @@ export function stillArriving(verification, afterScreen) {
 }
 
 /**
+ * Can the plan continue from where we actually landed?
+ *
+ * Only asked when the verdict is `unexpected-screen`, and only answered by the
+ * next step's own selector resolving here. A screen that can serve the next step
+ * is not a wrong turn in any sense the caller cares about.
+ */
+async function stillOnPlan(deviceQuery, verification, nextStep, options) {
+  if (verification?.verdict !== 'unexpected-screen' || !nextStep) return false;
+  const target = nextStep.value ?? nextStep.target ?? nextStep.label ?? nextStep.into;
+  // A coordinate resolves anywhere and a ref was numbered on another screen, so
+  // neither is evidence about where we are.
+  if (!target || /^#\d+$/.test(String(target).trim()) || /^@?-?\d+\s*,\s*-?\d+$/.test(String(target).trim())) return false;
+  if (!ACTION_STEPS.has(nextStep.action) && nextStep.action !== 'assert' && nextStep.action !== 'waitFor') return false;
+  try {
+    const hit = await api.locate(deviceQuery, String(target), { options });
+    return Boolean(hit?.target);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Reconcile the two sensors when they disagree about "did anything happen".
  *
  * The wait watches regions and the verdict compares screen identity, so a tap
@@ -990,11 +1038,24 @@ async function focusField(deviceQuery, udid, step, ctx) {
  * stopping a batch, so a five-menu hunt costs ten or more round trips for
  * something a person does in seconds.
  *
- * `seek` opens containers, checks, and comes back, inside a hard budget. It
- * **finds and does not act**: it leaves you on the screen where the target
- * resolves and says so, and the caller taps it as the next step of the same
- * batch. That keeps `seek` non-destructive by construction, because the only
- * things it ever taps are containers the vocabulary allowed.
+ * `seek` opens containers, checks, and comes back, inside a hard budget.
+ *
+ * **It acts, and saying otherwise is what made it dangerous.** The first
+ * version of this comment said it "finds and does not act", meaning it does not
+ * tap the *target* — but opening a door is an action, doors change state, and a
+ * reader who trusted that sentence handed `seek` a flow it could destroy. It
+ * did: it opened CANCEL, then AI TROUBLESHOOTING, then pressed "YES, THIS FIXED
+ * MY PROBLEM", ending five screens deep in a live support chat with a
+ * half-completed service request gone. One label further along was SUBMIT
+ * SERVICE REQUEST.
+ *
+ * What is true: it does not tap the target — it leaves you on the screen where
+ * the target resolves and says so, and the caller taps it as the next step of
+ * the same batch. What it *does* tap is doors, filtered by the exploration
+ * vocabulary (`vocabulary.openableAsDoor`), which is much stricter than the
+ * substitution list and refuses anything that commits, abandons, answers or
+ * leaves. And it returns to the screen it started from before handing back,
+ * saying plainly when it could not.
  *
  * Ordering is the pluggable part, and the only part a local model touches. With
  * `SIMFRAME_PLANNER` unset the order is mechanical — the screen's own reading
@@ -1006,6 +1067,8 @@ export const SEEK_BUDGET = 6;
 
 /** How many candidates a ranker is asked about, and how long a door gets to open. */
 export const SEEK_RANK_CANDIDATES = 12;
+/** How many back-steps a failed seek may spend returning to where it began. */
+const RETURN_BUDGET = 8;
 const SEEK_SETTLE_MS = 1200;
 
 async function candidatesToOpen(deviceQuery, udid, { visited, options }) {
@@ -1016,9 +1079,19 @@ async function candidatesToOpen(deviceQuery, udid, { visited, options }) {
     // Content only. A nav-bar title is not a door — the first version of this
     // opened "Settings", which is the name of the screen it was already on.
     if ((r.region ?? 'content') !== 'content') continue;
-    if (!r.label || !view.actsInteractive(r) || r.enabled === false) continue;
+    if (!r.label || r.enabled === false) continue;
     if (visited.has(String(r.label))) continue;
-    if (!vocabulary.actableLocally(r.label)) continue;
+    // Permissive about *shape*, strict about *vocabulary* — and that pairing is
+    // the correction, not a loosening. Requiring `actsInteractive` found **zero
+    // doors** on a screen holding two real pickers, because a React Native
+    // picker is a generic element with no value and the tree has been wrong
+    // about roles in every round. Meanwhile the door vocabulary was too loose
+    // and opened CANCEL. The tree is unreliable about what is tappable and the
+    // label is reliable about what must not be opened, so trust each where it
+    // is trustworthy.
+    if (!vocabulary.openableAsDoor(r.label)) continue;
+    // A paragraph is not a door.
+    if (String(r.label).length > 48) continue;
     labels.push(String(r.label));
   }
   return { here, map, labels: [...new Set(labels)] };
@@ -1097,6 +1170,13 @@ async function seek(deviceQuery, udid, step, ctx) {
   const opened = [];
   const trail = [];
   let spent = 0;
+  const origin = await (async () => {
+    try {
+      return (await api.screenIdentity(deviceQuery, { options, confirmNovel: false })).hash ?? null;
+    } catch {
+      return null;
+    }
+  })();
 
   // Depth-first, because that is what a person does: Accessibility, then
   // Display & Text Size, then Larger Text. The first version always came back
@@ -1146,6 +1226,23 @@ async function seek(deviceQuery, udid, step, ctx) {
     opened.push(pick);
   }
 
+  // Come back before handing over.
+  //
+  // The contract is depth-first *with return*, and on failure it was not: a
+  // reported run ended five doors deep in a live support chat, on an unrelated
+  // screen, with the flow it started from destroyed. Leaving a caller somewhere
+  // they did not ask to be is worse than failing, because everything they try
+  // next is aimed at the wrong screen.
+  let restored = origin == null;
+  for (let i = 0; i < RETURN_BUDGET && !restored; i += 1) {
+    let now = null;
+    try {
+      now = (await api.screenIdentity(deviceQuery, { options, confirmNovel: false })).hash;
+    } catch { break; }
+    if (now === origin) { restored = true; break; }
+    if (!await goBack(deviceQuery, udid, step, ctx, { from: now, to: origin })) break;
+  }
+
   // Say where we got to and what is there, not just that we failed.
   //
   // Measured on the first real run of this: with the ranker on, `seek "make the
@@ -1174,6 +1271,9 @@ async function seek(deviceQuery, udid, step, ctx) {
       `"${goal}" did not resolve by label within ${spent} of ${budget} steps.`
       + (opened.length ? ` Opened: ${opened.map((l) => JSON.stringify(l)).join(' -> ')}.` : ' Nothing here looked like a container.')
       + landing
+      + (restored
+        ? ' Back on the screen you started from.'
+        : ' **You are not back where you started** — the way back could not be found, so read the screen before acting.')
       + ' If one of those is what you meant, tap it by name; otherwise say where to look or raise the budget.',
     ),
     'no_plan',

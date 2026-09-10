@@ -67,12 +67,43 @@ function saysPhrase(label, phrase) {
 /**
  * May simframe act on this label on its own initiative?
  *
+ * `purpose` matters, and conflating two purposes cost a real run. The default,
+ * `substitute`, answers *"may a retry aim at this instead?"* and permits
+ * "Cancel", deliberately, so a local tier can decline a dialog rather than
+ * stranding on every confirmation it meets.
+ *
+ * `explore` answers a different question — *"may I open this as a door and see
+ * what is behind it?"* — and there "Cancel" is the abandon-this-task control.
+ * `seek` asked the first question and got the first answer: it opened CANCEL
+ * first, then AI TROUBLESHOOTING, then pressed "YES, THIS FIXED MY PROBLEM",
+ * ending five screens deep in a live support chat with a half-built service
+ * request destroyed. One label further along was SUBMIT SERVICE REQUEST.
+ *
+ * So exploration has its own list and it errs toward refusing. A door missed
+ * costs one step of a bounded budget; a door taken wrongly costs the run, and
+ * can cost the thing being tested.
+ *
  * @returns {{allowed: boolean, reason?: string, matched?: string}}
  */
-export function mayActLocally(label, { locale } = {}) {
+export function mayActLocally(label, { locale, purpose = 'substitute' } = {}) {
   const text = String(label ?? '').trim();
-  if (!text) return { allowed: true };
+  if (!text) return { allowed: purpose !== 'explore' };
   const vocab = load(locale);
+
+  if (purpose === 'explore') {
+    // Checked before the "listed as safe" exemption below, which exists for
+    // declining dialogs and must never make something a door.
+    for (const word of vocab.exploration?.neverOpen ?? []) {
+      if (saysPhrase(text, word)) {
+        return { allowed: false, reason: 'not a door — it commits, abandons or answers', matched: word };
+      }
+    }
+    for (const pattern of vocab.exploration?.neverOpenPatterns ?? []) {
+      if (new RegExp(pattern, 'i').test(alnum(text)) || new RegExp(pattern, 'i').test(text.toLowerCase())) {
+        return { allowed: false, reason: 'not a door — it reads as an instruction or an answer', matched: pattern };
+      }
+    }
+  }
 
   // Exceptions first, and matched against the **whole** label rather than as a
   // phrase inside it. "Cancel" is how you *decline* a dialog and a barrier that
@@ -98,3 +129,6 @@ export function mayActLocally(label, { locale } = {}) {
 
 /** Convenience for a filter: keep only what a local tier may act on. */
 export const actableLocally = (label, options) => mayActLocally(label, options).allowed;
+
+/** May exploration open this as a door? Stricter than substitution, on purpose. */
+export const openableAsDoor = (label, options) => mayActLocally(label, { ...options, purpose: 'explore' }).allowed;

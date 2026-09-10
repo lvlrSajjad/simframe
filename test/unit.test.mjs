@@ -2596,6 +2596,71 @@ test('the graph hands over its vocabulary instead of counting it', async () => {
   assert.match(hint, /Known to work here: tap "Anaheim", tap "4 Casa"/);
 });
 
+test('a variant that satisfies the next step is a note, not a halt', async () => {
+  const actions = await import('../src/actions.js');
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+
+  // Reported twice in one round and the direct cause of two flows needing three
+  // calls instead of one: a tap landed on a hash *variant* of the screen its
+  // edge remembered — the action had plainly worked, the state was right, the
+  // CTA enabled — and 26 remaining steps were discarded. Variant absorption
+  // cannot rescue it, because absorption only claims an *unclaimed* reading and
+  // the variant had already been recorded as a node of its own.
+  assert.match(src, /async function stillOnPlan/);
+  // Asked only on that verdict, and answered only by the next step resolving.
+  assert.match(src, /verification\?\.verdict !== 'unexpected-screen' \|\| !nextStep/);
+  // A coordinate resolves anywhere and a ref was numbered on another screen, so
+  // neither is evidence about where we are.
+  assert.match(src, /neither is evidence about where we are/);
+  // The verdict is still reported and still logged — it found a real app bug
+  // for a reporter twice, and this changes whether the batch dies, not whether
+  // the mismatch is mentioned.
+  assert.match(src, /landed on a variant of the expected screen/);
+
+  // haltDecision itself is unchanged: an unexpected screen still stops a run.
+  assert.equal(actions.haltDecision({ verification: { verdict: 'unexpected-screen', detail: 'x' } }).halt, true);
+  assert.equal(actions.haltDecision({ verification: { verdict: 'unverified', detail: 'x' } }).halt, false);
+  assert.equal(actions.haltDecision({ verification: { verdict: 'ok' } }).halt, false);
+});
+
+test('exploration may not open a door that commits, abandons or answers', async () => {
+  const vocab = await import('../src/vocabulary.js');
+
+  // The worst thing shipped in this series, reported from a real app. `seek`
+  // opened CANCEL first — because "cancel" is listed as safe so a local tier can
+  // DECLINE a dialog — then AI TROUBLESHOOTING, then pressed "YES, THIS FIXED MY
+  // PROBLEM", ending five screens deep in a live support chat with a
+  // half-completed service request destroyed. One label along was SUBMIT SERVICE
+  // REQUEST.
+  //
+  // May-I-tap-this-to-decline and may-I-open-this-as-a-door are different
+  // permissions, and one list answered both.
+  for (const label of [
+    'CANCEL', 'YES, THIS FIXED MY PROBLEM', 'HELP CENTER',
+    'Activate to dismiss pop-up window.', 'Sign in', 'Submit', 'Delete',
+    'OK', 'Done', 'Continue', 'Allow', 'Rate this app',
+  ]) {
+    assert.equal(vocab.openableAsDoor(label), false, `${label} is not a door`);
+  }
+
+  // Real doors stay open, including the two pickers a reported run found ZERO
+  // candidates for — because candidacy had asked the tree whether they looked
+  // interactive, and the tree has been wrong about roles in every round.
+  for (const label of ['Accessibility', 'Display & Text Size', 'Work Orders', 'Select', 'Change', 'General']) {
+    assert.equal(vocab.openableAsDoor(label), true, `${label} is a door`);
+  }
+
+  // And substitution is unchanged: "Cancel" must stay tappable there, or a
+  // local tier strands on every confirmation it meets.
+  assert.equal(vocab.actableLocally('CANCEL'), true);
+  assert.equal(vocab.actableLocally('Delete'), false);
+
+  // An unlabelled element is not a door — there is nothing to judge.
+  assert.equal(vocab.openableAsDoor(''), false);
+  assert.equal(vocab.openableAsDoor(null), false);
+});
+
 test('a step can carry its own fallbacks, and only some failures earn one', async () => {
   const actions = await import('../src/actions.js');
   const metrics = await import('../src/metrics.js');
