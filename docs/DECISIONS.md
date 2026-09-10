@@ -15,6 +15,7 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 | 2026-09-10 | Phase 12 next, per the default order | **REORDERED** | `novel_dialog`: 0 of 173, ever |
 | 2026-09-10 | Phase 15 — exploration, and the first real local-model job | **PROMOTED** | Semantic ranking is beyond a matcher |
 | 2026-09-10 | Phase 18 — local triage, not local planning | **PROPOSED** | The recovery class cannot be enumerated |
+| 2026-09-10 | Local model ranks doors; Claude drives | **INVERTED** | The plan should be watched, not chosen |
 | 2026-09-10 | `seek` may open any label a retry may substitute | **WRONG, fixed** | It opened CANCEL, then answered a prompt |
 | 2026-09-10 | A structural "dead end" rule | **REVERTED before shipping** | It cannot tell unfinished from unfinishable |
 | 2026-09-10 | Phase 17 — local planner tier | **NO-GO** | The prize is 5% of decisions |
@@ -26,6 +27,56 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 | earlier | Phase 9 — tier-2 local model | **DEFERRED, gate unmet** | Cheaper tool for the same gap, unbuilt |
 
 ---
+
+## 2026-09-10 — the local model should supervise the plan, not choose the steps
+
+**The owner's proposal, and it inverts what was built.** *"I'd use Claude as
+planner and use apple as the brain to act when the tool gets confused in between
+the steps... the live driver and supervisor until the plan is finished. The apple
+model communicates with Claude only when it cannot act. And when the plan is
+finished, apple tells the results in short to Claude."*
+
+**Why it is right.** The shipped ranker asks the local model *which door to
+open*, which is a decision Claude is good at and mostly does not need help with —
+and Phase 17 already measured that the matcher resolves 37 of 40 of them. The
+proposal asks it instead to hold the plan and **watch it run**, which is where
+round 6 says the time goes: of 514 seconds, ~386 (75%) was thinking and round
+trips, and every pause the operator flagged live was a call boundary.
+
+**Two corrections, both of which make it stronger.**
+
+*The executor already exists and is not a model.* `sim_do` is precisely "hand a
+plan to a local driver that runs it, verifies each step and reports once", and
+round 6's best result was 18 steps in a single call. Deterministic code is the
+better executor — faster, exact, auditable, cannot hallucinate a step — so the
+plan stays there. This also resolves a constraint the proposal would hit: Apple's
+model has 4,096 tokens of context and a 27-step plan plus screen state does not
+fit. A per-step supervisor does.
+
+*The supervisor's vocabulary is three words: wait, retry, stop.* What kills
+batches in the field reports is never "which step next". It is a stale assert, a
+variant that satisfied the next step anyway, a list that had not loaded, ten
+steps failing against an unchanged screen. Every one of those is answered by one
+of three words, and none requires inventing, skipping or substituting anything.
+
+That constraint is the safety property, and it is not a threshold — it is the
+size of the answer space. Today's `seek` incident is the argument for it: given
+latitude over *what* to open, with a permission list answering the wrong
+question, it pressed "YES, THIS FIXED MY PROBLEM" in a live app. A component that
+can only say wait/retry/stop cannot do that whatever it believes.
+
+**The half I had underweighted.** *"Apple tells the results in short to Claude."*
+A single surprise has repeatedly cost three to six calls just to *understand*. A
+local summary does not remove the round trip; it makes one round trip sufficient,
+and a six-call recovery becoming a one-call recovery is worth more than removing
+the call.
+
+**Sequencing, and it is not deferral.** Every batch-killer above is a
+deterministic bug already filed — 49, 51, 52, 53, and G1 which landed today.
+Fixing them beats having a model judge them: a supervisor papering over a stale
+assert is worse than a fresh assert. Fix, re-measure, and the supervisor's job is
+whatever remains. If nothing remains, that is the best available outcome and one
+measurement buys the answer.
 
 ## 2026-09-10 — one permission list cannot answer two questions
 

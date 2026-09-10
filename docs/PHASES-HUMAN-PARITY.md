@@ -405,7 +405,86 @@ what remains. That document plus BENCHMARKS.md is the evidence for the article.
 
 ---
 
-## Phase 18 — Local triage: recovering from the unexpected, not choosing the expected
+## Phase 18 — The local supervisor: Claude plans, the local model drives and watches
+
+> **Redesigned 2026-09-10 on the owner's proposal, which is better than what this
+> phase said.** Their words:
+>
+> *"For step C you used apple as planner, but I'd use Claude as planner and use
+> apple as the brain to act when the tool gets confused in between the steps. I'd
+> give the plan to apple's model and use that as the live driver and supervisor
+> until the plan is finished. The apple model communicates with Claude only when
+> it cannot act. And when the plan is finished, apple tells the results in short
+> to Claude."*
+>
+> This inverts what was built. The shipped ranker asks the local model *which
+> door to open* — a decision Claude is better at and mostly does not need help
+> with. This asks it to **hold the plan and watch it run**, which is where the
+> round-6 measurement says the time actually goes: of run A's 514 seconds, ~386
+> (75%) was thinking and round trips, and every pause the operator flagged live
+> was a call boundary.
+>
+> **Two corrections it needs, and both make it stronger.**
+>
+> **One: the executor already exists and it is not a model.** `sim_do` is exactly
+> "hand a plan to a local driver that runs it, verifies each step and reports back
+> once" — and round 6's best result was **18 steps in a single call**.
+> Deterministic code is a better executor than a model: faster, exact, auditable,
+> and it cannot hallucinate a step. So the local model must not *drive*. The plan
+> stays in the executor.
+>
+> This also settles a hard constraint the proposal would otherwise hit. Apple's
+> model has a 4,096-token context; a 27-step plan plus screen state plus history
+> does not fit. A **per-step supervisor** does, comfortably: the step that failed,
+> what was expected, what is on screen.
+>
+> **Two: the supervisor's whole vocabulary is three words.** What actually kills
+> batches in the field reports is never "which step next" — it is a moment where
+> the executor needed judgement and had none:
+>
+> | what killed the batch | what a supervisor would have said |
+> |---|---|
+> | `assert` read a stale snapshot (item 49) | re-read, then retry |
+> | `unexpected-screen` on a variant (G1) | the next step resolves here — continue |
+> | a list had not loaded (items 51, 53) | wait, do not fail |
+> | ten steps failed on an unchanged screen (item 52) | stop, nothing downstream can work |
+>
+> So the supervisor chooses only between **wait**, **retry**, and **stop**. It may
+> not invent a step, skip a step, substitute a target, or continue past an
+> unexpected *screen*. That is one-directional authority in the shape this design
+> needs, and it is not a threshold — it is the size of the answer space.
+>
+> After today it is worth saying why that matters so much. `seek` was given
+> latitude to choose *what* to open, its permission list answered the wrong
+> question, and it pressed "YES, THIS FIXED MY PROBLEM" in a live app. A component
+> that can only say wait/retry/stop cannot do that, whatever it believes.
+>
+> **The half of the proposal I had underweighted, and it is the valuable half.**
+> *"When the plan is finished, apple tells the results in short to Claude."* The
+> field reports show a single surprise costing **three to six calls just to
+> understand** — a `find`, an `--interactive`, a screenshot, a coordinate guess.
+> A local summary does not remove the round trip; it makes one round trip
+> sufficient. Turning a six-call recovery into a one-call recovery is worth more
+> than removing the call.
+>
+> **Sequencing, and this is not deferral.** Every row in the table above is a
+> *deterministic* fix that is already filed: 49, 51, 52, 53, and G1 which landed
+> today. Fixing them is strictly better than having a model judge them — a
+> supervisor papering over a stale assert is worse than a fresh assert. So: fix
+> those, re-measure, and the supervisor's job is whatever is *left*. If nothing
+> is left, that is the best possible outcome and it costs one measurement to find
+> out.
+>
+> **Go/no-go, revised.** After items 49–53 land, run two field rounds and classify
+> every batch that still died: deterministic bug, genuine app surprise, or a
+> judgement call that wait/retry/stop would have answered. **Go** if the third
+> category is more than a quarter of them. Measure two things separately because
+> they succeed independently: **batches saved** (a wrong "continue" costs a wrong
+> tap, so precision must be very high — start at 95% and derive the threshold from
+> the data), and **calls-per-recovery before and after the summary**, which is the
+> number that justifies the phase on its own.
+
+## Phase 18 (superseded framing) — Local triage: recovering from the unexpected
 
 Proposed 2026-09-10, out of the round-4 and round-5 field data and the owner's
 own framing. **Filed as a separate phase rather than as an appeal against Phase
