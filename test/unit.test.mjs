@@ -2624,6 +2624,49 @@ test('a variant that satisfies the next step is a note, not a halt', async () =>
   assert.equal(actions.haltDecision({ verification: { verdict: 'ok' } }).halt, false);
 });
 
+test('the supervisor may say three words and nothing else', async () => {
+  const supervisor = await import('../src/supervisor.js');
+  const { readFileSync } = await import('node:fs');
+
+  // Claude plans, deterministic code executes, and this judges failures behind
+  // the hands and in front of the reasoner. Its answer space IS the safety
+  // property: it cannot invent a step, skip one, substitute a target or
+  // continue past an unexpected screen, because those are not words it can say.
+  // Today's `seek` incident is the argument — given latitude over *what* to
+  // open, it pressed "YES, THIS FIXED MY PROBLEM" in a live app.
+  assert.deepEqual([...supervisor.DECISIONS].sort(), ['retry', 'stop', 'wait']);
+
+  // Off unless asked, per call first and environment second — because an MCP
+  // server's environment is fixed at spawn and that already cost a round.
+  assert.equal(supervisor.requested({}), null);
+  assert.equal(supervisor.requested({ supervisor: 'apple' }), 'apple');
+  assert.equal(supervisor.requested({ supervisor: 'none' }), null);
+  assert.equal(await supervisor.judge({ step: 'tap X', failure: 'nope' }), null, 'not asked means no ruling');
+  assert.equal(await supervisor.judge({ options: { supervisor: 'apple' } }), null, 'and nothing to judge means none');
+
+  // An answer outside the vocabulary is not a decision. Refusing it in code is
+  // what makes the three-word constraint real rather than merely documented.
+  const src = readFileSync(new URL('../src/supervisor.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(!DECISIONS\.has\(decision\)\) return null/);
+
+  // Its prose is recorded, never presented as the ground for what happened. In
+  // testing it returned a correct decision with a reason citing a rule that did
+  // not apply, and presenting a confabulated rationale as fact is the mistake
+  // `seek`'s documentation already made once.
+  const actions = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(actions, /its own prose is deliberately not trusted|prose is deliberately not trusted/i);
+  const mcp = readFileSync(new URL('../src/mcp.js', import.meta.url), 'utf8');
+  assert.match(mcp, /it said: /, 'the reason is quoted as a claim');
+
+  // A stop is correctable: the result names the steps it did not attempt, so
+  // the planner resumes instead of re-planning.
+  assert.match(actions, /step\(s\) were not attempted/);
+  assert.match(actions, /re-issue the remaining steps with a `supervise` note/);
+  // And the plan briefs it, which is what made it usable at all — asked cold it
+  // called a list that was plainly still arriving a dead end.
+  assert.match(actions, /supervise = null/);
+});
+
 test('exploration may not open a door that commits, abandons or answers', async () => {
   const vocab = await import('../src/vocabulary.js');
 

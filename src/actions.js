@@ -7,6 +7,7 @@ import * as graph from './graph.js';
 import * as input from './input.js';
 import * as intent from './intent.js';
 import * as vocabulary from './vocabulary.js';
+import * as supervisor from './supervisor.js';
 import * as view from './view.js';
 import * as planner from './planner.js';
 import * as metrics from './metrics.js';
@@ -156,6 +157,19 @@ export async function runScript(
     // compared against a human baseline.
     flowName = null,
     minSteps = null,
+    // What the plan wants its supervisor to know.
+    //
+    // The owner's insight, and it is what made the supervisor usable. Asked
+    // cold, it called a list that was plainly still arriving a dead end —
+    // because it does not know this app and Claude, by the time it writes the
+    // plan, does. So the plan briefs its own first responder: `supervise` is
+    // the batch's standing guidance, and a step may add `expect` of its own.
+    //
+    // It is also the correction channel. When the supervisor stops a run, the
+    // result says so, names the remaining steps, and tells the caller that
+    // re-issuing them with a `supervise` note will not stop again for that
+    // reason. A wrong local decision costs one message, not a re-plan.
+    supervise = null,
     options,
   } = {},
 ) {
@@ -168,6 +182,7 @@ export async function runScript(
   const flowId = metrics.newFlowId();
   const escalations = [];
   const verdicts = [];
+  const supervisions = [];
   // Named noteEscalation, not note: the step loop below declares its own
   // `note` string for the no-visible-change suffix, which shadowed this and
   // turned every escalating verdict into a failed step reading "note is not a
@@ -229,6 +244,8 @@ export async function runScript(
     }
   };
 
+  let consecutiveFailures = 0;
+  let lastFailureScreen = null;
   for (const [i, raw] of steps.entries()) {
     const step = normalizeStep(raw);
     const stepStart = Date.now();
@@ -274,7 +291,38 @@ export async function runScript(
       // we did not expect to be on is not a retry, it is a second guess.
       try {
         detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus });
-      } catch (err) {
+      } catch (thrown) {
+        let err = thrown;
+        // Ask the supervisor before anything is abandoned. It sits behind the
+        // hands and in front of the reasoner: first responder, not
+        // decision-maker, and its whole vocabulary is wait/retry/stop.
+        const ruling = await superviseFailure(deviceQuery, {
+          goal: supervise ?? flowName, step, expected: step.expect, err, options,
+        });
+        if (ruling?.decision === 'wait' || ruling?.decision === 'retry') {
+          if (ruling.decision === 'wait') {
+            await api.waitFor(deviceQuery, {
+              mode: 'settle', stableMs: 400, timeoutMs: SUPERVISOR_WAIT_MS, options,
+            }).catch(() => null);
+          }
+          try {
+            detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus });
+            detail += ` [the local supervisor said ${ruling.decision}; it worked on the second attempt]`;
+            supervisions.push({ index: i, decision: ruling.decision, reason: ruling.reason, outcome: 'recovered' });
+            continue;
+          } catch (again) {
+            supervisions.push({ index: i, decision: ruling.decision, reason: ruling.reason, outcome: 'still failed' });
+            err = again;
+          }
+        } else if (ruling?.decision === 'stop') {
+          supervisions.push({ index: i, decision: 'stop', reason: ruling.reason, outcome: 'stopped the run' });
+          const remaining = steps.slice(i);
+          err.message += ` — the local supervisor stopped the run here.`
+            + ` ${remaining.length} step(s) were not attempted.`
+            + ' If that judgement was wrong, re-issue the remaining steps with a `supervise` note'
+            + ' telling it what to expect, and it will not stop for this reason again.';
+          err.remainingSteps = remaining;
+        }
         const { allowed, refused } = permittedAlternatives(step);
         if (!allowed.length || !mayRetryAfter(err)) {
           if (refused.length) {
@@ -298,8 +346,21 @@ export async function runScript(
           }
         }
         if (last) {
+          // When every selector misses and the screen moved a moment ago, the
+          // problem is timing and not naming. Reported: three fallbacks all
+          // failed because an asset list had not arrived, and the three-label
+          // failure message read like a naming problem and pointed away from
+          // the cause. The reporter's summary — *"fallbacks are a cure for 'I
+          // named it wrong'; almost everything that actually failed failed
+          // because 'it is not there yet'"* — is the finding, and the least a
+          // failure can do is not mislead about which of the two it was.
+          const churning = await recentlyChanged(deviceQuery, options);
           last.message = `none of ${tried.length} selector(s) resolved `
-            + `(${tried.map((t) => JSON.stringify(String(t))).join(', ')}). Last: ${last.message}`;
+            + `(${tried.map((t) => JSON.stringify(String(t))).join(', ')}).`
+            + (churning
+              ? ` The screen has only been still for ${churning}ms, so this is very likely timing rather than naming:`
+                + ' waitFor a string from the loaded state instead of adding more labels.'
+              : ` Last: ${last.message}`);
           throw last;
         }
       }
@@ -457,10 +518,16 @@ export async function runScript(
       // happened. Without this a step that moved the screen the wrong way
       // reports success, and the flow carries on believing it worked.
       let verification = null;
+      // Hoisted because the note below is assembled outside the verification
+      // block that owns `afterScreen`. Reaching into that scope from here threw
+      // `afterScreen is not defined` on the very first step of a real run,
+      // which is what running it on a device catches and reading it does not.
+      let afterReading = null;
       if (verify && ACTION_STEPS.has(step.action) && beforeScreen?.hash) {
         const afterState = (await api.getState(deviceQuery, { options })).state;
         const kind = afterState.transition?.kind;
         const afterScreen = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, confirmNovel });
+        afterReading = afterScreen;
         verification = {
           ...withWayBack(
             stillArriving(
@@ -547,7 +614,9 @@ export async function runScript(
       const launchNote = step.action === 'launch' && settled?.noVisibleChange
         ? ' [the screen did not change, so this app was already in front — or it did not come forward]'
         : '';
+      const filling = stillFillingIn(afterReading?.entry);
       const note = launchNote
+        + (filling ? ` [settled, but ${filling} — waitFor content, do not act on this yet]` : '')
         + (settled?.smallChange ? ' [a small change, in one region only]' : '')
         + (settled?.noVisibleChange ? ' [no visible change]' : '')
         + (settled?.staleBaseline ? ' [baseline had already settled; re-taken from the live screen]' : '')
@@ -638,6 +707,30 @@ export async function runScript(
       });
       failed = true;
       if (!continueOnError) break;
+      // Nothing downstream of a navigation that never happened can succeed, and
+      // paying its timeouts one at a time is how `--continueOnError` spent 79
+      // seconds on ten steps that could not possibly work — two `waitFor`s
+      // serving their full 9,000 ms against a screen that had not moved. What
+      // the operator saw was "you look stuck", and they were right.
+      //
+      // The evidence is the screen hash: consecutive failures against an
+      // unchanged screen are not independent attempts, they are one failure
+      // being re-paid. `continueOnError` means "do not stop at the first
+      // problem"; it does not mean "keep going after the screen has stopped
+      // responding to anything".
+      const failedOn = beforeScreen?.hash ?? null;
+      if (failedOn && failedOn === lastFailureScreen) {
+        consecutiveFailures += 1;
+      } else {
+        consecutiveFailures = 1;
+        lastFailureScreen = failedOn;
+      }
+      if (consecutiveFailures >= STUCK_AFTER) {
+        results[results.length - 1].error +=
+          ` — ${consecutiveFailures} consecutive failures on an unchanged screen; stopping rather than paying the remaining timeouts`;
+        failed = true;
+        break;
+      }
     }
   }
 
@@ -677,6 +770,10 @@ export async function runScript(
     totalMs: wallMs,
     ranSteps: results.length,
     totalSteps: steps.length,
+    // Every local ruling, so a wrong one is correctable rather than mysterious.
+    // A `stop` also carries the steps it did not attempt, so the caller resumes
+    // instead of re-planning.
+    supervisions: supervisions.length ? supervisions : undefined,
     frames,
   };
 }
@@ -763,6 +860,105 @@ export function readbackNote(sent, seen) {
     return { note: ` = ${JSON.stringify(shown)}`, empty: false, landed: true };
   }
   return { note: ' [the field reads empty]', empty: Boolean(sent), landed: false };
+}
+
+/**
+ * Is this screen still filling in?
+ *
+ * Three times in one reported run, every list in an app arrived *after* the
+ * settle declared the screen stable. `waitFor` on a row label fixes it, but
+ * that requires already knowing a string that only exists once loaded — which
+ * you can only learn by having failed once.
+ *
+ * Two signals, both already in hand and neither previously read. The tree often
+ * publishes the spinner itself: the reporter's own map contained
+ * `#13 element 201,263 loading`. And a list that renders its count before its
+ * rows announces itself — the sharpest case in that round was a `waitFor` on
+ * "Records" satisfied by the header **"21 Records"** while zero of the 21 rows
+ * existed. Even a correctly written wait can be satisfied by a promise of
+ * content rather than by content.
+ */
+const LOADING_LABEL = /^(loading|loading…|loading\.\.\.|please wait|fetching|refreshing)$/i;
+const COUNT_HEADER = /^(\d[\d,]*)\s+(records?|results?|items?|rows?|entries)\b/i;
+
+export function stillFillingIn(entry) {
+  const targets = entry?.targets ?? [];
+  if (!targets.length) return null;
+  for (const t of targets) {
+    if (LOADING_LABEL.test(String(t.label ?? '').trim())) {
+      return 'a control on this screen still reads "loading"';
+    }
+  }
+  const content = targets.filter((t) => (t.region ?? 'content') === 'content' && t.label);
+  for (const t of content) {
+    const m = COUNT_HEADER.exec(String(t.label).trim());
+    if (!m) continue;
+    const promised = Number(String(m[1]).replace(/,/g, ''));
+    // The header itself, plus whatever chrome shares the region. Well short of
+    // what it promised means the rows are still coming.
+    if (Number.isFinite(promised) && promised >= 3 && content.length < promised / 2) {
+      return `a header promises ${promised} ${m[2].toLowerCase()} and only ${content.length - 1} row(s) are here yet`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Ask the local supervisor whether the plan can proceed past this failure.
+ *
+ * Everything it needs is already in hand: the step, the failure, what is on
+ * screen, how long the screen has been still, and whatever the plan told it to
+ * expect. It never sees pixels and never chooses an action.
+ *
+ * Its own prose is deliberately not trusted as an explanation. In testing it
+ * returned a correct decision with a reason citing a rule that did not apply,
+ * so the decision is used and the reason is recorded — never presented to the
+ * caller as the ground for what happened. Presenting a confabulated rationale
+ * as fact is the mistake `seek`'s documentation already made once.
+ */
+const SUPERVISOR_WAIT_MS = 4000;
+
+async function superviseFailure(deviceQuery, { goal, step, expected, err, options }) {
+  if (!supervisor.requested(options)) return null;
+  try {
+    const map = await view.screenMap(deviceQuery, { options, refresh: false });
+    const stillMs = map.identity?.state?.motion?.stillForMs;
+    return await supervisor.judge({
+      goal,
+      step: `${step.action} ${JSON.stringify(String(step.value ?? step.target ?? step.into ?? step.seek ?? '').slice(0, 60))}`,
+      expected,
+      failure: err.message,
+      screen: (map.rows ?? []).filter((r) => r.label).map((r) => r.label),
+      stillMs,
+      note: stillFillingIn(map.identity?.entry),
+      options,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How long ago the screen last moved, or null if it has been still.
+ *
+ * Used only to tell a timing failure from a naming failure, which is a
+ * distinction every `or` chain in a reported round got wrong.
+ */
+async function recentlyChanged(deviceQuery, options, withinMs = 2500) {
+  try {
+    const { state } = await api.getState(deviceQuery, { options });
+    // `changed` is a boolean and `motion.stillForMs` is the age. Reading
+    // `changed` as a timestamp is a mistake worth naming, because it would have
+    // silently reported "0ms ago" on every still screen and turned this hint
+    // into the opposite of information.
+    if (state?.changed === true) return 0;
+    if (state?.transition?.kind === 'loading') return 0;
+    const still = state?.motion?.stillForMs;
+    if (!Number.isFinite(still)) return null;
+    return still <= withinMs ? Math.round(still) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1069,6 +1265,10 @@ export const SEEK_BUDGET = 6;
 export const SEEK_RANK_CANDIDATES = 12;
 /** How many back-steps a failed seek may spend returning to where it began. */
 const RETURN_BUDGET = 8;
+/** How long a disagreeing assert waits before looking again. */
+const ASSERT_RETAKE_MS = 900;
+/** Consecutive failures on one unchanged screen before a continue-on-error run gives up. */
+export const STUCK_AFTER = 3;
 const SEEK_SETTLE_MS = 1200;
 
 async function candidatesToOpen(deviceQuery, udid, { visited, options }) {
@@ -1522,10 +1722,43 @@ async function runStep(deviceQuery, udid, step, ctx) {
       const want = String(step.is ?? (step.gone ? 'gone' : 'visible')).toLowerCase();
       let found = null;
       try {
-        found = await api.locate(deviceQuery, query, { index: step.index, refresh: step.refresh });
+        // Fresh by default, and this was the single most expensive finding in a
+        // reported round. `assert REVIEW is enabled` failed while the map
+        // printed by that very call showed the button enabled three lines
+        // below: the assert had resolved against screen *memory*, and state
+        // changes without a screen's identity changing.
+        //
+        // A verification step reading a cached map is self-defeating. It costs
+        // one perception pass, which is the same trade Phase 11.5 made for the
+        // trailing map and for the same reason — a read is cheaper than the
+        // round trip a wrong verdict causes.
+        //
+        // The reporter's framing is why this is worth a paragraph: *"I put an
+        // assert in to be careful, and being careful is what broke the flow.
+        // The lesson an agent learns is 'do not assert inside batches', which
+        // is the opposite of what you want learned."*
+        found = await api.locate(deviceQuery, query, { index: step.index, refresh: step.refresh !== false, options: ctx.options });
       } catch (err) {
         if (want === 'gone') return `${query} is gone`;
         throw new Error(`${query}: ${err.message}`);
+      }
+      // A state that disagrees earns one more look, because the state may have
+      // arrived between the action and the assert — which is exactly what a
+      // batch does. `tap` already re-takes a stale baseline and says so.
+      const disagrees = (t) => (want === 'enabled' && t.enabled === false)
+        || (want === 'disabled' && t.enabled !== false);
+      let retook = '';
+      if (disagrees(found.target)) {
+        await api.waitFor(deviceQuery, {
+          mode: 'settle', stableMs: 250, timeoutMs: ASSERT_RETAKE_MS, options: ctx.options,
+        }).catch(() => null);
+        try {
+          const again = await api.locate(deviceQuery, query, { index: step.index, refresh: true, options: ctx.options });
+          if (!disagrees(again.target)) {
+            found = again;
+            retook = ' [state arrived between the action and the assert; re-read from the live screen]';
+          }
+        } catch { /* keep the first reading and report it */ }
       }
       const t = found.target;
       switch (want) {
@@ -1534,11 +1767,11 @@ async function runStep(deviceQuery, udid, step, ctx) {
         case 'gone':
           throw new Error(`${query} is still on screen at ${t.x},${t.y}`);
         case 'enabled':
-          if (t.enabled === false) throw new Error(`"${t.label}" is disabled`);
-          return `"${t.label}" is enabled`;
+          if (t.enabled === false) throw new Error(`"${t.label}" is disabled, and still disabled on a second look`);
+          return `"${t.label}" is enabled${retook}`;
         case 'disabled':
-          if (t.enabled !== false) throw new Error(`"${t.label}" is not disabled`);
-          return `"${t.label}" is disabled`;
+          if (t.enabled !== false) throw new Error(`"${t.label}" is not disabled, on two looks`);
+          return `"${t.label}" is disabled${retook}`;
         case 'value': {
           const expected = String(step.equals ?? step.text ?? '');
           const actual = [t.label, t.value, ...(t.aliases ?? [])].filter(Boolean).join(' ');

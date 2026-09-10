@@ -60,8 +60,28 @@ function requiredFiles() {
     throw new Error('no Swift test sources found — has the layout moved? This check would silently pass.');
   }
 
-  // The standalone OCR helper, compiled on demand by src/ocr.js.
-  required.add(rel(path.join(ROOT, 'native', 'ocr.swift')));
+  // Every standalone Swift helper compiled on demand from `src/`.
+  //
+  // This listed `native/ocr.swift` by name, which is why it did not catch the
+  // next two: `rank.swift` and `supervise.swift` were absent from `files`, so
+  // the local planner and the local supervisor would have been silently
+  // unavailable for every installed user — the exact failure this whole check
+  // exists to prevent, reproduced because the check named one file instead of
+  // stating the rule.
+  //
+  // The rule is: if a module under `src/` compiles it, it has to ship.
+  const helpers = walk(path.join(ROOT, 'native'), (p) => p.endsWith('.swift'))
+    .filter((p) => !p.includes(`${path.sep}simframed${path.sep}`) && !p.includes(`${path.sep}spikes${path.sep}`));
+  if (!helpers.length) {
+    throw new Error('no standalone Swift helper found under native/ — has the layout moved? This check would silently pass.');
+  }
+  const sources = walk(path.join(ROOT, 'src'), (p) => p.endsWith('.js'))
+    .map((f) => fs.readFileSync(f, 'utf8')).join('\n');
+  for (const helper of helpers) {
+    const name = path.basename(helper);
+    if (!sources.includes(name)) continue; // not compiled by anything; not required
+    required.add(rel(helper));
+  }
 
   // Every runtime module. `files` ships "src" wholesale today; asserting each
   // one catches anybody narrowing that later.

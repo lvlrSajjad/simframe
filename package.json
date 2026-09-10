@@ -45,6 +45,8 @@
     "data",
     "flows",
     "native/ocr.swift",
+    "native/rank.swift",
+    "native/supervise.swift",
     "native/simframed/Package.swift",
     "native/simframed/Sources",
     "native/simframed/Tests",

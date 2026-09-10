@@ -30,6 +30,7 @@ export function modesFor(base = {}, args = {}) {
   const out = { ...base };
   if (args.sensor) out.sensor = String(args.sensor);
   if (args.planner) out.planner = String(args.planner);
+  if (args.supervisor) out.supervisor = String(args.supervisor);
   return out;
 }
 
@@ -44,6 +45,11 @@ const modeProps = {
     type: 'string',
     enum: ['none', 'apple'],
     description: 'Local model for this call. Orders the containers seek opens; it cannot choose an action. Omit to keep the server default.',
+  },
+  supervisor: {
+    type: 'string',
+    enum: ['none', 'apple'],
+    description: 'Local supervisor for this call. When a step fails it answers wait, retry or stop — nothing else — before the batch is abandoned. Omit to keep the server default.',
   },
 };
 
@@ -93,10 +99,14 @@ const TOOLS = [
       properties: {
         ...deviceProp,
         ...modeProps,
+        supervise: {
+          type: 'string',
+          description: 'What the local supervisor should know about this app while the batch runs — how lists load, what makes a control stay disabled, what a benign failure looks like here. It has no knowledge of the app; you do. Ignored when no supervisor is enabled.',
+        },
         steps: {
           type: 'array',
           description:
-            'Ordered steps. Every selector below accepts "#3" | "Save" | "@120,400". Act: {"tap":"Save"} (add "index" if a label is ambiguous), {"type":{"into":"Name","text":"Fryer 3"}}, {"paste":{"into":"Notes","text":"long text"}}, {"scroll":"down"}, {"scrollTo":"Delete account"}, {"swipe":{"from":[x,y],"to":[x,y]}}, {"button":"HOME"}, {"launch":{"value":"com.example.app","relaunch":true,"args":["-uiTest","1"]}}, {"openUrl":"myapp://x"}, {"permission":{"value":"photos","grant":"grant","bundleId":"com.example.app"}}. Check: {"assert":{"value":"Saved","is":"visible"}} (also gone | enabled | disabled | value with "equals"), {"waitFor":{"value":"Saved","timeoutMs":5000}}, {"settle":{"stableMs":600}}, {"pause":300}. Recover without a round trip: add "or" to any step for fallback selectors tried locally — {"tap":"Save","or":["Done","Confirm"]} — and {"seek":"change username","budget":6} explores for something not on this screen: it OPENS containers (a real action — state changes), checks, and returns to where it started, refusing to open anything that commits, abandons or answers. It does not tap the target; it leaves you on the screen where the target resolves so you tap it next. Do not point it into a flow whose progress you cannot afford to lose.',
+            'Ordered steps. Every selector below accepts "#3" | "Save" | "@120,400". Act: {"tap":"Save"} (add "index" if a label is ambiguous), {"type":{"into":"Name","text":"Fryer 3"}}, {"paste":{"into":"Notes","text":"long text"}}, {"scroll":"down"}, {"scrollTo":"Delete account"}, {"swipe":{"from":[x,y],"to":[x,y]}}, {"button":"HOME"}, {"launch":{"value":"com.example.app","relaunch":true,"args":["-uiTest","1"]}}, {"openUrl":"myapp://x"}, {"permission":{"value":"photos","grant":"grant","bundleId":"com.example.app"}}. Check: {"assert":{"value":"Saved","is":"visible"}} (also gone | enabled | disabled | value with "equals"), {"waitFor":{"value":"Saved","timeoutMs":5000}}, {"settle":{"stableMs":600}}, {"pause":300}. Recover without a round trip: add "or" to any step for fallback selectors tried locally — {"tap":"Save","or":["Done","Confirm"]} — and {"seek":"change username","budget":6} explores for something not on this screen: it OPENS containers (a real action — state changes), checks, and returns to where it started, refusing to open anything that commits, abandons or answers. It does not tap the target; it leaves you on the screen where the target resolves so you tap it next. Do not point it into a flow whose progress you cannot afford to lose. Brief the supervisor from the plan: top-level "supervise" is standing guidance for the whole batch ("lists here render a count header before rows; REVIEW stays disabled until a provider is chosen") and per-step "expect" adds to it. When it stops a run the result names the steps it did not attempt — re-issue them with a corrected "supervise" note if the judgement was wrong.',
           items: { type: 'object' },
         },
         autoSettle: {
@@ -757,10 +767,20 @@ async function doScript(target, args, options) {
     stableMs: args.stableMs,
     timeoutMs: args.timeoutMs,
     continueOnError: args.continueOnError,
+    // The plan's briefing for its own first responder. Ignored when no
+    // supervisor is enabled, so passing it is always safe.
+    supervise: args.supervise,
     options,
   });
 
   const lines = stepLines(res);
+  // Every local ruling is reported, because a wrong one has to be correctable
+  // rather than mysterious — and the model's own stated reason is shown as its
+  // claim, not as the ground for what happened.
+  for (const s_ of res.supervisions ?? []) {
+    lines.push(`supervisor at step ${s_.index}: ${s_.decision} — ${s_.outcome}`
+      + (s_.reason ? ` (it said: "${s_.reason}")` : ''));
+  }
   if (args.saveAs) {
     const saved = navigate.saveFlow(res.device.udid, args.saveAs, res);
     lines.push(

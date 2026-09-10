@@ -254,6 +254,7 @@ async function main() {
   // argument rather than a restart. `--sensor=ax-first`, `--planner=apple`.
   if (flags.sensor) options.sensor = String(flags.sensor);
   if (flags.planner) options.planner = String(flags.planner);
+  if (flags.supervisor) options.supervisor = String(flags.supervisor);
 
   switch (command) {
     case undefined:
@@ -609,6 +610,7 @@ async function main() {
         stableMs: num(flags.stableMs, 500),
         timeoutMs: num(flags.timeoutMs, 8000),
         continueOnError: Boolean(flags.continueOnError),
+        supervise: flags.supervise ? String(flags.supervise) : undefined,
         options,
       });
       const saved = flags.save
@@ -616,6 +618,12 @@ async function main() {
         : null;
       // `--map=false` arrives as the string "false"; `--no-map` as true.
       const wantMap = !flags.json && flags.noMap !== true && String(flags.map ?? 'true') !== 'false';
+      // Every local ruling, so a wrong one is correctable rather than
+      // mysterious — and the model's stated reason is shown as its claim.
+      for (const s_ of res.supervisions ?? []) {
+        console.log(`supervisor at step ${s_.index}: ${s_.decision} — ${s_.outcome}`
+          + (s_.reason ? ` (it said: "${s_.reason}")` : ''));
+      }
       const escalated = (res.results ?? []).some((r) => metrics.ESCALATING_VERDICTS.has(r.verification?.verdict));
       const map = wantMap
         ? await mapText(flags.device, options, res.endScreen, { flowOk: res.ok, escalated })
@@ -1223,6 +1231,20 @@ async function doctor({ json = false, strict = false, device, options = {} } = {
     });
   } catch { /* reported by the layers above */ }
 
+  // The local supervisor. Behind the hands and in front of the reasoner, and
+  // able to say only wait/retry/stop.
+  try {
+    const supervisor = await import('./supervisor.js');
+    const st = await supervisor.status(options);
+    add('local supervisor', 'ok', `${st.supervisor} — ${st.detail}`, {
+      key: 'supervisor.backend',
+      value: st.supervisor,
+    });
+    supervisor.close();
+  } catch (err) {
+    add('local supervisor', 'ok', `none — ${err.message}`, { key: 'supervisor.backend', value: 'none' });
+  }
+
   // The local planner tier. `none` is the normal answer and not a fault: it is
   // off unless SIMFRAME_PLANNER asks for it, and it only ever reorders
   // candidates that exploration was going to try anyway.
@@ -1471,6 +1493,8 @@ const closeHelpers = async () => {
   try {
     const planner = await import('./planner.js');
     planner.close();
+    const supervisor = await import('./supervisor.js');
+    supervisor.close();
   } catch { /* nothing to close */ }
 };
 
