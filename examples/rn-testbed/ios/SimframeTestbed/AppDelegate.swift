@@ -40,9 +40,15 @@ class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
 
   override func bundleURL() -> URL? {
 #if DEBUG
-    RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index")
+    // 8083, matching `metro.config.js`. Metro's default is 8081 and this machine
+    // runs other RN apps: the bundle URL is resolved at launch, so on 8081 the
+    // testbed would load whichever app answered first and look, convincingly,
+    // like itself. Set here rather than through a build setting so it is visible
+    // in the source next to the thing it affects.
+    RCTBundleURLProvider.sharedSettings().jsLocation = "localhost:8083"
+    return RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index")
 #else
-    Bundle.main.url(forResource: "main", withExtension: "jsbundle")
+    return Bundle.main.url(forResource: "main", withExtension: "jsbundle")
 #endif
   }
 }
