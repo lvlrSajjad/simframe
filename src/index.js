@@ -303,6 +303,18 @@ export const STALE_FRAME_MS = 2500;
  */
 export const MEMORY_SETTLE_MS = 250;
 
+/**
+ * How well a relabelled ref must match before it is acted on.
+ *
+ * Above `matching.MINIMUM_SCORE` (0.45) on purpose: that floor is for a label
+ * the caller wrote, and this is a label simframe substituted after refusing
+ * their `#n`. A fuzzy name match returns `similarity * 0.72` and a prefix match
+ * is scaled by its coverage, so neither can reach 0.8 on the name alone — which
+ * makes this "the label matched nearly exactly", not a tuned constant. The
+ * recovery that made this necessary scored 0.64.
+ */
+export const RELABEL_MIN_SCORE = 0.8;
+
 /** Below this a "change" is a clock digit or a caret, not a new screen. */
 export const MINOR_CHANGE = 0.004;
 export const MAJOR_CHANGE = 0.03;
@@ -1250,6 +1262,35 @@ async function locateWith(
         second.staleRef = true;
         second.staleLabel = err.staleLabel;
         throw second;
+      }
+      // A recovery is held to a higher bar than the lookup it stands in for,
+      // and to one the caller never has to think about.
+      //
+      // `MINIMUM_SCORE` (0.45) is the bar for a label the caller actually
+      // wrote. This label is one *we substituted on their behalf* after
+      // refusing their `#n`, so a weak match here is not "close enough" — it is
+      // us choosing a target nobody named. The reported wrong answer scored
+      // **0.64** and cleared the ordinary floor comfortably.
+      //
+      // 0.8 is structural rather than fitted to that incident: a fuzzy name
+      // match returns `similarity * 0.72` and a prefix match is scaled by its
+      // coverage, so neither reaches 0.8 on the name alone. Only a near-exact
+      // name does. And the region check needs no tuned number at all — if the
+      // map would not offer this target, a recovery may not silently pick it.
+      const region = again.target?.region ?? 'content';
+      const weak = Number.isFinite(again.score) && again.score < RELABEL_MIN_SCORE;
+      if (weak || !regions.offerable(region)) {
+        err.message = `#${selector.ref} cannot be trusted here, and "${err.staleLabel}" was not`
+          + ' safely re-findable either:'
+          + (weak ? ` the best match scored ${again.score.toFixed(2)}, below the ${RELABEL_MIN_SCORE} a`
+            + ' relabel needs (a number you did not ask for may not become a tap on a guess).' : '')
+          + (!regions.offerable(region) ? ` the best match sits in the ${region}, which sim_ui does not`
+            + ' offer as something to act on.' : '')
+          + ' Read the screen again (sim_ui) and name the target.';
+        err.staleRef = true;
+        err.staleLabel = err.staleLabel;
+        err.relabelRefused = { score: again.score ?? null, region };
+        throw err;
       }
       return {
         ...again,

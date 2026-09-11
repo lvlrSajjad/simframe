@@ -25,6 +25,27 @@ export const REGIONS = [
 ];
 
 /**
+ * Regions the screen map will not offer as something to act on.
+ *
+ * The status bar says the time and the battery level. It is on every screen, it
+ * is never what anybody wants to tap, and it costs a row every time — so
+ * `sim_ui` hides it.
+ *
+ * It lives here rather than in `view.js`, where it started, because it is not
+ * only a presentation rule. A target the map refuses to *show* must also be a
+ * target nothing may resolve onto *behind the caller's back*, and the case that
+ * proved it was exactly that: a stale `#1` numbered "Reminders" in Reminders,
+ * re-resolved in Contacts onto the status-bar back-to-app breadcrumb
+ * "• Reminders", scored 0.64 and handed back a tap point at (47,40) — a place
+ * the map would never have put in front of anybody. One rule, one home, both
+ * readers.
+ */
+const UNOFFERED_REGIONS = new Set(['status-bar']);
+
+/** Would the screen map offer a target in this region? */
+export const offerable = (region) => !UNOFFERED_REGIONS.has(region);
+
+/**
  * The status bar stays positional, and deliberately.
  *
  * It is a device inset — the notch or dynamic island — not app layout, so its

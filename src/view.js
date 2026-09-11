@@ -22,10 +22,10 @@ import * as matching from './matching.js';
 const REGION_ORDER = ['nav-bar', 'content', 'tab-bar', 'keyboard', 'status-bar'];
 
 /**
- * The status bar says the time and the battery level. It is on every screen,
- * it is never what anybody wants to tap, and it costs a row every time.
+ * Which regions the map will not offer now lives in `regions.js`, because it is
+ * not only a presentation rule — see `regions.offerable`. A target this hides
+ * must also be one nothing resolves onto behind the caller's back.
  */
-const HIDDEN_REGIONS = new Set(['status-bar']);
 
 /** A keyboard is 30-odd keys nobody refers to by name. One line says it. */
 const COLLAPSE_REGIONS = new Set(['keyboard']);
@@ -249,7 +249,7 @@ export function rowsFor(entry, { screen, filter, interactive, all = false, limit
     if (!isNum(t.x) || !isNum(t.y)) return false;
     // Off-screen elements are real in the tree and untappable in fact.
     if (regions.offViewport(t, screen)) return false;
-    if (!all && HIDDEN_REGIONS.has(t.region)) return false;
+    if (!all && !regions.offerable(t.region)) return false;
     if (!all && isNoise(t)) return false;
     return true;
   });

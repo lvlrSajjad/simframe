@@ -4038,3 +4038,58 @@ test('101a: a supervisor ruling survives the process that made it', async () => 
   assert.equal(metrics.readSupervisions(udid).length, 1, 'and nothing was appended');
   assert.match(String(metrics.writeError()), /must be one of/);
 });
+
+test('98: a relabelled ref needs a near-exact match in a region the map would offer', async () => {
+  const api = await import('../src/index.js');
+  const matching = await import('../src/matching.js');
+  const regions = await import('../src/regions.js');
+
+  // The bar is a relationship, not a taste. `MINIMUM_SCORE` is for a label the
+  // caller wrote; this is for one simframe substituted after refusing their
+  // `#n`, so it must be strictly higher — and higher than the 0.64 that was
+  // reported as a tap in the status bar.
+  assert.ok(api.RELABEL_MIN_SCORE > matching.MINIMUM_SCORE,
+    'a recovery is held to a higher bar than the lookup it stands in for');
+  assert.ok(api.RELABEL_MIN_SCORE > 0.64, 'and above the score that produced the reported wrong answer');
+
+  // The reported incident, as a fixture: `#1` was numbered "Reminders" in
+  // Reminders and asked for in Contacts, where the only thing resembling it is
+  // the status-bar back-to-app breadcrumb.
+  const screen = { width: 402, height: 874 };
+  const breadcrumb = {
+    label: '• Reminders', type: 'StaticText', region: 'status-bar', x: 47, y: 40, width: 90, height: 20,
+  };
+  const outcome = matching.resolve([breadcrumb, {
+    label: 'All Contacts', type: 'Button', region: 'nav-bar', x: 201, y: 100, width: 200, height: 40,
+  }], 'Reminders', { screen });
+
+  // Both guards refuse it, and independently — which is the point of having
+  // two. The score one depends on a number; the region one does not.
+  if (outcome.status === 'ok') {
+    assert.ok(outcome.score < api.RELABEL_MIN_SCORE,
+      `the breadcrumb scored ${outcome.score} and must not clear the relabel floor`);
+    assert.equal(regions.offerable(outcome.target.region), false,
+      'and it sits in a region sim_ui does not offer');
+  }
+
+  // The structural reason 0.8 is the number: a fuzzy name match returns
+  // `similarity * 0.72`, so it cannot reach the floor on the name alone. If
+  // that scoring ever changes, this fails rather than the floor silently
+  // becoming reachable by a guess.
+  const fuzzy = matching.resolve([{
+    label: 'Remindars', type: 'Button', region: 'content', x: 201, y: 300, width: 200, height: 40,
+  }], 'Reminders', { screen });
+  assert.equal(fuzzy.status, 'ok', 'a typo still resolves for a caller who asked for it');
+  assert.ok(fuzzy.score < api.RELABEL_MIN_SCORE,
+    `a fuzzy match scored ${fuzzy.score}, which must stay below the relabel floor`);
+
+  // And the rule has one home. A target the map hides must be one nothing
+  // resolves onto behind the caller's back, so `view.js` and the recovery read
+  // the same predicate rather than each keeping a set.
+  assert.equal(regions.offerable('status-bar'), false);
+  assert.equal(regions.offerable('content'), true);
+  assert.equal(regions.offerable('nav-bar'), true);
+  const fs3 = await import('node:fs');
+  const view = fs3.readFileSync(new URL('../src/view.js', import.meta.url), 'utf8');
+  assert.ok(!/HIDDEN_REGIONS\s*=\s*new Set/.test(view), 'view.js no longer keeps its own copy');
+});

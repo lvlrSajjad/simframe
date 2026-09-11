@@ -511,6 +511,22 @@ signature is not confirmed until the binary states its own prototype.
    publish. Cheap, and the second one is a rule we already state elsewhere and
    do not enforce on this path. Worth doing before the next peer round.
 
+   **DONE, 2026-09-12.** Both guards, and the reported case is now a fixture
+   rather than an anecdote: `matching.resolve` on a status-bar breadcrumb
+   "• Reminders" asked for "Reminders" returns **exactly the reported 0.64**,
+   in region `status-bar`, and each guard refuses it on its own.
+
+   `RELABEL_MIN_SCORE` is 0.8 and the number is structural rather than fitted to
+   the incident: a fuzzy name match returns `similarity * 0.72` and a prefix
+   match is scaled by its coverage, so neither reaches 0.8 on the name alone —
+   measured, a "Remindars" typo scores 0.69. Only a near-exact name qualifies.
+   The ordinary floor stays 0.45 for a label the caller actually wrote.
+
+   The region rule moved from `view.js` to `regions.offerable`, because it was
+   never only a presentation rule: a target the map refuses to *show* must also
+   be one nothing may resolve onto *behind the caller's back*. Two readers, one
+   home, and a test fails if `view.js` grows its own copy again.
+
 ### The supervisor mechanism answered — `docs/research/06-supervisor-mechanism.md`, 2026-09-11
 
 A second brief, asked after the owner pointed out that **speed was never the
