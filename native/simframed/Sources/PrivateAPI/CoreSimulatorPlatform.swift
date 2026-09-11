@@ -167,6 +167,9 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     /// session survives. Input is warmed too, because a session that outlived
     /// its device is dead anyway.
     public func reattachDevice(udid: String?) throws -> DeviceInfo {
+        // Before the port reference goes, not after: unregistering needs the
+        // port it was registered on.
+        unregisterChangeCallback()
         device = nil
         display = nil
         return try attach(udid: udid)
@@ -183,6 +186,10 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     }
 
     private func resolveDisplay(on device: NSObject, warmInput: Bool) throws -> DeviceInfo {
+        // This re-walks the same `ioPorts` array and frequently finds the *same*
+        // port object, so replacing `display` without releasing the callback on
+        // the outgoing one is how registrations accumulated on a single port.
+        unregisterChangeCallback()
         guard let io = device.value(forKey: "io") as? NSObject,
               let ports = io.value(forKey: "ioPorts") as? [NSObject] else {
             throw PrivateAPIError.noDisplayPort
@@ -359,6 +366,17 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     /// to dismiss as broken.
     public func observeChanges(_ handler: @escaping () -> Void) throws {
         guard let display else { throw PrivateAPIError.noDisplayPort }
+        // Registration is not idempotent and this used to be called as though it
+        // were. Every call minted a fresh UUID and left the previous
+        // registration live, and the recovery loop calls it on every attempt:
+        // one log from 2026-09-12 shows **670 port re-resolves**, which is up to
+        // 670 damage callbacks registered on one port, each invoked per redraw
+        // (~52/s while an app switches).
+        //
+        // That is the best available explanation for a wedge that gets worse the
+        // longer it runs and that only a device restart cures — and it means the
+        // recovery was a cause as well as a response. Unregister first, always.
+        unregisterChangeCallback()
         let sel = NSSelectorFromString("registerCallbackWithUUID:damageRectanglesCallback:")
         guard display.responds(to: sel), let imp = display.method(for: sel) else {
             throw PrivateAPIError.frameworksUnavailable("damageRectanglesCallback missing")
@@ -371,7 +389,13 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
         unsafeBitCast(imp, to: RegFn.self)(display, sel, uuid, block as AnyObject)
     }
 
-    public func detach() {
+    /// Drop the damage callback we registered, if we registered one.
+    ///
+    /// Safe to call when there is nothing to drop, which is what lets both
+    /// `observeChanges` and the port-replacement paths call it unconditionally.
+    /// Unregisters against the port it was registered on — the one currently in
+    /// `display` — so it must run *before* that reference is replaced.
+    func unregisterChangeCallback() {
         if let display, let uuid = changeUUID {
             let sel = NSSelectorFromString("unregisterDamageRectanglesCallbackWithUUID:")
             if display.responds(to: sel), let imp = display.method(for: sel) {
@@ -381,6 +405,10 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
         }
         changeCallback = nil
         changeUUID = nil
+    }
+
+    public func detach() {
+        unregisterChangeCallback()
         display = nil
         attached = nil
     }
