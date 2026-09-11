@@ -3,7 +3,7 @@
   "name": "io.github.lvlrSajjad/simframe",
   "title": "simframe",
   "description": "Always-warm iOS Simulator and Android emulator frames: agents read the screen in ~20ms",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "websiteUrl": "https://lvlrsajjad.github.io/simframe/",
   "repository": {
     "url": "https://github.com/lvlrSajjad/simframe",
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "simframe",
-      "version": "0.12.0",
+      "version": "0.12.1",
       "transport": {
         "type": "stdio"
       }
