@@ -42,6 +42,23 @@ if (!supervisor.requested({})) {
   process.exit(2);
 }
 
+// Before anything else, because the device may already be wedged from the last
+// run — `ensureDaemon` throws on a display that has stopped rendering, and it
+// threw here on the third attempt of the afternoon, before the loop's own check
+// could ever run. Driving one simulator hard for a few minutes is what does it.
+{
+  const { execFileSync } = await import('node:child_process');
+  try {
+    await api.ensureDaemon(device);
+  } catch {
+    console.log('the device is not producing frames; reviving before starting');
+    try {
+      execFileSync(process.execPath, ['src/cli.js', 'revive', `--device=${device}`],
+        { cwd: new URL('..', import.meta.url).pathname, timeout: 300_000, stdio: 'inherit' });
+    } catch { /* reported below by the throw from ensureDaemon */ }
+  }
+}
+
 const { device: dev } = await api.ensureDaemon(device);
 console.log(`device: ${dev.name} (${dev.runtime})`);
 
@@ -53,13 +70,29 @@ console.log(`device: ${dev.name} (${dev.runtime})`);
  * starts its own timers. Relaunching and then opening the URL would be too
  * late: the list's delay has already been drawn from the default stream.
  */
+/**
+ * Scaffolding runs with the supervisor OFF, and that is not a detail.
+ *
+ * The first collection run produced 18 rulings of which **14 came from the
+ * harness's own plumbing** — seven from tapping an "Open in …?" dialog that was
+ * not always there, two from terminating an app that was not running, three
+ * from typing into a form we had failed to reach. Every one was a real
+ * consultation and every one would have landed in the population that 101 and
+ * 96 are going to measure.
+ *
+ * A fixture is a claim about what the supervisor should say. Plumbing is not,
+ * and a harness that cannot tell them apart is measuring itself.
+ */
+const SCAFFOLD = { supervisor: 'none' };
+
 const launchSeeded = async (seed) => {
   // Terminating an app that is not running fails, and a failed step aborts the
   // rest of the batch — so it gets its own call and its own shrug.
-  await actions.runScript(device, { steps: [{ terminate: BUNDLE }], verify: false }).catch(() => null);
+  await actions.runScript(device, { steps: [{ terminate: BUNDLE }], verify: false, options: SCAFFOLD }).catch(() => null);
   await actions.runScript(device, {
     steps: [{ openUrl: `simframetestbed://seed/${seed}` }, { pause: 1200 }],
     verify: false,
+    options: SCAFFOLD,
   });
   // iOS asks "Open in ...?" whenever a custom scheme is opened by another
   // process, springboard included, and it asks on every launch. Answered here
@@ -68,11 +101,29 @@ const launchSeeded = async (seed) => {
   await actions.runScript(device, {
     steps: [{ tap: 'Open' }, { pause: 2200 }],
     verify: false,
+    options: SCAFFOLD,
   }).catch(async () => {
     // No dialog this time. Give the app the same settling time anyway, so the
     // fixture's timing does not depend on whether iOS felt like asking.
-    await actions.runScript(device, { steps: [{ pause: 2200 }], verify: false }).catch(() => null);
+    await actions.runScript(device, { steps: [{ pause: 2200 }], verify: false, options: SCAFFOLD }).catch(() => null);
   });
+};
+
+/**
+ * Walk to where a fixture starts, unjudged.
+ *
+ * Navigation is scaffolding too. Three of the first run's stray rulings were a
+ * `type` that failed because the form had never been reached — a ruling about
+ * the harness's own navigation, recorded as though it were about the fixture.
+ */
+const walk = async (steps) => {
+  if (!steps.length) return true;
+  try {
+    await actions.runScript(device, { steps, verify: false, options: SCAFFOLD });
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 /**
@@ -102,53 +153,64 @@ const FIXTURES = [
   {
     name: 'arriving',
     want: 'recovered',
-    steps: [{ waitFor: { value: 'Monstera #1', timeoutMs: 900 } }],
+    walk: [],
+    judge: { waitFor: { value: 'Monstera #1', timeoutMs: 900 } },
     expect: 'the list is still loading; its rows arrive shortly after launch',
   },
   {
     name: 'blocked',
     want: 'stopped',
-    steps: [
-      { tap: 'Forms, tab, 2 of 3' }, { tap: 'Stepped form' },
-      { tap: 'Next' }, { tap: 'Next' },
-      { waitFor: { value: 'Submitted', timeoutMs: 2500 } },
+    walk: [
+      { tap: 'Forms, tab, 2 of 3' }, { pause: 900 }, { tap: 'Stepped form' }, { pause: 900 },
+      { tap: 'Next' }, { pause: 700 }, { tap: 'Next' }, { pause: 700 },
     ],
+    judge: { waitFor: { value: 'Submitted', timeoutMs: 2500 } },
     expect: 'Review is blocked until Species is filled in, and it is empty',
   },
   {
     name: 'refused',
     want: 'stopped',
-    steps: [
-      { tap: 'Forms, tab, 2 of 3' }, { tap: 'One-step form' },
+    walk: [
+      { tap: 'Forms, tab, 2 of 3' }, { pause: 900 }, { tap: 'One-step form' },
       { pause: 6500 },
       { type: { into: 'Your Name', text: 'Ada' } },
-      { tap: 'Submit' },
-      { waitFor: { value: 'Saved', timeoutMs: 2500 } },
+      { tap: 'Submit' }, { pause: 900 },
     ],
+    judge: { waitFor: { value: 'Saved', timeoutMs: 2500 } },
     expect: 'the first submit always fails and the second works, so waiting cannot help',
   },
 ];
 
 const before = metrics.readSupervisions(dev.udid).length;
 let runs = 0;
+let skipped = 0;
 
 for (let i = 0; i < seeds; i += 1) {
   const seed = 1000 + i * 7;
   for (const fx of FIXTURES) {
     await reviveIfWedged();
     await launchSeeded(seed);
-    const steps = fx.steps.map((s, idx) => (idx === fx.steps.length - 1 ? { ...s, expect: fx.expect } : s));
+    const reached = await walk(fx.walk);
+    if (!reached) {
+      process.stdout.write(`  seed ${seed}  ${fx.name.padEnd(9)} SKIPPED — could not reach the fixture\n`);
+      skipped += 1;
+      continue;
+    }
     try {
-      await actions.runScript(device, { steps, supervise: fx.name, verify: true });
-    } catch { /* a failing flow is the point */ }
+      await actions.runScript(device, {
+        steps: [{ ...fx.judge, expect: fx.expect }],
+        supervise: fx.name,
+        verify: true,
+      });
+    } catch { /* a failing step is the point */ }
     runs += 1;
-    process.stdout.write(`  seed ${seed}  ${fx.name.padEnd(9)} run\n`);
+    process.stdout.write(`  seed ${seed}  ${fx.name.padEnd(9)} judged\n`);
   }
 }
 
 const all = metrics.readSupervisions(dev.udid);
 const fresh = all.slice(before);
-console.log(`\n${runs} runs produced ${fresh.length} ruling(s)\n`);
+console.log(`\n${runs} judged step(s), ${skipped} skipped, ${fresh.length} ruling(s)\n`);
 
 const byFixture = new Map(FIXTURES.map((f) => [f.expect, f]));
 const score = new Map(FIXTURES.map((f) => [f.name, { n: 0, right: 0, decisions: {}, outcomes: {} }]));
