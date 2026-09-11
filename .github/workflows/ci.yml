@@ -297,7 +297,14 @@ jobs:
             simframe state --device="$DEVICE" --json \
               | node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(s.hash+" "+s.seq)'
           }
-          printf '[{"button":"home"},{"settle":true}]\n' > /tmp/reset.json
+          # Both settles in this step need the runner's budget, not one of them.
+          # The previous commit widened the openUrl flow's and left this one at
+          # its default, and *this* is the one that then failed — "pressed home
+          # (never settled)", then the settle giving up at 9.3s, with the
+          # two-step flow taking 36s in total. Going to the home screen is a
+          # springboard animation, which is exactly the kind of thing a loaded
+          # build farm makes slow.
+          printf '[{"button":"home"},{"settle":{"timeoutMs":25000}}]\n' > /tmp/reset.json
           simframe do /tmp/reset.json --device="$DEVICE"
           BEFORE=$(read_state)
           # A settle budget, stated rather than defaulted. The default is a cold
