@@ -584,12 +584,41 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    wrote "it runs on logs we already have" and then went to look. Rulings are
    returned in a `supervisions` array on the result and **nothing writes them
    anywhere**; `escalations.jsonl` does not carry them. Three rulings have ever
-   been produced and none survive. So the real first step is 101a below, and the
+   **A second correction, from building 101a — and this one is about the premise,
+   not the plumbing.** The first real ruling to reach the new log came back on
+   edge `823b8158b727:tap:nonexistent row` with `edge_samples: 0` and
+   `edge_p95_ms: null`. A p95 lookup could not have answered it, and not by bad
+   luck: **a naming failure is a step that has never succeeded on this edge, so
+   the graph has no timing for it by construction.** The subset 101 can actually
+   speak to is *timing* failures on edges that have worked before, where a p95
+   exists. That may still be the majority of `wait`/`retry` rulings — timing is
+   what those decisions are about — but it is now an empirical question with a
+   readiness number attached rather than an assumption: `simframe supervisions`
+   prints `edges the graph had timed: n/total`, and 101 cannot start until that
+   numerator is a population. One ruling in, it is 0/1.
+
+   So the real first step is 101a below, and the
    prize cannot be counted before it exists — which is the whole of
    `measure-the-prize-before-the-solution`, committed against me again.
 
-101a. **Persist supervisor rulings, because three of the next four items need
-   them.** One line per consultation, alongside the escalation log: the screen
+101a. ~~**Persist supervisor rulings**~~ — **DONE, 2026-09-12.**
+   `~/.simframe/<udid>/supervisions.jsonl`, beside the other two logs, written
+   through `metrics.recordSupervision` from a single `noteRuling` helper so a
+   ruling cannot reach the caller without also being written down — the four
+   outcome branches had already drifted apart once, `from` being on the `stop`
+   push and on none of the others. Outcomes are a closed vocabulary
+   (`recovered`, `still_failed`, `stopped`, `no_ruling`) for the reason `REASONS`
+   is closed, and refused rather than thrown, because this is called from inside
+   a flow's failure handler where a throw would turn a recoverable step failure
+   into a crash. `simframe supervisions` reads it. **Verified with a real ruling
+   on the bench device, not a fixture:** `retry -> still_failed`, 666 ms, on
+   edge `823b8158b727:tap:nonexistent row`. Two things it taught immediately —
+   the p95 caveat now recorded against 101, and that `edge_samples`/`edge_p95_ms`
+   have to be captured *at ruling time* because the graph keeps learning and a
+   p95 read later is not the number the ruling was competing with.
+
+   The original entry, kept because the reasoning is what justified the fields:
+   One line per consultation, alongside the escalation log: the screen
    hash and the graph edge, the decision, `stillMs` at the time, the step's
    `expect` note if it had one, and the outcome the executor observed
    afterwards — recovered, still failed, stopped. That last field is what makes

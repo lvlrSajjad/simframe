@@ -47,6 +47,7 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe baseline list             recorded runs per flow, and what is committed
   simframe hpi     [device]          Human Parity Index, per flow and overall
   simframe escalations [device]      why simframe handed decisions back, by reason
+  simframe supervisions [device]     local supervisor rulings, and what came of each
                                      (--session=<id> narrows to one agent; the
                                      ids are listed in the output. SIMFRAME_SESSION
                                      names one, but only at process start — an
@@ -1025,6 +1026,37 @@ async function main() {
         flags.out ? `wrote ${flags.out}` : null,
       ]);
       return;
+    }
+
+    case 'supervisions': {
+      const dev = await resolveDevice(flags.device);
+      const records = metrics.readSupervisions(dev.udid, { limit: flags.last ? num(flags.last) : undefined });
+      const b = metrics.supervisionBreakdown(records);
+      if (flags.out) store.writeAtomic(String(flags.out), `${JSON.stringify({ ...b, records }, null, 2)}\n`);
+      emit(flags, { ...b, records: flags.verbose ? records : undefined }, [
+        `${b.total} supervisor ruling${b.total === 1 ? '' : 's'} on ${dev.name}`,
+        b.total ? '' : 'Nothing has been judged on this device yet. The supervisor is off unless'
+          + ' SIMFRAME_SUPERVISOR=apple, and a ruling is only recorded when a step actually fails.',
+        ...Object.entries(b.decision_to_outcome)
+          .sort((a, c) => c[1] - a[1])
+          .map(([k, n]) => `  ${k.padEnd(28)} ${String(n).padStart(4)}`),
+        b.total ? '' : null,
+        b.total ? `sourced: ${Object.entries(b.by_from).map(([k, n]) => `${k} ${n}`).join(', ')}` : null,
+        b.median_latency_ms != null ? `median latency: ${b.median_latency_ms}ms` : null,
+        // Said out loud, because the first version of item 101 claimed its
+        // measurement ran "on logs we already have" when nothing persisted a
+        // ruling at all. This line is what stops that claim being made twice.
+        b.total
+          ? `edges the graph had timed: ${b.p95_known}/${b.total}`
+            + (b.p95_unknown
+              ? ` — ${b.p95_unknown} ruling(s) are on edges with no p95, so they cannot take part in 101's comparison`
+              : '')
+          : null,
+        b.sessions.length > 1
+          ? `WARNING ${b.sessions.length} sessions are pooled here; two agents on one device write one file`
+          : null,
+      ].filter((l) => l !== null).join('\n'));
+      break;
     }
 
     case 'escalations': {

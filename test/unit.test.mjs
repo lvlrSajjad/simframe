@@ -2710,9 +2710,24 @@ test('acting on a ruling re-runs the same step, never a different one', async ()
   assert.match(hook, /supervise` note/);
 
   // Every ruling is recorded, including one that did not help — a supervisor
-  // whose mistakes are invisible cannot be corrected.
-  for (const outcome of ['recovered', 'still failed', 'stopped the run']) {
-    assert.ok(hook.includes(outcome), `outcome "${outcome}" is reported`);
+  // whose mistakes are invisible cannot be corrected. Asserted as the calls
+  // that do the recording rather than as the English they print: the words
+  // moved into a lookup when the rulings started being persisted, and this
+  // test failed for that with nothing wrong, which is what a test pinned to
+  // the shape of the source buys you.
+  for (const outcome of ['recovered', 'still_failed', 'stopped', 'no_ruling']) {
+    assert.ok(hook.includes(`ruled('${outcome}')`), `the ${outcome} branch records its ruling`);
+  }
+
+  // And the two vocabularies cannot drift apart. The log stores tokens that
+  // have to keep parsing; the caller is shown English that a test pins. The
+  // mapping between them is the new seam, so it is checked for exhaustiveness
+  // rather than trusted.
+  const metrics = await import('../src/metrics.js');
+  const src2 = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const shown = src2.slice(src2.indexOf('const SHOWN = {'), src2.indexOf('const noteRuling'));
+  for (const token of metrics.RULING_OUTCOMES) {
+    assert.ok(shown.includes(`${token}:`), `${token} has a caller-facing wording`);
   }
 });
 
@@ -2755,8 +2770,14 @@ test('round 7: the supervisor stops going silent, and code answers what code kno
   // reported the supervisor makes no difference without realising it had never
   // run."
   const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
-  assert.match(src, /decision: 'unavailable'/);
+  assert.match(src, /ruled\('no_ruling'\)/);
+  assert.match(src, /'unavailable'/);
   assert.match(src, /consulted and did not answer/);
+  // It is now also *durable*, which is the half that was missing: a
+  // consultation that answered nothing used to be visible in one result and
+  // gone with the process.
+  const metrics = await import('../src/metrics.js');
+  assert.ok(metrics.RULING_OUTCOMES.includes('no_ruling'), 'an unanswered consultation is a recordable outcome');
 });
 
 test('the viewport has two edges, and a horizontal row proved it', async () => {
@@ -3959,4 +3980,61 @@ test('no row is dropped for being long, and the harness can prove it', async () 
   assert.ok(fx.expect.discoverable.length >= 3, 'the reported shape is a fixture');
   const harness = fs2.readFileSync(new URL('../scripts/eval-perception.mjs', import.meta.url), 'utf8');
   assert.match(harness, /kind: 'discovery'/);
+});
+
+test('101a: a supervisor ruling survives the process that made it', async () => {
+  const metrics = await import('../src/metrics.js');
+  const udid = 'TEST-SUPERVISIONS';
+  const file = metrics.paths(udid).supervisions;
+  try { (await import('node:fs')).rmSync(file, { force: true }); } catch { /* first run */ }
+
+  // Until this landed, a ruling went into a `supervisions` array on the result
+  // and died with the process: three rulings had ever existed anywhere, and
+  // 101's p95 replay, 106's cost-of-a-stop and 96's response variable were all
+  // waiting on a population that nothing was collecting.
+  assert.equal(metrics.readSupervisions(udid).length, 0, 'starts empty');
+
+  const wrote = metrics.recordSupervision(udid, {
+    index: 2,
+    step: 'tap:general',
+    edge: 'abc123def456:tap:general',
+    screen: 'abc123def456',
+    decision: 'wait',
+    from: 'model',
+    reason: 'the list is still arriving',
+    ms: 310,
+    stillMs: 120,
+    p95: 1400,
+    samples: 7,
+    expect: 'the General list',
+    failure: '"General" is not on this screen. Visible: Settings',
+    outcome: 'recovered',
+  });
+  assert.equal(wrote, true, 'the ruling is written');
+
+  const [row] = metrics.readSupervisions(udid);
+  // The outcome is the field that makes a ruling scoreable rather than merely
+  // recorded, so it is the one asserted first.
+  assert.equal(row.outcome, 'recovered');
+  assert.equal(row.decision, 'wait');
+  assert.equal(row.from, 'model');
+
+  // And what the graph knew about the edge *at the time*. Recorded here rather
+  // than looked up during analysis because the graph keeps learning: a p95 read
+  // next week is not the number this ruling was competing with, which is the
+  // whole of what item 101 asks.
+  assert.equal(row.edge_p95_ms, 1400);
+  assert.equal(row.edge_samples, 7);
+  assert.equal(row.still_ms, 120);
+  assert.equal(row.edge, 'abc123def456:tap:general');
+  assert.equal(row.expect, 'the General list');
+
+  // An outcome outside the vocabulary is refused rather than written, for the
+  // reason `REASONS` is closed: a log that accepts "other" collects a pile of
+  // "other" and answers nothing. Refused, not thrown — this is called from
+  // inside a flow's failure handler, where a throw would turn a recoverable
+  // step failure into a crash.
+  assert.equal(metrics.recordSupervision(udid, { decision: 'wait', outcome: 'sort of worked' }), false);
+  assert.equal(metrics.readSupervisions(udid).length, 1, 'and nothing was appended');
+  assert.match(String(metrics.writeError()), /must be one of/);
 });

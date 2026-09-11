@@ -209,6 +209,59 @@ export async function runScript(
       /* instrumentation must not be able to fail a flow it is only watching */
     }
   };
+  /**
+   * What the caller is shown for each outcome, keyed by what the log stores.
+   *
+   * Two vocabularies on purpose. The log wants tokens that will still parse in
+   * six months; the result and the CLI line want English, and a test already
+   * pins those words. Mapping them here is what stops the two drifting.
+   */
+  const SHOWN = {
+    recovered: 'recovered',
+    still_failed: 'still failed',
+    stopped: 'stopped the run',
+    no_ruling: 'no ruling',
+  };
+  /**
+   * Record one ruling, in memory for the caller and on disk for the analysis.
+   *
+   * One helper rather than four call sites because the two had already drifted
+   * apart once — `from` was on the `stop` push and on none of the others, so a
+   * rule-sourced wait was indistinguishable from a model-sourced one in the
+   * only place that reported them. A ruling that reaches the caller and not the
+   * log is the state item 101a exists to end: three rulings had ever existed
+   * anywhere, and 101, 106 and 96 are all waiting on a population.
+   */
+  const noteRuling = (index, ruling, outcome, { step, expect, failure } = {}) => {
+    const shown = SHOWN[outcome] ?? outcome;
+    supervisions.push({
+      index,
+      decision: ruling?.decision ?? 'unavailable',
+      reason: ruling?.reason ?? 'the supervisor did not answer',
+      from: ruling?.from,
+      outcome: shown,
+    });
+    try {
+      metrics.recordSupervision(udid, {
+        index,
+        step: step ? graph.actionSignature(step) : ruling?.context?.action ?? null,
+        edge: ruling?.context?.edge ?? null,
+        screen: ruling?.context?.screen ?? null,
+        decision: ruling?.decision ?? 'unavailable',
+        from: ruling?.from ?? (ruling ? 'model' : 'none'),
+        reason: ruling?.reason ?? 'the supervisor did not answer',
+        ms: ruling?.ms,
+        stillMs: ruling?.context?.stillMs,
+        p95: ruling?.context?.p95,
+        samples: ruling?.context?.samples,
+        expect,
+        failure,
+        outcome,
+      });
+    } catch {
+      /* instrumentation must not be able to fail a flow it is only watching */
+    }
+  };
 
   const needsInput = steps.some((s) => ACTION_STEPS.has(normalizeStep(s).action));
   if (needsInput) {
@@ -310,7 +363,10 @@ export async function runScript(
         // hands and in front of the reasoner: first responder, not
         // decision-maker, and its whole vocabulary is wait/retry/stop.
         const ruling = await superviseFailure(deviceQuery, {
-          goal: supervise ?? flowName, step, expected: step.expect, err, options,
+          goal: supervise ?? flowName, step, expected: step.expect, err, options, udid,
+        });
+        const ruled = (outcome) => noteRuling(i, ruling, outcome, {
+          step, expect: step.expect, failure: err.message,
         });
         if (ruling?.decision === 'wait' || ruling?.decision === 'retry') {
           // Both wait and retry settle first, differing only in how long.
@@ -332,10 +388,10 @@ export async function runScript(
           try {
             detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus });
             detail += ` [the local supervisor said ${ruling.decision}; it worked on the second attempt]`;
-            supervisions.push({ index: i, decision: ruling.decision, reason: ruling.reason, outcome: 'recovered' });
+            ruled('recovered');
             continue;
           } catch (again) {
-            supervisions.push({ index: i, decision: ruling.decision, reason: ruling.reason, outcome: 'still failed' });
+            ruled('still_failed');
             err = again;
           }
         } else if (!ruling && supervisor.requested(options)) {
@@ -345,10 +401,10 @@ export async function runScript(
           // model healthy. The reporter's own words — *"had I run flow 2 alone
           // I would have reported the supervisor makes no difference without
           // realising it had never run"*.
-          supervisions.push({ index: i, decision: 'unavailable', reason: 'the supervisor did not answer', outcome: 'no ruling' });
+          ruled('no_ruling');
           err.message += ' — the local supervisor was consulted and did not answer, so this failure was not judged.';
         } else if (ruling?.decision === 'stop') {
-          supervisions.push({ index: i, decision: 'stop', reason: ruling.reason, from: ruling.from, outcome: 'stopped the run' });
+          ruled('stopped');
           const remaining = steps.slice(i);
           err.message += ` — the local supervisor stopped the run here.`
             + ` ${remaining.length} step(s) were not attempted.`
@@ -1123,14 +1179,34 @@ const SUPERVISOR_RETRY_MS = 900;
 /** A scroll moves at once or not at all; it does not need a transition's budget. */
 const SCROLL_SETTLE_MS = 800;
 
-async function superviseFailure(deviceQuery, { goal, step, expected, err, options }) {
+async function superviseFailure(deviceQuery, { goal, step, expected, err, options, udid }) {
   if (!supervisor.requested(options)) return null;
+  // The action half of the edge is free — the step is in hand — so a rule-sourced
+  // ruling still records which action it was about even though it never reads
+  // the screen. Deliberately no `screenMap` call on this path: the rule exists
+  // to answer without one, and paying for a read to make the log prettier would
+  // slow the fast path to improve the bookkeeping.
+  const action = graph.actionSignature(step);
   const settled = deterministicRuling(err);
-  if (settled) return { decision: settled.decision, reason: settled.why, from: 'rule' };
+  if (settled) {
+    return {
+      decision: settled.decision, reason: settled.why, from: 'rule',
+      context: { action, edge: action, screen: null, stillMs: null, p95: null, samples: null },
+    };
+  }
   try {
     const map = await view.screenMap(deviceQuery, { options, refresh: false });
     const stillMs = map.identity?.state?.motion?.stillForMs;
-    return await supervisor.judge({
+    const screen = map.identity?.hash ?? null;
+    // What the graph knew about this edge at the moment of the ruling. Read
+    // here and not at analysis time on purpose: the graph keeps learning, so a
+    // p95 looked up next week is not the number this ruling was competing
+    // with, and item 101 asks exactly "would a p95 lookup have got this right".
+    let timing = null;
+    try {
+      timing = udid && map.identity ? graph.timingFor(udid, map.identity, step) : null;
+    } catch { /* an unknown edge is a fact about the graph, not a failure here */ }
+    const ruling = await supervisor.judge({
       goal,
       step: `${step.action} ${JSON.stringify(String(step.value ?? step.target ?? step.into ?? step.seek ?? '').slice(0, 60))}`,
       expected,
@@ -1140,6 +1216,19 @@ async function superviseFailure(deviceQuery, { goal, step, expected, err, option
       note: stillFillingIn(map.identity?.entry),
       options,
     });
+    if (!ruling) return null;
+    return {
+      ...ruling,
+      from: ruling.from ?? 'model',
+      context: {
+        action,
+        edge: screen ? `${String(screen).slice(0, 12)}:${action}` : action,
+        screen,
+        stillMs,
+        p95: timing?.p95 ?? null,
+        samples: timing?.samples ?? null,
+      },
+    };
   } catch {
     return null;
   }

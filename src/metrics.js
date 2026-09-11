@@ -25,6 +25,21 @@ export const REASONS = [
 export const OUTCOMES = ['resolved_locally', 'escalated_to_model', 'failed'];
 
 /**
+ * What the executor observed after a supervisor ruling — the field that makes a
+ * ruling scoreable rather than merely recorded.
+ *
+ * A ruling on its own says what the supervisor thought. Three items on the
+ * deferred list (101's p95 replay, 106's cost of the steps a `stop` skipped,
+ * 96's response variable) need what happened *next*, and until now nothing
+ * persisted a ruling at all: they went into a `supervisions` array on the
+ * result and died with the process. Three rulings had ever existed anywhere.
+ *
+ * Closed, and mandatory, for the same reason `REASONS` is: a vocabulary that
+ * admits "other" collects a pile of "other".
+ */
+export const RULING_OUTCOMES = ['recovered', 'still_failed', 'stopped', 'no_ruling'];
+
+/**
  * Which faculty would have removed this escalation.
  *
  * This is the mapping that turns the reason breakdown into a phase order, so
@@ -57,6 +72,7 @@ function metricPaths(udid) {
     dir,
     escalations: path.join(dir, 'escalations.jsonl'),
     flows: path.join(dir, 'flows.jsonl'),
+    supervisions: path.join(dir, 'supervisions.jsonl'),
     baselines: path.join(dir, 'baselines'),
   };
 }
@@ -109,6 +125,106 @@ export function readJsonl(file, { limit } = {}) {
 
 export const readEscalations = (udid, opts) => readJsonl(metricPaths(udid).escalations, opts);
 export const readFlows = (udid, opts) => readJsonl(metricPaths(udid).flows, opts);
+export const readSupervisions = (udid, opts) => readJsonl(metricPaths(udid).supervisions, opts);
+
+/**
+ * Write down one supervisor ruling and what came of it.
+ *
+ * The fields are chosen so the three items waiting on this can be answered
+ * **offline, from the log**, rather than by another device run:
+ *
+ * - `screen`/`edge` — which `(screen_hash, action)` the ruling was about, so
+ *   rulings can be grouped by edge the way the graph groups timings.
+ * - `p95`/`samples` — what the graph knew about that edge **at the moment of
+ *   the ruling**. Recording it now rather than looking it up later is the
+ *   difference between 101 being arithmetic and 101 being archaeology: the
+ *   graph keeps learning, so a p95 read next week is not the p95 the
+ *   supervisor was implicitly competing with.
+ * - `stillMs` — the same input the supervisor got, so a replay sees what it saw.
+ * - `expect` — the plan's own note, because a ruling made with a briefing and
+ *   one made without are not the same measurement (96's critical arm).
+ * - `outcome` — what the executor observed afterwards. Mandatory.
+ *
+ * `from` separates a deterministic rule from a model answer. Both are rulings
+ * and both have outcomes, but a comparison that mixed them would credit the
+ * model for what a two-line rule decided.
+ */
+export function recordSupervision(udid, {
+  session, index, step, edge, screen, decision, from, reason, ms,
+  stillMs, p95, samples, expect, failure, outcome,
+}) {
+  // Swallowed rather than thrown, unlike `recordEscalation`'s guard, and the
+  // difference is deliberate: this is called from inside a flow's failure
+  // handler, where a throw would turn a recoverable step failure into a crash.
+  // It still lands in `lastWriteError`, which `simframe escalations` prints.
+  if (!RULING_OUTCOMES.includes(outcome)) {
+    lastWriteError = `supervision outcome must be one of ${RULING_OUTCOMES.join('/')}, got ${JSON.stringify(outcome)}`;
+    return false;
+  }
+  return appendJsonl(metricPaths(udid).supervisions, {
+    timestamp: new Date().toISOString(),
+    session_id: session ?? SESSION_ID,
+    client: CLIENT,
+    step_index: index ?? null,
+    step: step ?? null,
+    edge: edge ?? null,
+    screen_fingerprint: screen ?? null,
+    decision,
+    from: from ?? 'model',
+    // Recorded, never presented as the ground for what happened: the supervisor
+    // has returned a correct decision with a reason citing a rule that did not
+    // apply. Keeping it is how that stays measurable instead of anecdotal.
+    reason: reason ? String(reason).slice(0, 200) : null,
+    latency_ms: Number.isFinite(ms) ? Math.round(ms) : null,
+    still_ms: Number.isFinite(stillMs) ? Math.round(stillMs) : null,
+    edge_p95_ms: Number.isFinite(p95) ? Math.round(p95) : null,
+    edge_samples: Number.isFinite(samples) ? samples : null,
+    expect: expect ? String(expect).slice(0, 200) : null,
+    failure: failure ? String(failure).slice(0, 300) : null,
+    outcome,
+  });
+}
+
+/**
+ * What the ruling log currently says, and whether it can yet answer 101.
+ *
+ * Deliberately counts rather than scores. Item 101 asks which `wait`/`retry`
+ * rulings a p95-per-edge lookup would have got right, and that is a separate
+ * piece of work; what this answers is the question that comes first and was
+ * embarrassing to get wrong once already — **is there a population to measure
+ * at all, and do its rows carry the fields the measurement needs.** `p95_known`
+ * is that readiness check: a ruling recorded on an edge the graph had never
+ * timed cannot take part in the comparison, however many of them there are.
+ */
+export function supervisionBreakdown(records) {
+  const by = (key) => {
+    const out = {};
+    for (const r of records) {
+      const k = r[key] ?? 'unknown';
+      out[k] = (out[k] ?? 0) + 1;
+    }
+    return out;
+  };
+  const matrix = {};
+  for (const r of records) {
+    const k = `${r.decision ?? 'unknown'} -> ${r.outcome ?? 'unknown'}`;
+    matrix[k] = (matrix[k] ?? 0) + 1;
+  }
+  const timed = records.filter((r) => Number.isFinite(r.edge_p95_ms));
+  const latencies = records.map((r) => r.latency_ms).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  return {
+    total: records.length,
+    by_decision: by('decision'),
+    by_outcome: by('outcome'),
+    by_from: by('from'),
+    decision_to_outcome: matrix,
+    // Readiness for 101, not a result for it.
+    p95_known: timed.length,
+    p95_unknown: records.length - timed.length,
+    sessions: [...new Set(records.map((r) => r.session_id).filter(Boolean))],
+    median_latency_ms: latencies.length ? latencies[latencies.length >> 1] : null,
+  };
+}
 
 /**
  * Mark an error as an escalation with a reason, at the site that knows why.
