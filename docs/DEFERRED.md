@@ -81,12 +81,19 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > effect: **do the cheap wins first, then the model comparison, then everything
 > else.** Nothing below needs re-deciding; it needs doing.
 >
-> **Push 1 — the cheap wins** (offline-testable, no device sweep):
-> **101a** persist supervisor rulings with the outcome the executor observed,
-> because it gates 101, 106 and 96 alike · **98** put a score floor and a
-> published-region check on the relabel recovery, which today accepted 0.64 and
-> a status-bar target · **88** the MCP tool descriptions still open with `#3`
-> instead of intent.
+> **Push 1 — DONE, 2026-09-12.** **101a** rulings persist to
+> `supervisions.jsonl` and `simframe supervisions` reads them; verified with a
+> real ruling on the bench device, which immediately contradicted a premise of
+> 101 (a naming failure is on an edge the graph has never timed, so it has no
+> p95 by construction) · **98** score floor 0.8 and a region check, with the
+> reported 0.64 status-bar case now a fixture · **88** the MCP descriptions and
+> CLI help lead with the label; the skill's prose no longer contradicts its own
+> table.
+>
+> **Next up is 110**, ahead of Push 2: it is the only thing keeping
+> `integration` intermittently red, the mechanism is now measured on the runner
+> rather than inferred, and the fix is a region-band change plus a
+> `TOKEN_RULES_VERSION` bump and a re-measure.
 >
 > **Ahead of both, and new: 110.** The red `integration` job is **not** item 95.
 > It is a real fingerprint collision: a screen whose own name is an iOS large
