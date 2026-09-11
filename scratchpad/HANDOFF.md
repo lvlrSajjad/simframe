@@ -1,4 +1,4 @@
-# Handoff — 2026-09-11 night, for 2026-09-12
+# Handoff — updated 2026-09-12, mid-session
 
 `docs/DEFERRED.md` opens with a **START HERE, 2026-09-12** block. That is the
 live list. `docs/DECISIONS.md` is the register of judgements. This is the short
@@ -13,30 +13,33 @@ build of *the tarball's own sources*, version consistency across
 `package.json`/`server.json`/tag, the publish, and the "actually resolvable on
 npm" poll that `v0.5.1` taught us to add.
 
-**Nothing is held locally.** `origin/main` is current. This is the first handoff
-in a while with no unpushed commits, and it should stay that way.
+**Nothing is held locally.** `origin/main` is current — `92b73a8` as of this
+update.
 
 **It has not had a peer round.** Every previous local-tier idea in this project
 passed a bench and died on a real app. The supervisor in 0.11.0 has been driven
 by its own author and nobody else.
 
-## Tomorrow, in the owner's own order
+## Push 1 — DONE, 2026-09-12
 
-They said: cheap wins first (my choice of which), then the model comparison,
-then the rest. Not tonight.
+- **101a** rulings persist to `supervisions.jsonl`; `simframe supervisions`
+  reads them. Verified with a real ruling on the bench device, which
+  immediately contradicted a premise of 101: a naming failure is on an edge the
+  graph has never timed, so it has **no p95 by construction**
+  (`edge_samples: 0`). 101 can only speak to timing failures on edges that have
+  worked before, and the command prints `edges the graph had timed: n/total` so
+  that is now empirical.
+- **98** score floor 0.8 plus a region check. The number is structural, not
+  fitted: a fuzzy match caps at `similarity * 0.72`, so only a near-exact name
+  clears it (a "Remindars" typo measures 0.69). The reported case is a fixture
+  now — `• Reminders` in the status bar, asked for as `Reminders`, **exactly the
+  reported 0.64**, refused twice over. The region rule moved to
+  `regions.offerable` so `view.js` and the recovery read one predicate.
+- **88** MCP descriptions and CLI help lead with the label. The skill's prose
+  also contradicted its own table and its example flow tapped `"#3"`.
 
-**Push 1 — cheap wins, all offline-testable, no device sweep.**
-
-- **101a** persist supervisor rulings. One line per consultation: screen hash and
-  graph edge, decision, `stillMs`, the step's `expect`, and **the outcome the
-  executor observed afterwards**. That last field is what makes a ruling
-  scoreable rather than merely recorded. Smallest item on the list; gates 101,
-  106, 96 and 109a.
-- **98** the relabel recovery still accepts a weak match. Today it took **0.64**
-  and a target in the **status bar**, a region `sim_ui` refuses to publish. Two
-  guards: a score floor (a recovery is a guess and deserves a higher bar than a
-  lookup the caller asked for) and a published-region check.
-- **88** MCP tool descriptions still open with `#3` rather than intent.
+**110's first half is also done** — see below. Push 2 (**99** prewarm and the
+token budget, **100** the abstain token) is next, then 109a.
 
 **Push 2 — the supervisor's reliability.**
 
@@ -74,7 +77,42 @@ recommendation not to look.
   briefing+larger. Model-without-briefing is dropped *with cause* — asked cold it
   scored about one in four and called an arriving list a dead end.
 
-## What today established
+## 110 — the fingerprint had no name for a screen (2026-09-12)
+
+**What last night's red `integration` actually was**, after three wrong
+diagnoses of my own: not item 95, not a settle failure, not a tap that missed. A
+real collision. Chrome labels are the only text identity keeps, and an iOS large
+title is drawn tight against the content it heads — 63-79 pt of inset above,
+**5.3 pt** below, against a boundary bar of 66.5 — so it fell into `content` and
+was discarded as content. The Settings root had **0 named tokens** in both
+sensor modes. Two sparse nameless readings on a runner then matched exactly.
+
+Fixed by finding the title from the inset *above* it, deliberately not from the
+`Heading` role: OCR has no roles and the colliding reading was OCR-only, so a
+role test would work only where it does not fail. `TOKEN_RULES_VERSION` is 7.
+
+**Two things worth carrying forward.** Unbounded, the rule promoted
+example.com's `<h1>` to chrome, because Safari on iOS puts its chrome at the
+bottom — page content entering identity, which this module has been bitten by
+twice. Bounded by a platform constant (iOS draws a large title at a system
+offset; the page heading sits 122 pt down). And the distributions **did not
+move** — gap 0.48 either way — because the collision has never happened on this
+machine. The change removes the precondition, not a measured regression.
+
+**The other half is open and larger.** Two fixtures have real compact nav bars
+the detector also misses (gap below 10.0 against 19 required; 27.7 against
+66.5) and `contacts` still reads 0 named. The detector identifies a bar by the
+whitespace beneath it and iOS does not always provide any.
+
+## CI has two independent failure causes, and I conflated them once
+
+- **The collision** (above), on `d7f0e45` step 13.
+- **Item 95, which is real**, on `5c79aad` step 11: `settle: screen did not
+  settle within 8056ms`, a two-step flow taking 45.6 s. Genuine runner slowness.
+
+`5b2e8da` passed both. Do not read one as the other again.
+
+## What 2026-09-11 established
 
 **The red CI was hiding a worse bug than itself.** The stale-ref check failed by
 matching prose. Running the scenario on a device instead: `find #1`, numbered in
