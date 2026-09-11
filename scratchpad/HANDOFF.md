@@ -1,38 +1,68 @@
-# Handoff — paused mid-session, 2026-09-12 evening
+# Handoff — 0.12.0 shipped, 2026-09-12
 
-`docs/DEFERRED.md` opens with a **START HERE** block; that plus items 111 and 112
-are the live list. Nothing is held locally — `origin/main` is current, 20 commits
-today. The bench device is shut down. Metro is left running on **8083** (the
-owner's call), and the testbed app is installed.
+`origin/main` is current and nothing is held. **0.12.0 is on npm as `latest`**,
+verified independently of the workflow's exit code (`npm view simframe version`
+→ 0.12.0, tarball resolvable, MCP Registry step ran). CI was green on the
+release SHA first, and `ci [v0.12.0]` and `release [v0.12.0]` both passed.
+
+Metro is left running on **8083** and the testbed is installed on the bench
+device, which is shut down.
 
 ## Pick up here
 
-The agreed order, and we got one item into it:
+**The four peer findings from the 0.12.0 round are the front of the list**, and
+they are better specified than anything I would have invented:
 
-1. **95 — device stability. IN PROGRESS, and the interesting half is done.**
-   A real leak was found in our own code: `observeChanges` registered a
-   damage-rectangles callback with a fresh UUID on every call and never released
-   the previous one, while `resolveDisplay` re-walks the same `ioPorts` array and
-   frequently finds the *same* port. So every recovery attempt added a live
-   callback to one port — and this morning's log has **670 port re-resolves**,
-   each invoked per redraw. Our recovery was a cause as well as a response.
-   Fixed; registration is now unregister-then-register.
+1. **114 — `unexpected-screen` aborts steps that worked.** Nine of sixteen steps
+   skipped, twice in one flow, on a type that had demonstrably landed. Hashes
+   differ legitimately because list *content* differs. Their fix: check the
+   step's own postcondition — does the field contain what was typed, did the
+   tapped element change — before aborting on screen identity. We already hold
+   that evidence. `continueOnError` disables the guard wholesale, which they
+   correctly call the wrong trade.
+2. **115 — "memory disagrees with this screen" on nearly every call.** Item 86,
+   reported independently, plus my own sightings on the testbed the same day.
+   When the tool's own advice is "don't trust the graph" that often, the hash is
+   costing more than it returns.
+3. **117 — `scrollTo` treats "in the tree" as "in view"**, and reported an
+   element at y=835 as visible when it sat under the fixed bottom bar. Half
+   built already: we identify the `tab-bar` region, so anything inside it should
+   count as obstructed.
+4. **118 — the accessibility tree should win outright for text content**, with
+   OCR supplying geometry. `O Records` for `0 Records` will silently break an
+   assertion. A fusion-priority change, testable offline against the fixtures.
 
-   **What is NOT done is proving it was the cause.** `scripts/soak-capture.mjs`
-   exists for exactly that: drive until the display dies and report how long it
-   took. Before the fix, roughly 10-20 minutes; the device wedged three times in
-   one afternoon. **Run it first thing** — that is the before/after, and it is
-   the difference between "found a leak" and "fixed the wedge".
+**Then 112, which is written but not run.** Three `wait` fixtures exist now
+(`arriving`, `detail`, `secondwave`) against two `stop` ones, and the scoreboard
+prints its own balance and says SKEWED above 65%. What is missing is the run:
+`SIMFRAME_SUPERVISOR=apple node scripts/collect-rulings.mjs --device=<udid>
+--seeds=8`. Until that lands, **no accuracy number from the ruling log means
+anything** — the last population was 12 `stop` to 2 `wait`, where guessing the
+commonest answer scored 86% against the model's 64%.
 
-2. **112 — balance the ruling population.** Today's 14 labelled rulings are 12
-   `stop` to 2 `wait`, so a majority-class guess scores 86% and beats the model's
-   64%. No accuracy number from that set means anything. Add genuine `wait`
-   fixtures: `listArrivesInWaves` already exists in the testbed and no fixture
-   uses it; a slow detail screen and a modal mid-present are cheap.
-3. **100, the `abstain` token**, with **97** behind it. Today's measurement is
-   direct evidence: every supervisor error was `wait` where `stop` was right,
-   five times, never the reverse.
-4. Then **109a → 109**, a reshaped **101**, then 89+92 and 93+94.
+**Then 100 (the `abstain` token) with 97 behind it.** Today's measurement is the
+argument: every supervisor error was `wait` where `stop` was right, five times,
+never the reverse.
+
+## What the soak did and did not establish
+
+It ran the full 25 minutes: 48 laps, 336 cold reads, no wedge. But **zero
+capture failures in the window**, which means the run never exercised the
+recovery path — so it cannot distinguish the callback-leak fix from conditions
+being kinder, and there is no matched before-run. The leak is real and measured
+(670 registrations in one pre-fix log, 2 after the escalation fix). Its being
+*the* cause of the wedge is not established. If wedges recur, that is the thread.
+
+## Network visibility (80) — feasibility settled
+
+React Native **does** emit CDP `Network.*` events, with method, URL, status, mime
+type, bytes and a correlating `requestId`. `scripts/probe-network.mjs` is the
+hand-rolled client. Three details each worth an afternoon: the target is on
+*Metro's* inspector (`React Native Bridgeless [C++ connection]`), the upgrade
+needs an `Origin` matching the inspector's host, and `/json/list` returns zero
+targets while the app is mid-relaunch. Scope limit: this is RN's debugger, so it
+covers RN apps and not native ones. Still a product decision; what is settled is
+that it can be built.
 
 ## Owed to the owner
 
