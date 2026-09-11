@@ -82,7 +82,8 @@ async function record<T>(url: string, method: string, run: () => Promise<{ value
  */
 export async function fetchItems(): Promise<Item[]> {
   if (mode === 'offline') {
-    await sleep(delayMs(400, 2200));
+    // Slow enough that a step issued straight after launch genuinely races it.
+    await sleep(delayMs(1500, 3500));
     return record('local://items', 'GET', async () => ({ value: LOCAL, status: 200 }));
   }
   return record(`${CONTENT}/posts?_limit=24`, 'GET', async () => {
@@ -138,8 +139,21 @@ export async function submitForm(fields: Record<string, string>): Promise<{ ok: 
   });
 }
 
-/** A control that stays disabled for a while — the `wait` fixture. */
-export const enableAfterMs = (): number => delayMs(1200, 4000);
+/**
+ * How long a control stays disabled — the `wait` fixture's window.
+ *
+ * Widened from 1200-4000 after the first attempt to use it failed to race at
+ * all: navigating to the form takes a step of its own, and by the time the next
+ * step ran the control was already live. A fixture that only sometimes
+ * reproduces the condition is a fixture you cannot trust a null result from.
+ *
+ * Worth recording alongside it: tapping a disabled control does **not** consult
+ * the supervisor. The tap is delivered, nothing happens, and simframe reports a
+ * `no-visible-change` verdict rather than throwing — and the supervisor is only
+ * asked about steps that throw. So the window matters for `waitFor` and
+ * `assert` steps, which do throw, not for the tap itself.
+ */
+export const enableAfterMs = (): number => delayMs(3000, 6000);
 
 /** Whether this run's list should arrive in two waves. */
 export const listArrivesInWaves = (): boolean => chance(0.5);

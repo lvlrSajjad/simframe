@@ -60,8 +60,20 @@ import * as regions from './regions.js';
  *     exactly and one hash stood for two different screens. `regions.bands`
  *     now finds a large title by the inset above it; every affected screen
  *     hashes differently, so stored graphs and maps go again.
+ *
+ * 8 — the same rule, keyed on the wrong thing. Its "is this a real inset"
+ *     test compared the gap above the title against the screen's **median row
+ *     gap**, so whether a system-drawn title counted as chrome depended on how
+ *     many rows happened to sit below it. Caught on the React Native testbed's
+ *     first day, with two screens of one app: a list of 24 rows has a median
+ *     gap of 0 and the rule fired, a list of 4 above a tab bar has a median gap
+ *     of **414** and it did not. Same title, same 62.9pt inset, opposite
+ *     answers — so one screen carried a name and the other did not, and the
+ *     graph merged them. Both bounds are absolute now. Screens that were
+ *     missed at 7 hash differently at 8, and unlike a stale hash that matches
+ *     nothing, these matched the *wrong* thing.
  */
-export const TOKEN_RULES_VERSION = 7;
+export const TOKEN_RULES_VERSION = 8;
 
 /** Frames are quantised to this, so sub-pixel drift and a nudged row do not matter. */
 export const GRID = 24;

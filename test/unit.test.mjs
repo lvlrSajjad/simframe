@@ -3459,7 +3459,11 @@ test('a summary screen is not a keyboard, and its content stays in its identity'
   // This assertion is doing its job: it is here to make a token-rule change
   // deliberate rather than incidental, so the number moves only alongside a
   // reason written down in `fingerprint.js`.
-  assert.equal(fingerprint.TOKEN_RULES_VERSION, 7);
+  // 8: the same rule keyed on the screen's median row gap rather than on a
+  // constant, so a system-drawn title was chrome or content depending on how
+  // many rows sat below it. Two screens of one app, same 62.9pt inset, opposite
+  // answers — and the graph merged them.
+  assert.equal(fingerprint.TOKEN_RULES_VERSION, 8);
 });
 
 test('a band is only the keyboard if there is a keyboard in it', async () => {
@@ -4182,4 +4186,44 @@ test('110: a large title is the screen\'s name, and a page heading is not', asyn
     listRow(2, 'Add List')];
   assert.equal(regions.regionFor(wide.frame, screen, regions.bands(empty, screen)), 'content',
     'a title is a name, and names are short');
+});
+
+test('110b: a screen that says it is called something else is not this screen', async () => {
+  const graphmod = await import('../src/graph.js');
+  const udid = freshDevice('name-veto');
+
+  // The shape the React Native testbed produced on its first day, and the
+  // reason this rule exists: two root screens of one app, each a large title
+  // over full-width rows above a tab bar. Structurally near-identical, named
+  // differently, and **0.50** similar against a 0.36 threshold — so the graph
+  // made them one node and offered one screen's controls on the other.
+  const shared = [
+    'button:content:w15:h2:x1:y8#many',
+    'button:tab-bar:w3:h1:x1:y33#many',
+    'text:content:w0:h1:x16:y27#many',
+  ];
+  const plants = { hash: 'a'.repeat(32), tokens: [...shared, 'heading:nav-bar:@leading:w4:h2:"plants":x1:y5#1'] };
+  const forms = { hash: 'b'.repeat(32), tokens: [...shared, 'heading:nav-bar:@leading:w4:h2:"forms":x1:y5#1'] };
+
+  const fingerprint = await import('../src/fingerprint.js');
+  const similarity = fingerprint.similarity(plants.tokens, forms.tokens);
+  assert.ok(similarity >= graphmod.SIMILARITY_THRESHOLD,
+    `the point of the rule is that these DO clear the threshold (${similarity.toFixed(2)})`);
+
+  // Stood on, not merely pointed at: an edge stores its destination's hash and
+  // nothing else, so a node only has tokens to compare against once a reading
+  // has been taken *from* it.
+  graphmod.record(udid, { from: plants, action: { tap: 'anything' }, to: plants, kind: 'none' });
+  assert.equal(graphmod.nearestScreen(udid, forms), null,
+    'a differently-named screen is not matched, however alike its shape');
+  assert.ok(graphmod.nearestScreen(udid, plants), 'and the screen itself still matches');
+
+  // Silence is not disagreement. Two sensors are known to share only 0.33-0.47
+  // of a token set, so a reading whose tree did not answer carries no names
+  // through no fault of the screen's — vetoing on that would turn a sensor
+  // difference into an identity claim, which is the mistake the fingerprint
+  // distributions are split by sensor mix to avoid.
+  const unnamed = { hash: 'c'.repeat(32), tokens: shared };
+  assert.ok(graphmod.nearestScreen(udid, unnamed),
+    'a reading with no names at all is not vetoed, it is merely unhelpful');
 });

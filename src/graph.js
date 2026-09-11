@@ -258,6 +258,28 @@ export function nearestScreen(udid, screen, { threshold = SIMILARITY_THRESHOLD }
   for (const node of nodes) {
     for (const f of fingerprintsOf(node)) {
       if (!f.tokens?.length) continue;
+      // A screen that says it is called something else is not this screen.
+      //
+      // Similarity weighs every token equally, and a chrome label is not an
+      // equal token — it is the only text in a fingerprint and the only thing
+      // that distinguishes two screens of the same shape. `fingerprint.js` has
+      // said so in a comment since it was written: "two list screens with
+      // identical structure differ by their title, and nothing else says so".
+      // Nothing enforced it.
+      //
+      // Measured on the RN testbed, which is what found this: a list of plants
+      // and a list of forms, each a large title over full-width rows above a
+      // tab bar, scored **0.50** against a 0.36 threshold and became one node.
+      // Both were correctly named by then; the name was simply outvoted, being
+      // one token of a union of six. The graph then offered one screen's
+      // controls on the other, which is the failure `verify` exists to stop.
+      //
+      // Both sides must actually carry names for this to apply. A reading whose
+      // tree did not answer has no names through no fault of the screen's, and
+      // the two sensors are already known to disagree about 0.33-0.47 of a
+      // token set — so "one has names, the other does not" is a fact about the
+      // sensors and must not be read as a fact about identity.
+      if (disagreeOnName(f.tokens, key.tokens)) continue;
       const s = fingerprint.similarity(f.tokens, key.tokens);
       if (s > bestSimilarity) {
         bestSimilarity = s;
@@ -266,6 +288,31 @@ export function nearestScreen(udid, screen, { threshold = SIMILARITY_THRESHOLD }
     }
   }
   return best && bestSimilarity >= threshold ? { node: best, similarity: bestSimilarity } : null;
+}
+
+/** The chrome labels in a token set — the only text a fingerprint keeps. */
+function namesIn(tokens) {
+  const out = new Set();
+  for (const t of tokens ?? []) {
+    const open = t.indexOf('"');
+    if (open < 0) continue;
+    const close = t.lastIndexOf('"');
+    if (close > open) out.add(t.slice(open + 1, close));
+  }
+  return out;
+}
+
+/**
+ * Do these two readings name themselves, and name themselves differently?
+ *
+ * Only a positive disagreement counts. Silence on either side is not evidence.
+ */
+function disagreeOnName(a, b) {
+  const left = namesIn(a);
+  const right = namesIn(b);
+  if (!left.size || !right.size) return false;
+  for (const name of left) if (right.has(name)) return false;
+  return true;
 }
 
 /**

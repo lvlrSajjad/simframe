@@ -110,6 +110,20 @@ const LARGE_TITLE_MAX_WIDTH_FRACTION = 0.6;
  * and content that merely fell into a band), so the bound is not optional.
  */
 const LARGE_TITLE_MAX_INSET_PT = 96;
+/**
+ * And the least it can be, before it is just the next row.
+ *
+ * Absolute, like the maximum, and for the same reason: the inset is drawn by
+ * the system, so it is not a function of what the screen contains. The first
+ * version tested it against the screen's *median row gap* — and the testbed
+ * caught that on its first day, with two screens of the same app. A list of 24
+ * rows has a median gap of 0 and the rule fired; a list of 4 rows above a tab
+ * bar has a median gap of **414**, because the empty area counts as a gap, and
+ * the rule did not. Same title, same inset of 62.9pt, opposite answers — so one
+ * screen had a name in its identity and the other did not, and the graph then
+ * called them the same screen at 0.50 similarity.
+ */
+const LARGE_TITLE_MIN_INSET_PT = 24;
 const BOUNDARY_GAP_FACTOR = 1.9;
 
 /** A tab bar is several things spread across the width, not one thing at the bottom. */
@@ -257,10 +271,11 @@ export function bands(elements, screen) {
       && row.items.length === 1
       && (row.items[0].frame?.width ?? 0) <= screen.width * LARGE_TITLE_MAX_WIDTH_FRACTION
       && row.bottom <= screen.height * TOP_CHROME_LIMIT
-      && Number.isFinite(typical) && typical > 0
       // A real separation from the status bar, but a system-sized one: far
       // enough to be an inset, near enough to still be the app's own title.
-      && row.top - statusBarBottom > typical
+      // Both bounds absolute — see LARGE_TITLE_MIN_INSET_PT for what keying the
+      // lower one on the screen's own row rhythm cost.
+      && row.top - statusBarBottom >= LARGE_TITLE_MIN_INSET_PT
       && row.top - statusBarBottom <= LARGE_TITLE_MAX_INSET_PT
     ) {
       navBarBottom = row.bottom;
