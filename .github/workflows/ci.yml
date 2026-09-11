@@ -223,6 +223,26 @@ jobs:
       - name: Every layer is the good one, or this fails
         run: |
           set -o pipefail
+          # Wait for the layers, then assert. The assertion is "every layer is
+          # the good one", not "every layer is the good one within zero seconds
+          # of starting capture" — and `ax.driver = null` has failed this step
+          # twice, including on a docs-only commit, because AXPTranslation
+          # attaches in-process and had not finished doing so. Item 95 named
+          # that exact symptom and answered it with `bootstatus -b`, which
+          # waits for the *boot*; nothing waited for this.
+          #
+          # `doctor` itself deliberately does not wait — it reports what is true
+          # now, which is what makes it worth reading. So the patience lives
+          # here, bounded, and a layer that never arrives still fails with the
+          # same clear reason as before.
+          for attempt in $(seq 1 12); do
+            simframe doctor --json --device="$DEVICE" > /tmp/doctor.json 2>/dev/null || true
+            if node -e 'const d=require("/tmp/doctor.json"); process.exit(d["ax.driver"]==="simframed" && d["capture.engine"]==="simframed" ? 0 : 1)' 2>/dev/null; then
+              echo "     (layers ready after ${attempt} check(s))"
+              break
+            fi
+            sleep 5
+          done
           simframe doctor --json --device="$DEVICE" | tee /tmp/doctor.json
           node -e '
             const d = JSON.parse(require("fs").readFileSync("/tmp/doctor.json", "utf8"));
@@ -280,7 +300,14 @@ jobs:
           printf '[{"button":"home"},{"settle":true}]\n' > /tmp/reset.json
           simframe do /tmp/reset.json --device="$DEVICE"
           BEFORE=$(read_state)
-          printf '[{"openUrl":"https://example.com"},{"settle":true}]\n' > /tmp/flow.json
+          # A settle budget, stated rather than defaulted. The default is a cold
+          # p95 plus margin measured on a developer's machine; this runner has
+          # taken 45s for a two-step flow, and step 11 has failed with
+          # `settle: screen did not settle within 8056ms` more than once. What
+          # this step asserts is that **capture notices a change** — the speed
+          # at which Safari launches on a loaded build farm is not the subject,
+          # so the budget is widened rather than the assertion weakened.
+          printf '[{"openUrl":"https://example.com"},{"settle":{"timeoutMs":25000}}]\n' > /tmp/flow.json
           # Retried, and only here. `xcrun simctl openurl` returns
           # NSPOSIXErrorDomain code 60 — "Operation timed out" — on a loaded
           # hosted runner: three consecutive runs failed on it while the same
