@@ -4274,3 +4274,51 @@ test('113: the map says how old its frame is, which sim_look always did and it n
   });
   assert.match(head, /WARNING this frame is/);
 });
+
+test('a name that names two devices is refused, not resolved to whichever came first', async () => {
+  const { pickDevice } = await import('../src/platform/ios.js');
+  const dev = (udid, name, state = 'Booted') => ({ udid, name, runtime: 'iOS 26.5', state });
+
+  // The shape that has now cost two peer rounds. Item 83 recorded in writing
+  // that two booted devices on this machine are both called "iPhone 17 Pro",
+  // and answered it by warning in `sim_devices` and printing a UDID prefix in
+  // headers — leaving this function, where the choice is actually made, alone.
+  const twins = [dev('AAAA', 'iPhone 17 Pro'), dev('BBBB', 'iPhone 17 Pro')];
+
+  const err = (() => {
+    try { pickDevice('iPhone 17 Pro', twins); return null; } catch (e) { return e; }
+  })();
+  assert.ok(err, 'a name shared by two devices cannot identify one');
+  assert.equal(err.ambiguous, true, 'and it must outrank another backend matching cleanly');
+  // The UDIDs, because "pass the UDID" is useless without them.
+  assert.match(err.message, /AAAA/);
+  assert.match(err.message, /BBBB/);
+
+  // What it cost, and why this is not a tidiness fix: a caller passed the shared
+  // name, read a screen "38ms old" and an hour wrong, concluded the app had
+  // signed itself out, and abandoned a verification run that was fine. The
+  // frame was fresh — it belonged to the *other* device, idling on a login
+  // screen — and `refresh: true` refreshed that same wrong device, so two
+  // independent-looking sources agreed with each other and were both wrong.
+
+  // A UDID is unique, so it still resolves even when the names collide.
+  assert.equal(pickDevice('AAAA', twins).udid, 'AAAA');
+  assert.equal(pickDevice('bbbb', twins).udid, 'BBBB', 'and case does not matter');
+
+  // One device with that name is not ambiguous.
+  assert.equal(pickDevice('iPhone 17 Pro', [dev('AAAA', 'iPhone 17 Pro'), dev('CCCC', 'iPhone 15')]).udid, 'AAAA');
+
+  // A partial match that hits two was already refused, and still is.
+  const partial = (() => {
+    try { pickDevice('iPhone', [dev('AAAA', 'iPhone 17 Pro'), dev('CCCC', 'iPhone 15')]); return null; } catch (e) { return e; }
+  })();
+  assert.ok(partial && partial.ambiguous);
+
+  // A shut-down twin pair is refused too: the fallback pool is the whole list,
+  // so resolving by name there has exactly the same problem.
+  const parked = [dev('AAAA', 'iPad Air', 'Shutdown'), dev('BBBB', 'iPad Air', 'Shutdown')];
+  const off = (() => {
+    try { pickDevice('iPad Air', parked); return null; } catch (e) { return e; }
+  })();
+  assert.ok(off && off.ambiguous, 'the booted pool is not the only one that can collide');
+});

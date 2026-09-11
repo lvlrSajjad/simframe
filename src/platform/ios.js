@@ -66,6 +66,19 @@ async function bootedDevices(opts) {
  */
 async function resolveDevice(query, opts) {
   const all = await listDevices(opts);
+  return pickDevice(query, all);
+}
+
+/**
+ * Which device a query means, given the whole list.
+ *
+ * Separated from the listing so the decision can be **tested** rather than
+ * reasoned about, because two peer rounds in a row reported being handed the
+ * wrong device and both were decided here. The same move as `decisionOf` in the
+ * supervisor: the one line where a wrong answer is expensive should be a
+ * function somebody can call with adversarial input.
+ */
+export function pickDevice(query, all) {
   const booted = all.filter((d) => d.state === 'Booted');
   if (!query) {
     if (booted.length === 0) throw new Error('no booted simulator (open Simulator.app or run `xcrun simctl boot <udid>`)');
@@ -98,8 +111,40 @@ async function resolveDevice(query, opts) {
   const q = query.toLowerCase();
   const pools = [booted, all];
   for (const pool of pools) {
-    const exact = pool.find((d) => d.udid.toLowerCase() === q || d.name.toLowerCase() === q);
-    if (exact) return exact;
+    // A UDID is unique, so an exact UDID match needs no further thought.
+    const byUdid = pool.find((d) => d.udid.toLowerCase() === q);
+    if (byUdid) return byUdid;
+    // A **name is not unique**, and this branch used to treat it as though it
+    // were: one `find` over both fields returned whichever device the list
+    // happened to put first, and short-circuited past the ambiguity guard
+    // below. Item 83 recorded that two booted devices on this machine are both
+    // called "iPhone 17 Pro" and answered it by warning in `sim_devices` and
+    // printing a UDID prefix in headers — leaving the resolver, which is where
+    // the choice is actually made, untouched.
+    //
+    // What that cost, reported from a three-hour session on a real app: a
+    // caller passed the shared name, read a screen that was "38ms old" and an
+    // hour wrong, concluded the app had signed itself out, and abandoned a
+    // verification run that was fine. The frame was fresh — it was the *other*
+    // device's, idling on a login screen. `refresh: true` returned the matching
+    // tree because it refreshed the same wrong device. Two independent-looking
+    // sources agreeing with each other and both wrong.
+    //
+    // So a name that names two devices is an ambiguity, exactly like a partial
+    // match that hits two, and it refuses for the same reason: the cost of
+    // guessing wrong is reading somebody else's screen and believing it.
+    const byName = pool.filter((d) => d.name.toLowerCase() === q);
+    if (byName.length === 1) return byName[0];
+    if (byName.length > 1) {
+      throw Object.assign(
+        new Error(
+          `"${query}" is the name of ${byName.length} devices: `
+          + `${byName.map((d) => d.udid).join(', ')} — a name cannot say which one you mean, `
+          + 'so pass the UDID',
+        ),
+        { ambiguous: true },
+      );
+    }
     const partial = pool.filter((d) => d.name.toLowerCase().includes(q));
     if (partial.length === 1) return partial[0];
     if (partial.length > 1) {

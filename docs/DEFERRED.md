@@ -1143,6 +1143,134 @@ simframe inferred *something* from the cleared field but never said the app had
 remounted, which "silently invalidates every step that follows". It is
 detectable on the same CDP connection we now have a client for.
 
+### Peer round on 0.12.0 — three hours on a real app, the fifth round
+
+~60 calls over three hours reproducing and verifying five QA bugs in a map and
+work-order flow, on a React Native app with Metro attached. The most detailed
+round yet, and its P0 is the worst finding this project has had.
+
+119. **A name that names two devices was resolved to whichever came first.**
+   FIXED, 2026-09-12, same day. And the reason it is worth a long entry is not
+   the fix, it is that **we already knew and fixed the wrong thing.**
+
+   The report: mid-session `sim_look` returned the app's **login screen** while
+   the app was on a populated map screen. The reporter concluded the session had
+   been signed out, told their user so, and abandoned a verification run that was
+   fine. The tell, found only afterwards: the status-bar clock in the frame read
+   **10:56** against a real device clock of **9:44** — over an hour out. And
+   `sim_ui` with `refresh: true` returned *the matching accessibility tree*, so
+   "two independent-looking sources agreeing with each other and both wrong".
+   Their own summary is the sentence to keep: *"it doesn't slow you down, it
+   makes you confidently wrong."*
+
+   The cause was in `resolveDevice`: one `find` over UDID **and name** returned
+   the first hit and short-circuited past the ambiguity guard directly below it.
+   A UDID is unique; a name is not. So a caller passing the shared name
+   `"iPhone 17 Pro"` got whichever device the list happened to order first — and
+   the frame really was 38ms old, because it belonged to the *other* device,
+   idling on a login screen. `refresh: true` refreshed that same wrong device.
+
+   **Item 83 recorded, in writing, that two booted devices on this machine are
+   both called "iPhone 17 Pro."** It answered that by warning in `sim_devices`
+   and printing a UDID prefix in headers — improving the *reporting* of a
+   collision while leaving the *choice* exactly as it was. Knowing about a
+   hazard and hardening everything except the place the decision is made is a
+   distinct way of being wrong, and it is the one to watch for here.
+
+   The decision is now `pickDevice(query, all)`, a pure exported function with
+   adversarial tests, for the same reason `decisionOf` was extracted from the
+   supervisor the same day: the one line where a wrong answer is expensive
+   should be callable by a test.
+
+   **What is NOT fixed, and must not be assumed to be.** Their other two
+   hypotheses are untested and both plausible: that the frame buffer is not
+   invalidated on app relaunch or stream reconnect, and that `age` measures the
+   wrong thing when a frame predates a reconnect. They also suggest surfacing a
+   capture sequence number that resets on reconnect, or the device clock, so a
+   caller can sanity-check cheaply — which is a good idea independent of the
+   cause. Their interim advice should be taken literally until then: **`xcrun
+   simctl io <udid> screenshot` is the tiebreaker whenever a result contradicts
+   expectations**, because there is no in-tool way to tell.
+
+   **And note what 113's fix did not do.** Reporting frame age would not have
+   caught this: the frame *said* 38ms and was telling the truth about itself. An
+   age computed from `capturedAt` inherits whatever `capturedAt` means, so a
+   staleness marker built on it cannot detect a fresh frame from the wrong
+   device. 113 was worth doing and it is not this.
+
+120. **A tap or swipe that lands on an overlay is indistinguishable from one
+   that does nothing.** Fifteen minutes lost to six consecutive
+   `swipe [201,750] -> [201,250]` calls that reported `no visible change`, with
+   an Intercom banner at y≈753 swallowing every gesture. The banner **was** in
+   the element list — `#20 element 201,753 Profile image for <support> …` —
+   and nothing connected "your swipe started at y=750" to "there is an element
+   at y=753 that is not the list". Starting at y=620 worked immediately.
+
+   Their suggested output is the whole fix and we already hold the geometry:
+
+   ```
+   swipe 201,750 -> 201,250  ·  start point hit: "Support Request" (overlay),
+                                not the scrollable beneath it
+   ```
+
+   Generalised: `no visible change` should say **what the coordinate resolved
+   to**. "The tap resolved to element X" is far more actionable than "nothing
+   happened". Cheap, and it turns a silent failure into a one-line diagnosis.
+
+121. **Reported coordinates exceed the stated screen width.** The header says
+   `402x874pt` and the map lists `#23 element 411,634` and `#15 element 413,564`.
+   The reporter could not tell whether the map was in points, pixels or
+   something else, and defensively started deriving tap coordinates from
+   screenshot proportions instead of trusting our numbers — *"slower and more
+   error-prone than just trusting the map"*. Either elements genuinely extend
+   off-screen, in which case say so or clamp, or there is a rounding or scale
+   bug. Note this is the second coordinate-contract complaint in two rounds:
+   116 is `region` cropping a different frame from the one the map prints. The
+   contract "coordinates are in the same frame as the header dimensions" has to
+   hold, because callers build arithmetic on it.
+
+122. **Custom controls are invisible, with no fallback to hit-testing.** A
+   bottom-sheet drag handle (`Animated.View` with a `PanResponder`), icon-only
+   three-dot menus on every card, and the navigation back chevron were all
+   absent from the tree while being real, tappable and on-screen. All needed raw
+   `@x,y` read off a screenshot. They fixed the drag handle in their own app by
+   adding `accessible`/`accessibilityRole`/`accessibilityLabel` — *"which
+   incidentally made it testable and VoiceOver-reachable, a genuine win"*.
+
+   Two asks. A **fallback view-hierarchy source** showing hit-testable but
+   unlabelled views as `element 201,824 <untagged, tappable>`, because "most
+   real apps under test are not fully labelled". And **say when the tree is
+   thin**: "38 elements, 0 interactive" is a strong hint to reach for a
+   screenshot rather than keep trying selectors. A `sim_ui` line like *"N
+   on-screen tappable views have no accessibility label — they cannot be
+   addressed by selector"* would push people toward instrumenting, which is the
+   outcome everyone wants.
+
+123. **`settle` cannot cope with a permanently animated screen**, and aborts the
+   rest of the batch when it gives up — expensive when step 1 of 6 was the
+   settle. A streaming AI-summary panel, a Lottie and the Intercom widget never
+   settle. They landed on `pause` plus `continueOnError`, *"strictly worse than a
+   settle that knows what to ignore"*.
+
+   Both asks are good and one is nearly free: **on settle failure, print the
+   region map `sim_state` already produces** — "did not settle; the moving region
+   is the top-right 15%" immediately identifies a spinner nobody cares about.
+   Then allow settling on a region or excluding one:
+   `{"settle": {"ignore": [[0,560],[402,700]]}}`.
+
+**Praised, and specifically so it survives a refactor.** `sim_do` batching is
+*"the single best thing here"* and was used for nearly everything — a whole flow
+with per-step verdicts in one round trip is "a completely different experience
+from single-stepping". The text map beats a screenshot for almost every
+question, with `sim_look` reserved for layout and colour. `sim_permission` is
+*"exactly the right call"* and let them verify a permission bug end to end.
+Intent selectors resolved reliably, OCR-only text included. **The `#ref`
+staleness guard caught a real wrong tap** — the `staleKind` work from the
+previous day, earning its keep in the field. The screen graph
+(`worked here before: tap "CLOSE"`) *"materially changed how confidently I
+moved"*. And `--relaunch` preserving the app session made permission re-testing
+practical.
+
 **Ordering, revised — and the reason is a habit we said we would break.** Fable's
 recommendation is explicit: **promote 97 ahead of 96.** Both of our problematic
 rulings were abstention cases, not experiment-design questions; the abstain token
