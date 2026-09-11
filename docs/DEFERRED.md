@@ -76,41 +76,60 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > the recovery be wired to the wrong branch in the first place. Both now run
 > the thing.
 >
-> **START HERE, 2026-09-12.** 0.11.0 shipped last night — npm `latest`, MCP
-> Registry, green. The owner's instruction for the next session, verbatim in
-> effect: **do the cheap wins first, then the model comparison, then everything
-> else.** Nothing below needs re-deciding; it needs doing.
+> **START HERE, 2026-09-12 (evening).** Rewritten, because the morning's version
+> had a duplicated paragraph and three stale statuses. This is the live list.
 >
-> **Push 1 — DONE, 2026-09-12.** **101a** rulings persist to
-> `supervisions.jsonl` and `simframe supervisions` reads them; verified with a
-> real ruling on the bench device, which immediately contradicted a premise of
-> 101 (a naming failure is on an edge the graph has never timed, so it has no
-> p95 by construction) · **98** score floor 0.8 and a region check, with the
-> reported 0.64 status-bar case now a fixture · **88** the MCP descriptions and
-> CLI help lead with the label; the skill's prose no longer contradicts its own
-> table.
+> **Done today.** **101a** rulings persist to `supervisions.jsonl` and
+> `simframe supervisions` reads them · **98** relabel score floor 0.8 plus a
+> published-region check, the reported 0.64 status-bar case now a fixture ·
+> **88** the MCP descriptions and CLI help lead with the label · **110's first
+> half**, a large title found by the inset above it, `TOKEN_RULES_VERSION` 7,
+> verified on the runner (`settings` 0 named → 1) · **99**, minus the token
+> budget, which was measured and is not needed — the worst case the clipping
+> caps allow is 1,918 tokens of 4,096 · **the wedge** (`recoveryExhausted` plus
+> `simframe revive`) · **CI concurrency lanes**, which were the biggest single
+> cause of what read as flaky · and **`scripts/ci-integration-local.sh`**, the
+> integration job in two minutes instead of thirty.
 >
-> **Next up is 110**, ahead of Push 2: it is the only thing keeping
-> `integration` intermittently red, the mechanism is now measured on the runner
-> rather than inferred, and the fix is a region-band change plus a
-> `TOKEN_RULES_VERSION` bump and a re-measure.
+> **The structural fact that sets the order.** Four of the biggest remaining
+> items — **101**, **96**, **106** and **109a** — are all gated on the same
+> thing: *a population of supervisor rulings*. The log now exists and holds
+> **one** ruling, because a ruling needs a step that genuinely fails. Nothing in
+> that cluster can start until something generates failures on demand.
 >
-> **Ahead of both, and new: 110.** The red `integration` job is **not** item 95.
-> It is a real fingerprint collision: a screen whose own name is an iOS large
-> title enters identity with `0 named` tokens — the Settings root and Contacts
-> both do, on every visit, measured — so two list screens of the same shape can
-> hash identically. The fix is a region-band change in `regions.js` plus a
-> `TOKEN_RULES_VERSION` bump and a re-measure. The harness now keeps its
-> readings on failure, so the before and after are both diagnosable.
+> **So, in order:**
 >
-> **Push 2 — the supervisor's reliability**: **99** `prewarm()` plus a
-> `tokenCount`/`contextSize` budget check and per-`GenerationError` triage ·
-> **100** the `abstain` token.
+> 1. **111, the React Native testbed** (new, below). Agreed 2026-09-12. It is
+>    first because it unblocks the cluster above, reproduces both of 110's
+>    nameless-screen classes locally where CI cannot be reproduced, and gives
+>    `integration` an app we control instead of Apple's Settings.
+> 2. **110's second half.** Two of the 17 perception fixtures have *real* compact
+>    nav bars the detector misses — gap below 10.0 against 19 required, and 27.7
+>    against 66.5 — and `contacts` and `reminders` still read 0 named on the
+>    runner. This is the live cause of intermittently red `integration`.
+> 3. **100, the `abstain` token**, with **97** behind it. Research's explicit
+>    recommendation: highest reliability-per-effort, preserves the safety
+>    property, and filing it behind a four-cell experiment repeats the
+>    research-instead-of-act habit.
+> 4. **109a, then 109** — the model comparison the owner authorised. 109a needs
+>    the rulings from (1).
+> 5. **101**, with its measured caveat: a naming failure is on an edge the graph
+>    has never timed, so it has no p95 by construction, and only timing failures
+>    on proven edges can take part.
+> 6. **96**, then the rest of the supervisor cluster: 106, 105, 104, 102, 103,
+>    107, 108.
+> 7. **89 + 92** (`custom_actions` and `AXTraits`, both already in the tree and
+>    never asked for), then **93 + 94** (scroll offset, scroll inertia).
+> 8. **95's remaining mitigations**, if `integration` still misbehaves once (2)
+>    lands: keep the simulator warm across the job, disable animations,
+>    pre-dismiss SpringBoard's first run, larger runners.
 >
-> **Then 109a**, which is the good idea: replay bottled rulings against
-> candidate models offline, so the model question needs dozens of *rulings*
-> rather than dozens of *runs*. Then **109**'s four live arms, then 101, 96,
-> 89+92, 93+94.
+> **Needs the owner, not the list:** **80** network visibility (the CDP client
+> is needed either way), **81** detecting screen changes the agent did not
+> cause, **Phase 19** (the web), a **peer round on 0.11.0**, and the
+> **code-scanning graph** idea — measured ceiling of 9% as a navigation oracle,
+> but the *names* and *destructive-barrier* angles are stronger and the testbed
+> makes them prototypable.
 >
 > **Next, in order.**
 >
@@ -911,6 +930,55 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    report no longer asserts "the tour went somewhere unintended" when the data
    says collision — it names which screen was matched, and when neither reading
    carries a chrome label it says so and points at `analyse-fingerprint.mjs`.
+
+111. **A React Native testbed, because four items are waiting on failures that
+   nobody can produce on demand.** Agreed with the owner 2026-09-12, in-tree at
+   `examples/rn-testbed/`.
+
+   **Why it is first.** 101, 96, 106 and 109a all need a population of supervisor
+   rulings. 101a made rulings durable and the log holds **one**, because a ruling
+   requires a step that genuinely fails — and Apple's Settings does not fail on
+   command. A testbed with deliberate failure modes turns "we need dozens of
+   rulings" from a waiting game into a script.
+
+   **React Native and not SwiftUI**, which is the one judgement worth writing
+   down: a SwiftUI testbed would be a tenth of the weight and would exercise the
+   wrong accessibility tree. The owner's own app is RN — the standing rule about
+   bundle ids mentions Metro, and the only perception fixture named after a real
+   field report is `reported__rn-list-card.json`. RN's tree is where the
+   surprises come from.
+
+   **In-tree is safe**, checked rather than assumed: `package.json`'s `files` is
+   an **allowlist** (`src`, `data`, `flows`, named `native/*`, `skills`,
+   `scripts`, README, LICENSE), so nothing under `examples/` can ship. Two traps
+   found before starting: RN's default bundle id is
+   `org.reactjs.native.example.<Name>`, and the identifier guard allows only
+   `org.swift.` and `org.json.` under `org` — so set it to `com.example.…` at
+   scaffold time or the guard trips. And `node_modules` plus `Pods` must be
+   gitignored, or `check-private` walks an RN tree on every run.
+
+   **Ordered by what it unblocks, not by coverage.**
+
+   1. **Failure modes for the supervisor** — a control disabled until a seeded
+      delay, a list that renders its count header before its rows, a step that
+      fails once and then succeeds. This is the item's whole reason to exist.
+   2. **110's two nameless-screen classes** — a large-title root and a
+      compact-bar pushed screen. Both are unreproducible on a hosted runner and
+      both become reproducible here in seconds.
+   3. **The wizard-with-review-step** — a form step and a review step sharing
+      chrome, which collapsed onto one hash once and has a unit test but no live
+      case.
+   4. Then the ordinary inventory: tabs, modals, stepped forms, long forms,
+      keyboard-up.
+
+   **Seeded, not random.** A seed printed on launch and settable by deep link.
+   Randomness that cannot be replayed converts a bug into a ghost, which is what
+   two days of chasing the fingerprint collision actually cost.
+
+   **Staged, and not into CI on day one.** Screens first in pure JS, iterated
+   through Metro; then record fixtures; then wire it into
+   `ci-integration-local.sh`. Pointing `integration` at a bigger app before 95
+   is addressed would add a second unknown to a job that is already a coin toss.
 
 **Ordering, revised — and the reason is a habit we said we would break.** Fable's
 recommendation is explicit: **promote 97 ahead of 96.** Both of our problematic
