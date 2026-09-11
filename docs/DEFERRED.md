@@ -817,6 +817,32 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    nameless. Exactly backwards, and it is why the collision pairs a root with a
    pushed screen rather than two roots.
 
+   **Quantified from the runner's own readings, 2026-09-12** — the first green
+   `integration` run after the harness started keeping them, so this is the
+   runner's data rather than an inference from ours:
+
+   | screen | tokens | named | sensors |
+   | --- | --- | --- | --- |
+   | `settings` | 4 | **0** | ax+ocr |
+   | `reminders` | 6-7 | **0** | ax+ocr |
+   | `contacts` | 10 | **0** | ax+ocr |
+   | `settings-general` | 5 | **1** | ax+ocr |
+   | `browser` | 11 | 5 | ax+ocr |
+
+   Three of six screens have no name at all, and `settings-general` has exactly
+   **one** named token — that single nav-bar title is the only thing separating
+   it from the Settings root. The gap reads healthy (0.77, same-min 0.86) only
+   because that one token is present. It is a single point of failure wearing a
+   comfortable margin.
+
+   And that is what failed. My guess that the runner's readings were OCR-only
+   was **wrong** — every reading here is `ax+ocr`. But the colliding reading in
+   the red run reported `sources ocr` *alone*: the tree did not contribute to
+   that one reading, the single named token went with it, and two screens became
+   4-to-5-token geometry blobs that matched exactly. So the trigger is not
+   runner speed and not OCR quality — it is the accessibility tree dropping out
+   of a single reading on a screen that has nothing else to say who it is.
+
    That is a token-rule change, so it needs `TOKEN_RULES_VERSION` and
    `FINGERPRINT_VERSION` bumped and both distributions re-measured — which is
    what `eval-fingerprint.mjs` is for, and it now keeps its readings on failure
