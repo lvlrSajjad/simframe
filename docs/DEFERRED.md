@@ -1240,6 +1240,43 @@ rather than leaving it to be discovered.
    **A product decision, not a fix** — it is a new capability and a new
    dependency surface, so it needs an explicit call.
 
+   **FEASIBILITY SETTLED, 2026-09-12.** The open question was "`Network.enable`
+   returns `{}`; whether it emits events is unresolved". It emits them.
+   Measured against the RN testbed, with a fetch triggered through
+   `Runtime.evaluate` so no screen interaction was involved at all:
+
+   ```
+   Network.requestWillBeSent  id=8fdd9115…  GET https://jsonplaceholder.typicode.com/todos/1
+   Network.responseReceived   id=8fdd9115…  status=200  application/json  type=XHR
+   Network.loadingFinished    id=8fdd9115…  bytes=83
+   ```
+
+   Method, URL, **status**, mime type, byte count, and a `requestId` correlating
+   them. So "settled, and these three requests fired with these statuses" is
+   fully constructible from what the protocol already sends.
+
+   The plumbing, all verified rather than assumed: the target is on **Metro's**
+   inspector (`/json/list`, ours on port 8083, not 8081), described as
+   `React Native Bridgeless [C++ connection]`; the socket is
+   `ws://…/inspector/debug?device=<id>&page=1`; the upgrade returns **101** with
+   an `Origin` header matching the inspector's host and 401s without one; Node
+   20 has no global `WebSocket`, so `scripts/probe-network.mjs` hand-rolls the
+   handshake and enough framing to read small text frames, with no dependencies.
+   `/json/list` returns **zero targets while the app is mid-relaunch**, which
+   reads as "not supported" if you ask once.
+
+   **Two things this changes about the item.** It rides on *React Native's*
+   debugger, not the simulator's WebKit inspector — so it works for RN apps and
+   not for native ones, which is a scope limit that was not obvious when this was
+   filed and should not be promised away. And `awaitPromise: true` on
+   `Runtime.evaluate` returns Hermes' internal promise object rather than the
+   resolved value, so a caller wanting the body has to read it another way.
+
+   **Still a product decision.** What is settled is that it *can* be built and
+   what it would cost; pairing it to settle, the API surface, and whether it
+   behaves the same against a real app with auth headers and larger payloads are
+   all open. The last of those needs the owner's own app.
+
 81. **Detect screen changes the agent did not cause.** Their runner-up, and it
    bit *me* the same afternoon: the owner's app appeared in the foreground of the
    benchmark device mid-field-test, and I ran 28 swipe gestures before noticing.
