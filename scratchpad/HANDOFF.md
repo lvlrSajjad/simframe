@@ -1,18 +1,24 @@
 # Handoff — 2026-09-12 night, for 2026-09-13
 
-`origin/main` is current, nothing held. **0.12.0 is on npm as `latest`.**
+`origin/main` is current, nothing held. **0.12.1 is on npm as `latest`**,
+verified independently (`npm view simframe version` → 0.12.1, tarball
+resolvable). CI went all green on `b504631` including `integration`, so both
+settle fixes worked, and 0.12.1 shipped the same night.
+
+## State of the machine
+
+- **Metro is running on 8083** (the owner's call) and the testbed app is built
+  at `scratchpad/rn-build/…/SimframeTestbed.app`. Reinstall it after a wipe.
+- **Our bench device `326464A4` is shut down.** A *different* simulator,
+  `B55AB0AE`, is booted and is **also named "iPhone 17 Pro"** — the exact
+  collision 119 fixes, live on this machine. It may be a colleague's; leave it
+  alone, and **always pass `--device` explicitly here**.
+- Two cleanup lessons worth keeping: `TaskStop` kills the shell task and **not**
+  a `nohup`'d child, so three `collect-rulings` processes survived their runs
+  and had to be killed by PID; and `git add -u` stages only *tracked* files, so
+  a new script sat unstaged through two commits.
 
 ## First thing tomorrow
-
-**Cut 0.12.1.** Approved by the owner tonight and gated only on CI, which was
-still running on `b504631` when we stopped. Check that run: if green, `npm
-version patch` and push the tag. It contains **119** — a name shared by two
-simulators resolved to whichever the device list ordered first, so a caller got
-a fresh frame of the wrong device's login screen and was told nothing was wrong
-— plus two CI timing fixes. If `integration` is red again on **step 11**, stop
-widening settle budgets; two attempts was enough, and the next move is item 95's
-structural mitigations (keep the simulator warm across the job instead of
-booting cold, pre-dismiss SpringBoard's first run).
 
 ## Then, in this order — and the order changed last night
 
