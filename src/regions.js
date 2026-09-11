@@ -84,6 +84,32 @@ const BOTTOM_CHROME_LIMIT = 0.82;
  * screen sets its own scale.
  */
 const MIN_BOUNDARY_GAP_PT = 10;
+/**
+ * How wide a lone row may be and still be a screen's title rather than its
+ * first paragraph.
+ *
+ * 0.6 of the screen, measured: the Settings root's large title is 133 pt of
+ * 402 (0.33), while Reminders' empty-state heading "Welcome to Reminders" is
+ * 326 pt (0.81) and is content — it describes the screen instead of naming it.
+ * A title is a name and names are short.
+ */
+const LARGE_TITLE_MAX_WIDTH_FRACTION = 0.6;
+/**
+ * How far below the status bar a large title can start.
+ *
+ * iOS draws one at a **system** offset, not an app-chosen one, so this is a
+ * bound on a platform constant rather than a tuned threshold. Measured on the
+ * bench device: the Settings root's title starts 63-79 pt below the status bar
+ * depending on which sensor reports its box, while example.com's `<h1>` — page
+ * *content* that merely happens to be the first row, because Safari on iOS puts
+ * its chrome at the bottom — starts **122 pt** down.
+ *
+ * Without this bound the rule promoted that `<h1>` to chrome and "example
+ * domain" entered the screen's identity. Pulling page content into identity is
+ * the exact failure this module has been bitten by twice (a phantom keyboard,
+ * and content that merely fell into a band), so the bound is not optional.
+ */
+const LARGE_TITLE_MAX_INSET_PT = 96;
 const BOUNDARY_GAP_FACTOR = 1.9;
 
 /** A tab bar is several things spread across the width, not one thing at the bottom. */
@@ -195,6 +221,49 @@ export function bands(elements, screen) {
     if (isBoundary(gap) && rows.slice(0, i + 1).every((r) => allShort(r, screen))) {
       navBarBottom = rows[i].bottom;
       break;
+    }
+  }
+
+  // --- a large title, which has no gap under it to be found by.
+  //
+  // The loop above identifies top chrome by the whitespace *beneath* it, and an
+  // iOS large title is drawn tight against the content it heads: measured on
+  // the Settings root, 79 pt of inset above it and **5.3 pt** below, against a
+  // bar of `max(10, typical * 1.9)` = 66.5. No threshold reaches that, so the
+  // title fell into `content` and was discarded as content — leaving the screen
+  // with **no name at all** in its fingerprint, in either sensor mode.
+  //
+  // That is not cosmetic. Chrome labels are the only text identity keeps, and
+  // `fingerprint.js` names the consequence: two list screens with identical
+  // structure differ by their title and nothing else says so. A nameless screen
+  // is pure geometry, and on a hosted runner two sparse nameless readings
+  // matched exactly — one screen's hash for two screens.
+  //
+  // So it is found by the inset *above* it instead, which is the half iOS does
+  // provide. A large title sits alone, narrow, high, under a generous gap; a
+  // compact bar is the mirror image of that (20-33 pt above, 118-134 below) and
+  // is already caught by the loop. Deliberately not keyed on the `Heading`
+  // role: OCR has no roles, and the reading that actually collided was
+  // OCR-only, so a role test would work only in the case that does not fail.
+  //
+  // Measured across all 17 perception fixtures before being written here: it
+  // changes exactly one of them, the Settings root.
+  if (!navBarBottom) {
+    const first = rows.findIndex((r) => r.top >= statusBarBottom - 1);
+    const row = first >= 0 ? rows[first] : null;
+    if (
+      row
+      && first + 1 < rows.length
+      && row.items.length === 1
+      && (row.items[0].frame?.width ?? 0) <= screen.width * LARGE_TITLE_MAX_WIDTH_FRACTION
+      && row.bottom <= screen.height * TOP_CHROME_LIMIT
+      && Number.isFinite(typical) && typical > 0
+      // A real separation from the status bar, but a system-sized one: far
+      // enough to be an inset, near enough to still be the app's own title.
+      && row.top - statusBarBottom > typical
+      && row.top - statusBarBottom <= LARGE_TITLE_MAX_INSET_PT
+    ) {
+      navBarBottom = row.bottom;
     }
   }
 

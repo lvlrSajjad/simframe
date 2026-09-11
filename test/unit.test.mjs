@@ -3431,7 +3431,18 @@ test('a summary screen is not a keyboard, and its content stays in its identity'
   // being used as the boundary, so a real keyboard's top row fell outside it and
   // ten keys were counted INTO a screen's identity. Over-detection deleted
   // content from an identity; under-detection added a keyboard to one.
-  assert.equal(fingerprint.TOKEN_RULES_VERSION, 6);
+  //
+  // 7: a screen whose own name is an iOS large title had no name in its identity
+  // at all, because the top-chrome detector looks for the gap *beneath* a bar
+  // and a large title is drawn tight against the content it heads. Measured on
+  // the Settings root, 0 named tokens in both sensor modes — and on a hosted
+  // runner two sparse nameless readings then matched exactly, one hash standing
+  // for two different screens.
+  //
+  // This assertion is doing its job: it is here to make a token-rule change
+  // deliberate rather than incidental, so the number moves only alongside a
+  // reason written down in `fingerprint.js`.
+  assert.equal(fingerprint.TOKEN_RULES_VERSION, 7);
 });
 
 test('a band is only the keyboard if there is a keyboard in it', async () => {
@@ -4092,4 +4103,66 @@ test('98: a relabelled ref needs a near-exact match in a region the map would of
   const fs3 = await import('node:fs');
   const view = fs3.readFileSync(new URL('../src/view.js', import.meta.url), 'utf8');
   assert.ok(!/HIDDEN_REGIONS\s*=\s*new Set/.test(view), 'view.js no longer keeps its own copy');
+});
+
+test('110: a large title is the screen\'s name, and a page heading is not', async () => {
+  const regions = await import('../src/regions.js');
+  const fingerprint = await import('../src/fingerprint.js');
+  const screen = { width: 402, height: 874 };
+  const clock = { label: '12:22', type: 'Text', x: 47, y: 33, frame: { x: 24, y: 25, width: 47, height: 16 } };
+  const listRow = (i, label) => ({
+    label, type: 'Button', x: 201, y: 320 + i * 54,
+    frame: { x: 16, y: 299 + i * 54, width: 370, height: 54 },
+  });
+
+  // The Settings root, measured on the bench device: the title sits 63-79pt
+  // below the status bar and only **5.3pt** above the content it heads, against
+  // a boundary bar of max(10, typical * 1.9) = 66.5. No gap-below test reaches
+  // that, so before this rule the screen had NO name in its identity at all.
+  const largeTitle = {
+    label: 'Settings', type: 'Heading', x: 82, y: 141,
+    frame: { x: 16, y: 120, width: 133, height: 43 },
+  };
+  const root = [clock, largeTitle,
+    { label: 'Apple Account', type: 'Button', x: 201, y: 216, frame: { x: 16, y: 168, width: 370, height: 96 } },
+    listRow(0, 'General'), listRow(1, 'Accessibility'), listRow(2, 'Camera'), listRow(3, 'Search')];
+
+  assert.equal(regions.regionFor(largeTitle.frame, screen, regions.bands(root, screen)), 'nav-bar',
+    'the screen\'s own name is chrome, not content');
+  const named = (t) => t.filter((x) => x.includes('"'));
+  // Annotated first, because that is what the capture pipeline does and what
+  // `fingerprint.tokens` depends on: given an unannotated target it falls back
+  // to `regionFor` *without* the bands, so nothing can be nav-bar.
+  assert.ok(named(fingerprint.tokens(regions.annotate(root, screen), screen).tokens).some((t) => /"settings"/.test(t)),
+    'and it reaches the fingerprint, which is the point — chrome labels are the only text identity keeps');
+
+  // The false positive this must not make. Safari on iOS puts its chrome at the
+  // BOTTOM, so a page's <h1> is the first row on screen — but it is content, and
+  // pulling page content into identity is the failure this module has already
+  // been bitten by twice. Measured: example.com's h1 starts 122pt below the
+  // status bar against the system title's 63-79.
+  const pageHeading = {
+    label: 'Example Domain', type: 'Text', x: 128, y: 190,
+    frame: { x: 35, y: 179, width: 186, height: 23 },
+  };
+  const page = [clock, pageHeading,
+    { label: 'This domain is for use in illustrative examples in documents.', type: 'Text', x: 201, y: 240, frame: { x: 35, y: 225, width: 330, height: 40 } },
+    listRow(2, 'More information...')];
+  assert.equal(regions.regionFor(pageHeading.frame, screen, regions.bands(page, screen)), 'content',
+    'a page heading 122pt down is content that happens to be first, not a title');
+  assert.ok(!named(fingerprint.tokens(regions.annotate(page, screen), screen).tokens).some((t) => /"example domain"/.test(t)),
+    'so it stays out of the screen\'s identity');
+
+  // And a wide lone row is a paragraph, not a name. Reminders' empty state puts
+  // "Welcome to Reminders" at 326pt of 402 (0.81) — it describes the screen
+  // rather than naming it.
+  const wide = {
+    label: 'Welcome to Reminders', type: 'Heading', x: 201, y: 155,
+    frame: { x: 38, y: 141, width: 326, height: 28 },
+  };
+  const empty = [clock, wide,
+    { label: 'Quick Creation, Simply type in your list.', type: 'Text', x: 201, y: 240, frame: { x: 38, y: 195, width: 326, height: 94 } },
+    listRow(2, 'Add List')];
+  assert.equal(regions.regionFor(wide.frame, screen, regions.bands(empty, screen)), 'content',
+    'a title is a name, and names are short');
 });

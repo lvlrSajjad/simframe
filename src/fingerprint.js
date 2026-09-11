@@ -48,8 +48,20 @@ import * as regions from './regions.js';
  *     extends upward while the rows above keep being key-shaped, which page
  *     content is not. Any screen fingerprinted with a keyboard up hashes
  *     differently, so the stored graph and maps must go again.
+ *
+ * 7 — a screen whose own name is an iOS **large title** had no name at all in
+ *     its identity. Chrome labels are the only text these tokens keep, and a
+ *     large title is drawn tight against the content it heads — 79 pt of inset
+ *     above it and 5.3 pt below, against a boundary bar of 66.5 — so the top
+ *     chrome detector, which looks for the gap *beneath* a bar, never found it
+ *     and the title was discarded as content. Measured on the Settings root in
+ *     both sensor modes: **0 named tokens**, and the same for Contacts and
+ *     Reminders. On a hosted runner two sparse nameless readings then matched
+ *     exactly and one hash stood for two different screens. `regions.bands`
+ *     now finds a large title by the inset above it; every affected screen
+ *     hashes differently, so stored graphs and maps go again.
  */
-export const TOKEN_RULES_VERSION = 6;
+export const TOKEN_RULES_VERSION = 7;
 
 /** Frames are quantised to this, so sub-pixel drift and a nudged row do not matter. */
 export const GRID = 24;

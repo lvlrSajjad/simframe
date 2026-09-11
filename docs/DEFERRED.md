@@ -857,9 +857,50 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    the gap: today `settings` vs `contacts` is the closest different-screen pair
    at 0.08 and both are nameless.
 
-   **Until it lands, `integration` can go red on this again**, and that is a
-   real collision rather than flakiness. Item 95 did not cause it and the runner
-   contributed only which reading it got.
+   **HALF DONE, 2026-09-12 — the large-title half.** `regions.bands` now finds a
+   large title by the inset *above* it, which is the half iOS provides, and
+   `TOKEN_RULES_VERSION` is 7 so stored graphs and maps go. Deliberately not
+   keyed on the `Heading` role: OCR has no roles and the reading that actually
+   collided was OCR-only, so a role test would have worked only in the case that
+   does not fail. Verified in both sensor modes on the bench device — the
+   Settings root goes from **0 named to 1**, `"settings"`, as OCR
+   (`text:nav-bar:@leading`) and as tree (`heading:nav-bar:@leading`).
+
+   **It caught a false positive on the way, and that is the part worth keeping.**
+   Unbounded, the rule promoted example.com's `<h1>` to chrome — Safari on iOS
+   puts its chrome at the bottom, so a page heading is the first row on screen —
+   and `"example domain"` entered that screen's identity. Pulling page content
+   into identity is the exact failure this module has been bitten by twice
+   before. The bound is a platform constant rather than a tuned threshold: iOS
+   draws a large title at a **system** offset, measured at 63-79 pt below the
+   status bar, where the page heading sits 122 pt down. `LARGE_TITLE_MAX_INSET_PT`
+   is 96. Chrome labels entering identity went 9 → 10 (one right, one wrong) →
+   back to 9 with `"settings"` in and `"example domain"` out.
+
+   **The distributions did not move**: gap 0.48 either way, same-min 0.56,
+   diff-max 0.08. That is the honest result and worth stating plainly — the
+   collision has never happened on this machine, so there was nothing here to
+   improve. What the change removes is the *precondition*: a screen that had
+   nothing but its shape to say who it was now has a name.
+
+   **The other half is still open, and it is the larger one.** Three of the 17
+   perception fixtures have no detected top chrome and all three have a visible
+   title; the large title was only one of two causes. `contacts__list`
+   (`Back | Contacts`, gap below 10.0 against 19 required) and
+   `settings__general-about` (`General | About`, 27.7 against 66.5) are **real
+   compact nav bars** that the detector misses, and `contacts` still reads
+   **0 named** on the device. The root flaw is that the detector identifies a bar
+   by the whitespace beneath it and iOS does not always provide any; a bar should
+   be identifiable by its contents and position — short items, high, one at the
+   leading edge, above content. That is a second `TOKEN_RULES_VERSION` bump and
+   its own before/after.
+
+   **Until that lands, `integration` can still go red on this**, and it is a
+   real collision rather than flakiness. Item 95 did not cause the one I chased
+   — though it is real and caused the *next* failure, on `5c79aad`, where step
+   11 timed out with `settle: screen did not settle within 8056ms` and a
+   two-step flow took 45.6 s. The job now has two independent failure causes and
+   they should not be conflated again.
 
    **Three harness fixes landed the same night**, because the failure was
    undiagnosable rather than obscure: the `--out` write sat past every
