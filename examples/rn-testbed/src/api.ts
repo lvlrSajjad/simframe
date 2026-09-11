@@ -95,7 +95,11 @@ export async function fetchItems(): Promise<Item[]> {
 
 export async function fetchItem(id: number): Promise<Item> {
   if (mode === 'offline') {
-    await sleep(delayMs(250, 900));
+    // Widened from 250-900ms. A fixture needs the race to happen *every* time
+    // or a null result means nothing — and walking to this screen costs about a
+    // second, so the old window had usually closed before the judge step ran.
+    // The same mistake as the disabled-control window, made twice.
+    await sleep(delayMs(1200, 2800));
     const hit = LOCAL.find((i) => i.id === id) ?? LOCAL[0];
     return record(`local://items/${id}`, 'GET', async () => ({ value: hit, status: 200 }));
   }
@@ -155,11 +159,19 @@ export async function submitForm(fields: Record<string, string>): Promise<{ ok: 
  */
 export const enableAfterMs = (): number => delayMs(3000, 6000);
 
-/** Whether this run's list should arrive in two waves. */
-export const listArrivesInWaves = (): boolean => chance(0.5);
+/**
+ * Whether this run's list should arrive in two waves.
+ *
+ * Always, now. It was a coin toss, which is right for variety and wrong for a
+ * fixture: the `wait` side of the ruling population is what is short, and a
+ * fixture that produces a ruling half the time produces half a population.
+ * What stays seeded is *when* the second wave lands, which is the part that
+ * should vary.
+ */
+export const listArrivesInWaves = (): boolean => true;
 
 /** How long the first wave takes to be joined by the second. */
-export const secondWaveMs = (): number => between(600, 2000);
+export const secondWaveMs = (): number => between(1200, 2800);
 
 /** A jittered pull-to-refresh, so no two refreshes take the same time. */
 export const refreshMs = (): number => Math.round(400 + random() * 1600);

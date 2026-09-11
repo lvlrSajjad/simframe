@@ -181,6 +181,28 @@ const FIXTURES = [
     expect: 'the list is still loading; its rows arrive shortly after launch',
   },
   {
+    name: 'detail',
+    want: 'recovered',
+    // A detail screen that is still fetching. Waiting is the right answer and
+    // re-running the step proves it, which is what makes this scoreable.
+    walk: [{ tap: 'Monstera #1' }],
+    arrive: null,
+    judge: { waitFor: { value: 'Prefers bright indirect light', timeoutMs: 700 } },
+    expect: 'the detail screen is still fetching; its text arrives shortly',
+  },
+  {
+    name: 'secondwave',
+    want: 'recovered',
+    // The list renders its count header, then a third of its rows, then the
+    // rest. `Jade #24` is in the last wave, so a tight wait for it fails while
+    // the screen is *stable and incomplete at the same moment* — the state that
+    // has fooled settle detection and the supervisor alike.
+    walk: [{ swipe: { from: [201, 300], to: [201, 620] } }],
+    arrive: null,
+    judge: { waitFor: { value: 'Jade #24', timeoutMs: 700 } },
+    expect: 'the list arrives in waves and this row is in the last one',
+  },
+  {
     name: 'blocked',
     want: 'stopped',
     walk: [
@@ -266,4 +288,25 @@ for (const fx of FIXTURES) {
   );
 }
 if (unattributed) console.log(`\n${unattributed} ruling(s) came from a step this script did not label.`);
+
+// Said before the accuracy is read, not after. The first population was 12
+// `stop` to 2 `wait`, so a majority-class guess scored 86% against the model's
+// 64% — and every number computed from it was an artifact of that skew. A
+// scoreboard that prints accuracy without printing its own balance invites
+// exactly that mistake a second time.
+{
+  const want = {};
+  for (const fx of FIXTURES) {
+    const s = score.get(fx.name);
+    want[fx.want] = (want[fx.want] ?? 0) + s.n;
+  }
+  const total = Object.values(want).reduce((a, b) => a + b, 0);
+  const biggest = Math.max(0, ...Object.values(want));
+  const baseline = total ? Math.round((100 * biggest) / total) : 0;
+  console.log(`\nbalance: ${JSON.stringify(want)} — guessing the commonest answer scores ${baseline}%.`);
+  if (baseline > 65) {
+    console.log('  SKEWED. Any accuracy above is mostly a fact about the fixture set, not the judge.');
+    console.log('  Add fixtures for the under-represented answer before comparing anything against anything.');
+  }
+}
 console.log(`\nthe log now holds ${all.length} ruling(s) — simframe supervisions --device=${dev.udid}`);
