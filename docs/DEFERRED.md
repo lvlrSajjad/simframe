@@ -1032,6 +1032,117 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    then 109** — and state thresholds as fitted unless they were chosen on one
    split and scored on another.
 
+### Peer round on 0.11.0 — the fourth round, 2026-09-12
+
+One app, one session, ~20 calls, a React Native app with heavy async list
+loading against a live UAT backend and Metro attached — which the reporter
+themself names as "exactly the profile that stresses the settle and
+screen-identity heuristics". Everything below was quoted from tool output rather
+than recalled.
+
+**Praised, and worth protecting.** The multi-device error now answers the
+question it raises, including the "over MCP there is no shell" clause — their
+main ergonomic complaint from the previous round, gone. `{"key":"return"}`
+closed the submit-to-search gap that had blocked them. Region grouping
+(`nav-bar:`/`content:`/`tab-bar:`) "reads much faster". And **both of yesterday's
+new signals earned their keep in a real session**: the cleared-field warning
+caught Metro's fast refresh remounting the app mid-flow, and the loading-state
+note stopped them acting on a half-rendered list. Those are the two changes that
+were hardest to justify from a bench.
+
+113. **`sim_ui` silently picks a device where `sim_look` refuses, and returned a
+   confident stale map.** THE WORST FINDING OF THE ROUND, and the worst class we
+   have. The app was on the login screen; `sim_ui` returned a complete 20-element
+   map of a different screen. `refresh: true` returned the same stale map again.
+   The trigger was a second simulator booting — but the actionable part is the
+   asymmetry: **at that same moment `sim_look` refused with the ambiguity error
+   and `sim_ui` picked something.** One tool has the guard, the other does not.
+
+   The reporter then told their user the card was still on screen and the login
+   frame had been stale — backwards — and said why that matters: *"A wrong answer
+   is worse than an error here, because nothing downstream knows to doubt it."*
+   That is this project's own most-repeated lesson arriving from outside.
+
+   Cheap: one guard, applied in one more place. Do it first.
+
+114. **`unexpected-screen` aborts batches on steps that demonstrably worked.**
+   Twice in one flow; nine of sixteen steps skipped and re-issued by hand.
+
+   ```
+   FAIL [6] type: unexpected-screen: expected the screen this action
+                 reached 2x before, and landed somewhere else
+   later steps were not run
+   ```
+
+   The type *had* landed — the same result listed the typed query, a record
+   count and the row underneath it. The hashes differed **legitimately**, because
+   list content differs between runs. Their fix is better than ours would have
+   been: *before aborting on screen identity, check the step's own
+   postcondition* — does the field contain what was typed, did the tapped element
+   change. We already hold that evidence. `continueOnError` "works around it but
+   disables the guard wholesale, which is the wrong trade", and they are right.
+
+115. **Screen identity is too sensitive to trust on content-heavy screens**, and
+   the tool says so itself on nearly every call:
+
+   ```
+   memory disagrees with this screen: 1 remembered control not present
+    — this screen has probably been confused with another.
+      Trust the element list, not the graph.
+   ```
+
+   *"When the tool's own guidance is 'don't trust the graph' that consistently,
+   the hash is costing more than it returns."* Their suggestion — hash structure,
+   exclude list row text — is what the fingerprint already intends, so this is a
+   gap between intent and behaviour rather than a new design. **Note this is
+   item 86 reported independently**, and I hit it myself on the testbed the same
+   day, repeatedly. Two independent sightings and one self-sighting should move
+   it up.
+
+116. **`region` does not match the element map's coordinate space.** The map put
+   a row at `201,437`; a crop of `{x:14,y:392,width:374,height:88}` returned
+   empty space from *below* it. The docs say region is in points, "the same
+   coordinates the element map prints". Either it crops a different frame or
+   there is an unaccounted offset. Their words: "straightforward to pin with a
+   test", and that is exactly right — a fixture with a known element and a known
+   crop.
+
+117. **`scrollTo` treats "in the tree" as "in view".**
+
+   ```
+   "New Test Assess count check..." is in view at 201,835 already
+   [no visible change]
+   ```
+
+   y=835 sits underneath the fixed bottom button bar, so it was not visible at
+   all, and they fell back to raw `swipe` coordinates for the rest of the
+   session. The fix is already half-built: **we identify the `tab-bar:` region,
+   so anything inside it should count as obstructed.** Note the bitter irony
+   that `offScreenMatch` exists precisely to tell "not on this screen" from "not
+   in view" and this is the same distinction one layer down.
+
+118. **OCR still loses digits to letters, and the tree should win outright for
+   text.** `O Records` for `0 Records` is the one that matters — *"a digit
+   misread as a letter will silently break an assertion"*. Alongside it
+   `Naturai Gas`, `JYouTube`, `dHow To`, and `Brentwoodl` where a text cursor was
+   read as an `l`. They credit the `~` dual-reading convention for surfacing
+   disagreement, then make the sharper point: **in a React Native app the
+   accessibility tree holds the real strings, so it should win outright for text
+   content with OCR supplying geometry.** That is a fusion-priority change, not
+   an OCR-accuracy one, and it is testable offline against the perception
+   fixtures.
+
+**Their two asks, and one is already answered.** Network visibility — *"on a
+mobile app most 'is this broken?' questions are answered by the wire, not the
+pixels, and you are already the component that knows when a screen settled"*.
+They hand-rolled a CDP tap twice in one session because the JS context resets
+and takes the patch with it. **Feasibility was settled the same day; see 80.**
+Their second ask is new and cheap given that work: **a "the JS bundle reloaded"
+event.** Fast refresh bounced the app to its home screen twice mid-flow;
+simframe inferred *something* from the cleared field but never said the app had
+remounted, which "silently invalidates every step that follows". It is
+detectable on the same CDP connection we now have a client for.
+
 **Ordering, revised — and the reason is a habit we said we would break.** Fable's
 recommendation is explicit: **promote 97 ahead of 96.** Both of our problematic
 rulings were abstention cases, not experiment-design questions; the abstain token
