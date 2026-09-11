@@ -14,8 +14,19 @@ on:
 # is a hosted macOS runner booting a simulator, so two pushes a minute apart used
 # to mean two full device jobs and the second answer being the only one anybody
 # read.
+#
+# Keyed on the **event as well as the ref**, and that second half was missing.
+# Every trigger shared one lane per ref, so the nightly schedule and a push
+# fought each other: on 2026-09-12 the 12:13 nightly cancelled the push run for
+# `0769447` outright, and the commit reached main having been verified by
+# nothing. It reads as flaky CI and it is not — it is two runs competing for one
+# slot, one of which takes 28 minutes because it owns `bench`.
+#
+# Now a push supersedes a push on the same ref (which is the point), a tag has
+# its own lane (it always did — a different ref), and the nightly neither
+# cancels a push verification nor is cancelled by one.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

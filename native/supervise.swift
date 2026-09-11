@@ -121,11 +121,19 @@ func serve() async {
     are not being asked what to do, only whether this can proceed. Answer with \
     the decision alone.
     """
-    // A throwaway session up front so the first real judgement does not pay
-    // model load — measured at ~880ms against ~600ms warm.
-    _ = try? await LanguageModelSession(instructions: instructions)
-        .respond(to: "Step: warm\nIt failed with: warm", generating: Judgement.self)
-    emit(["ready": true])
+    // Warm up front so the first real judgement does not pay model load —
+    // measured at ~880ms against ~600ms warm.
+    //
+    // `prewarm()` is the supported way and this used to be a throwaway
+    // `respond`, which loaded the same weights the hard way and paid a whole
+    // generation to do it. Warming a session we then discard works because
+    // residency is process- and system-managed: the expensive part outlives the
+    // session, which is also why fresh-session-per-judgement is affordable.
+    LanguageModelSession(instructions: instructions).prewarm()
+    // The window, reported rather than assumed. 4,096 has been a documented
+    // constant we repeated; since 26.4 it is queryable, so it is now read from
+    // the model and handed to the caller, who prints it in `doctor`.
+    emit(["ready": true, "contextSize": SystemLanguageModel.default.contextSize])
     while let line = readLine(strippingNewline: true) {
         if line.isEmpty { continue }
         guard let data = line.data(using: .utf8),
@@ -165,8 +173,35 @@ func serve() async {
                 "decision": out.content.decision.rawValue,
                 "ms": Int(Date().timeIntervalSince(started) * 1000),
             ])
+        } catch let err as LanguageModelSession.GenerationError {
+            // Named, not merely stringified, because the cases mean different
+            // things to whoever reads the log — and because a string match on
+            // an error message is a classification that silently becomes
+            // "unknown" the day Apple rewords it.
+            //
+            // Deliberately NOT a retry policy. The research that asked for this
+            // warned that a blanket retry burns battery on the permanent cases,
+            // and checking found we never retry at all: `ask` resolves null on
+            // any error and `judge` refuses anything outside the three words. So
+            // what these buy is a diagnosis, which is what was actually missing
+            // — every failure reached the log as "the supervisor did not answer".
+            let kind: String
+            switch err {
+            // Our own bug if it appears: the caller clips every field and the
+            // worst case those caps allow measures 1,918 tokens of 4,096.
+            case .exceededContextWindowSize: kind = "context-window"
+            // Permanent for this input. Retrying cannot help and it says so.
+            case .guardrailViolation: kind = "guardrail"
+            case .unsupportedLanguageOrLocale: kind = "locale"
+            // A session takes one request at a time. The line protocol here
+            // serialises them and each gets a fresh session, so this should be
+            // unreachable — worth knowing loudly if it ever is not.
+            case .rateLimited: kind = "rate-limited"
+            default: kind = "generation"
+            }
+            emit(["error": "\(err)", "kind": kind])
         } catch {
-            emit(["error": "\(error)"])
+            emit(["error": "\(error)", "kind": "unknown"])
         }
     }
 }

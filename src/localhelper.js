@@ -94,7 +94,11 @@ export function lineServer({ ensureBinary, what }) {
           try { msg = JSON.parse(line); } catch { continue; }
           if (!settled) {
             settled = true;
-            if (msg.ready) resolve({ ok: true, child, waiters });
+            // The ready line may carry facts about the helper worth keeping —
+            // the model's context window, for one, which used to be a constant
+            // we repeated in comments. Passed through rather than parsed here,
+            // because this file knows about lines and not about models.
+            if (msg.ready) resolve({ ok: true, child, waiters, hello: msg });
             else resolve({ ok: false, reason: msg.unavailable ?? `the ${what} did not become ready` });
             continue;
           }
@@ -145,7 +149,9 @@ export function lineServer({ ensureBinary, what }) {
     },
     async status() {
       const live = await open();
-      return live?.ok ? { ok: true } : { ok: false, reason: live?.reason ?? 'unavailable' };
+      return live?.ok
+        ? { ok: true, hello: live.hello ?? {} }
+        : { ok: false, reason: live?.reason ?? 'unavailable' };
     },
     close() {
       try { session?.child?.kill(); } catch { /* already gone */ }

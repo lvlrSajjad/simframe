@@ -45,6 +45,30 @@ const helper = lineServer({
 
 export const DECISIONS = new Set(['wait', 'retry', 'stop']);
 
+/**
+ * The vocabulary gate, as a function so it can be *tested* rather than grepped.
+ *
+ * This one line is the safety property: the supervisor cannot invent a step,
+ * skip one, substitute a target or continue past an unexpected screen, because
+ * those are not words it can say. Anything outside the three is not a decision
+ * and becomes `null`, which means "behave as if there is no supervisor".
+ *
+ * It was previously inline, and the test that guarded it matched the source
+ * text — so it broke when the branch grew an else, with nothing actually wrong.
+ * A property this important deserves an assertion that runs it.
+ */
+export function decisionOf(answer) {
+  // A string, checked rather than coerced. `String(["wait"])` is `"wait"`, so a
+  // `String(...)` coercion here let `{decision: ["wait"]}` through the one gate
+  // that defines this component's answer space. Found the first time this
+  // property was *run* instead of grepped for in the source — the old test
+  // matched the source text of the branch and could never have caught it.
+  const raw = answer?.decision;
+  if (typeof raw !== 'string') return null;
+  const decision = raw.toLowerCase();
+  return DECISIONS.has(decision) ? decision : null;
+}
+
 /** Which backend the caller asked for, per call first and environment second. */
 export function requested(options) {
   const raw = String(options?.supervisor ?? process.env.SIMFRAME_SUPERVISOR ?? '').trim().toLowerCase();
@@ -62,6 +86,7 @@ export function requested(options) {
  */
 export async function judge({
   goal, step, expected, failure, screen, stillMs, note, options, timeoutMs = 2500,
+  detail,
 } = {}) {
   if (!requested(options)) return null;
   if (!step || !failure) return null;
@@ -74,10 +99,24 @@ export async function judge({
     stillMs: Number.isFinite(stillMs) ? Math.round(stillMs) : null,
     note: note ? String(note).slice(0, 200) : null,
   }, timeoutMs);
-  const decision = String(answer?.decision ?? '').toLowerCase();
-  // An answer outside the vocabulary is not a decision. Refusing it here is
-  // what makes the three-word constraint real rather than merely documented.
-  if (!DECISIONS.has(decision)) return null;
+  const decision = decisionOf(answer);
+  if (decision == null) {
+    // Why it did not answer, for the caller's log — through an out-parameter
+    // rather than the return value, because returning anything truthy here
+    // would change what the executor does. `null` means "behave as if there is
+    // no supervisor" and that safety property is the one thing in this file
+    // that must not become conditional.
+    //
+    // Before this, every failure reached the supervision log as "the
+    // supervisor did not answer": a timeout, a guardrail refusal and a model
+    // that was never installed were one indistinguishable line.
+    if (detail && typeof detail === 'object') {
+      detail.kind = answer?.kind
+        ?? (answer == null ? 'no answer' : answer.decision ? 'outside the vocabulary' : 'unparseable');
+      if (answer?.error) detail.error = String(answer.error).slice(0, 200);
+    }
+    return null;
+  }
   return { decision, reason: String(answer.reason ?? '').slice(0, 120), ms: answer.ms ?? null };
 }
 
@@ -101,16 +140,21 @@ export async function status(options) {
     screen: ['Probe'],
     stillMs: 5000,
   }, 6000);
-  const decision = String(probe?.decision ?? '').toLowerCase();
-  if (!DECISIONS.has(decision)) {
+  if (decisionOf(probe) == null) {
     return {
       supervisor: 'none',
       detail: 'the model loaded but did not answer a probe — it is present and not working',
     };
   }
+  // The window, read from the model rather than repeated from documentation.
+  // Worth printing: the worst case our own clipping allows measures 1,918
+  // tokens against it, and that ratio is the reason there is no per-call token
+  // budget check — see DEFERRED 99.
+  const ctx = live.hello?.contextSize;
   return {
     supervisor: 'apple',
-    detail: `Apple Foundation Models, on-device; answered a probe in ${probe.ms ?? '?'}ms; may only answer wait/retry/stop`,
+    detail: `Apple Foundation Models, on-device; answered a probe in ${probe.ms ?? '?'}ms;`
+      + `${ctx ? ` ${ctx}-token window;` : ''} may only answer wait/retry/stop`,
   };
 }
 

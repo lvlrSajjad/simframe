@@ -232,12 +232,15 @@ export async function runScript(
    * log is the state item 101a exists to end: three rulings had ever existed
    * anywhere, and 101, 106 and 96 are all waiting on a population.
    */
-  const noteRuling = (index, ruling, outcome, { step, expect, failure } = {}) => {
+  const noteRuling = (index, ruling, outcome, { step, expect, failure, why } = {}) => {
     const shown = SHOWN[outcome] ?? outcome;
+    const unanswered = why?.kind
+      ? `the supervisor did not answer: ${why.kind}`
+      : 'the supervisor did not answer';
     supervisions.push({
       index,
       decision: ruling?.decision ?? 'unavailable',
-      reason: ruling?.reason ?? 'the supervisor did not answer',
+      reason: ruling?.reason ?? unanswered,
       from: ruling?.from,
       outcome: shown,
     });
@@ -249,7 +252,7 @@ export async function runScript(
         screen: ruling?.context?.screen ?? null,
         decision: ruling?.decision ?? 'unavailable',
         from: ruling?.from ?? (ruling ? 'model' : 'none'),
-        reason: ruling?.reason ?? 'the supervisor did not answer',
+        reason: ruling?.reason ?? unanswered,
         ms: ruling?.ms,
         stillMs: ruling?.context?.stillMs,
         p95: ruling?.context?.p95,
@@ -362,11 +365,15 @@ export async function runScript(
         // Ask the supervisor before anything is abandoned. It sits behind the
         // hands and in front of the reasoner: first responder, not
         // decision-maker, and its whole vocabulary is wait/retry/stop.
+        // Why a consultation produced nothing, for the log. Every failure used
+        // to arrive as "the supervisor did not answer" — a timeout, a guardrail
+        // refusal and a model that was never installed reading identically.
+        const why = {};
         const ruling = await superviseFailure(deviceQuery, {
-          goal: supervise ?? flowName, step, expected: step.expect, err, options, udid,
+          goal: supervise ?? flowName, step, expected: step.expect, err, options, udid, detail: why,
         });
         const ruled = (outcome) => noteRuling(i, ruling, outcome, {
-          step, expect: step.expect, failure: err.message,
+          step, expect: step.expect, failure: err.message, why,
         });
         if (ruling?.decision === 'wait' || ruling?.decision === 'retry') {
           // Both wait and retry settle first, differing only in how long.
@@ -402,7 +409,9 @@ export async function runScript(
           // I would have reported the supervisor makes no difference without
           // realising it had never run"*.
           ruled('no_ruling');
-          err.message += ' — the local supervisor was consulted and did not answer, so this failure was not judged.';
+          err.message += ' — the local supervisor was consulted and did not answer'
+            + (why.kind ? ` (${why.kind})` : '')
+            + ', so this failure was not judged.';
         } else if (ruling?.decision === 'stop') {
           ruled('stopped');
           const remaining = steps.slice(i);
@@ -1179,7 +1188,7 @@ const SUPERVISOR_RETRY_MS = 900;
 /** A scroll moves at once or not at all; it does not need a transition's budget. */
 const SCROLL_SETTLE_MS = 800;
 
-async function superviseFailure(deviceQuery, { goal, step, expected, err, options, udid }) {
+async function superviseFailure(deviceQuery, { goal, step, expected, err, options, udid, detail }) {
   if (!supervisor.requested(options)) return null;
   // The action half of the edge is free — the step is in hand — so a rule-sourced
   // ruling still records which action it was about even though it never reads
@@ -1215,6 +1224,7 @@ async function superviseFailure(deviceQuery, { goal, step, expected, err, option
       stillMs,
       note: stillFillingIn(map.identity?.entry),
       options,
+      detail,
     });
     if (!ruling) return null;
     return {

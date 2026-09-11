@@ -2989,10 +2989,22 @@ test('the supervisor may say three words and nothing else', async () => {
   assert.equal(await supervisor.judge({ step: 'tap X', failure: 'nope' }), null, 'not asked means no ruling');
   assert.equal(await supervisor.judge({ options: { supervisor: 'apple' } }), null, 'and nothing to judge means none');
 
-  // An answer outside the vocabulary is not a decision. Refusing it in code is
-  // what makes the three-word constraint real rather than merely documented.
-  const src = readFileSync(new URL('../src/supervisor.js', import.meta.url), 'utf8');
-  assert.match(src, /if \(!DECISIONS\.has\(decision\)\) return null/);
+  // An answer outside the vocabulary is not a decision, and this is now run
+  // rather than grepped. The previous version matched the source text of the
+  // gate and broke when the branch grew an else — nothing wrong, a test pinned
+  // to a shape. The gate is a function so the property can be exercised.
+  assert.equal(supervisor.decisionOf({ decision: 'wait' }), 'wait');
+  assert.equal(supervisor.decisionOf({ decision: 'STOP' }), 'stop', 'case is not a new word');
+  assert.equal(supervisor.decisionOf({ decision: ' retry ' }), null, 'and neither is whitespace');
+  for (const notAWord of [
+    { decision: 'proceed' }, { decision: 'skip' }, { decision: 'tap Save' },
+    { decision: 'wait, then retry' }, { decision: '' }, { decision: null },
+    { decision: 3 }, { decision: ['wait'] }, { decision: { decision: 'wait' } },
+    {}, null, undefined, 'wait',
+  ]) {
+    assert.equal(supervisor.decisionOf(notAWord), null,
+      `${JSON.stringify(notAWord)} is not one of the three words`);
+  }
 
   // Its prose is recorded, never presented as the ground for what happened. In
   // testing it returned a correct decision with a reason citing a rule that did
