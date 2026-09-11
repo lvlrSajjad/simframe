@@ -87,6 +87,43 @@ const readings = [];
 /** Navigations that did not land before the reading was taken. */
 const arrivalFailures = [];
 
+/**
+ * The tokens that carry a name, as opposed to a shape.
+ *
+ * A fingerprint is deliberately geometry — role, region, size, position — and
+ * chrome labels are the only text that survives into it (`fingerprint.js`).
+ * That module's own comment states the consequence: "two list screens with
+ * identical structure differ by their title, and nothing else says so". So a
+ * reading with none of these has no identity to speak of, and two such
+ * readings of *different* screens can hash identically. Counted here because
+ * that is diagnosable and "the tour went somewhere unintended" is not.
+ */
+const namedTokens = (tokens) => tokens.filter((t) => t.includes('"'));
+
+/**
+ * Write the readings out now, rather than after the checks.
+ *
+ * The write used to sit past every `process.exit(1)`, so the only run that
+ * kept its evidence was the run with nothing to explain. A failing run exited
+ * before the file existed and `if: always()` on the upload step faithfully
+ * uploaded nothing — which is how one red integration job cost an evening of
+ * inferring from a summary line while `analyse-fingerprint.mjs`, which exists
+ * to classify exactly these divergences, had no file to read. Called as soon
+ * as the tour is done and again with the analysis, so every exit below this
+ * point still leaves the readings behind.
+ */
+const save = (extra = {}) => {
+  if (!outFile) return;
+  fs.writeFileSync(outFile, JSON.stringify({
+    label, device: dev.name, runtime: dev.runtime, rounds, at: Date.now(),
+    threshold: graph.SIMILARITY_THRESHOLD,
+    // Tokens are kept. They were stripped here once, and the first time the
+    // margin narrowed the run could not be diagnosed from its own output.
+    readings,
+    ...extra,
+  }, null, 2));
+};
+
 for (let round = 1; round <= rounds; round += 1) {
   for (const screen of tour) {
     if (screen.steps?.length) {
@@ -136,11 +173,24 @@ for (let round = 1; round <= rounds; round += 1) {
       // like fingerprint drift.
       sources: id.entry?.sources ?? [],
     });
+    // Sensors and named tokens are on every line, not only inside a failure.
+    // Both were invisible until a run failed, and both are what the failure
+    // turns out to be about: two readings of one screen taken by different
+    // sensors do not share a hash by design, and a reading carrying no chrome
+    // label cannot be told from any other screen of the same shape. A summary
+    // line that hid those sent an evening after hosted-runner speed.
     process.stdout.write(
-      `  round ${round}  ${screen.name.padEnd(14)} ${String(id.hash).slice(0, 10)}  ${String((id.tokens ?? []).length).padStart(3)} tokens${id.settled ? '' : '  (never settled)'}\n`,
+      `  round ${round}  ${screen.name.padEnd(22)} ${String(id.hash).slice(0, 10)}  `
+      + `${String((id.tokens ?? []).length).padStart(3)} tokens  `
+      + `${String(namedTokens(id.tokens ?? []).length).padStart(2)} named  `
+      + `${((id.entry?.sources ?? []).join('+') || 'none').padEnd(9)}`
+      + `${id.settled ? '' : '  (never settled)'}\n`,
     );
   }
 }
+
+save();
+if (outFile) console.log(`\nwrote ${readings.length} readings to ${outFile}`);
 
 if (arrivalFailures.length) {
   console.error(`\nFAIL ${arrivalFailures.length} reading(s) were taken on the previous screen:`);
@@ -178,11 +228,17 @@ function findStrays(all) {
     if (siblings.length < 2) continue;
     const bestSelf = Math.max(...siblings.map((o) => fingerprint.similarity(r.tokens, o.tokens)));
     const others = all.filter((o) => o.name !== r.name);
-    const bestOther = others.length
-      ? Math.max(...others.map((o) => fingerprint.similarity(r.tokens, o.tokens)))
-      : 0;
+    // Which screen it resembles, not merely how much. A stray that resembles
+    // one particular other screen at 1.00 is a different animal from one that
+    // resembles everything weakly, and the report could not tell them apart.
+    let match = null;
+    let bestOther = 0;
+    for (const o of others) {
+      const s = fingerprint.similarity(r.tokens, o.tokens);
+      if (s > bestOther) { bestOther = s; match = o; }
+    }
     if (bestSelf < graph.SIMILARITY_THRESHOLD && bestOther >= bestSelf) {
-      strays.push({ reading: r, bestSelf, bestOther });
+      strays.push({ reading: r, bestSelf, bestOther, match });
     }
   }
   return strays;
@@ -190,14 +246,41 @@ function findStrays(all) {
 
 const strays = findStrays(readings);
 if (strays.length) {
-  console.error(`\nFAIL ${strays.length} reading(s) were taken on a screen other than the one named:`);
-  for (const { reading, bestSelf, bestOther } of strays) {
-    console.error(`       ${reading.name} r${reading.round}: resembles its own screen ${bestSelf.toFixed(2)}, `
-      + `another screen ${bestOther.toFixed(2)} (${reading.count} tokens, sources ${reading.sources.join('+') || 'none'})`);
+  console.error(`\nFAIL ${strays.length} reading(s) do not resemble their own screen:`);
+  // Two causes wear the same symptom, and until now the report asserted the
+  // second one. A reading can be unlike its siblings because the tour went
+  // somewhere unintended — or because the fingerprint could not tell two
+  // screens apart, which is the harness's actual subject. They are separable
+  // from the data in hand: a collision is a reading that carries no chrome
+  // label while matching one particular other screen almost exactly, and a
+  // wrong turn is one whose tokens name a screen the tour did not ask for.
+  let collisions = 0;
+  for (const { reading, bestSelf, bestOther, match } of strays) {
+    const named = namedTokens(reading.tokens);
+    const matchNamed = match ? namedTokens(match.tokens) : [];
+    const collided = bestOther >= 0.99 && named.length === 0 && matchNamed.length === 0;
+    if (collided) collisions += 1;
+    console.error(`       ${reading.name} r${reading.round}: own screen ${bestSelf.toFixed(2)}, `
+      + `${match ? `${match.name} r${match.round}` : 'another screen'} ${bestOther.toFixed(2)} `
+      + `(${reading.count} tokens, ${named.length} named, sources ${reading.sources.join('+') || 'none'})`);
+    if (collided) {
+      console.error('              ^ a COLLISION, not a wrong turn: neither reading carries a chrome');
+      console.error('                label, so both are structure with no name and the fingerprint has');
+      console.error('                nothing left to tell two list screens apart.');
+    }
+    if (named.length) console.error(`              names: ${named.map((t) => t.slice(t.indexOf('"'), t.lastIndexOf('"') + 1)).join(' ')}`);
   }
-  console.error('\nThat is the tour going somewhere unintended, not the fingerprint drifting, and');
-  console.error('measuring it as either distribution poisons both ends. Fix the tour — a tap that');
-  console.error('missed, or a screen that needs longer than its pause — and re-run.');
+  if (collisions) {
+    console.error(`\n${collisions} of ${strays.length} are fingerprint collisions. That is this harness's own subject,`);
+    console.error('not a tour fault: a reading whose chrome label went missing cannot establish');
+    console.error('identity, and comparing it as though it could is what produced the verdict above.');
+  } else {
+    console.error('\nThat is the tour going somewhere unintended, not the fingerprint drifting, and');
+    console.error('measuring it as either distribution poisons both ends. Fix the tour — a tap that');
+    console.error('missed, or a screen that needs longer than its pause — and re-run.');
+  }
+  console.error(`\nEvery reading is in ${outFile ?? 'the --out file'}; `
+    + 'run `node scripts/analyse-fingerprint.mjs <that file>` to classify the divergent tokens.');
   process.exit(1);
 }
 
@@ -317,17 +400,11 @@ for (const r of readings) {
 }
 console.log(`\n${labels.size} distinct chrome label(s) entered identity: ${[...labels].sort().join(' · ') || '(none)'}`);
 
-if (outFile) {
-  fs.writeFileSync(outFile, JSON.stringify({
-    label, device: dev.name, runtime: dev.runtime, rounds, at: Date.now(),
-    threshold, same: s, mixed: m, different: d, gap, separated, thresholdInGap,
-    labels: [...labels].sort(),
-    // Tokens are kept. They were stripped here, and the first time the margin
-    // narrowed the run could not be diagnosed from its own output.
-    readings,
-  }, null, 2));
-  console.log(`\nwrote ${outFile}`);
-}
+save({
+  same: s, mixed: m, different: d, gap, separated, thresholdInGap,
+  labels: [...labels].sort(),
+});
+if (outFile) console.log(`\nwrote ${outFile}`);
 
 // The stated margin, checked rather than eyeballed. A person noticing that a
 // number moved is not a test; this is the machine that re-measures it.

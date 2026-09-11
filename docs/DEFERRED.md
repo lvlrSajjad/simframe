@@ -88,6 +88,14 @@ could not fire in the MCP server; `simframe input reset` now exists and is what
 > a status-bar target · **88** the MCP tool descriptions still open with `#3`
 > instead of intent.
 >
+> **Ahead of both, and new: 110.** The red `integration` job is **not** item 95.
+> It is a real fingerprint collision: a screen whose own name is an iOS large
+> title enters identity with `0 named` tokens — the Settings root and Contacts
+> both do, on every visit, measured — so two list screens of the same shape can
+> hash identically. The fix is a region-band change in `regions.js` plus a
+> `TOKEN_RULES_VERSION` bump and a re-measure. The harness now keeps its
+> readings on failure, so the before and after are both diagnosable.
+>
 > **Push 2 — the supervisor's reliability**: **99** `prewarm()` plus a
 > `tokenCount`/`contextSize` budget check and per-`GenerationError` triage ·
 > **100** the `abstain` token.
@@ -714,6 +722,56 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    rather than after it — the keyboard bug went from two failed guesses to an
    exact measurement the moment it stopped being tested against a live page, and
    a ruling is far easier to bottle than a screen.
+
+110. **A screen whose own name is a large title has no name in its fingerprint,
+   and two such screens can hash identically.** Found 2026-09-11 night, chasing
+   what looked like item 95. The `integration` job's only failure was
+   `settings-general r3` reading `5663423aa0` — byte-identical to the **Settings
+   root**. Everything I first said about it was wrong and is worth recording as
+   the cost of reading a summary line: the fingerprint had not drifted (every
+   screen returned an identical hash in all three rounds), the two readings
+   flagged "never settled" produced the *same* hash as their settled siblings
+   and poisoned nothing, and 6-11 tokens is this tour's normal yield on that
+   image rather than a degenerate reading.
+
+   The cause is in `fingerprint.js`'s own stated terms. Identity is deliberately
+   geometry, and chrome labels are the only text that survives — the module says
+   so and names the consequence: *"two list screens with identical structure
+   differ by their title, and nothing else says so"*. Measured here on the bench
+   device, three rounds: **the Settings root carries `0 named` tokens on every
+   visit, and so does Contacts.** Not unluckily — consistently. Its own name is
+   on screen as an iOS **large title**, which sits in the `content` region, so
+   it is discarded as content. The screen is pure shape. Locally that survives
+   because its shape differs from everything else by 0.08; on the runner it met
+   another 7-token shape and matched it at 1.00.
+
+   So a retry-on-nameless mitigation is the wrong fix — it would spend a cold
+   perception pass per reading and return another nameless reading. The fix is
+   in the region bands: **a large title is chrome — it is the screen's name —
+   and the top-chrome clustering in `regions.js` does not recognise one.** Which
+   half rejects it (the boundary-gap test or `allShort`) is one experiment, not
+   yet run.
+
+   That is a token-rule change, so it needs `TOKEN_RULES_VERSION` and
+   `FINGERPRINT_VERSION` bumped and both distributions re-measured — which is
+   what `eval-fingerprint.mjs` is for, and it now keeps its readings on failure
+   (below), so the before and after are both diagnosable. Expect it to *widen*
+   the gap: today `settings` vs `contacts` is the closest different-screen pair
+   at 0.08 and both are nameless.
+
+   **Until it lands, `integration` can go red on this again**, and that is a
+   real collision rather than flakiness. Item 95 did not cause it and the runner
+   contributed only which reading it got.
+
+   **Three harness fixes landed the same night**, because the failure was
+   undiagnosable rather than obscure: the `--out` write sat past every
+   `process.exit(1)`, so the only run that kept its evidence was the run with
+   nothing to explain and `if: always()` on the upload step faithfully uploaded
+   nothing; the reading log now prints the **sensor mix and the named-token
+   count** per line, which is the whole diagnosis at a glance; and the stray
+   report no longer asserts "the tour went somewhere unintended" when the data
+   says collision — it names which screen was matched, and when neither reading
+   carries a chrome label it says so and points at `analyse-fingerprint.mjs`.
 
 **Ordering, revised — and the reason is a habit we said we would break.** Fable's
 recommendation is explicit: **promote 97 ahead of 96.** Both of our problematic
