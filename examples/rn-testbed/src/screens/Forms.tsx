@@ -135,9 +135,9 @@ function SimpleForm() {
           setResult(null);
           try {
             await submitForm({ name });
-            setResult('Saved');
+            setResult('Order placed');
           } catch (err) {
-            setResult(`Could not save: ${(err as Error).message}`);
+            setResult(`The order was rejected: ${(err as Error).message}`);
           } finally {
             setBusy(false);
           }

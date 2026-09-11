@@ -981,6 +981,57 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    `ci-integration-local.sh`. Pointing `integration` at a bigger app before 95
    is addressed would add a second unknown to a job that is already a coin toss.
 
+112. **The first ruling population is unbalanced, and that invalidates every
+   accuracy number anyone would compute from it — including the ones 96, 101 and
+   109 are designed to produce.** Measured 2026-09-12, the first day the testbed
+   could generate rulings at all. 14 labelled rulings, arrival proved on every
+   one, 0 skipped:
+
+   | | |
+   | --- | --- |
+   | population | **12 want `stop`, 2 want `wait`** |
+   | the model | 9/14 (64%) |
+   | always `"stop"` | **12/14 (86%)** |
+   | always `"wait"` | 2/14 (14%) |
+   | `stillMs > 2000 -> stop` | **14/14 (100%)** |
+
+   **Read none of those as results.** A population that is 86% one class makes
+   the majority-class baseline beat the model, and the stillness threshold was
+   chosen *after* seeing the answers, on 14 samples. Both numbers are artifacts
+   of the fixture set. Had we run 109's four arms against this population we
+   would have produced a confident, meaningless comparison and believed it —
+   which is the failure this project has already had twice, and the reason
+   `measure the prize before the solution` is written down.
+
+   **What is real, because it does not depend on the balance:**
+
+   - **Every error the supervisor made was in one direction** — `wait` where
+     `stop` was right, 5 times, never the reverse. It over-waits. That is the
+     safe direction (the cost is a settle plus one re-run, not a wrong action,
+     which is the three-word vocabulary working as designed) but it is a bias,
+     and it is the bias **100**'s `abstain` token and **97**'s selective
+     prediction are aimed at.
+   - **Decision correlates with `stillMs`**: median 3,316ms for `wait` against
+     8,020ms for `stop`, ranges overlapping. So the model may largely be reading
+     a number the code already has, which is exactly what **101** suspects. Not
+     established — suggested, on a sample too small and too skewed to settle it.
+   - **`edges the graph had timed: 0/14`**, again. Every one of these is a step
+     that has never succeeded on that edge, so 101's p95 comparison still has no
+     population at all. That is now two independent measurements saying the same
+     thing and it should change 101's shape rather than wait for more data.
+   - **Median judgement latency 1,440ms** (1,026-1,629) on this device.
+
+   **What has to happen before any comparison is worth running:** the fixture set
+   needs as many genuine `wait` cases as `stop` cases. Today only `arriving`
+   produces them and it yielded 2 rulings from 6 seeds, because reaching a
+   fixture costs three seconds of answering iOS's "Open in …?" dialog and the
+   list has usually arrived by then. Candidates already in the testbed or cheap
+   to add: a list that arrives in two waves (`listArrivesInWaves` exists and is
+   unused by any fixture), a detail screen that loads slowly, a modal that takes
+   time to present, a refresh caught mid-flight. **Balance first, then 109a,
+   then 109** — and state thresholds as fitted unless they were chosen on one
+   split and scored on another.
+
 **Ordering, revised — and the reason is a habit we said we would break.** Fable's
 recommendation is explicit: **promote 97 ahead of 96.** Both of our problematic
 rulings were abstention cases, not experiment-design questions; the abstain token

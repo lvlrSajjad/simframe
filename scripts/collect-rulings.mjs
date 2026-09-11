@@ -110,16 +110,33 @@ const launchSeeded = async (seed) => {
 };
 
 /**
- * Walk to where a fixture starts, unjudged.
+ * Walk to where a fixture starts, unjudged — and *prove* you arrived.
  *
  * Navigation is scaffolding too. Three of the first run's stray rulings were a
- * `type` that failed because the form had never been reached — a ruling about
- * the harness's own navigation, recorded as though it were about the fixture.
+ * `type` that failed because the form had never been reached.
+ *
+ * The `arrive` half is the harder lesson, and it cost a wrong number. A walk
+ * that does not throw is not a walk that arrived: two `Next` taps landed on a
+ * live button, threw nothing, and advanced nothing, so **three of four rulings
+ * in the first clean run were taken on step 1 of a three-step form** while the
+ * fixture claimed they were about the review step. The scoreboard read 25% and
+ * was measuring the harness.
+ *
+ * `eval-fingerprint.mjs` already learned exactly this — it checks that each
+ * reading was taken on the screen the tour named, having once measured a
+ * distribution against readings taken somewhere else. The check simply had not
+ * been carried over.
  */
-const walk = async (steps) => {
-  if (!steps.length) return true;
+const walk = async (steps, arrive) => {
   try {
-    await actions.runScript(device, { steps, verify: false, options: SCAFFOLD });
+    if (steps.length) await actions.runScript(device, { steps, verify: false, options: SCAFFOLD });
+    if (!arrive) return true;
+    // Asserted, not assumed. An assert that throws means we are not there.
+    await actions.runScript(device, {
+      steps: [{ assert: { value: arrive, is: 'visible' } }],
+      verify: false,
+      options: SCAFFOLD,
+    });
     return true;
   } catch {
     return false;
@@ -153,8 +170,14 @@ const FIXTURES = [
   {
     name: 'arriving',
     want: 'recovered',
-    walk: [],
-    judge: { waitFor: { value: 'Monstera #1', timeoutMs: 900 } },
+    // Pull to refresh rather than relying on the launch, because reaching the
+    // fixture now takes three seconds of its own — answering iOS's "Open in …?"
+    // — and by then the list has always arrived. The first clean run produced
+    // *no rulings at all* from this fixture for that reason. A refresh empties
+    // the list and reloads it on a fresh seeded delay, right where we want it.
+    walk: [{ swipe: { from: [201, 300], to: [201, 620] } }],
+    arrive: null,
+    judge: { waitFor: { value: 'Monstera #1', timeoutMs: 700 } },
     expect: 'the list is still loading; its rows arrive shortly after launch',
   },
   {
@@ -162,8 +185,10 @@ const FIXTURES = [
     want: 'stopped',
     walk: [
       { tap: 'Forms, tab, 2 of 3' }, { pause: 900 }, { tap: 'Stepped form' }, { pause: 900 },
-      { tap: 'Next' }, { pause: 700 }, { tap: 'Next' }, { pause: 700 },
+      { tap: 'Next' }, { pause: 1200 }, { tap: 'Next' }, { pause: 1200 },
     ],
+    // The review step, proved rather than hoped for.
+    arrive: 'Step 3 of 3',
     judge: { waitFor: { value: 'Submitted', timeoutMs: 2500 } },
     expect: 'Review is blocked until Species is filled in, and it is empty',
   },
@@ -174,9 +199,15 @@ const FIXTURES = [
       { tap: 'Forms, tab, 2 of 3' }, { pause: 900 }, { tap: 'One-step form' },
       { pause: 6500 },
       { type: { into: 'Your Name', text: 'Ada' } },
-      { tap: 'Submit' }, { pause: 900 },
+      { tap: 'Submit' }, { pause: 1200 },
     ],
-    judge: { waitFor: { value: 'Saved', timeoutMs: 2500 } },
+    // The rejection is on screen, so the submit demonstrably happened and
+    // failed — otherwise this fixture can pass by never having submitted.
+    arrive: 'The order was rejected',
+    // "Saved" was the string here and it fuzzy-matched "Could not save: …", so
+    // the judge step *succeeded* on the failure it was meant to catch and the
+    // fixture produced no rulings at all. Success and failure now share no words.
+    judge: { waitFor: { value: 'Order placed', timeoutMs: 2500 } },
     expect: 'the first submit always fails and the second works, so waiting cannot help',
   },
 ];
@@ -190,7 +221,7 @@ for (let i = 0; i < seeds; i += 1) {
   for (const fx of FIXTURES) {
     await reviveIfWedged();
     await launchSeeded(seed);
-    const reached = await walk(fx.walk);
+    const reached = await walk(fx.walk, fx.arrive);
     if (!reached) {
       process.stdout.write(`  seed ${seed}  ${fx.name.padEnd(9)} SKIPPED — could not reach the fixture\n`);
       skipped += 1;
