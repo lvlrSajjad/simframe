@@ -10,9 +10,13 @@ settle fixes worked, and 0.12.1 shipped the same night.
 - **Metro is running on 8083** (the owner's call) and the testbed app is built
   at `scratchpad/rn-build/…/SimframeTestbed.app`. Reinstall it after a wipe.
 - **Our bench device `326464A4` is shut down.** A *different* simulator,
-  `B55AB0AE`, is booted and is **also named "iPhone 17 Pro"** — the exact
-  collision 119 fixes, live on this machine. It may be a colleague's; leave it
-  alone, and **always pass `--device` explicitly here**.
+  `B55AB0AE`, is booted, is **also named "iPhone 17 Pro"**, and has a live
+  simframed on it (started 23:39, frames arriving). That is the exact collision
+  119 fixes, present on this machine right now. It was left running rather than
+  stopped: it is not ours, and stopping another session's capture is the same
+  class of act as tapping somebody else's screen. **Always pass `--device`
+  explicitly here** — and if that daemon turns out to be a stray of ours, it is
+  safe to stop, but check with the owner first.
 - Two cleanup lessons worth keeping: `TaskStop` kills the shell task and **not**
   a `nohup`'d child, so three `collect-rulings` processes survived their runs
   and had to be killed by PID; and `git add -u` stages only *tracked* files, so
