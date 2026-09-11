@@ -748,9 +748,29 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    So a retry-on-nameless mitigation is the wrong fix — it would spend a cold
    perception pass per reading and return another nameless reading. The fix is
    in the region bands: **a large title is chrome — it is the screen's name —
-   and the top-chrome clustering in `regions.js` does not recognise one.** Which
-   half rejects it (the boundary-gap test or `allShort`) is one experiment, not
-   yet run.
+   and the top-chrome clustering in `regions.js` does not recognise one.**
+
+   **Which half rejects it, measured** — replayed offline against the recorded
+   readings, no device, one command, which is how this should have started:
+
+   | screen | `navBarBottom` | the title row | gap below it |
+   | --- | --- | --- | --- |
+   | `settings` (root) | **0** | `Settings`, y 120-163 | **5.33 pt** |
+   | `settings-general` | 106 | `Settings / General`, y 62-106 | 118.17 pt |
+
+   It is the **boundary-gap test**, and `allShort` and `withinReach` both pass
+   (133 pt wide of 402; bottom at 0.19 of the screen against a 0.28 limit). But
+   not the part of it I assumed: the bar is `max(MIN_BOUNDARY_GAP_PT, typical ×
+   BOUNDARY_GAP_FACTOR)` = `max(10, 35 × 1.9)` = **66.5 pt**, so the 10 pt floor
+   is not binding and **no threshold tweak reaches 5.33.** A large title has to
+   be recognised by role and position — a `Heading` alone on a row, below the
+   status bar, above the first content row — not by the gap beneath it, because
+   iOS draws a large title tight against the content it heads.
+
+   The asymmetry is the whole bug: a **pushed** screen gets a compact bar with a
+   118 pt gap and is named, while a **root** screen with a large title is
+   nameless. Exactly backwards, and it is why the collision pairs a root with a
+   pushed screen rather than two roots.
 
    That is a token-rule change, so it needs `TOKEN_RULES_VERSION` and
    `FINGERPRINT_VERSION` bumped and both distributions re-measured — which is
