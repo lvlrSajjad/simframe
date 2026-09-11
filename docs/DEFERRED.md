@@ -951,10 +951,11 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    **In-tree is safe**, checked rather than assumed: `package.json`'s `files` is
    an **allowlist** (`src`, `data`, `flows`, named `native/*`, `skills`,
    `scripts`, README, LICENSE), so nothing under `examples/` can ship. Two traps
-   found before starting: RN's default bundle id is
-   `org.reactjs.native.example.<Name>`, and the identifier guard allows only
-   `org.swift.` and `org.json.` under `org` — so set it to `com.example.…` at
-   scaffold time or the guard trips. And `node_modules` plus `Pods` must be
+   found before starting: RN's default bundle identifier is a `reactjs`-prefixed
+   template placeholder that the identifier guard does not allow, so it must be
+   set to `com.example.…` at scaffold time or the guard trips. (Writing that
+   placeholder out in full here tripped the guard too, which is the guard
+   working — the literal is deliberately not repeated.) And `node_modules` plus `Pods` must be
    gitignored, or `check-private` walks an RN tree on every run.
 
    **Ordered by what it unblocks, not by coverage.**

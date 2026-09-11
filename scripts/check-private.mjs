@@ -53,6 +53,15 @@ export const ALLOWED = [
   /^com\.google\./i,
   /^org\.swift\./i,
   /^org\.json\./i,
+  // Build-tool namespaces, not app identifiers — and they arrive by the
+  // hundred the moment an Android project exists. `org.jetbrains.kotlin.android`
+  // is a Gradle plugin id, `org.jetbrains.kotlin:kotlin-gradle-plugin` a Maven
+  // coordinate, and `org.gradle.jvmargs` is a *property name* that merely looks
+  // like a bundle id. Added when the React Native testbed landed and flagged
+  // four of them; same judgement as the two lines above, which are Swift's and
+  // JSON's own namespaces rather than anybody's app.
+  /^org\.jetbrains\./i,
+  /^org\.gradle\./i,
   /^com\.facebook\./i,     // idb, a reference implementation named in the docs
   /^com\.example\./i,
   /^com\.acme\./i,
