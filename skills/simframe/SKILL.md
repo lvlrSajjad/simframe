@@ -230,7 +230,10 @@ Measured against the same screen as an image: **~460 tokens of text versus
 image path degrades to base64-as-text. The text also says what is *tappable*
 and where, which an image does not.
 
-The numbers are selectors. Whatever `ui` calls `#3`, you can tap as `#3`.
+The numbers are selectors, and so are the labels beside them. Act by **name** —
+whatever `ui` calls `Weekly digest`, you can tap as `"Weekly digest"`. A `#3`
+is exact but only until the screen moves; see Selectors below for why that
+order is a correction rather than a preference.
 
 **Reach for an image only when the text genuinely cannot answer the question:**
 visual layout, colour, spacing, an animation, or something neither the
@@ -246,7 +249,7 @@ a baseline captured *before* it, so steps cannot race the UI.
 cat > /tmp/flow.json <<'JSON'
 [{"tap": "Inbox tab"},
  {"assert": {"value": "Weekly digest", "is": "visible"}},
- {"tap": "#3"},
+ {"tap": "Weekly digest"},
  {"type": {"into": "Reply", "text": "on it"}},
  {"scrollTo": "Send"},
  {"tap": "Send"},

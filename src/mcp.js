@@ -78,13 +78,22 @@ const deviceProp = {
 };
 
 /**
- * One selector grammar everywhere.
+ * One selector grammar everywhere, and the order is the recommendation.
  *
- * `#3` is the cheapest thing a caller can say and the least ambiguous, because
- * simframe numbered it; a bare phrase is resolved by intent, which is more
- * forgiving and occasionally has to ask which one was meant.
+ * It used to lead with `#3` and call it "cheapest and unambiguous". Four peer
+ * rounds running reported the opposite: intent resolution worked every time,
+ * while refs renumbered underneath them and were only safe inside the round
+ * trip that issued them. The README was corrected and these descriptions were
+ * not, which is the half a caller actually reads.
+ *
+ * "Unambiguous" was also the wrong word for it. A ref is exact about which
+ * element simframe meant and says nothing about whether that element is still
+ * there — the failure mode that needed `staleKind` to tell a moved layout from
+ * a different screen, and then a score floor and a region check on top of that
+ * before a relabelled ref could be trusted. A label carries its own evidence;
+ * a number carries none.
  */
-const SELECTOR = 'Selector: "#3" (a number from the last screen map — cheapest and unambiguous), a label or phrase like "Save" or "the Assets tab" (resolved by intent), or "@120,400" for raw point coordinates.';
+const SELECTOR = 'Selector: a label or phrase like "Save" or "the Assets tab" or "back" (resolved by intent — verbs, typos, synonyms, icon-only controls: START HERE), "#3" (a number from the last screen map — exact, but only inside the round trip that numbered it), or "@120,400" for raw point coordinates (last resort: it cannot tell you it missed).';
 
 const selectorProp = (what = 'What to act on') => ({
   sel: { type: 'string', description: `${what}. ${SELECTOR}` },
@@ -94,7 +103,7 @@ const TOOLS = [
   {
     name: 'sim_ui',
     description:
-      'READ THE SCREEN as text: every element numbered, with region, type, label, state, contents and tap point, plus which screen this is and what simframe knows about it. A tenth the cost of a screenshot and more useful, because it says what is tappable and where. Whatever it calls #3, you can tap as "#3". Start here, never with sim_look.',
+      'READ THE SCREEN as text: every element numbered, with region, type, label, state, contents and tap point, plus which screen this is and what simframe knows about it. A tenth the cost of a screenshot and more useful, because it says what is tappable and where. Act on what it shows by NAME — whatever it calls "General", you can tap as "General"; the #3 numbers are exact but only until the screen moves. Start here, never with sim_look.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -123,7 +132,7 @@ const TOOLS = [
         steps: {
           type: 'array',
           description:
-            'Ordered steps. Every selector below accepts "#3" | "Save" | "@120,400". Act: {"tap":"Save"} (add "index" if a label is ambiguous), {"type":{"into":"Name","text":"Fryer 3"}}, {"paste":{"into":"Notes","text":"long text"}}, {"clear":"Notes"} to empty a field and "clear":true on a type/paste to replace rather than append (drop "into" to type into whatever already has focus, which is how you follow a browser next-field chevron — nothing can be read back then, and the step says so), {"scroll":"down"}, {"scrollTo":"Delete account"}, {"swipe":{"from":[x,y],"to":[x,y]}}, {"button":"HOME"}, {"key":"return"} (the keyboard return/enter key, which is how a mobile search field submits — also escape, tab, space, backspace, and the arrows), {"launch":{"value":"com.example.app","relaunch":true,"args":["-uiTest","1"]}}, {"openUrl":"myapp://x"}, {"permission":{"value":"photos","grant":"grant","bundleId":"com.example.app"}}. Check: {"assert":{"value":"Saved","is":"visible"}} (also gone | enabled | disabled | value with "equals"), {"waitFor":{"value":"Saved","timeoutMs":5000}}, {"settle":{"stableMs":600}}, {"pause":300}. Recover without a round trip: add "or" to any step for fallback selectors tried locally — {"tap":"Save","or":["Done","Confirm"]} — and {"seek":"change username","budget":6} explores for something not on this screen: it OPENS containers (a real action — state changes), checks, and returns to where it started, refusing to open anything that commits, abandons or answers. It does not tap the target; it leaves you on the screen where the target resolves so you tap it next. Do not point it into a flow whose progress you cannot afford to lose. A long screen is only knowable a viewport at a time, so {"sweep":"all","fill":{"Last Name":"Asadi","Email":"a@b.c"}} goes to the top, then reads and fills section by section to the bottom — filling each field while it is on screen, which beats finding one and scrolling back. Add "from":"here" to sweep down from where you are. It reports which section each element was in, what it filled, and what it never found at any scroll position. Prefer it to scrollTo on forms and long lists. Brief the supervisor from the plan: top-level "supervise" is standing guidance for the whole batch ("lists here render a count header before rows; REVIEW stays disabled until a provider is chosen") and per-step "expect" adds to it. When it stops a run the result names the steps it did not attempt — re-issue them with a corrected "supervise" note if the judgement was wrong.',
+            'Ordered steps. Every selector below accepts "Save" | "#3" | "@120,400", in that order of preference. Act: {"tap":"Save"} (add "index" if a label is ambiguous), {"type":{"into":"Name","text":"Fryer 3"}}, {"paste":{"into":"Notes","text":"long text"}}, {"clear":"Notes"} to empty a field and "clear":true on a type/paste to replace rather than append (drop "into" to type into whatever already has focus, which is how you follow a browser next-field chevron — nothing can be read back then, and the step says so), {"scroll":"down"}, {"scrollTo":"Delete account"}, {"swipe":{"from":[x,y],"to":[x,y]}}, {"button":"HOME"}, {"key":"return"} (the keyboard return/enter key, which is how a mobile search field submits — also escape, tab, space, backspace, and the arrows), {"launch":{"value":"com.example.app","relaunch":true,"args":["-uiTest","1"]}}, {"openUrl":"myapp://x"}, {"permission":{"value":"photos","grant":"grant","bundleId":"com.example.app"}}. Check: {"assert":{"value":"Saved","is":"visible"}} (also gone | enabled | disabled | value with "equals"), {"waitFor":{"value":"Saved","timeoutMs":5000}}, {"settle":{"stableMs":600}}, {"pause":300}. Recover without a round trip: add "or" to any step for fallback selectors tried locally — {"tap":"Save","or":["Done","Confirm"]} — and {"seek":"change username","budget":6} explores for something not on this screen: it OPENS containers (a real action — state changes), checks, and returns to where it started, refusing to open anything that commits, abandons or answers. It does not tap the target; it leaves you on the screen where the target resolves so you tap it next. Do not point it into a flow whose progress you cannot afford to lose. A long screen is only knowable a viewport at a time, so {"sweep":"all","fill":{"Last Name":"Asadi","Email":"a@b.c"}} goes to the top, then reads and fills section by section to the bottom — filling each field while it is on screen, which beats finding one and scrolling back. Add "from":"here" to sweep down from where you are. It reports which section each element was in, what it filled, and what it never found at any scroll position. Prefer it to scrollTo on forms and long lists. Brief the supervisor from the plan: top-level "supervise" is standing guidance for the whole batch ("lists here render a count header before rows; REVIEW stays disabled until a provider is chosen") and per-step "expect" adds to it. When it stops a run the result names the steps it did not attempt — re-issue them with a corrected "supervise" note if the judgement was wrong.',
           items: { type: 'object' },
         },
         autoSettle: {

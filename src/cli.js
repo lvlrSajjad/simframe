@@ -57,10 +57,12 @@ const USAGE = `simframe — always-warm iOS Simulator frames
                                      (--strict, or SIMFRAME_STRICT=1, makes any
                                       degraded layer a non-zero exit)
 
-Selectors — anywhere a control is named
-  #3            the number \`simframe ui\` gave it. Cheapest, unambiguous.
-  "Save"        a label or a phrase, resolved by intent (verbs, typos, synonyms)
-  @120,400      raw point coordinates
+Selectors — anywhere a control is named, best first
+  "Save"        a label or a phrase, resolved by intent (verbs, typos, synonyms,
+                icon-only controls by their common name). Start here.
+  #3            the number \`simframe ui\` gave it. Exact, but only inside the
+                round trip that numbered it — the screen moves and it does not.
+  @120,400      raw point coordinates. Last resort: it cannot tell you it missed.
 
 Measuring against a human — the Human Parity Index
 

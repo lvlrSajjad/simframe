@@ -942,6 +942,20 @@ the dangerous kind for an agent-facing tool."* All three are fixed.
    beat refs.** A documentation change, not a code one: lead with intent
    resolution.
 
+   **DONE, 2026-09-12.** The README and the skill's table had already been
+   corrected; the MCP tool descriptions and the CLI help had not, which is the
+   half a caller actually reads. All four now lead with the label, and the
+   skill's prose no longer contradicts its own table two screens further down
+   (it said "whatever `ui` calls `#3`, you can tap as `#3`" and its example
+   flow tapped `"#3"`).
+
+   "Unambiguous" was also the wrong word, and saying why is the useful part: a
+   ref is exact about which element simframe meant and carries **no evidence
+   about whether that element is still there**. That is the failure mode which
+   needed `staleKind` to separate a moved layout from a different screen, and
+   then 98's score floor and region check before a relabelled ref could be
+   trusted at all. A label carries its own evidence; a number carries none.
+
 **Praised, and worth protecting.** *"Errors that diagnose instead of just
 failing"* — they singled out `waited 10000ms for Gaslamp: "Gaslamp" is in the
 tree but not in view — it is at y=2975 on a 874pt screen. Scroll to it
