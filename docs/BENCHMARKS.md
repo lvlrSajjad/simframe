@@ -3701,3 +3701,66 @@ had timed` was **0/14**, twice independently.
 It cannot reproduce the runner's speed — this machine settles a screen in a few
 hundred milliseconds where a loaded runner has taken 45 s for a two-step flow —
 so green here means the code is right, not that CI will pass.
+
+## 2026-09-12 (late) — the first supervisor number that means anything, and it is awkward
+
+Same machine and device. 8 seeds x 5 fixtures, 40 judged steps, **0 skipped**,
+32 rulings, arrival asserted on every one.
+
+**The population is balanced, which is the point.** 16 `wait` against 16 `stop`,
+so the majority-class baseline is **50%** — against the previous population's
+86%, which made every number computed from it an artifact.
+
+| | |
+| --- | --- |
+| the model | **91%** |
+| always the commonest answer | 50% |
+| median judgement latency | 1,192 ms |
+| `edges the graph had timed` | **0/32** |
+
+### And a flat threshold beats it on data it never saw
+
+Fitted on the first 16 rulings by recording order, scored on the last 16. The
+split rule, the candidate thresholds and the baselines were all written into
+`scripts/score-rulings.mjs` **before this population finished collecting**,
+because the previous attempt chose a threshold after seeing the answers and
+produced a meaningless 100%.
+
+| | fit half | held-out half |
+| --- | --- | --- |
+| `stillMs > 3000 -> stop` | 100% | **100%** |
+| the model | — | 94% |
+
+No gap between fit and held-out, so it is not reading noise. A one-line
+comparison on a number the daemon already computes outperforms a 1.2-second
+model call.
+
+**Three things that keep this a strong hint rather than a settled fact.** 16
+held-out samples, where 100% and 94% differ by a single ruling. Five fixture
+shapes *designed by the author of the threshold*, each deliberately cleanly one
+thing or the other — so the threshold may be separating the design rather than
+the world. And `edges the graph had timed` is 0/32 for the third independent
+time, so what wins is a **flat global threshold**, not the p95-per-edge lookup
+item 101 actually proposes. Those are different claims and only the simpler one
+has evidence.
+
+### The error direction, which does not depend on the balance
+
+3 errors of 32, **all `wait` where `stop` was right**. Never the reverse. That
+is the third population in a row with one-directional error, and it is the case
+for an `abstain` token (100) whatever the headline accuracy is. It is also the
+safe direction: a wrong `wait` costs a settle and one re-run, not a wrong
+action, which is the three-word vocabulary working as designed.
+
+### What the outcome column says that the decision column does not
+
+Scored by *decision* the model is 91%. Scored by *outcome* — did acting on the
+ruling actually recover the flow — it is 69%, and almost all of the difference
+is one fixture: `detail` took `wait` 8 times out of 8, which is the **right
+word**, and recovered only once. The decision was right and it did not help.
+
+That gap is worth more than either number. It says a correct ruling is not
+sufficient: the supervisor's `wait` settles for a fixed 4 s and re-runs, and a
+screen that needs longer is judged correctly and fails anyway. Whether that is a
+fixture too slow to recover or a wait budget too short to be useful is not yet
+known, and it is the next thing to measure.

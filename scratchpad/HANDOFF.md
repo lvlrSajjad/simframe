@@ -1,68 +1,89 @@
-# Handoff — 0.12.0 shipped, 2026-09-12
+# Handoff — 2026-09-12 night, for 2026-09-13
 
-`origin/main` is current and nothing is held. **0.12.0 is on npm as `latest`**,
-verified independently of the workflow's exit code (`npm view simframe version`
-→ 0.12.0, tarball resolvable, MCP Registry step ran). CI was green on the
-release SHA first, and `ci [v0.12.0]` and `release [v0.12.0]` both passed.
+`origin/main` is current, nothing held. **0.12.0 is on npm as `latest`.**
 
-Metro is left running on **8083** and the testbed is installed on the bench
-device, which is shut down.
+## First thing tomorrow
 
-## Pick up here
+**Cut 0.12.1.** Approved by the owner tonight and gated only on CI, which was
+still running on `b504631` when we stopped. Check that run: if green, `npm
+version patch` and push the tag. It contains **119** — a name shared by two
+simulators resolved to whichever the device list ordered first, so a caller got
+a fresh frame of the wrong device's login screen and was told nothing was wrong
+— plus two CI timing fixes. If `integration` is red again on **step 11**, stop
+widening settle budgets; two attempts was enough, and the next move is item 95's
+structural mitigations (keep the simulator warm across the job instead of
+booting cold, pre-dismiss SpringBoard's first run).
 
-**The four peer findings from the 0.12.0 round are the front of the list**, and
-they are better specified than anything I would have invented:
+## Then, in this order — and the order changed last night
 
-1. **114 — `unexpected-screen` aborts steps that worked.** Nine of sixteen steps
-   skipped, twice in one flow, on a type that had demonstrably landed. Hashes
-   differ legitimately because list *content* differs. Their fix: check the
-   step's own postcondition — does the field contain what was typed, did the
-   tapped element change — before aborting on screen identity. We already hold
-   that evidence. `continueOnError` disables the guard wholesale, which they
-   correctly call the wrong trade.
-2. **115 — "memory disagrees with this screen" on nearly every call.** Item 86,
-   reported independently, plus my own sightings on the testbed the same day.
-   When the tool's own advice is "don't trust the graph" that often, the hash is
-   costing more than it returns.
-3. **117 — `scrollTo` treats "in the tree" as "in view"**, and reported an
-   element at y=835 as visible when it sat under the fixed bottom bar. Half
-   built already: we identify the `tab-bar` region, so anything inside it should
-   count as obstructed.
-4. **118 — the accessibility tree should win outright for text content**, with
-   OCR supplying geometry. `O Records` for `0 Records` will silently break an
-   assertion. A fusion-priority change, testable offline against the fixtures.
+**The supervisor is off by default. The peer findings hit every user.** That
+asymmetry decides this, because last night's measurement made the supervisor
+work *less* urgent, not more.
 
-**Then 112, which is written but not run.** Three `wait` fixtures exist now
-(`arriving`, `detail`, `secondwave`) against two `stop` ones, and the scoreboard
-prints its own balance and says SKEWED above 65%. What is missing is the run:
-`SIMFRAME_SUPERVISOR=apple node scripts/collect-rulings.mjs --device=<udid>
---seeds=8`. Until that lands, **no accuracy number from the ruling log means
-anything** — the last population was 12 `stop` to 2 `wait`, where guessing the
-commonest answer scored 86% against the model's 64%.
+1. **120** — a coordinate tap should say what it hit. Fifteen minutes lost in a
+   real session to an overlay that was *in the element list* at y≈753 while the
+   swipe started at y=750. We already hold the geometry; it converts a silent
+   failure into one line.
+2. **121** — coordinates exceeding the stated screen width (`411` on a `402pt`
+   screen). The reporter stopped trusting our numbers and derived taps from
+   screenshot proportions instead. Second coordinate-contract complaint in two
+   rounds; **116** is the other.
+3. **117** (`scrollTo` calls an element under the tab bar "in view" — half built,
+   we already identify that region), **123** (print the region map `sim_state`
+   already computes when settle gives up), **114** (check the step's own
+   postcondition before aborting a batch on screen identity).
+4. **100, the `abstain` token.** Three populations in a row have had errors in
+   one direction only — `wait` where `stop` was right, never the reverse.
+5. **A bigger, messier ruling population — not a bigger model.** See below.
+6. Then, and possibly never, **109a / 109**.
 
-**Then 100 (the `abstain` token) with 97 behind it.** Today's measurement is the
-argument: every supervisor error was `wait` where `stop` was right, five times,
-never the reverse.
+## What last night measured, and why it reorders the list
 
-## What the soak did and did not establish
+First balanced population: 16 `wait` against 16 `stop`, baseline **50%**.
 
-It ran the full 25 minutes: 48 laps, 336 cold reads, no wedge. But **zero
-capture failures in the window**, which means the run never exercised the
-recovery path — so it cannot distinguish the callback-leak fix from conditions
-being kinder, and there is no matched before-run. The leak is real and measured
-(670 registrations in one pre-fix log, 2 after the escalation fix). Its being
-*the* cause of the wedge is not established. If wedges recur, that is the thread.
+| | |
+| --- | --- |
+| the model | **91%** |
+| `stillMs > 3000`, held-out half | **100%** (model 94% on the same half) |
+| median judgement latency | 1,192 ms |
+| `edges the graph had timed` | 0/32, third time |
 
-## Network visibility (80) — feasibility settled
+**The model is good and may be unnecessary.** A one-line comparison on a number
+the daemon already computes beat it on data it was never fitted to, with no gap
+between the fit and held-out halves. The split rule and candidate thresholds
+were fixed in `scripts/score-rulings.mjs` *before* the population finished, so
+it is not the fitted-after-the-fact number the previous attempt produced.
 
-React Native **does** emit CDP `Network.*` events, with method, URL, status, mime
-type, bytes and a correlating `requestId`. `scripts/probe-network.mjs` is the
-hand-rolled client. Three details each worth an afternoon: the target is on
-*Metro's* inspector (`React Native Bridgeless [C++ connection]`), the upgrade
-needs an `Origin` matching the inspector's host, and `/json/list` returns zero
-targets while the app is mid-relaunch. Scope limit: this is RN's debugger, so it
-covers RN apps and not native ones. Still a product decision; what is settled is
-that it can be built.
+**Do not over-read it.** 16 held-out samples, where 100% and 94% differ by one
+ruling; five fixtures designed by the same person who then found the threshold,
+each deliberately cleanly one thing or the other. The next measurement is
+whether it survives situations nobody designed — which is why a messier
+population beats a bigger model as the next spend.
+
+**And 101 as written asks the wrong question.** It proposes a p95-per-edge
+lookup; `edges the graph had timed` is 0 in all three populations, because a step
+that failed has never succeeded on that edge. What won was a flat global
+threshold. Different claim, and only the simpler one has evidence. Restated in
+the item.
+
+**One more thing neither number shows.** By *decision* the model is 91%; by
+*outcome* 69%. Nearly all the difference is the `detail` fixture taking `wait`
+8 times out of 8 — the right word — and recovering once. A correct ruling is not
+sufficient when the wait that follows is a fixed 4 s and the screen needs
+longer. Whether that is a fixture too slow or a wait budget too short is unknown
+and worth measuring.
+
+## The experiments article — the owner's idea, and a good one
+
+They want the numbers per iteration written up: what made things better, what
+made them worse. The spine should be **what we believed first**, because the
+entries with teaching in them are the reversals — a "64% accurate" supervisor on
+a population where guessing scored 86%; `prewarm()` looking like a regression
+until measured on the right axis; a large-title rule that fired on one screen
+and not its neighbour because it keyed on the median row gap; a recovery loop
+that registered 670 callbacks and released none; 9% of escalations being what a
+code-scanning graph could address. Generate it from `BENCHMARKS.md` where
+possible so it cannot drift from the data.
 
 ## Owed to the owner
 

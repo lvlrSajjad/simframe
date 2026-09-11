@@ -626,6 +626,30 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    wrote "it runs on logs we already have" and then went to look. Rulings are
    returned in a `supervisions` array on the result and **nothing writes them
    anywhere**; `escalations.jsonl` does not carry them. Three rulings have ever
+   **RESTATED 2026-09-12, and the item as written is asking the wrong question.**
+   Measured on a balanced population — 16 `wait` against 16 `stop`, baseline
+   50% — a **flat global threshold** beats the model on data it was never fitted
+   to: `stillMs > 3000 -> stop` scores 100% on both the fit and the held-out
+   half, against the model's 94% on the held-out half, with the split rule and
+   the candidate thresholds fixed in `scripts/score-rulings.mjs` before the
+   population finished collecting. The model itself is good — 91% against that
+   50% baseline — and a 1.2-second call is losing to one comparison.
+
+   But **this item proposes a p95-per-edge lookup, and that is not what won.**
+   `edges the graph had timed` has been **0** in all three populations collected,
+   because a step that failed is a step that has never succeeded on that edge, so
+   there is no timing to look up. A flat threshold and a learned per-edge p95 are
+   different claims and only the flat one has any evidence. Whoever picks this up
+   should build the flat version, measure it against a *messier* population than
+   the five clean fixtures its threshold was found on, and treat the per-edge
+   formulation as unsupported until an edge population exists.
+
+   Three caveats travel with the result and must not be dropped: 16 held-out
+   samples, where 100% and 94% differ by one ruling; fixtures designed by the
+   same person who then found the threshold, each deliberately cleanly one thing
+   or the other; and no test yet of whether it survives situations nobody
+   designed.
+
    **A second correction, from building 101a — and this one is about the premise,
    not the plumbing.** The first real ruling to reach the new log came back on
    edge `823b8158b727:tap:nonexistent row` with `edge_samples: 0` and
@@ -1021,7 +1045,20 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
      thing and it should change 101's shape rather than wait for more data.
    - **Median judgement latency 1,440ms** (1,026-1,629) on this device.
 
-   **What has to happen before any comparison is worth running:** the fixture set
+   **DONE 2026-09-12: the population is balanced and the numbers are in
+   `docs/BENCHMARKS.md`.** 16/16, baseline 50%, the model at 91%. And the result
+   reorders what comes next — see 101's restatement. The model judges well and a
+   free threshold may make it unnecessary, so **a bigger, messier population is
+   the next measurement, not a bigger model**. Running 109's arms now would be
+   spending a comparison on a question that might not need asking.
+
+   One thing the balanced run surfaced that neither number shows: scored by
+   *decision* the model is 91%, scored by *outcome* it is 69%, and nearly all the
+   difference is the `detail` fixture taking `wait` 8 times out of 8 — the right
+   word — and recovering once. A correct ruling is not sufficient when the wait
+   that follows it is a fixed 4 s and the screen needs longer.
+
+   **The original requirement, met:** the fixture set
    needs as many genuine `wait` cases as `stop` cases. Today only `arriving`
    produces them and it yielded 2 rulings from 6 seeds, because reaching a
    fixture costs three seconds of answering iOS's "Open in …?" dialog and the
