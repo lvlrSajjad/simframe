@@ -4227,3 +4227,50 @@ test('110b: a screen that says it is called something else is not this screen', 
   assert.ok(graphmod.nearestScreen(udid, unnamed),
     'a reading with no names at all is not vetoed, it is merely unhelpful');
 });
+
+test('113: the map says how old its frame is, which sim_look always did and it never did', async () => {
+  const v = await import('../src/view.js');
+
+  // Reported from the field against 0.11.0: a complete 20-element map of a
+  // screen the app was not on, with no staleness marker, and the reporter then
+  // told their user the opposite of the truth. Their sentence is the one this
+  // project keeps writing down — "a wrong answer is worse than an error here,
+  // because nothing downstream knows to doubt it".
+  //
+  // `sim_look` and `sim_state` have printed frame age since they existed. This
+  // map, the one an agent is told to start with, never has — and `ensureDaemon`
+  // will return a frame up to 30s old, so it was reachable with nothing broken.
+  const at = (ms) => ({ state: { capturedAt: 1_000_000 - ms } });
+  const now = 1_000_000;
+
+  // Silent when fresh, deliberately: a line on every call is a line nobody reads.
+  assert.equal(v.frameAgeNote(at(0), now), null);
+  assert.equal(v.frameAgeNote(at(v.FRAME_FRESH_MS - 1), now), null);
+
+  // Stated plainly in between.
+  const mild = v.frameAgeNote(at(2500), now);
+  assert.match(mild, /frame 2\.5s old/);
+  assert.doesNotMatch(mild, /WARNING/, 'a two-second-old frame is worth saying, not worth shouting');
+
+  // And shouted once it is old enough to describe a screen that has gone.
+  const bad = v.frameAgeNote(at(12_000), now);
+  assert.match(bad, /WARNING/);
+  assert.match(bad, /12\.0s old/);
+  assert.match(bad, /description of the past/);
+  assert.match(bad, /refresh/, 'and it says what to do about it');
+
+  // No frame, no claim. Inventing an age would be the same class of fault as
+  // the one being fixed.
+  assert.equal(v.frameAgeNote({}, now), null);
+  assert.equal(v.frameAgeNote(null, now), null);
+  assert.equal(v.frameAgeNote({ state: { capturedAt: 'soon' } }, now), null);
+
+  // It reaches the rendered header, not just the helper.
+  const head = v.render({
+    device: { name: 'iPhone' },
+    identity: { hash: 'abc12345', state: { capturedAt: Date.now() - 9000 } },
+    rows: [],
+    screen: { width: 402, height: 874 },
+  });
+  assert.match(head, /WARNING this frame is/);
+});

@@ -3576,3 +3576,128 @@ window. A peer independently hand-rolled a bridge and *patched
 so the fallback is an interceptor injected through `Runtime.evaluate`. Settling
 it needs one request made while listening, which is cheaper than building the
 fallback speculatively.
+
+> **Settled 2026-09-12: the events do arrive, and the inference above was
+> wrong.** Nothing fired in the listening window because nothing had been
+> *requested* in it. The peer's `XMLHttpRequest` patch was read as evidence
+> about the protocol and was evidence about their goal — they wanted request
+> bodies, which the protocol does not hand over. See the 2026-09-12 section
+> below. No interceptor is needed.
+
+## 2026-09-12 — identity, the wedge, the supervisor, and the network question settled
+
+M-series MacBook Pro, 32 GB · Xcode 26.6 · macOS 26.6.2 · iPhone 17 Pro, iOS 26.5.
+
+### Network visibility: events do arrive
+
+The section above says "what is **not** settled is whether the domain emits
+anything", and reasoned from a peer having patched `XMLHttpRequest` that it
+probably does not. **That inference was wrong.** With a request actually fired
+while listening — triggered through `Runtime.evaluate`, so no screen was
+involved — the domain reports fully:
+
+| event | payload |
+| --- | --- |
+| `Network.requestWillBeSent` | `GET https://jsonplaceholder.typicode.com/todos/1` |
+| `Network.responseReceived` | `status=200  application/json  type=XHR` |
+| `Network.loadingFinished` | `bytes=83` |
+
+All four events share one `requestId`, so method, URL, **status**, mime type and
+size correlate. "Settled, and these three requests fired with these statuses" is
+constructible from what the protocol already sends; no interceptor is needed.
+
+Plumbing, measured not assumed: the target is Metro's inspector, described
+`React Native Bridgeless [C++ connection]`; the socket is
+`ws://…/inspector/debug?device=<id>&page=1`; the upgrade is **101** with an
+`Origin` matching the inspector's host. `/json/list` returns **zero targets
+while the app is mid-relaunch**, which reads as "not supported" if asked once.
+Scope limit that was not obvious before: this is *React Native's* debugger, so
+it covers RN apps and not native ones.
+
+### Capture soak, after the callback-registration fix
+
+| | |
+| --- | --- |
+| duration | **25 minutes**, the full budget |
+| work | 48 laps, **336 cold reads** |
+| wedges | **0** |
+| `capture failed` in the window | **0** |
+| `re-resolved the display port` | **0** |
+
+Read with care. Zero failures means the run never exercised the recovery path,
+so it **cannot** distinguish the leak fix from conditions simply being kinder —
+and there is no matched before-run, only the impression of three wedges in one
+afternoon. What it does establish is that 336 cold reads over 25 minutes is
+survivable, which it demonstrably was not the day before.
+
+For scale on the leak itself: one pre-fix log shows **670 port re-resolves
+against 42 device rebinds**, each re-resolve registering a damage callback that
+was never released. After the escalation fix, the same state produces **2**.
+
+### Screen identity
+
+| | before | after |
+| --- | --- | --- |
+| same-screen minimum | 0.56 | **0.63** |
+| different-screen maximum | 0.08 | 0.08 |
+| gap | 0.48 | **0.55** |
+| threshold | 0.36 | 0.36 |
+| chrome labels entering identity | 9 | 9 |
+
+`TOKEN_RULES_VERSION` 6 → **8**. The label count is unchanged by design: the
+first attempt reached 10 by also promoting a page's `<h1>` to chrome, which is
+page content entering identity, and the bound that excludes it is a platform
+constant — an iOS large title starts 63-79 pt below the status bar where
+example.com's heading starts **122**.
+
+Two screens of one RN app, both correctly named, still scored **0.50 against a
+0.36 threshold** and merged, because similarity weighs a name as one token of
+six. A differing name now vetoes a match.
+
+### The local supervisor
+
+| | |
+| --- | --- |
+| judgement latency, median | **1,440 ms** (1,026-1,629) |
+| spawn to first answer, throwaway `respond` warm | 1,537 / 1,088 / 1,041 ms |
+| spawn to first answer, `prewarm()` | **747 / 738 / 739 ms** |
+| first request after warm | 710 ms `prewarm` vs 546 ms throwaway |
+| steady-state request | 533-541 ms either way |
+| context window, read from the model | 4,096 tokens |
+| worst-case request the caller's caps allow | **1,918 tokens** — 47% |
+
+`prewarm()` is slower on the first *request* and much faster to the first
+*answer*, because the old warm ran a whole generation before signalling ready.
+Measuring the request alone would have called it a regression. And the
+worst-case figure is why there is no per-call token budget check: the caps make
+exceeding the window unreachable.
+
+### Ruling population — and why its accuracy is unusable
+
+14 labelled rulings, arrival asserted on every one, 0 skipped.
+
+| | |
+| --- | --- |
+| population | **12 want `stop`, 2 want `wait`** |
+| the model | 9/14 (64%) |
+| always `"stop"` | **12/14 (86%)** |
+| `stillMs > 2000 -> stop` | 14/14 (100%) |
+
+None of those are results. A population 86% one class makes the majority-class
+baseline beat the model, and that threshold was fitted after seeing the answers
+on 14 samples. Recorded so the trap is on the record rather than in someone's
+head. What survives the imbalance: every error was `wait` where `stop` was
+right, five times, never the reverse; decision tracks `stillMs` (median 3,316 ms
+for `wait` against 8,020 ms for `stop`, ranges overlapping); and `edges the graph
+had timed` was **0/14**, twice independently.
+
+### Local CI mirror
+
+| | |
+| --- | --- |
+| hosted `integration` job | 30+ minutes, and a second push cancels the answer |
+| `scripts/ci-integration-local.sh` | **~2 minutes**, 4 of the job's steps |
+
+It cannot reproduce the runner's speed — this machine settles a screen in a few
+hundred milliseconds where a loaded runner has taken 45 s for a two-step flow —
+so green here means the code is right, not that CI will pass.

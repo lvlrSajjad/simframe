@@ -315,6 +315,9 @@ the next call should change.
 | `#N cannot be trusted here — … this is a different screen` | the screen really did change. Read it again |
 | `autoSettle was off, so the map below was read without waiting` | the map may describe the screen *before* the last action landed |
 | `"iPhone 17 Pro" names more than one booted device` | a name cannot identify which device answered. Pass `device` with a UDID |
+| `frame 2.5s old` | the map was read from a frame that old. Usually fine after a deliberate pause; worth noticing if you expected to have just acted |
+| `WARNING this frame is Ns old — … a description of the past` | the screen may have moved on entirely. **Pass `refresh`** before believing any element below it. Reported from the field against 0.11.0: a complete 20-element map of a screen the app was not on, with nothing saying so |
+| `capture is wedged and both recoveries are spent` | the simulator has stopped rendering and neither of simframe's recoveries helped. Run `simframe revive --device=<udid>`; nothing else will work until you do |
 
 ## Every step is verified, and the verdict means something
 
@@ -391,7 +394,18 @@ as one call adds one exchange to the context instead of twelve.
 ```bash
 simframe doctor           # capture engine, input driver, a11y, OCR — each honestly
 simframe doctor --strict  # any degraded layer is a non-zero exit
+simframe input reset      # rebuild the HID session, without restarting anything
+simframe revive           # power-cycle a device that has stopped rendering
 ```
+
+**If capture has wedged**, `doctor` says so and nothing below it will work. A
+simulator driven hard for several minutes can stop rendering — `simctl
+screenshot` fails too, so it is the device and not simframe's view of it — and
+the daemon tries two recoveries, reports the state, and stops there. `simframe
+revive` does the restart in the order that matters and confirms frames are
+flowing again afterwards. It is a command rather than a behaviour on purpose:
+a capture loop that rebooted the device it was watching would be a tool
+reaching for the mains.
 
 simframe falls back when it must — the simctl capture loop instead of the
 daemon, idb instead of the in-process input and accessibility paths — but it
@@ -408,6 +422,7 @@ simframe recall             # what happened in the last ~60s, as text
 simframe strip              # recent frames tiled into one image, for an animation
 simframe find "the save button"   # resolve an intent without acting on it
 simframe wait --mode=settle       # block until the screen stops reacting
+simframe supervisions             # what the local supervisor decided, and what came of it
 ```
 
 `recall` matters more than it looks: if you look up and the screen is already

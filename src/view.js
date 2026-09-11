@@ -330,6 +330,28 @@ export function recalledNote(identity, now = Date.now()) {
 }
 
 /**
+ * How old the frame behind this reading is, and whether that is a problem.
+ *
+ * Two thresholds, because "slightly behind" and "possibly a different screen"
+ * are different messages. Under `FRAME_FRESH_MS` nothing is said: a map that
+ * announced "42ms old" on every call would train a reader to skip the line that
+ * matters. Over `FRAME_STALE_MS` it shouts, because at that age the app may have
+ * moved on entirely and the whole element list is then a description of the past.
+ */
+export const FRAME_FRESH_MS = 1500;
+export const FRAME_STALE_MS = 4000;
+
+export function frameAgeNote(identity, now = Date.now()) {
+  const at = identity?.state?.capturedAt;
+  if (!Number.isFinite(at)) return null;
+  const age = Math.max(0, now - at);
+  if (age < FRAME_FRESH_MS) return null;
+  if (age < FRAME_STALE_MS) return `frame ${(age / 1000).toFixed(1)}s old`;
+  return `WARNING this frame is ${(age / 1000).toFixed(1)}s old — the screen may have moved on `
+    + 'since, so treat the elements below as a description of the past and pass refresh';
+}
+
+/**
  * What a control *contains*, from the sensor that actually knows.
  *
  * A field's text reached a row only as the OCR alias, which means it was as old
@@ -702,6 +724,20 @@ export function render({ device, identity, rows, truncated, collapsed, screen, n
     identity?.settled === false ? 'STILL MOVING' : null,
     // Still and finished are not the same thing.
     identity?.loading === true ? 'STILL LOADING' : null,
+    // How old the *frame* this map was read from is.
+    //
+    // `sim_look` and `sim_state` have printed this since they existed, and this
+    // map never has — so the one tool an agent is told to start with was the one
+    // that could not say how old its evidence was. Reported from the field: a
+    // complete 20-element map of a screen the app was not on, and *"a wrong
+    // answer is worse than an error here, because nothing downstream knows to
+    // doubt it"*. `ensureDaemon` will hand back a frame up to 30s old, so this
+    // was reachable without anything being broken.
+    //
+    // `recalledNote` below is a different claim — that the *element map* came
+    // from memory — and having one was what made the absence of the other easy
+    // to miss.
+    frameAgeNote(identity),
     recalledNote(identity),
   ].filter(Boolean).join(' · ');
 

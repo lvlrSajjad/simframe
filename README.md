@@ -636,9 +636,11 @@ simframe strip --count=6       # contact sheet, for an animation
 simframe doctor --strict       # any degraded layer is a non-zero exit
 simframe escalations           # why simframe still needs a model, by reason
 simframe escalations --session # ...this agent only, not every agent on the device
+simframe supervisions          # local supervisor rulings, and what came of each
 simframe hpi                   # speed and accuracy against a human baseline
 simframe baseline record settings-larger-text --runs=5   # record the human
 simframe input reset           # rebuild the HID session, without restarting anything
+simframe revive                # power-cycle a wedged device: stop, shutdown, boot, start, reset input
 simframe start / status / stop [--force] / devices
 simframe ui --device=emulator-5554      # or export SIMFRAME_DEVICE once
 ```
@@ -647,6 +649,48 @@ simframe ui --device=emulator-5554      # or export SIMFRAME_DEVICE once
 first: the space form set the flag to `true` and then resolved a device named
 "true", which is a poor answer to a flag `doctor`'s own advice tells you to
 type.
+
+### When the simulator stops rendering
+
+A simulator driven hard for several minutes can stop rendering: capture fails,
+`simctl screenshot` fails too, and the daemon's own recoveries — re-resolving the
+display port, then rebinding the device — do not help. It reports the state
+rather than acting on it, because a capture loop that rebooted the device it was
+watching would be a tool reaching for the mains:
+
+```
+capture is wedged and both recoveries are spent (2 port re-resolves, 2 device
+rebinds, no frame since). This needs the device restarted —
+`simframe revive --device=<udid>`. Backing off until a frame arrives.
+```
+
+`simframe revive` is that restart, in the order that matters — stop the daemon,
+shut the device down, boot it and *wait for the boot to finish*, start capture,
+rebuild the HID session — and it ends by checking frames are flowing again
+rather than by reporting that the steps ran. It is a command and not a
+behaviour: the decision stays yours.
+
+### Reading what the local supervisor decided
+
+With `SIMFRAME_SUPERVISOR=apple`, every consultation is written to
+`~/.simframe/<udid>/supervisions.jsonl` with what the executor observed
+afterwards, which is what makes a ruling scoreable rather than merely recorded.
+`simframe supervisions` reads it:
+
+```
+14 supervisor rulings on iPhone 17 Pro
+
+  stop -> stopped                    7
+  wait -> recovered                  5
+  wait -> still_failed               2
+
+sourced: model 14
+median latency: 1440ms
+edges the graph had timed: 0/14 — 14 ruling(s) are on edges with no p95
+```
+
+That last line is the honest one: a step that failed is usually a step that has
+never succeeded on that edge, so the graph has no timing to compare against.
 
 ### Keeping a session cheap
 
