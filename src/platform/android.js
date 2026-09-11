@@ -996,6 +996,28 @@ function capabilities() {
   };
 }
 
+/**
+ * Not implemented here, and it says so in its own vocabulary.
+ *
+ * `revive` exists for a display that has stopped rendering — a CoreSimulator
+ * pathology. An emulator's failure modes are its own (the console port going
+ * away, adb losing the device) and the remedy is not the same sequence, so
+ * borrowing the other platform's answer would be the mistake `doctor` made when
+ * it reported "input driver: idb" for an emulator: a claim about a tool that has
+ * never spoken to an Android device.
+ *
+ * When an emulator wedge is characterised rather than guessed at, this becomes
+ * a real implementation. Until then the honest answer is that this backend does
+ * not have the layer.
+ */
+async function restartDevice(serial) {
+  throw new Error(
+    `simframe cannot yet restart an emulator (${serial}) — that remedy is written for a`
+    + ' simulator display that stopped rendering, and an emulator fails differently.'
+    + ' Restart it from Android Studio, or `adb -s <serial> emu kill` and relaunch.',
+  );
+}
+
 /** @type {import('./index.js').Platform} */
 export const platform = {
   id: 'android',
@@ -1011,6 +1033,7 @@ export const platform = {
   launchApp,
   terminateApp,
   openUrl,
+  restartDevice,
   setPermission,
   setPasteboard,
   getPasteboard,

@@ -192,6 +192,8 @@ case "run":
         var dirty = true
         var recovery = CaptureRecovery()
         var stalledSince: Double?
+        /// Said once per stall episode, not once per failed read.
+        var announcedExhausted = false
         var lastCapture = 0.0
         var frames = 0
         var lastReport = Date().timeIntervalSince1970
@@ -495,6 +497,7 @@ case "run":
                             // back on its own, which nobody would otherwise know.
                             try? store.writeCaptureHealth(nil)
                             stalledSince = nil
+                            announcedExhausted = false
                             FileHandle.standardError.write(
                                 "simframed: capture recovered on its own\n".data(using: .utf8)!)
                         }
@@ -510,7 +513,19 @@ case "run":
                         // by restarting the daemon. Reporting a failure loudly is
                         // right; never recovering from it is not, so re-resolve the
                         // port and re-arm the damage callback.
-                        if due {
+                        // Nothing left to try is a thing to say once, not a
+                        // rung to keep pulling. See `recoveryExhausted`.
+                        if due && recovery.recoveryExhausted {
+                            if !announcedExhausted {
+                                announcedExhausted = true
+                                FileHandle.standardError.write(
+                                    ("simframed: capture is wedged and both recoveries are spent"
+                                     + " (\(recovery.reattaches) port re-resolves, \(recovery.rebinds) device rebinds,"
+                                     + " no frame since). This needs the device restarted —"
+                                     + " `simframe revive --device=<udid>`. Backing off until a frame arrives.\n")
+                                        .data(using: .utf8)!)
+                            }
+                        } else if due {
                             let onDamage = { lock.lock(); dirty = true; lock.unlock() }
                             // Escalate rather than repeat. Two successful re-resolves
                             // with no frame between them means the port was never the
@@ -552,7 +567,10 @@ case "run":
                                 "reason": "\(error)",
                             ])
                         }
-                        Thread.sleep(forTimeInterval: 0.5)
+                        // Back off once there is nothing left to attempt. Half a
+                        // second forever on a dead display is pure heat, and the
+                        // log it produced buried everything else in the file.
+                        Thread.sleep(forTimeInterval: recovery.recoveryExhausted ? 5.0 : 0.5)
                     }
                 }
             }

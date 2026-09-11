@@ -75,6 +75,25 @@ public struct CaptureRecovery {
         reattaches >= Self.stalledAfterReattaches && rebinds < Self.maxRebinds
     }
 
+    /// Both rungs of the ladder have been tried and no frame has arrived since.
+    ///
+    /// What happens after the ladder runs out was left implicit, and the
+    /// implicit answer was "go back to the bottom rung forever". Measured from a
+    /// real wedge: **670 re-resolves against 42 rebinds** in one log. Once
+    /// `rebinds` hits `maxRebinds` — and it only resets on a real frame —
+    /// `needsRebind` is false for good, so every sixth failure re-resolved a
+    /// port that two rebinds had already proved was not the problem, at 600ms a
+    /// go, each time logging a message that calls the condition "usually
+    /// transient".
+    ///
+    /// That is why a wedged device reads as the tool hanging rather than the
+    /// tool reporting. The state is unchanged in spirit — the daemon still only
+    /// reports, and restarting the device stays the operator's call — but it can
+    /// stop pretending it has something left to try.
+    public var recoveryExhausted: Bool {
+        rebinds >= Self.maxRebinds && reattaches >= Self.stalledAfterReattaches
+    }
+
     public mutating func captureSucceeded() {
         consecutiveFailures = 0
         // A real frame is the only evidence that health is back. Resetting this

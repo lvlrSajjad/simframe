@@ -1154,6 +1154,11 @@ test('the platform surface is satisfiable by something that is not a simulator',
     launchApp: async () => {},
     terminateApp: async () => {},
     openUrl: async () => {},
+    // A backend without this remedy throws in its own terms, which is a real
+    // implementation of the member. What it must not do is borrow the other
+    // platform's answer — that is how `doctor` came to report "input driver:
+    // idb" for an emulator.
+    restartDevice: async () => { throw new Error('a fake device cannot be restarted'); },
     setPermission: async () => 'granted nothing',
     setPasteboard: async () => {},
     permissionServices: () => [],

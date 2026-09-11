@@ -189,6 +189,28 @@ async function openUrl(udid, url) {
   await run('xcrun', ['simctl', 'openurl', udid, url], { timeout: 20_000 });
 }
 
+/**
+ * Shut a device down and bring it back, waiting for the boot to finish.
+ *
+ * The remedy for a display that has stopped rendering, which the capture loop
+ * can detect and must not perform: it reports `stalled` and stops, because a
+ * capture loop that rebooted the device it was watching would be a tool
+ * reaching for the mains when a reading looks wrong. This is the operator's
+ * decision, reached by `simframe revive`.
+ *
+ * `bootstatus -b` and not `boot`, for the reason it is used in CI: `boot`
+ * returns before the device is usable, and everything downstream then races the
+ * boot. Timeboxed generously — a cold boot on a busy machine is slow, and a
+ * boot that never finishes should fail here with a reason rather than as a
+ * puzzle further down.
+ */
+async function restartDevice(udid) {
+  // Tolerated: a device that is already off cannot be shut down, and that is
+  // the state this command is most often reached from.
+  await run('xcrun', ['simctl', 'shutdown', udid], { timeout: 60_000 }).catch(() => null);
+  await run('xcrun', ['simctl', 'bootstatus', udid, '-b'], { timeout: 240_000 });
+}
+
 const PERMISSION_SERVICES = [
   'all', 'calendar', 'contacts-limited', 'contacts', 'location', 'location-always',
   'photos-add', 'photos', 'media-library', 'microphone', 'motion', 'reminders', 'siri',
@@ -347,6 +369,7 @@ export const platform = {
   launchApp,
   terminateApp,
   openUrl,
+  restartDevice,
   setPermission,
   setPasteboard,
   permissionServices: () => PERMISSION_SERVICES,

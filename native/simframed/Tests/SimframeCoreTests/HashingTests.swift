@@ -397,4 +397,45 @@ final class CaptureRecoveryTests: XCTestCase {
         XCTAssertEqual(recovery.consecutiveFailures, 2, "the run is not cleared by an attempt that did not work")
         XCTAssertTrue(recovery.captureFailed(), "so the next failure tries again immediately")
     }
+
+    /// What happens when the ladder runs out, which was previously implicit —
+    /// and the implicit answer was "start again at the bottom, forever".
+    func testAnExhaustedLadderStopsPretendingItHasSomethingLeft() {
+        let platform = StubPlatform()
+        var recovery = CaptureRecovery(threshold: 1)
+        XCTAssertFalse(recovery.recoveryExhausted, "nothing has been tried yet")
+
+        // Two re-resolves that each succeed and change nothing: this is the
+        // pathology, not a hypothetical. The port hands back a fresh descriptor
+        // and every read still fails.
+        for _ in 0..<CaptureRecovery.stalledAfterReattaches {
+            _ = recovery.captureFailed()
+            guard case .success = recovery.reattach(platform: platform, onDamage: {}) else {
+                return XCTFail("the stub re-resolves")
+            }
+        }
+        XCTAssertTrue(recovery.needsRebind, "so the escalation is due")
+        XCTAssertFalse(recovery.recoveryExhausted, "but the ladder has a second rung")
+
+        for _ in 0..<CaptureRecovery.maxRebinds {
+            _ = recovery.captureFailed()
+            guard case .success = recovery.rebind(platform: platform, udid: "UDID", onDamage: {}) else {
+                return XCTFail("the stub rebinds")
+            }
+        }
+        XCTAssertFalse(recovery.needsRebind, "the rebinds are spent")
+        XCTAssertTrue(recovery.recoveryExhausted, "and so is the ladder")
+
+        // Measured from a real wedge: 670 port re-resolves against 42 rebinds in
+        // one log, because this state fell back to the bottom rung every sixth
+        // failure at 600ms a go, each time logging "usually transient".
+        _ = recovery.captureFailed()
+        XCTAssertTrue(recovery.recoveryExhausted, "more failures do not restore an option")
+
+        // A real frame is the only thing that resets it, exactly as for the rest
+        // of this machine — a re-resolve must never look like recovery.
+        recovery.captureSucceeded()
+        XCTAssertFalse(recovery.recoveryExhausted, "a frame is the only evidence health is back")
+        XCTAssertFalse(recovery.isStalled)
+    }
 }

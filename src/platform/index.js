@@ -61,7 +61,7 @@ export const PLATFORM_SURFACE = Object.freeze([
   'id', 'deviceNoun',
   'listDevices', 'bootedDevices', 'resolveDevice', 'isBootedSync', 'ownsUdid',
   'geometry', 'inputDriver',
-  'screenshot', 'launchApp', 'terminateApp', 'openUrl',
+  'screenshot', 'launchApp', 'terminateApp', 'openUrl', 'restartDevice',
   'setPermission', 'setPasteboard', 'permissionServices', 'capabilities', 'toolchain',
   'bootedAt',
 ]);
@@ -259,6 +259,16 @@ export const inputDriverFor = (udid) => platformFor(udid).inputDriver(udid);
  * avoid that is to ask.
  */
 export const capabilitiesFor = (udid) => platformFor(udid).capabilities();
+
+/**
+ * Power-cycle a device, on the backend that owns it.
+ *
+ * Reached only from `simframe revive`, never from the capture loop: the loop
+ * detects a stalled display and reports it, and restarting is the operator's
+ * call. A backend that does not have this remedy throws in its own terms rather
+ * than borrowing the other's.
+ */
+export const restartDevice = (udid) => platformFor(udid).restartDevice(udid);
 
 /** What `simframe doctor` should check: each registered backend's own toolchain. */
 export function toolchainChecks() {

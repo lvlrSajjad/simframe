@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runDaemon, DEFAULTS } from './daemon.js';
-import { bootedDevices, capabilitiesFor, listDevices, PLATFORMS, resolveDevice, screenshot, toolchainChecks } from './platform/index.js';
+import { bootedDevices, capabilitiesFor, listDevices, PLATFORMS, resolveDevice, restartDevice, screenshot, toolchainChecks } from './platform/index.js';
 import * as actions from './actions.js';
 import * as analyze from './analyze.js';
 import * as api from './index.js';
@@ -48,6 +48,7 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe hpi     [device]          Human Parity Index, per flow and overall
   simframe escalations [device]      why simframe handed decisions back, by reason
   simframe supervisions [device]     local supervisor rulings, and what came of each
+  simframe revive [device]           power-cycle a wedged device: stop, shutdown, boot, start, reset input
                                      (--session=<id> narrows to one agent; the
                                      ids are listed in the output. SIMFRAME_SESSION
                                      names one, but only at process start — an
@@ -378,6 +379,51 @@ async function main() {
       }
       console.log(`rebuilt the HID session for ${dev.name}`
         + (before.stale ? `\n  it was stale: ${before.reason}` : '\n  it did not report stale; rebuilt anyway, as asked'));
+      return;
+    }
+
+    // The power cycle, when the narrow remedies are spent.
+    //
+    // Deliberately a command and not a behaviour. The capture loop tries two
+    // things — re-resolve the display port, then rebind the device — and then
+    // reports `stalled` and stops, because a capture loop that rebooted the
+    // device it was watching would be a tool reaching for the mains when a
+    // reading looks wrong. Restarting is the operator's call.
+    //
+    // But it was the operator's call *and* their four commands, remembered from
+    // a handoff note: stop the daemon, shut the device down, boot it and wait,
+    // start capture, rebuild the HID session. Done by hand three times in one
+    // afternoon, in that order, because any other order leaves a daemon holding
+    // a dead device. So the tool knows the order now; the decision is still
+    // yours.
+    case 'revive': {
+      const dev = await resolveDevice(device);
+      const say = (line) => { if (!flags.json) console.log(line); };
+      const steps = [];
+      const did = async (what, fn) => {
+        try { await fn(); steps.push({ step: what, ok: true }); say(`  ok   ${what}`); } catch (err) {
+          steps.push({ step: what, ok: false, error: err.message });
+          say(`  ..   ${what} — ${err.message.split('\n')[0]}`);
+        }
+      };
+      say(`reviving ${dev.name}`);
+      // Forced: the point of this command is that the device is wedged, so
+      // something is certainly still holding it.
+      await did('stopped the daemon', async () => { api.stopDaemon(dev.udid, { force: true }); });
+      // Through the boundary, which is the whole point of the boundary: the
+      // first version of this shelled out to `xcrun` from here and the test
+      // that forbids it failed immediately, correctly.
+      await did('restarted the device, and waited for the boot to finish',
+        () => restartDevice(dev.udid));
+      await did('started capture', () => api.ensureDaemon(dev.udid));
+      await did('rebuilt the HID session', () => input.resetSession(dev.udid));
+      const health = await api.getState(dev.udid).then((s) => s?.state ?? null).catch(() => null);
+      const alive = Boolean(health?.hash);
+      emit(flags, { ok: alive, device: dev.udid, steps }, alive
+        ? `\n${dev.name} is producing frames again`
+        : `\n${dev.name} is still not producing frames. This is past what simframe can do —`
+          + ' check Simulator.app is not showing an error, and see docs/DEFERRED.md item 95.');
+      if (!alive) process.exitCode = 1;
       return;
     }
 
