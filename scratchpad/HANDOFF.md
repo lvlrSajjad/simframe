@@ -1,59 +1,92 @@
-# Handoff — updated 2026-09-12, mid-session
+# Handoff — paused mid-session, 2026-09-12 evening
 
-`docs/DEFERRED.md` opens with a **START HERE, 2026-09-12** block. That is the
-live list. `docs/DECISIONS.md` is the register of judgements. This is the short
-version.
+`docs/DEFERRED.md` opens with a **START HERE** block; that plus items 111 and 112
+are the live list. Nothing is held locally — `origin/main` is current, 20 commits
+today. The bench device is shut down. Metro is left running on **8083** (the
+owner's call), and the testbed app is installed.
 
-## 0.11.0 shipped
+## Pick up here
 
-**Done, and confirmed rather than assumed.** `npm view simframe version` returns
-`0.11.0`; `dist-tags.latest` is `0.11.0`; the MCP Registry step ran. The
-`release` workflow passed every gate it owns — tests, `check:package`, a Swift
-build of *the tarball's own sources*, version consistency across
-`package.json`/`server.json`/tag, the publish, and the "actually resolvable on
-npm" poll that `v0.5.1` taught us to add.
+The agreed order, and we got one item into it:
 
-**Nothing is held locally.** `origin/main` is current — `92b73a8` as of this
-update.
+1. **95 — device stability. IN PROGRESS, and the interesting half is done.**
+   A real leak was found in our own code: `observeChanges` registered a
+   damage-rectangles callback with a fresh UUID on every call and never released
+   the previous one, while `resolveDisplay` re-walks the same `ioPorts` array and
+   frequently finds the *same* port. So every recovery attempt added a live
+   callback to one port — and this morning's log has **670 port re-resolves**,
+   each invoked per redraw. Our recovery was a cause as well as a response.
+   Fixed; registration is now unregister-then-register.
 
-**It has not had a peer round.** Every previous local-tier idea in this project
-passed a bench and died on a real app. The supervisor in 0.11.0 has been driven
-by its own author and nobody else.
+   **What is NOT done is proving it was the cause.** `scripts/soak-capture.mjs`
+   exists for exactly that: drive until the display dies and report how long it
+   took. Before the fix, roughly 10-20 minutes; the device wedged three times in
+   one afternoon. **Run it first thing** — that is the before/after, and it is
+   the difference between "found a leak" and "fixed the wedge".
 
-## Push 1 — DONE, 2026-09-12
+2. **112 — balance the ruling population.** Today's 14 labelled rulings are 12
+   `stop` to 2 `wait`, so a majority-class guess scores 86% and beats the model's
+   64%. No accuracy number from that set means anything. Add genuine `wait`
+   fixtures: `listArrivesInWaves` already exists in the testbed and no fixture
+   uses it; a slow detail screen and a modal mid-present are cheap.
+3. **100, the `abstain` token**, with **97** behind it. Today's measurement is
+   direct evidence: every supervisor error was `wait` where `stop` was right,
+   five times, never the reverse.
+4. Then **109a → 109**, a reshaped **101**, then 89+92 and 93+94.
 
-- **101a** rulings persist to `supervisions.jsonl`; `simframe supervisions`
-  reads them. Verified with a real ruling on the bench device, which
-  immediately contradicted a premise of 101: a naming failure is on an edge the
-  graph has never timed, so it has **no p95 by construction**
-  (`edge_samples: 0`). 101 can only speak to timing failures on edges that have
-  worked before, and the command prints `edges the graph had timed: n/total` so
-  that is now empirical.
-- **98** score floor 0.8 plus a region check. The number is structural, not
-  fitted: a fuzzy match caps at `similarity * 0.72`, so only a near-exact name
-  clears it (a "Remindars" typo measures 0.69). The reported case is a fixture
-  now — `• Reminders` in the status bar, asked for as `Reminders`, **exactly the
-  reported 0.64**, refused twice over. The region rule moved to
-  `regions.offerable` so `view.js` and the recovery read one predicate.
-- **88** MCP descriptions and CLI help lead with the label. The skill's prose
-  also contradicted its own table and its example flow tapped `"#3"`.
+## Owed to the owner
 
-**110's first half is also done** — see below. Push 2 (**99** prewarm and the
-token budget, **100** the abstain token) is next, then 109a.
+- **A peer round.** They will ask a human peer. An agent peer round on the
+  testbed was started and **stopped when we paused** — it reported nothing, so
+  re-run it; it takes minutes.
+- **Network visibility (80).** They said "ready when you are" and will sit in
+  for it. Needs ~20 minutes together: they trigger a real API call while we
+  listen. The testbed's live mode was built for this, so the setup is paid for.
+- **Ollama** — they are pulling `qwen3:8b` and `qwen3:14b`, several hours. Their
+  Homebrew ollama 0.5.7 *server* was answering on 11434 while the new 0.34.0
+  client talked to it, which is what the misleading 412 "needs a newer version"
+  was: `brew services stop ollama`, then run the app's server.
 
-**Push 2 — the supervisor's reliability.**
+## Confirmed today
 
-- **99** `prewarm()` instead of our throwaway `respond`; a `tokenCount` check
-  against `contextSize` before each call; per-`GenerationError` triage
-  (`exceededContextWindowSize` is recoverable by rebuilding, `guardrailViolation`
-  is not, so a blanket retry burns battery).
-- **100** the `abstain` token — the one addition that raises coverage without
-  widening what the component can do.
+- The owner's app is on RN's **New Architecture**, so the testbed matches it.
+- Phase 19 (the web) waits until mobile is reliable — their words, "fry the fish
+  we have".
+- The code-scanning graph idea is worth a **prototype** if the results impress;
+  measured ceiling as a navigation oracle is 9% of escalations, but the *names*
+  and *destructive-barrier* angles are stronger and the testbed makes them
+  prototypable.
 
-**Then 109a, which is the good idea.** Bottle rulings as fixtures and replay them
-against candidate models **offline**. The model question then needs dozens of
-*rulings*, not dozens of *runs*, and escapes the noise band entirely. Only after
-that, 109's four live arms.
+## What today established
+
+**Push 1 landed** (101a rulings persist · 98 relabel guards · 88 label-first
+docs), **99** minus the token budget — measured at 1,918 tokens of 4,096 worst
+case, so the check would guard a condition that cannot occur — and **110** in two
+halves.
+
+**The testbed earned its place on day one.** It validated 110's first half on a
+non-Apple app, then found that half was keyed on the wrong thing: the "is this a
+real inset" test compared against the screen's *median row gap*, so a
+system-drawn title was chrome or content depending on how many rows sat below it
+(24 rows → median 0 → fired; 4 rows above a tab bar → median 414 → did not).
+Both bounds absolute now, `TOKEN_RULES_VERSION` 8.
+
+**And naming both screens still did not separate them** — 0.50 similarity
+against a 0.36 threshold, because the name was one token of six. A chrome label
+is now decisive in the graph: two readings that both name themselves, and name
+themselves differently, are not the same screen. Silence is not disagreement.
+
+**CI's flakiness was mostly structural.** Every trigger shared one concurrency
+lane per ref, so the nightly cancelled push verifications outright. Fixed.
+`scripts/ci-integration-local.sh` runs the integration job here in two minutes
+instead of thirty and has already caught two device wedges in its first ten
+lines.
+
+**Three harness bugs, all the same family — assuming instead of proving.** A
+walk that does not throw is not a walk that arrived; three of four rulings in one
+run were taken on step 1 of a three-step form while claiming to be about step 3.
+`eval-fingerprint.mjs` already checks exactly this and the check had not been
+carried over. Fixtures now assert arrival.
 
 ## The model comparison — the owner's call, 2026-09-11
 
