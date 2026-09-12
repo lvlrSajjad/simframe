@@ -177,13 +177,30 @@ was otherwise impossible.
 
 **What is measured and what is not.** The ranker: 5 of 6 top-1 on hand-written
 cases, median 564 ms warm, and on a real exploration it went to the right region
-in two steps where reading order wandered into version strings. The supervisor:
-correct on four real batch-killers once the plan briefed it, 689–751 ms warm —
-**on a bench, not in the field.** `ax-first` made no measurable difference to how
-an agent drove a real app, with one small regression and one small win. Numbers
-and conditions are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md); the judgements,
-including a phase cancelled by its own measurement, are in
-[`docs/DECISIONS.md`](docs/DECISIONS.md).
+in two steps where reading order wandered into version strings. `ax-first` made
+no measurable difference to how an agent drove a real app, with one small
+regression and one small win.
+
+**The supervisor, on 22 labelled failures from a seeded React Native app** —
+and the number to judge it by is round trips, not accuracy:
+
+| | |
+|---|---|
+| handled locally, no round trip | **9 of 22** |
+| escalated to Claude | 13 of 22 |
+| a model round trip, measured in the field | 10–16 s |
+
+So roughly 90–145 s saved on that population. Accuracy was 77 / 82 / 86% across
+three runs of the *same* questions — it is **not deterministic**, and every
+earlier single-run figure in this project carried that spread without reporting
+it. All of its errors were `wait` where `stop` was right, which is the cheap
+direction: a wrong `wait` costs a settle and a re-run, and `stop` already means
+"hand back to Claude with the unattempted steps" rather than "give up".
+
+**Still a bench, not the field.** These are fixtures we designed, on a testbed we
+built, labelled by the person who then scored them. Numbers and conditions are in
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md); the judgements, including a phase
+cancelled by its own measurement, are in [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
 **And the measurements that changed our minds** are in
 [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md), with what we expected beforehand
@@ -211,6 +228,15 @@ only the percentages would have recommended the wrong model.
 The Ollama arm is an **experiment, not a recommendation**: off unless named,
 no weights shipped, no dependency added, and every arm reads the same briefing
 out of `native/supervise.swift` so no arm is answering a different question.
+
+**Two further results, both negative, both worth more than the table.** A
+*cascade* — free rule first, model where it is unsure, Claude after that — was
+worse at every abstention band we tried (95% for the rule alone; 91%, 86%, 82%
+as more was handed to the model). And giving the model a fourth word, `abstain`,
+cost the Apple arm about a third of its accuracy (77/82/86% → 45/50/55%) **while
+it never used the word once**. One added paragraph, nothing else changed. So the
+fourth word ships off, and "add an abstain token" became "find a judge that will
+use one".
 
 The supervisor's whole vocabulary is three words on purpose. It cannot invent a
 step, skip one, substitute a target or continue past an unexpected screen — not

@@ -312,6 +312,10 @@ three-word schema.</p>
     <tr><td>qwen3:14b (4-bit, 9.3&nbsp;GB)</td><td class="num">82&nbsp;%</td><td class="num">1,489&nbsp;ms</td></tr>
   </tbody>
 </table>
+<p>And the number a supervisor should actually be judged on is not accuracy at
+all. On the same 22 failures it <strong>handled 9 locally with no round trip</strong>
+and escalated 13 &mdash; at 10&ndash;16&nbsp;s a round trip, roughly
+90&ndash;145&nbsp;s saved.</p>
 <p class="note">The larger model scored <em>lower</em> than the smaller one. A free
 threshold beat all three on a population it was never fitted to. And the accuracy
 ranking inverts the safety ranking: every arm errs in one direction only, Apple&rsquo;s
@@ -324,6 +328,15 @@ threshold are in
 
 <h2>Honest limitations</h2>
 <ul>
+  <li>The supervisor is <strong>not deterministic</strong> &mdash; 77 / 82 / 86&nbsp;% across three
+      runs of the same 22 questions. Any single figure for it carries about &plusmn;2 rulings
+      of spread.</li>
+  <li>A <strong>cascade</strong> (free rule, then the small model, then Claude) was worse at
+      every band tried, and giving the model an <code>abstain</code> word cost it a third of
+      its accuracy while it never used the word once. Both are measured; neither is
+      shipped on.</li>
+  <li>Every supervisor number here is a <strong>bench</strong>: fixtures we designed, on a
+      testbed we built, labelled by the person who then scored them.</li>
   <li>Simulators only — <code>simctl</code> cannot capture a physical device.</li>
   <li>Capture tops out near 6&nbsp;fps, so fast animations are sampled, not recorded.</li>
   <li>A screen mid-load genuinely does not look like that screen loaded, so the first visit after a cold launch usually rebuilds its map.</li>

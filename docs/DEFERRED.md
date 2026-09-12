@@ -609,6 +609,38 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    (Chow 1970; El-Yaniv & Wiener 2010), and the risk-coverage threshold is
    calibrated on a small held-out set rather than learned.
 
+   **Tried, 2026-09-12, and the result is a warning rather than a win.** Added
+   as a second `@Generable` type in the same binary, so one build answers both
+   vocabularies and the comparison is exact; the four-word brief is the
+   three-word brief plus one paragraph, built from it by concatenation so the two
+   cannot drift. Same 22 situations, three runs each way.
+
+   | arm | three words | four words | abstentions |
+   | --- | --- | --- | --- |
+   | Apple ~3B | 77 / 82 / 86% | **45 / 50 / 55%** | **0 of 22** |
+   | `qwen3:8b` | 91% | 95% | 0 of 22 |
+
+   **It never used the word once and lost about a third of its accuracy for
+   having been told it could.** The collapse is far outside its own run-to-run
+   spread, and nothing changed but the paragraph — so the addition altered how it
+   answered the *original* question. Prompt sensitivity, not judgement, and
+   invisible without a before/after on identical inputs.
+
+   The reasoning above is untouched by this: abstention still maps onto the safe
+   default, still widens nothing, and nothing here tested a model that abstains
+   because neither of them did. What changed is the item. It is no longer "add
+   the token" — it is **"find a judge that will use one"**, and the apparatus to
+   ask that question again is in the tree and off by default.
+
+   **And the cascade this was meant to enable was measured too, separately, and
+   was worse at every band**: 95% for the rule alone, then 91 / 86 / 82 as more
+   was handed to the model. The obvious abstain signal — proximity to the
+   decision boundary — is also the wrong one here, because the rule's single
+   error sits 3,534 ms from its own threshold against a median row distance of
+   1,610 ms. A band wide enough to catch it escalates 20 of 22 rows first. The
+   error is not a close call; it is wrong for a semantic reason no confidence
+   band around a duration can see.
+
 101. **The graph should answer `wait` before the model is asked.** Deterministic
    waiting is a solved pattern outside us — Selenium's explicit and fluent waits,
    Playwright's actionability auto-waiting — and **our transition graph with p95
@@ -643,6 +675,18 @@ own ablation found k=3 beat both k=1 and k=5, with k=5 causing an agent to
    should build the flat version, measure it against a *messier* population than
    the five clean fixtures its threshold was found on, and treat the per-edge
    formulation as unsupported until an edge population exists.
+
+   **And the cheap-first cascade this item ends with was measured, later the same
+   day, on a fresh 22-situation population — it did not work.** 95% for the rule
+   alone; 91% at a ±250 ms abstention band, 86% at ±1,000, 82% at ±1,500. Every
+   fall-through was worse or equal, never better. FrugalGPT's shape needs a tier
+   that can decline and neither tier has one — the threshold is a comparison and
+   always answers, and the supervisor's three words contain no abstention (see
+   100, where adding one cost a third of the model's accuracy). Worse, the
+   obvious decline signal is the wrong one: the rule's single error sits
+   3,534 ms from its own threshold against a median row distance of 1,610 ms, so
+   a band wide enough to catch it escalates 20 of 22 rows first. The cascade's
+   *shape* is right and the hard part is not the shape.
 
    Three caveats travel with the result and must not be dropped: 16 held-out
    samples, where 100% and 94% differ by one ruling; fixtures designed by the
