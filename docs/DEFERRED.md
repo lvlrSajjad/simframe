@@ -1294,6 +1294,36 @@ round yet, and its P0 is the worst finding this project has had.
    fix that did not fire on its own bug report. Found by running it on a device,
    not by reading it.
 
+124. **The local helper's `open()` has no timeout, and the safety property says
+   it must.** `judge` is documented to return `null` on *every* failure mode —
+   "behave as if there is no supervisor" is the one thing in that file that must
+   not become conditional. `ask` honours that with a timer. `open()` does not:
+   it resolves when the child prints a ready line, errors, or exits, and a child
+   that starts and does neither leaves every caller awaiting it forever, with no
+   timer running because the timer is armed after the await.
+
+   Not observed in the wild — the hang that led here was item 125 below, a
+   different fault with the same shape on the outside. Filed because the
+   reasoning is sound and the fix is small: bound the open, and stop discarding
+   the child's stderr (`stdio: ['pipe', 'pipe', 'ignore']`) so a helper that
+   crashes on startup says why.
+
+125. **A script using the supervisor could not exit, and it cost a wrong
+   diagnosis.** `collect-rulings.mjs` printed its final line, then sat at 0% CPU
+   with the helper child idle at `readLine`. The helper is kept warm and
+   deliberately not unref'd — unreferencing its stdout once unreferenced the
+   pipe every request waits on, and the process then exited silently mid-await —
+   so the live child holds the event loop open until somebody calls
+   `supervisor.close()`. Nobody did.
+
+   **What makes this worth an item rather than a one-line fix** is the wrong
+   diagnosis it already caused. Three "orphaned" `collect-rulings` processes
+   were killed by PID the night before and written up as a task runner failing
+   to kill `nohup`'d children. They had each finished their work, printed their
+   results, and could not leave. The handoff carried that wrong lesson forward
+   for a day. Fixed by closing the helper; the general shape — *a process that
+   is idle is not a process that is stuck* — is the part to keep.
+
 121. **Reported coordinates exceed the stated screen width.** The header says
    `402x874pt` and the map lists `#23 element 411,634` and `#15 element 413,564`.
    The reporter could not tell whether the map was in points, pixels or
@@ -1305,6 +1335,27 @@ round yet, and its P0 is the worst finding this project has had.
    116 is `region` cropping a different frame from the one the map prints. The
    contract "coordinates are in the same frame as the header dimensions" has to
    hold, because callers build arithmetic on it.
+
+   **Investigated 2026-09-12, not fixed, and here is exactly how far it got** —
+   so the next attempt does not repeat it. `regions.offViewport` has checked
+   *both* axes since `095d9f3`, which shipped in 0.11.0, and this report is from
+   the 0.12.0 round. `view.rowsFor` calls it on every row before printing, with
+   the same `screen` object the header's dimensions come from — so the two
+   cannot disagree, and a row at x=411 on a 402pt screen should already be
+   dropped. Verified directly rather than by reading: fed an entry containing
+   elements at `411,634`, `200,900` and `200,634` with `screen: {width: 402,
+   height: 874}`, only the in-bounds one came back; with `screen` absent all
+   three came back *and the header then prints no dimensions at all*, so the
+   reported combination — dimensions in the header, an out-of-bounds row below
+   it — is not reachable through `screenMap`.
+
+   Which means the path is somewhere else and the mechanism is still unknown.
+   **Do not ship a fix on the current reasoning**, which is precisely the
+   three-wrong-diagnoses pattern this file already records once. The cheap next
+   step is a reproduction rather than more reading: the testbed needs a
+   horizontally scrolling row (a filter-chip strip is what produced the x=422
+   sighting in the earlier round), because a partially-visible next item is the
+   one shape that puts a real element centre past the right edge.
 
 122. **Custom controls are invisible, with no fallback to hit-testing.** A
    bottom-sheet drag handle (`Animated.View` with a `PanResponder`), icon-only

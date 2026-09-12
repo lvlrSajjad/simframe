@@ -151,7 +151,7 @@ export const readSupervisions = (udid, opts) => readJsonl(metricPaths(udid).supe
  */
 export function recordSupervision(udid, {
   session, index, step, edge, screen, decision, from, reason, ms,
-  stillMs, p95, samples, expect, failure, outcome,
+  stillMs, p95, samples, expect, failure, outcome, supervisor, situation,
 }) {
   // Swallowed rather than thrown, unlike `recordEscalation`'s guard, and the
   // difference is deliberate: this is called from inside a flow's failure
@@ -171,6 +171,19 @@ export function recordSupervision(udid, {
     screen_fingerprint: screen ?? null,
     decision,
     from: from ?? 'model',
+    // *Which* judge, not just that there was one.
+    //
+    // Every arm of the capacity comparison writes to this one log, and without
+    // this field a population collected under Apple and one collected under a
+    // 14B are one undifferentiated file — the comparison the owner asked for
+    // would be unreadable from its own data. `from` says rule-or-model; this
+    // says which model.
+    supervisor: supervisor ?? null,
+    // The question, not only the answer. Without it, asking a second judge
+    // about the same situations means driving the device a second time — which
+    // puts the device's own variance inside a comparison that is about the
+    // judges. Null for a rule-sourced ruling, which never composed one.
+    situation: situation ?? null,
     // Recorded, never presented as the ground for what happened: the supervisor
     // has returned a correct decision with a reason citing a rule that did not
     // apply. Keeping it is how that stays measurable instead of anecdotal.

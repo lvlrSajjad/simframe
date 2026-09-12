@@ -4450,3 +4450,61 @@ test('a goto that fails always names why, and the name is one everybody knows', 
     assert.match(m[0], /reason/, `an \`ok: false\` with no reason: ${m[0].trim()}`);
   }
 });
+
+test('both supervisor arms are briefed from one source, and constrained to the same three words', async () => {
+  const ollama = await import('../src/ollama.js');
+  const supervisor = await import('../src/supervisor.js');
+
+  // The fairness condition, as an assertion rather than an intention. Two
+  // hand-maintained copies of a prompt is two arms answering different
+  // questions, and nothing in the resulting numbers would say so — they would
+  // simply be wrong and look fine. So the challenger reads the shipped arm's
+  // own instructions out of its source.
+  const brief = ollama.readBrief();
+  const swift = fs.readFileSync(new URL('../native/supervise.swift', import.meta.url), 'utf8');
+
+  assert.ok(brief.length > 500, 'the brief is the real one, not a stub');
+  for (const word of ['wait', 'retry', 'stop']) {
+    assert.ok(brief.includes(`${word} `), `the brief defines "${word}"`);
+  }
+  // Every sentence of it came from the Swift file. Checked by sampling distinct
+  // phrases rather than by string equality, because the Swift literal carries
+  // line continuations the reader has to undo — and undoing them wrongly is
+  // exactly the silent unfairness this guards.
+  for (const phrase of ['You supervise a UI test', 'Never suggest a different step', 'the decision alone']) {
+    assert.ok(brief.includes(phrase), `"${phrase}" survived the read`);
+  }
+  assert.ok(!brief.includes('\\'), 'no Swift line continuations are left in the text');
+  assert.ok(!/ {3}/.test(brief), 'and no leftover source indentation');
+  // A briefing that is silently empty is worse than one that throws.
+  assert.throws(() => ollama.readBrief(new URL('../package.json', import.meta.url).pathname));
+
+  // The same closed vocabulary, enforced by schema rather than by hope.
+  assert.deepEqual(ollama.SCHEMA.properties.decision.enum, [...supervisor.DECISIONS]);
+  // And the Swift arm's enum is those three and no more.
+  const swiftEnum = swift.slice(swift.indexOf('enum Decision'), swift.indexOf('struct Judgement'));
+  assert.deepEqual([...swiftEnum.matchAll(/case (\w+)/g)].map((m) => m[1]), [...supervisor.DECISIONS]);
+
+  // Target parsing, because a typo here silently measures the default model
+  // while the report says otherwise.
+  assert.deepEqual(ollama.parseTarget('ollama'), { model: 'qwen3:8b', host: ollama.DEFAULT_HOST });
+  assert.equal(ollama.parseTarget('ollama:qwen3:14b').model, 'qwen3:14b');
+  assert.equal(ollama.parseTarget('ollama:qwen3:14b@http://x:1').host, 'http://x:1');
+
+  // The prompt mirrors the Swift assembly, including the order. The brief says
+  // the plan's guidance outranks everything below it, so a prompt that put it
+  // last would be testing a different instruction.
+  const p = ollama.promptFor({
+    step: 'tap "Go"', failure: 'not found', goal: 'lists arrive late',
+    expected: 'a row', stillMs: 900, note: 'still filling in', screen: ['A', 'B'],
+  });
+  const order = ['Step:', 'It failed with:', "The plan's guidance", 'Expected:', 'still for', 'Perception note:', 'On screen now:'];
+  let at = -1;
+  for (const label of order) {
+    const i = p.indexOf(label);
+    assert.ok(i > at, `"${label}" comes after the field before it`);
+    at = i;
+  }
+  // Absent fields leave no empty line behind.
+  assert.equal(ollama.promptFor({ step: 'a', failure: 'b' }).split('\n').length, 2);
+});

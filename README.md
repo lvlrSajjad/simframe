@@ -185,6 +185,12 @@ and conditions are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md); the judgements
 including a phase cancelled by its own measurement, are in
 [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
+**And the measurements that changed our minds** — including one where the
+supervisor scored 64% on a population where guessing scored 86%, and one where a
+one-line comparison on a number we already compute beat the model — are in
+[`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md), with what we expected beforehand
+written down beside each.
+
 The supervisor's whole vocabulary is three words on purpose. It cannot invent a
 step, skip one, substitute a target or continue past an unexpected screen — not
 because a threshold forbids it but because those are not answers it can give.
@@ -610,6 +616,19 @@ accepted as the name that loop used to have.
   radio button moves ~0.1 % of the screen — below the change threshold — which
   used to burn the full timeout. Now the step returns in ~3 s marked
   `[no visible change]`, so you know to check rather than wait.
+- **And a gesture aimed at a coordinate says what it landed on.** A tap or swipe
+  that changed nothing prints the element covering its start point, because a
+  gesture goes to whatever is on top there:
+
+  ```
+  swiped 83,141 -> 83,800 [no visible change]
+    [the swipe start point 83,141 is inside "Settings" (nav-bar)]
+  ```
+
+  Reported from the field as fifteen minutes lost to six identical swipes that
+  a support banner was swallowing — a banner that was *in the element list the
+  same call printed*. Nothing said "there is something at y≈753 and you started
+  at y=750".
 
 ## CLI
 

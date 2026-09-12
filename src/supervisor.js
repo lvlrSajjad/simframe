@@ -33,6 +33,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as store from './store.js';
+import * as ollama from './ollama.js';
 import { compiler, lineServer } from './localhelper.js';
 
 const SOURCE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'native', 'supervise.swift');
@@ -44,6 +45,32 @@ const helper = lineServer({
 });
 
 export const DECISIONS = new Set(['wait', 'retry', 'stop']);
+
+/**
+ * Which arm answers.
+ *
+ * Two, and the second one is an experiment rather than a recommendation. The
+ * owner asked for the capacity question to be settled with numbers instead of
+ * speculation, and a comparison needs something to compare against. `apple` is
+ * the shipped arm; `ollama:<model>` asks a local Ollama, off unless named.
+ *
+ * A backend is an object with `ask` and `status` and nothing else, which is the
+ * same shape the platform boundary uses one layer down — so `judge` below
+ * cannot tell which arm it asked, including in the failure shapes.
+ */
+function backendFor(want) {
+  if (want === 'apple') return { kind: 'apple', ask: helper.ask, status: appleStatus };
+  if (want === 'ollama' || want.startsWith('ollama:')) {
+    const target = ollama.parseTarget(want);
+    return {
+      kind: 'ollama',
+      target,
+      ask: (situation, timeoutMs) => ollama.ask(target, situation, timeoutMs),
+      status: () => ollamaStatus(target),
+    };
+  }
+  return null;
+}
 
 /**
  * The vocabulary gate, as a function so it can be *tested* rather than grepped.
@@ -88,9 +115,15 @@ export async function judge({
   goal, step, expected, failure, screen, stillMs, note, options, timeoutMs = 2500,
   detail,
 } = {}) {
-  if (!requested(options)) return null;
+  const want = requested(options);
+  if (!want) return null;
   if (!step || !failure) return null;
-  const answer = await helper.ask({
+  const backend = backendFor(want);
+  if (!backend) {
+    if (detail && typeof detail === 'object') detail.kind = `no such supervisor backend: "${want}"`;
+    return null;
+  }
+  const answer = await backend.ask({
     goal: goal ? String(goal).slice(0, 200) : null,
     step: String(step).slice(0, 200),
     expected: expected ? String(expected).slice(0, 300) : null,
@@ -124,7 +157,59 @@ export async function judge({
 export async function status(options) {
   const want = requested(options);
   if (!want) return { supervisor: 'none', detail: 'not requested (SIMFRAME_SUPERVISOR is unset)' };
-  if (want !== 'apple') return { supervisor: 'none', detail: `no such supervisor backend: "${want}"` };
+  const backend = backendFor(want);
+  if (!backend) return { supervisor: 'none', detail: `no such supervisor backend: "${want}"` };
+  return backend.status();
+}
+
+/**
+ * The experiment arm, reported exactly as honestly as the shipped one.
+ *
+ * Same probe, because "available" from a presence check is the failure this
+ * project has already paid for: the model had stopped answering inside the
+ * long-lived server while `doctor`, in its own process, said it was healthy —
+ * for twenty calls and six failures during which nothing was being judged.
+ *
+ * A wide probe budget on purpose. This arm loads several gigabytes on first
+ * ask, and a cold load timing out would report a working model as broken —
+ * which is a different lie from the one above and just as useless.
+ */
+async function ollamaStatus(target) {
+  const live = await ollama.status(target);
+  if (!live.ok) return { supervisor: 'none', detail: live.reason };
+  // Weights first, then the clock. Without this the probe measured a disk read
+  // and called a working model broken.
+  const warm = await ollama.preload(target);
+  if (!warm.ok) {
+    return {
+      supervisor: 'none',
+      detail: warm.kind === 'timeout'
+        ? `"${target.model}" is still loading after 120s — ask again once it is resident`
+        : `"${target.model}" would not load (${warm.kind}: ${warm.error})`,
+    };
+  }
+  const probe = await ollama.ask(target, {
+    step: 'tap "Probe"',
+    failure: '"Probe" is not on this screen. Visible: Probe',
+    screen: ['Probe'],
+    stillMs: 5000,
+  }, live.timeoutMs);
+  if (decisionOf(probe) == null) {
+    return {
+      supervisor: 'none',
+      detail: `Ollama has "${target.model}" and it did not answer a probe`
+        + `${probe?.kind ? ` (${probe.kind}${probe.error ? `: ${probe.error}` : ''})` : ''}`,
+    };
+  }
+  return {
+    supervisor: `ollama:${target.model}`,
+    detail: `${target.model} via Ollama at ${target.host}; answered a probe in ${probe.ms ?? '?'}ms;`
+      + ' schema-constrained to wait/retry/stop. An experiment arm, not a recommendation —'
+      + ' see docs/EXPERIMENTS.md for what it measured.',
+  };
+}
+
+async function appleStatus() {
   const live = await helper.status();
   if (!live.ok) return { supervisor: 'none', detail: live.reason };
   // Prove a round trip, not a presence.

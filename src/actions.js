@@ -260,6 +260,8 @@ export async function runScript(
         expect,
         failure,
         outcome,
+        supervisor: supervisor.requested(options),
+        situation: ruling?.context?.situation ?? null,
       });
     } catch {
       /* instrumentation must not be able to fail a flow it is only watching */
@@ -1252,17 +1254,25 @@ async function superviseFailure(deviceQuery, { goal, step, expected, err, option
     try {
       timing = udid && map.identity ? graph.timingFor(udid, map.identity, step) : null;
     } catch { /* an unknown edge is a fact about the graph, not a failure here */ }
-    const ruling = await supervisor.judge({
-      goal,
+    // The question, kept — not just the answer.
+    //
+    // Three items (101, 96, 106) want to ask "what would a different judge have
+    // said about these same situations", and until now the log held the verdict
+    // and threw away what was asked. So comparing two supervisors meant driving
+    // the device once per arm, which is thirty minutes an arm and introduces
+    // the device's own variance into a comparison that is supposed to be about
+    // the judges. With this, one device pass produces a population every arm
+    // can be asked, on identical inputs.
+    const situation = {
+      goal: goal ?? null,
       step: `${step.action} ${JSON.stringify(String(step.value ?? step.target ?? step.into ?? step.seek ?? '').slice(0, 60))}`,
-      expected,
+      expected: expected ?? null,
       failure: err.message,
       screen: (map.rows ?? []).filter((r) => r.label).map((r) => r.label),
       stillMs,
       note: stillFillingIn(map.identity?.entry),
-      options,
-      detail,
-    });
+    };
+    const ruling = await supervisor.judge({ ...situation, options, detail });
     if (!ruling) return null;
     return {
       ...ruling,
@@ -1274,6 +1284,7 @@ async function superviseFailure(deviceQuery, { goal, step, expected, err, option
         stillMs,
         p95: timing?.p95 ?? null,
         samples: timing?.samples ?? null,
+        situation,
       },
     };
   } catch {

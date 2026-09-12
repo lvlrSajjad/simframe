@@ -310,3 +310,17 @@ if (unattributed) console.log(`\n${unattributed} ruling(s) came from a step this
   }
 }
 console.log(`\nthe log now holds ${all.length} ruling(s) — simframe supervisions --device=${dev.udid}`);
+
+// Close the helper, or this script never exits.
+//
+// The supervisor keeps a warm child process and deliberately does not unref its
+// stdout — unreferencing it once unreferenced the pipe every request waits on,
+// and the process then exited silently mid-await. The consequence nobody had
+// noticed is at *this* end: the script finishes its work, prints this line, and
+// then sits at 0% CPU forever with the helper idle at `readLine`, because the
+// live child is holding the event loop open.
+//
+// That is the whole story of three "orphaned" collect-rulings processes killed
+// by PID the night before, which were attributed to a task runner not killing
+// its children. They had each finished their work and could not leave.
+supervisor.close();

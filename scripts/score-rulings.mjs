@@ -42,7 +42,25 @@ const all = metrics.readSupervisions(dev.udid).filter((r) => CORRECT[r.expect]);
 // test was 16/16. Mixing a known-bad population into the denominator is the
 // same error as before wearing a different hat.
 const lastN = Number(arg('last', 0));
-const rows = lastN > 0 ? all.slice(-lastN) : all;
+// Which judge. Every arm of the capacity comparison writes to one log, so
+// scoring without this would average a 3B, an 8B and a 14B into a single
+// meaningless number — and it would look like a result.
+const arm = arg('arm', null);
+const armOf = (r) => r.supervisor ?? 'unrecorded';
+const scoped = arm ? all.filter((r) => armOf(r) === arm) : all;
+const rows = lastN > 0 ? scoped.slice(-lastN) : scoped;
+
+// A population spanning several arms is not one population. Say so, and say
+// what to pass, rather than printing an average of things that were never
+// comparable.
+const arms = [...new Set(rows.map(armOf))];
+if (arms.length > 1) {
+  console.log(`this log holds rulings from ${arms.length} supervisor arms:`);
+  for (const a of arms) console.log(`  ${String(rows.filter((r) => armOf(r) === a).length).padStart(4)}  ${a}`);
+  console.log('\nScore one at a time — `--arm=<name>` — because averaging them is not a result.');
+  process.exit(2);
+}
+if (rows.length) console.log(`arm: ${arms[0]}\n`);
 if (rows.length < 8) {
   console.error(`only ${rows.length} labelled ruling(s) — run scripts/collect-rulings.mjs first`);
   process.exit(2);
