@@ -185,11 +185,32 @@ and conditions are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md); the judgements
 including a phase cancelled by its own measurement, are in
 [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
-**And the measurements that changed our minds** — including one where the
-supervisor scored 64% on a population where guessing scored 86%, and one where a
-one-line comparison on a number we already compute beat the model — are in
+**And the measurements that changed our minds** are in
 [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md), with what we expected beforehand
-written down beside each.
+written down beside each — including the capacity comparison the supervisor
+design was assumed to make unnecessary. Asked the same 22 situations, three
+times each:
+
+| arm | accuracy | median | deterministic |
+|---|---|---|---|
+| always the commonest answer | 55% | — | — |
+| **`stillMs > 3000ms`, no model at all** | **95%** | **0 ms** | yes |
+| Apple Foundation Models (~3B, on-device) | 77 / 82 / 86% | ~640 ms | **no** |
+| `qwen3:8b` via Ollama (4-bit, 5.2 GB) | **91%** | 919 ms | yes |
+| `qwen3:14b` via Ollama (4-bit, 9.3 GB) | 82% | 1,489 ms | yes |
+
+Three results, and the third is the one that matters. The larger model scored
+*lower* than the smaller one. A free threshold on a number the daemon already
+computes beat all three, on a population it was never fitted to. And **the
+accuracy ranking inverts the safety ranking**: every arm errs in one direction
+only, Apple's errors are all `wait` where `stop` was right and both Qwen arms'
+are all `stop` where `wait` was right — and a wrong `stop` abandons a plan that
+would have worked, while a wrong `wait` costs a settle. A comparison reporting
+only the percentages would have recommended the wrong model.
+
+The Ollama arm is an **experiment, not a recommendation**: off unless named,
+no weights shipped, no dependency added, and every arm reads the same briefing
+out of `native/supervise.swift` so no arm is answering a different question.
 
 The supervisor's whole vocabulary is three words on purpose. It cannot invent a
 step, skip one, substitute a target or continue past an unexpected screen — not

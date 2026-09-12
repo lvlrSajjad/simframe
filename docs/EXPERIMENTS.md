@@ -17,9 +17,8 @@ changed them — including the ones that made us undo work.*
 
 A benchmarks file is a list of facts and reads like one. It cannot tell you that
 a number was a surprise, and the surprises are the only part with teaching in
-them. Eight of the entries below reversed a decision we had already made and
-sometimes already shipped; three of those reversals came from a measurement that
-took under ten minutes and could have been taken weeks earlier.
+them. Most of the entries below reversed a decision we had already made and in
+several cases already shipped.
 
 The pattern in every one of them is the same, and it is not "we were careless".
 It is that **a plausible mechanism is not evidence, and the cost of finding out
@@ -227,7 +226,82 @@ Five fixtures on the in-tree React Native testbed, each with a known correct
 answer, seeded so the same failure happens on demand. `wait`/`retry` differ only
 in how long they settle, so both satisfy a situation whose answer is "wait".
 
-<!-- NUMBERS -->
+22 rulings from one device pass (6 seeds x 5 fixtures, 30 judged steps, 0
+skipped), balance 10 `wait` / 12 `stop`, so the majority-class baseline is 55%.
+Every arm answered the identical 22 situations, three times.
+
+| arm | accuracy | median | deterministic |
+| --- | --- | --- | --- |
+| always the commonest answer | 55% | — | — |
+| **`stillMs > 3000ms -> stop`** | **95%** | **0 ms** | yes |
+| Apple Foundation Models (~3B) | 77 / 82 / 86% | 634–641 ms | **no** |
+| `qwen3:8b` (4-bit, 5.2 GB) | **91%** | 919 ms | yes |
+| `qwen3:14b` (4-bit, 9.3 GB) | 82% | 1,489 ms | yes |
+
+### What we believed, and what the table says
+
+**We believed capacity would help a little, and that the interesting question
+was how much.** The 14B is 79% larger than the 8B, 62% slower, and scored
+*lower* — 82% against 91%, on identical inputs, both deterministic at
+temperature 0. Whatever this task is hard at, it is not hard in a way more
+parameters fix.
+
+**We believed a headline accuracy would rank the arms.** It ranks them
+backwards. Every arm errs in exactly one direction, and the directions differ:
+
+| arm | errors | direction |
+| --- | --- | --- |
+| Apple | 4 | all `wait`/`retry` where `stop` was right |
+| `qwen3:8b` | 2 | all `stop` where `wait` was right |
+| `qwen3:14b` | 4 | all `stop` where `wait` was right |
+
+A wrong `wait` costs a settle and one re-run. A wrong `stop` abandons a plan
+that would have worked. So the best-scoring arm fails in the expensive
+direction and the worst-scoring arm fails in the cheap one. No single accuracy
+figure shows that, and a comparison that had reported only the percentages
+would have recommended the wrong model.
+
+**We did not expect the shipped arm to be non-deterministic.** Asked the same 22
+questions three times, Apple gave 77%, 82% and 86% — a spread of two rulings.
+Both Ollama arms returned byte-identical answers every time. That is a fact
+about reproducibility, not about quality, and it means any single Apple number
+in this project carries ±2 rulings of noise that was never being reported.
+
+### And the free comparison beat all three again
+
+`stillMs > 3000ms` was fixed on the *previous* population, before this one
+existed, so 95% here is genuinely out of sample. Second independent
+confirmation that a one-line comparison on a number the daemon already computes
+outperforms every model arm at no latency.
+
+**The reason to still distrust it**, which matters more than the number:
+sweeping the threshold gives 91% at 2,000 ms, 95% at 2,500 and 3,000, 82% at
+3,500 and 77% at 4,000. The plateau is about 2,100–3,200 ms, and the `blocked`
+fixtures sit at 3,225 / 3,250 / 3,401 / 3,699 ms — just above it, which is why
+3,500 collapses. A rule whose correctness depends on a 1.1-second window that
+the fixture design happens to straddle may be separating **the fixtures**
+rather than the world.
+
+So the honest reading is not "the supervisor is unnecessary". It is:
+
+- for these five fixture shapes, a free threshold is at least as good as any of
+  three models, and the burden of proof has moved onto the models;
+- the next measurement that would change anything is a population **nobody
+  designed** — not a bigger model, which this table has now tested and which did
+  not help;
+- and the error-direction result stands independently of all of it, because it
+  does not depend on the balance, the threshold, or the fixture design.
+
+### What replay cannot say
+
+Whether acting on a ruling actually *recovered* the flow is a fact about the
+device at that moment and belongs to whichever arm was live. Only the Apple arm
+was. On the live pass it recovered or correctly stopped **13 of 22** — 59%,
+against the same 55% baseline — and the gap between its decisions and its outcomes is the same
+one the previous population showed: the `detail` fixture takes the right word
+almost every time and recovers about a third of the time, because `wait` settles
+for a fixed budget and that screen wants longer. A correct ruling is not
+sufficient.
 
 ---
 

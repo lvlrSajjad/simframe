@@ -3764,3 +3764,89 @@ sufficient: the supervisor's `wait` settles for a fixed 4 s and re-runs, and a
 screen that needs longer is judged correctly and fails anyway. Whether that is a
 fixture too slow to recover or a wait budget too short to be useful is not yet
 known, and it is the next thing to measure.
+
+## 2026-09-12 — the capacity comparison, asked properly
+
+M-series Mac, 32 GB, Xcode 26, iPhone 17 Pro simulator on iOS 26.5, Ollama
+0.34.0. **One** device pass — 6 seeds x 5 fixtures, 30 judged steps, 0 skipped,
+**22 rulings** — then every arm replayed against those same 22 situations.
+
+Replay rather than a pass per arm, for two reasons. Three passes is two and a
+half hours, and more importantly it puts the *device's* variance inside a
+comparison that is supposed to be about the judges: a list that happened to
+arrive faster on one pass is not a fact about a model. `recordSupervision` now
+keeps the `situation`, so one pass produces a population every arm can answer.
+
+Balance **10 `wait` / 12 `stop`**, so the majority-class baseline is **55%**.
+
+### The table
+
+| arm | accuracy | median latency | deterministic |
+| --- | --- | --- | --- |
+| always the commonest answer | 55% | — | — |
+| **`stillMs > 3000ms -> stop`** | **95%** | **0 ms** | yes |
+| Apple Foundation Models (~3B, on-device) | 77% / 82% / 86% | 634–641 ms | **no** |
+| `qwen3:8b` (4-bit, 5.2 GB) | **91%** | 919 ms | yes |
+| `qwen3:14b` (4-bit, 9.3 GB) | 82% | 1,489 ms | yes |
+
+Three runs of the identical 22 questions. The two Ollama arms returned the same
+answers every time at `temperature: 0`; the Apple arm did not, and its spread of
+77–86% is ±2 rulings out of 22.
+
+**Fairness, which is most of the work.** Every model arm gets the same brief —
+`src/ollama.js` reads it out of `native/supervise.swift` at run time rather than
+keeping a second copy — and is constrained to the same three-word enum by a
+schema Ollama enforces at sampling, as Apple's guided generation does. Qwen3's
+deliberation is off, because the Apple arm does not deliberate either. Latency
+is reported rather than capped: capping at the shipped 2.5 s budget would score
+a larger model on latency while calling it accuracy.
+
+### Capacity did not help
+
+`qwen3:14b` is 79% larger than `qwen3:8b`, 62% slower, and **scored lower** — 82%
+against 91%, on identical inputs, both deterministic. Whatever this task is hard
+at, it is not hard in a way more parameters fix. That is the question the owner
+asked to settle with numbers, and this is the answer for these two models on
+this population.
+
+### The accuracy ranking inverts the safety ranking
+
+| arm | errors | direction |
+| --- | --- | --- |
+| Apple | 4 | **all** `wait`/`retry` where `stop` was right |
+| `qwen3:8b` | 2 | **all** `stop` where `wait` was right |
+| `qwen3:14b` | 4 | **all** `stop` where `wait` was right |
+
+Each arm errs in one direction only, and they are not the same direction. A
+wrong `wait` costs a settle and one re-run; a wrong `stop` abandons a plan that
+would have worked. So the arm with the best score fails in the expensive
+direction and the arm with the worst score fails in the cheap one — which is
+most of the argument for item 100's `abstain` token, and it is not visible in
+any single accuracy figure.
+
+Apple's error direction was stable across all three runs even though its score
+was not.
+
+### The free comparison beat all three, on data it had never seen
+
+`stillMs > 3000ms` was fixed on **last night's** population, before this one
+existed. It scores 95% here — 1 error in 22 — against the best model's 91%, at
+no latency, on a number the daemon already computes. Second independent
+confirmation.
+
+**And here is the reason to still distrust it.** Its working margin is narrow.
+Sweeping the threshold over this population:
+
+| threshold | accuracy |
+| --- | --- |
+| 2,000 ms | 91% |
+| 2,500 ms | 95% |
+| **3,000 ms** | **95%** |
+| 3,500 ms | 82% |
+| 4,000 ms | 77% |
+
+The plateau is roughly 2,100–3,200 ms, and the `blocked` fixtures cluster at
+3,225 / 3,250 / 3,401 / 3,699 ms — just above the threshold, which is why 3,500
+collapses. A rule whose correctness depends on a 1.1-second window that the
+fixture design happens to straddle is separating **the fixtures**, not
+necessarily the world. The next measurement is a population nobody designed.

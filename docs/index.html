@@ -295,6 +295,33 @@ simframe state --since=$H   <span class="cmt"># what moved, as text</span></pre>
   </tbody>
 </table>
 
+<h2>Does a bigger local model judge better?</h2>
+<p>The supervisor answers three words &mdash; <code>wait</code>, <code>retry</code>,
+<code>stop</code> &mdash; when a step fails, before the failure reaches the model.
+We assumed capacity barely mattered for that and were asked to prove it. One
+simulator pass recorded 22 real failures; every arm then answered the identical
+22, three times, briefed from the same source text and constrained to the same
+three-word schema.</p>
+<table>
+  <thead><tr><th>arm</th><th class="num">accuracy</th><th class="num">median</th></tr></thead>
+  <tbody>
+    <tr><td>always the commonest answer</td><td class="num">55&nbsp;%</td><td class="num">&mdash;</td></tr>
+    <tr><td><strong>a threshold on a number we already compute</strong></td><td class="num"><strong>95&nbsp;%</strong></td><td class="num"><strong>0&nbsp;ms</strong></td></tr>
+    <tr><td>Apple Foundation Models (~3B, on-device)</td><td class="num">77 / 82 / 86&nbsp;%</td><td class="num">~640&nbsp;ms</td></tr>
+    <tr><td>qwen3:8b (4-bit, 5.2&nbsp;GB)</td><td class="num">91&nbsp;%</td><td class="num">919&nbsp;ms</td></tr>
+    <tr><td>qwen3:14b (4-bit, 9.3&nbsp;GB)</td><td class="num">82&nbsp;%</td><td class="num">1,489&nbsp;ms</td></tr>
+  </tbody>
+</table>
+<p class="note">The larger model scored <em>lower</em> than the smaller one. A free
+threshold beat all three on a population it was never fitted to. And the accuracy
+ranking inverts the safety ranking: every arm errs in one direction only, Apple&rsquo;s
+all <code>wait</code> where <code>stop</code> was right and both Qwen arms&rsquo; all
+<code>stop</code> where <code>wait</code> was right &mdash; and a wrong <code>stop</code>
+abandons a plan that would have worked. Reporting only the percentages would have
+recommended the wrong model. Full conditions and the reasons to distrust the
+threshold are in
+<a href="https://github.com/lvlrSajjad/simframe/blob/main/docs/EXPERIMENTS.md">What We Believed First</a>.</p>
+
 <h2>Honest limitations</h2>
 <ul>
   <li>Simulators only — <code>simctl</code> cannot capture a physical device.</li>
