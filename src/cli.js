@@ -841,11 +841,15 @@ async function main() {
         /* capture not running: fall through and report the send alone */
       }
       const t0 = Date.now();
+      // Item 120, the single-shot half: a coordinate that changed nothing owes
+      // an answer about what it landed on.
+      let aim = null;
       switch (command) {
         case 'tapAt': {
           if (positional.length < 2 || nums.slice(0, 2).some(Number.isNaN)) {
             throw new Error('usage: simframe tapAt <x> <y>');
           }
+          aim = { point: { x: nums[0], y: nums[1] }, what: 'the tap point' };
           await input.tapPoint(dev.udid, nums[0], nums[1], flags.durationMs ? { durationMs: num(flags.durationMs) } : {});
           break;
         }
@@ -853,6 +857,7 @@ async function main() {
           if (positional.length < 4 || nums.slice(0, 4).some(Number.isNaN)) {
             throw new Error('usage: simframe swipe <x1> <y1> <x2> <y2>');
           }
+          aim = { point: { x: nums[0], y: nums[1] }, what: 'the swipe start point' };
           await input.swipe(dev.udid, { x: nums[0], y: nums[1] }, { x: nums[2], y: nums[3] }, { durationMs: num(flags.durationMs, 300) });
           break;
         }
@@ -886,14 +891,22 @@ async function main() {
       // Deliberately not an accusation. Pressing home while already on the
       // springboard legitimately changes nothing, and a warning that cries wolf
       // is how a real one gets ignored.
+      // The map for the screen as it was before the send. Free when the screen
+      // has been perceived once — and silent when it has not, because "we did
+      // not look" must not be printed as "there is nothing there".
+      const hit = changed === false && aim
+        ? api.screenmap.describePoint(api.screenmap.recall(dev.udid, before), aim.point, { what: aim.what })
+        : null;
       const note = changed === false
-        ? ' — the screen did not change. That is expected if the press had nothing to do here;'
+        ? ' — the screen did not change'
+          + (hit ? `, and ${hit}` : '')
+          + '. That is expected if the press had nothing to do here;'
           + ' if you expected a change, input may not be reaching the device —'
           + ' `simframe stop --force && simframe start` rebuilds the session.'
         : '';
       emit(
         flags,
-        { ok: true, command, ms, driver: driver.name, screenChanged: changed },
+        { ok: true, command, ms, driver: driver.name, screenChanged: changed, hit: hit ?? undefined },
         `${command} in ${ms}ms via ${driver.name}${changed === true ? ' — screen changed' : ''}${note}`,
       );
       return;

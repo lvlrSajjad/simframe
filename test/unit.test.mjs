@@ -2699,7 +2699,11 @@ test('acting on a ruling re-runs the same step, never a different one', async ()
   // the *same* step to run again — the ruling is about whether the plan can
   // proceed, never about what to do instead. If this ever passed a modified
   // step, the three-word vocabulary would be decorative.
-  assert.match(hook, /runStep\(deviceQuery, udid, step, \{ screen, options, frames, focus \}\)/);
+  // Pinned to the third argument alone. The context object beside it grows —
+  // `aim` was added for item 120 and broke this test with nothing wrong, which
+  // is the same lesson the recording assertions below already carry. What is
+  // safety-critical is that the step is `step`, unmodified.
+  assert.match(hook, /runStep\(deviceQuery, udid, step, \{/);
   assert.ok(!/stepWithTarget/.test(hook), 'a ruling never re-aims a step');
   assert.ok(!/steps\[i \+ 1\]/.test(hook), 'and never skips ahead');
 
@@ -4321,4 +4325,74 @@ test('a name that names two devices is refused, not resolved to whichever came f
     try { pickDevice('iPad Air', parked); return null; } catch (e) { return e; }
   })();
   assert.ok(off && off.ambiguous, 'the booted pool is not the only one that can collide');
+});
+
+test('a coordinate that did nothing says what it landed on (item 120)', async () => {
+  const { hitTest, describePoint, aimedAt } = await import('../src/screenmap.js');
+
+  // The reported screen, with the sizes that made it fifteen minutes long: a
+  // support banner pinned across the bottom, the list it covers, and a row.
+  const entry = {
+    targets: [
+      { label: 'Home', region: 'content', frame: { x: 0, y: 100, width: 402, height: 700 } },
+      { label: 'Profile image for support', region: 'content', frame: { x: 178, y: 730, width: 46, height: 46 } },
+      { label: 'Bell, Kate', region: 'content', frame: { x: 0, y: 600, width: 402, height: 60 } },
+    ],
+  };
+
+  // The gesture the reporter sent six times.
+  const hits = hitTest(entry, { x: 201, y: 750 });
+  assert.equal(hits.length, 2, 'the banner and the list beneath it both cover that point');
+  assert.equal(hits[0].label, 'Profile image for support', 'smallest first — the innermost is the likely catcher');
+
+  const note = describePoint(entry, { x: 201, y: 750 }, { what: 'the swipe start point' });
+  assert.match(note, /201,750/);
+  assert.match(note, /Profile image for support/);
+  assert.match(note, /2 elements/, 'and that it was not alone, because that is the whole diagnosis');
+
+  // Starting higher worked immediately, and the note has to agree.
+  assert.equal(hitTest(entry, { x: 201, y: 620 })[0].label, 'Bell, Kate');
+
+  // Two silences that must not be confused. Nothing there is an answer; no map
+  // is not, and printing "nothing covers that point" for a screen we never
+  // perceived would be a confident wrong answer of exactly the kind the peer
+  // rounds keep finding.
+  assert.match(
+    describePoint(entry, { x: 5, y: 5 }, {}),
+    /not inside any element/,
+    'we looked and found nothing',
+  );
+  assert.equal(describePoint(null, { x: 5, y: 5 }), null, 'we did not look');
+  assert.equal(describePoint({ targets: [] }, { x: 5, y: 5 }), null, 'and an empty map is not a look either');
+
+  // A swipe is caught where the finger goes down, so that is the point aimed at.
+  assert.deepEqual(
+    aimedAt({ action: 'swipe', from: [201, 750], to: [201, 250] }),
+    { point: { x: 201, y: 750 }, what: 'the swipe start point' },
+  );
+  assert.deepEqual(
+    aimedAt({ action: 'tapAt', x: 10, y: 20 }),
+    { point: { x: 10, y: 20 }, what: 'the tap point' },
+  );
+  // Nothing to say about a step that never named a coordinate.
+  assert.equal(aimedAt({ action: 'tap', value: 'Save' }), null);
+  assert.equal(aimedAt({ action: 'swipe', from: [1] }), null, 'half a point is not a point');
+});
+
+test('the aim a step reports is the point the finger reached, not the one in the script', async () => {
+  // The trap this out-parameter exists to avoid. Two steps resolve their own
+  // coordinates *inside* the step — an image-space tapAt converts, and scroll
+  // invents them from the screen size — so reading x/y back off the script
+  // would diagnose a point nothing was ever aimed at.
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  for (const action of ['tapAt', 'swipe', 'scroll']) {
+    const body = src.slice(src.indexOf(`case '${action}': {`));
+    const send = body.search(/await input\.(tapPoint|swipe)\(/);
+    const record = body.indexOf('ctx.aim.at =');
+    assert.ok(record !== -1, `${action} records where it aimed`);
+    assert.ok(record < send, `${action} records it before it sends, from the resolved coordinates`);
+  }
+  // And the note is taken from the screen the finger landed on, not the one
+  // the gesture failed to change.
+  assert.match(src, /describePoint\(\s*\n?[\s\S]{0,400}?beforeScreen\?\.entry/, 'diagnosed against the before-screen');
 });

@@ -151,6 +151,82 @@ const inside = (point, frame) =>
   point.y >= frame.y &&
   point.y <= frame.y + frame.height;
 
+const frameArea = (f) => (f ? Math.max(1, f.width) * Math.max(1, f.height) : Infinity);
+
+/**
+ * What the map says is at a point — everything containing it, smallest first.
+ *
+ * Item 120. Six consecutive `swipe [201,750] -> [201,250]` reported
+ * `no visible change` while a support banner sat at y≈753 swallowing every
+ * gesture. The banner was *in the element list the same call printed*; nothing
+ * connected "your swipe started at y=750" to "there is an element at y=753".
+ * The geometry was already in hand, so this is arithmetic over data we hold,
+ * not a new perception pass.
+ *
+ * Smallest first is a deliberately weaker claim than z-order. We do not know
+ * what is on top — the accessibility tree's order is not a paint order and OCR
+ * has none at all — and the honest statement is "these are the elements that
+ * cover that point", innermost first because the innermost is the one a
+ * gesture most often goes to. Saying "overlay" would be a guess wearing the
+ * clothes of a measurement.
+ */
+export function hitTest(entry, point) {
+  if (!entry?.targets || !Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return [];
+  return entry.targets
+    .filter((t) => t.frame && inside(point, t.frame))
+    .sort((a, b) => frameArea(a.frame) - frameArea(b.frame));
+}
+
+const describeTarget = (t) => {
+  const name = t.label || t.text || (t.type ? `(unlabelled ${t.type})` : '(unlabelled)');
+  return t.region ? `"${name}" (${t.region})` : `"${name}"`;
+};
+
+/**
+ * One line saying what a coordinate resolved to, for a gesture that did
+ * nothing visible.
+ *
+ * Returns `null` when there is no map for the screen, because "we did not
+ * look" and "we looked and found nothing" are different answers and only one
+ * of them is worth printing.
+ */
+export function describePoint(entry, point, { what = 'the point' } = {}) {
+  if (!entry?.targets?.length) return null;
+  const at = `${Math.round(point.x)},${Math.round(point.y)}`;
+  const hits = hitTest(entry, point);
+  if (!hits.length) {
+    return `${what} ${at} is not inside any element on the map`
+      + ' — empty space, or a view with no label (nothing can be said about what caught it)';
+  }
+  // The contention clause only where there is contention. On one hit the
+  // element's name *is* the diagnosis and anything after it is noise — and a
+  // note that pads every case is how a real one stops being read.
+  const others = hits.length > 1
+    ? `, the smallest of ${hits.length} elements covering it — a gesture goes to whatever is on top there`
+    : '';
+  return `${what} ${at} is inside ${describeTarget(hits[0])}${others}`;
+}
+
+/**
+ * The point a step is aimed at, when it is aimed at a coordinate at all.
+ *
+ * A swipe is captured by whatever sits under where the finger goes *down*, so
+ * the start point is the one worth diagnosing; the end point never decides who
+ * receives the gesture.
+ */
+export function aimedAt(step) {
+  if (!step) return null;
+  if (step.action === 'tapAt' && Number.isFinite(step.x) && Number.isFinite(step.y)) {
+    return { point: { x: step.x, y: step.y }, what: 'the tap point' };
+  }
+  if (step.action === 'swipe') {
+    const x = step.from?.[0] ?? step.from?.x;
+    const y = step.from?.[1] ?? step.from?.y;
+    if (Number.isFinite(x) && Number.isFinite(y)) return { point: { x, y }, what: 'the swipe start point' };
+  }
+  return null;
+}
+
 /**
  * Build the map for the screen currently showing. Accessibility elements are the
  * real hit targets, so they win where they exist; OCR fills in everything the

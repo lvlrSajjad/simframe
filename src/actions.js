@@ -354,12 +354,19 @@ export async function runScript(
         }),
         observedMs: null,
       };
+      // Where the hands actually went, filled in by the step that moved them.
+      //
+      // Item 120 needs the *resolved* point, not the one in the script: an
+      // image-space `tapAt` is converted inside the step, and `scroll` invents
+      // its coordinates from the screen size. Reading them back off the step
+      // would diagnose a point nothing was ever aimed at.
+      const aim = { at: null };
       let detail;
       // A selector that did not resolve gets the step's own alternatives before
       // the batch is abandoned. Anything else propagates: retrying from a screen
       // we did not expect to be on is not a retry, it is a second guess.
       try {
-        detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus });
+        detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus, aim });
       } catch (thrown) {
         let err = thrown;
         // Ask the supervisor before anything is abandoned. It sits behind the
@@ -393,7 +400,7 @@ export async function runScript(
             options,
           }).catch(() => null);
           try {
-            detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus });
+            detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus, aim });
             detail += ` [the local supervisor said ${ruling.decision}; it worked on the second attempt]`;
             ruled('recovered');
             continue;
@@ -433,7 +440,7 @@ export async function runScript(
         let last = err;
         for (const label of allowed) {
           try {
-            detail = await runStep(deviceQuery, udid, stepWithTarget(step, label), { screen, options, frames, focus });
+            detail = await runStep(deviceQuery, udid, stepWithTarget(step, label), { screen, options, frames, focus, aim });
             detail += ` [after ${tried.map((t) => JSON.stringify(String(t))).join(', ')} did not resolve]`;
             last = null;
             break;
@@ -729,10 +736,40 @@ export async function runScript(
         ? ' [the screen did not change, so this app was already in front — or it did not come forward]'
         : '';
       const filling = stillFillingIn(afterReading?.entry);
+      // Item 120: when a gesture aimed at a coordinate does nothing, say what
+      // that coordinate resolved to. The element that swallowed it is normally
+      // already in the list printed under this very verdict — the gap was
+      // never the data, it was that nobody connected "started at y=750" to
+      // "there is a banner at y=753".
+      //
+      // Diagnosed against the screen as it was *before* the action, because
+      // that is the screen the finger landed on. Using the after-reading would
+      // describe the world the gesture failed to change.
+      // Both signals, because they are not the same one and only one of them
+      // fires in the reported case. `settled.noVisibleChange` is the pixel
+      // detector saying the frame never moved; the `no-visible-change` verdict
+      // is the fingerprint saying we are on the screen we started on. A swipe
+      // into a search bar settled in 62ms and produced the second without the
+      // first — and six swipes reporting "no visible change" is what item 120
+      // was reported against. Keying on one of them would have shipped a fix
+      // that did not fire on its own bug report.
+      const wentNowhere = Boolean(settled?.noVisibleChange) || verification?.verdict === 'no-visible-change';
+      const aimNote = wentNowhere && aim.at
+        ? screenmap.describePoint(
+          // `beforeScreen` is null with verification off, and that is exactly
+          // the mode someone falls back to when coordinates are misbehaving.
+          // A stored map keyed on the pre-action frame costs one file read.
+          beforeScreen?.entry ?? screenmap.recall(udid, before),
+          aim.at.point,
+          { what: aim.at.what },
+        )
+        : null;
       const note = launchNote
         + (filling ? ` [settled, but ${filling} — waitFor content, do not act on this yet]` : '')
         + (settled?.smallChange ? ' [a small change, in one region only]' : '')
         + (settled?.noVisibleChange ? ' [no visible change]' : '')
+        // After the symptom, because it is the explanation of it.
+        + (aimNote ? ` [${aimNote}]` : '')
         + (settled?.staleBaseline ? ' [baseline had already settled; re-taken from the live screen]' : '')
         + (settled?.blackFrames
           ? ` [${settled.blackFrames} black frame(s) waited through${settled.blackMs ? `, still black after ${settled.blackMs}ms` : ''}]`
@@ -2166,6 +2203,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
           pointHeight: geo.pointHeight,
         }));
       }
+      if (ctx.aim) ctx.aim.at = { point: { x, y }, what: 'the tap point' };
       await input.tapPoint(udid, x, y, { durationMs: step.durationMs });
       return `tapped ${x},${y}`;
     }
@@ -2253,6 +2291,9 @@ async function runStep(deviceQuery, udid, step, ctx) {
     case 'swipe': {
       const from = { x: step.from?.[0] ?? step.from?.x, y: step.from?.[1] ?? step.from?.y };
       const to = { x: step.to?.[0] ?? step.to?.x, y: step.to?.[1] ?? step.to?.y };
+      // The start point only. A swipe is captured by whatever the finger goes
+      // down on; where it lifts never decides who received it.
+      if (ctx.aim) ctx.aim.at = { point: from, what: 'the swipe start point' };
       await input.swipe(udid, from, to, { durationMs: step.durationMs });
       return `swiped ${from.x},${from.y} -> ${to.x},${to.y}`;
     }
@@ -2269,6 +2310,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
         right: [{ x: midX - span, y: midY }, { x: midX + span, y: midY }],
       };
       if (!moves[dir]) throw new Error(`unknown scroll direction "${dir}"`);
+      if (ctx.aim) ctx.aim.at = { point: moves[dir][0], what: 'the scroll start point' };
       await input.swipe(udid, moves[dir][0], moves[dir][1], { durationMs: step.durationMs ?? 250 });
       return `scrolled ${dir}`;
     }

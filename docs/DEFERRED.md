@@ -1254,6 +1254,46 @@ round yet, and its P0 is the worst finding this project has had.
    to**. "The tap resolved to element X" is far more actionable than "nothing
    happened". Cheap, and it turns a silent failure into a one-line diagnosis.
 
+   **Fixed (0.12.2).** `screenmap.hitTest`/`describePoint` — every element whose
+   frame contains the point, smallest first — printed after the no-change
+   verdict by `tapAt`, `swipe` and `scroll`, in the batch and in the one-shot
+   CLI. Live on the bench device:
+
+   ```
+   swipe 83,141 -> 83,800 [no visible change]
+     [the swipe start point 83,141 is inside "Settings" (nav-bar)]
+   scrolled up
+     [the scroll start point 201,175 is inside "Apple Account, Sign in to…" (content)]
+   ```
+
+   **Three things it deliberately does not say, and one it nearly missed.**
+
+   It does not say *overlay*. The a11y tree's order is not a paint order and OCR
+   has none at all, so "on top" is not a fact we hold; the note reports what
+   covers the point, innermost first, and adds *"a gesture goes to whatever is
+   on top there"* only when more than one element is in contention. Naming a
+   z-order we cannot see would be a guess wearing the clothes of a measurement.
+
+   It does not read the coordinates off the step. Two of the three steps resolve
+   their own — an image-space `tapAt` converts inside the step, and `scroll`
+   invents them from the screen size — so the point is reported by the step that
+   moved the hands, through an out-parameter. The scroll line above is the
+   proof: `201,175` appears nowhere in the script.
+
+   It distinguishes *"we looked and nothing covers that point"* from *"there is
+   no map for this screen"*, and prints nothing for the second. The first is an
+   answer worth having — empty space, or a view with no label, which is item
+   122 — and printing it when we never perceived the screen would be the
+   confident wrong answer this file exists to record.
+
+   **And it nearly shipped keyed on the wrong signal.** `settled.noVisibleChange`
+   (the pixel detector) and the `no-visible-change` *verdict* (the fingerprint)
+   are different questions, and a live swipe into a search bar produced the
+   second without the first. Six swipes reporting "no visible change" is what
+   this item was reported against, so keying on one of them would have shipped a
+   fix that did not fire on its own bug report. Found by running it on a device,
+   not by reading it.
+
 121. **Reported coordinates exceed the stated screen width.** The header says
    `402x874pt` and the map lists `#23 element 411,634` and `#15 element 413,564`.
    The reporter could not tell whether the map was in points, pixels or
