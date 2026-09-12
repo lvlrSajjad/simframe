@@ -300,11 +300,30 @@ const VERIFYING_STEPS = new Set([
  */
 export function reasonForStepError(step, err) {
   const tagged = escalationOf(err);
-  if (tagged) return tagged;
+  if (tagged) return { ...tagged, classified: true };
   const action = step?.action;
-  if (action === 'confirm' || action === 'chooseAny') return { reason: 'novel_dialog', candidates: [], tried: [] };
-  if (VERIFYING_STEPS.has(action)) return { reason: 'verification_failed', candidates: [], tried: [] };
-  return { reason: 'verification_failed', candidates: [], tried: [] };
+  if (action === 'confirm' || action === 'chooseAny') {
+    return { reason: 'novel_dialog', candidates: [], tried: [], classified: true };
+  }
+  // Everything else is a *fallback*, and it now says so.
+  //
+  // This had two branches that returned the same value, which made it look
+  // like it discriminated. It does not: any step that threw without a site
+  // tagging it lands here. In a real field session that was **90% of all
+  // escalations** — and `FACULTY` then reported every one of them as evidence
+  // against "sense of time (Phase 11)", a claim nothing in the record supports.
+  //
+  // The tester's own first call failed with `unknown step "wait_for"` — a typo
+  // — and that too would be filed as evidence about which faculty to build
+  // next. CLAUDE.md calls this log the steering wheel; a steering wheel that
+  // pools typos, inert controls and slow lists into one reason is pointing
+  // somewhere nobody chose.
+  //
+  // No sixth reason: "unknown is not a reason" stays, and a vocabulary that
+  // admits "other" collects a pile of "other". What changes is that the record
+  // carries whether the reason was *read off the failure* or *assumed*, and
+  // the report declines to recommend a faculty for the assumed ones.
+  return { reason: 'verification_failed', candidates: [], tried: [], classified: false };
 }
 
 /**
@@ -440,6 +459,10 @@ export function recordEscalation(udid, {
   modelTurns = 1,
   wallMs = null,
   detail = null,
+  // Was this reason read off the failure, or assumed because nothing said?
+  // Default `false`, so a caller that does not think about it cannot
+  // accidentally claim precision it does not have.
+  classified = false,
 } = {}) {
   if (!REASONS.includes(reason)) throw new Error(`not an escalation reason: ${reason}`);
   if (!OUTCOMES.includes(outcome)) throw new Error(`not an escalation outcome: ${outcome}`);
@@ -455,6 +478,7 @@ export function recordEscalation(udid, {
     // What was asked for, in the caller's words. Ground truth for Phase 17's
     // go/no-go, and on its own it answers "what kind of decision is costing us".
     intent: intent ? String(intent).slice(0, 120) : null,
+    classified: Boolean(classified),
     step_index: stepIndex,
     screen_fingerprint: fingerprint,
     reason,
@@ -635,7 +659,9 @@ export function hpi({ flows, baselines = {} }) {
  */
 export function breakdown(records, { session = null, flow = null } = {}) {
   const byReason = {};
-  for (const r of REASONS) byReason[r] = 0;
+  const classifiedByReason = {};
+  const assumedByReason = {};
+  for (const r of REASONS) { byReason[r] = 0; classifiedByReason[r] = 0; assumedByReason[r] = 0; }
   const byScreen = new Map();
   const byOutcome = {};
   const bySession = new Map();
@@ -659,6 +685,12 @@ export function breakdown(records, { session = null, flow = null } = {}) {
     }
     if (r.flow_name) byFlow.set(r.flow_name, (byFlow.get(r.flow_name) ?? 0) + 1);
     byReason[r.reason] += 1;
+    // Three states, not two. A record written before this field existed makes
+    // no claim either way, and folding it in with "assumed" would make an old
+    // log look like a diagnosis failure — a warning that cries wolf is how a
+    // real one gets ignored, which this file already knows in another place.
+    if (r.classified === true) classifiedByReason[r.reason] += 1;
+    else if (r.classified === false) assumedByReason[r.reason] += 1;
     byOutcome[r.outcome] = (byOutcome[r.outcome] ?? 0) + 1;
     // Already avoided locally, so not avoidable by anything unbuilt.
     if (r.outcome !== 'resolved_locally') avoidable += 1;
@@ -685,9 +717,20 @@ export function breakdown(records, { session = null, flow = null } = {}) {
     pooled: sessions.length > 1 || unattributed > 0,
     by_flow: Object.fromEntries([...byFlow.entries()].sort((a, b) => b[1] - a[1])),
     by_reason: byReason,
+    // How many of each reason were *read off the failure* rather than assumed.
+    //
+    // The breakdown above picks the next phase, so its precision has to be
+    // visible in it. A reason that is mostly assumed is not a finding about an
+    // app; it is a count of things nothing could classify, and reading it as a
+    // verdict on a faculty is how the instrument came to disagree with a
+    // tester who was right.
+    classified_by_reason: classifiedByReason,
+    assumed_by_reason: assumedByReason,
     by_outcome: byOutcome,
+    // Only where the reason was actually read. A faculty named against a pile
+    // of assumptions is advice with nothing behind it.
     faculty: Object.fromEntries(
-      REASONS.filter((r) => byReason[r]).map((r) => [r, `${FACULTY[r]}${BUILT_FACULTIES.has(FACULTY[r]) ? ' [built]' : ''}`]),
+      REASONS.filter((r) => classifiedByReason[r]).map((r) => [r, `${FACULTY[r]}${BUILT_FACULTIES.has(FACULTY[r]) ? ' [built]' : ''}`]),
     ),
     avoidable,
     avoidable_escalation_rate: total ? Number((avoidable / total).toFixed(3)) : null,

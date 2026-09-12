@@ -1150,10 +1150,29 @@ async function main() {
         ...metrics.REASONS
           .filter((r) => b.by_reason[r])
           .sort((a, c) => b.by_reason[c] - b.by_reason[a])
-          .map((r) => `  ${r.padEnd(20)} ${String(b.by_reason[r]).padStart(4)}   `
-            + (metrics.BUILT_FACULTIES.has(metrics.FACULTY[r])
+          .map((r) => {
+            const n = b.by_reason[r];
+            const read = b.classified_by_reason?.[r] ?? 0;
+            // A faculty is only named for the part of a reason that was read
+            // off the failure. The rest is a count of things nothing could
+            // classify, and naming a phase against it is advice with nothing
+            // behind it — which is how this report came to tell a tester that
+            // their unlabeled-control problem was a timing problem.
+            const assumed = b.assumed_by_reason?.[r] ?? 0;
+            const named = metrics.BUILT_FACULTIES.has(metrics.FACULTY[r])
               ? `not removed by: ${metrics.FACULTY[r]} [built]`
-              : `would be removed by: ${metrics.FACULTY[r]}`)),
+              : `would be removed by: ${metrics.FACULTY[r]}`;
+            let verdict;
+            if (read > 0) {
+              verdict = named + (read < n ? ` (on the ${read} of ${n} whose reason was read)` : '');
+            } else if (assumed > 0) {
+              verdict = 'reason assumed, not read — no faculty can be named from these';
+            } else {
+              // Neither read nor assumed: the log predates the distinction.
+              verdict = `${named} — but these records predate the check, so treat it as untested`;
+            }
+            return `  ${r.padEnd(20)} ${String(n).padStart(4)}   ${verdict}`;
+          }),
         b.total ? '' : null,
         b.total ? `avoidable ${b.avoidable}/${b.total} (${b.avoidable_escalation_rate})` : null,
         // Said out loud rather than left for someone to discover: the rate is

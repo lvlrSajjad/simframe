@@ -1644,14 +1644,16 @@ test('HPI is null without a human, and accuracy punishes a wrong action', async 
 
 test('the escalation breakdown says which faculty would remove each one', async () => {
   const metrics = await import('../src/metrics.js');
-  const at = (reason, outcome, fingerprint) => ({
-    reason, outcome, screen_fingerprint: fingerprint, model_turns_spent: outcome === 'resolved_locally' ? 0 : 1,
+  const at = (reason, outcome, fingerprint, classified = true) => ({
+    reason, outcome, screen_fingerprint: fingerprint, classified,
+    model_turns_spent: outcome === 'resolved_locally' ? 0 : 1,
   });
   const b = metrics.breakdown([
     at('novel_dialog', 'escalated_to_model', 'aaa'),
     at('novel_dialog', 'resolved_locally', 'aaa'),
     at('unknown_screen', 'failed', 'bbb'),
-    at('verification_failed', 'escalated_to_model', 'aaa'),
+    // Assumed rather than read — the shape that was 90% of a real field log.
+    at('verification_failed', 'escalated_to_model', 'aaa', false),
     { reason: 'not-a-reason', outcome: 'failed' },
   ]);
   assert.equal(b.total, 4, 'a record with a bogus reason is not counted');
@@ -1663,6 +1665,25 @@ test('the escalation breakdown says which faculty would remove each one', async 
   assert.equal(b.model_turns_spent, 3);
   assert.deepEqual(b.top_screens[0], { fingerprint: 'aaa', count: 3 });
   assert.match(b.faculty.novel_dialog, /reflexes/);
+
+  // A reason whose records were all *assumed* names no faculty.
+  //
+  // This breakdown picks the next phase to build — CLAUDE.md calls it the
+  // steering wheel — and `verification_failed` is a fallback that catches any
+  // step which threw without a site tagging it, plus every `no-visible-change`
+  // verdict. In a real field session it was 90% of the log, and the report
+  // named "sense of time (Phase 11)" against all of it. The tester, reading
+  // their own notes, concluded the real problem was icon semantics. They were
+  // right and the instrument contradicted them.
+  assert.equal(b.by_reason.verification_failed, 1, 'still counted');
+  assert.equal(b.classified_by_reason.verification_failed, 0, 'and known to be an assumption');
+  assert.equal(b.faculty.verification_failed, undefined, 'so no phase is recommended from it');
+  assert.equal(b.classified_by_reason.novel_dialog, 2);
+
+  // A record written before the field existed is not evidence of precision.
+  const legacy = metrics.breakdown([{ reason: 'unknown_screen', outcome: 'failed' }]);
+  assert.equal(legacy.classified_by_reason.unknown_screen, 0);
+
   assert.equal(metrics.breakdown([]).avoidable_escalation_rate, null);
 });
 

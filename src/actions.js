@@ -819,6 +819,22 @@ export async function runScript(
           fingerprint: beforeScreen?.hash ?? null,
           reason: 'verification_failed',
           candidates: [],
+          // Assumed, not read. A verdict says the step did not do what was
+          // expected; it does not say which faculty would have prevented that.
+          //
+          // Measured in the field and it matters: on an app whose controls are
+          // largely unlabeled, `no-visible-change` came overwhelmingly from
+          // tapping an inert text label whose real hit target was an invisible
+          // chevron — icon semantics, Phase 15 — while this line filed every
+          // one as evidence about sense of time, Phase 11. The tester reached
+          // the right conclusion from their own notes and our instrument
+          // disagreed with them. It was wrong.
+          //
+          // Not reclassified here, because `no-visible-change` also covers a
+          // switch moving 0.1% of the screen, which is neither faculty. Saying
+          // "assumed" is the honest answer; guessing a better-sounding reason
+          // would be the same mistake in the other direction.
+          classified: false,
           // `verification_failed` is the largest reason class in the log and it
           // was the only one carrying no intent, which made most of the corpus
           // useless for asking what kind of decision costs us. The step knows
@@ -854,6 +870,7 @@ export async function runScript(
         // Carried from the throw site where it exists, and otherwise the step's
         // own target — which is what was asked for either way.
         intent: why.intent ?? goalOf(step),
+        classified: why.classified,
         outcome: 'failed',
         wallMs: Date.now() - stepStart,
         detail: err.message,
