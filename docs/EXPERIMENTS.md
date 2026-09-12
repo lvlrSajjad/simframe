@@ -292,6 +292,48 @@ So the honest reading is not "the supervisor is unnecessary". It is:
 - and the error-direction result stands independently of all of it, because it
   does not depend on the balance, the threshold, or the fixture design.
 
+### The question this experiment was actually commissioned to answer
+
+The reason for a local model was never accuracy. It was **latency**: a model
+consulted between steps should not cost a network round trip. That framing
+deserves its own table, because the one above ranks the arms against each other
+and not against the thing they exist to replace.
+
+| | median | accuracy |
+| --- | --- | --- |
+| a model round trip in the field | **10,000–16,000 ms** | — |
+| `qwen3:14b`, local | 1,489 ms | 82% |
+| `qwen3:8b`, local | 919 ms | 91% |
+| Apple ~3B, on-device | 634 ms | 77–86% |
+| a threshold, no model | **0 ms** | **95%** |
+
+**The thesis holds: local is 7–25x faster than going out.** Three things follow
+that the thesis did not anticipate.
+
+**More parameters are a straight loss on the latency axis.** The 14B costs 2.3x
+the latency of the 3B and is no more accurate. A design motivated by latency
+should reach for the *smallest* model that clears the bar, which is the opposite
+of the instinct a disappointing accuracy number produces.
+
+**A local model contends with the app under test.** The medians above are from a
+quiet machine. Run while the simulator was being driven, the same calls measured
+**5,191 ms** for `qwen3:8b` and **7,250 ms** for `qwen3:14b` — against 842 ms for
+Apple, which runs on the Neural Engine rather than fighting the app for the GPU.
+That is one observation and not a controlled measurement, and it is flagged
+rather than tabulated for that reason. But if it holds, a local Qwen *under
+load* lands in the same order of magnitude as the network round trip it was
+chosen to avoid, and the latency argument for it disappears exactly when the
+machine is busy — which is always, because the machine is busy running the app
+you are testing. **This is the next thing to measure**, and it matters more than
+another point of accuracy.
+
+**And for this particular decision the latency argument is moot**, because a
+zero-cost threshold already answers it better than any model. That is not an
+argument against local models; it is an argument about *which decisions* deserve
+one. Where the thesis pays undiminished is a decision with no cheap rule
+available — the `seek` container ranker is 564 ms warm against the same
+10–16 s round trip, ~20x cheaper, and nothing free replaces it.
+
 ### What replay cannot say
 
 Whether acting on a ruling actually *recovered* the flow is a fact about the

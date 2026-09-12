@@ -247,8 +247,26 @@ export function actsInteractive(t) {
 export function rowsFor(entry, { screen, filter, interactive, all = false, limit = DEFAULT_LIMIT } = {}) {
   let kept = (entry?.targets ?? []).map((t) => ({ ...t })).filter((t) => {
     if (!isNum(t.x) || !isNum(t.y)) return false;
-    // Off-screen elements are real in the tree and untappable in fact.
-    if (regions.offViewport(t, screen)) return false;
+    // Off-screen elements are real in the tree and untappable in fact —
+    // *unless* enough of one is on screen to tap, which the centre test cannot
+    // see. A filter chip showing 29pt of itself at the right edge was dropped
+    // while OCR's reading of that same sliver, labelled "Flc", was kept and
+    // printed in its place. Item 121: say so or clamp. Both, here — the row is
+    // kept, its tap point is moved to the centre of the visible part, and it is
+    // marked so nobody reads a clamped coordinate as a whole element.
+    //
+    // Deliberately NOT also relaxing `locate`. A clipped element still answers
+    // "in the tree but not in view", so `scrollTo` keeps scrolling to it rather
+    // than declaring a sliver good enough — that conservatism was bought with a
+    // reported session lost to `"'Assigned to Me' is in view at 422,277
+    // already"`, and widening it here would buy the same bug back.
+    if (regions.offViewport(t, screen)) {
+      const clip = regions.clipping(t, screen);
+      if (!clip?.usable) return false;
+      t.clipped = true;
+      t.x = clip.point.x;
+      t.y = clip.point.y;
+    }
     if (!all && !regions.offerable(t.region)) return false;
     if (!all && isNoise(t)) return false;
     return true;
@@ -395,7 +413,9 @@ function renderRow(r) {
     shortType(r.type).padEnd(9),
     `${r.x},${r.y}`.padEnd(9),
     state ? `${state} ` : '',
-    name,
+    // After the name, and appended rather than added as a column: an extra
+    // element in this join puts an extra space on *every* row, clipped or not.
+    r.clipped ? `${name}  (partly off-screen — the coordinate is the middle of the visible part)` : name,
   ].join(' ');
 }
 

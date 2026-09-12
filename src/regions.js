@@ -470,6 +470,60 @@ export function offViewport(t, screen) {
   return false;
 }
 
+/**
+ * The smallest sliver of an element that is worth offering as a tap target.
+ *
+ * Apple's own minimum touch target is 44pt; this is deliberately smaller,
+ * because the question here is not "is this comfortable to tap" but "is this a
+ * real control a person can see and reach". A filter chip showing 29pt of
+ * itself at the edge of a horizontal strip is both. Below this, what is on
+ * screen is bleed rather than a control.
+ */
+export const MIN_VISIBLE_PT = 24;
+
+/**
+ * How much of an element is actually on screen, and where to tap what is.
+ *
+ * `offViewport` answers a yes/no question about the element's *centre*, which
+ * is right for "should I scroll to reach this" and wrong for "is this here at
+ * all". A chip at the end of a horizontal strip showed **29pt of itself** on a
+ * 402pt screen — real, visible, tappable — while its centre sat at x=416, so it
+ * was dropped from the map entirely. What the caller got in its place was OCR's
+ * reading of the visible sliver: a `text` element labelled **"Flc"** at x=392,
+ * which passes every filter because its own box is inside the viewport.
+ *
+ * So the map did not merely omit a control. It offered a different, meaningless
+ * name for it, at a coordinate that looks perfectly ordinary. That is the shape
+ * of item 121 — a caller who cannot trust what the map says about the edge of
+ * the screen — and the item's own words are "say so or clamp". This does both.
+ */
+export function clipping(t, screen) {
+  const f = t?.frame;
+  const w = screen?.width;
+  const h = screen?.height;
+  if (!f || !Number.isFinite(w) || !Number.isFinite(h)) return null;
+  const left = Math.max(0, f.x);
+  const right = Math.min(w, f.x + f.width);
+  const top = Math.max(0, f.y);
+  const bottom = Math.min(h, f.y + f.height);
+  const visibleWidth = right - left;
+  const visibleHeight = bottom - top;
+  if (visibleWidth <= 0 || visibleHeight <= 0) {
+    return { visibleWidth: 0, visibleHeight: 0, clipped: true, usable: false, point: null };
+  }
+  const clipped = f.x < 0 || f.y < 0 || f.x + f.width > w || f.y + f.height > h;
+  return {
+    visibleWidth,
+    visibleHeight,
+    clipped,
+    usable: visibleWidth >= MIN_VISIBLE_PT && visibleHeight >= MIN_VISIBLE_PT,
+    // The centre of what can be seen, not the centre of the element. Tapping
+    // the latter would aim off the screen, which is the clamp the item asked
+    // for and the reason a caller could not simply be handed the real centre.
+    point: { x: Math.round((left + right) / 2), y: Math.round((top + bottom) / 2) },
+  };
+}
+
 /** Annotate a target list with region and nav slot. Mutates and returns it. */
 export function annotate(targets, screen) {
   const band = bands(targets, screen);

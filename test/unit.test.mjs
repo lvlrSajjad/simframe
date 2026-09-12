@@ -4530,3 +4530,62 @@ test('a live daemon that has not rendered yet is not a failed daemon', async () 
   assert.match(thrower, /no daemon process came up/);
   assert.match(thrower, /the display produced no frame/);
 });
+
+test('121: an element half off the right edge is offered, clamped and labelled as such', async () => {
+  const regions = await import('../src/regions.js');
+  const view = await import('../src/view.js');
+  const screen = { width: 402, height: 874 };
+
+  // The measured geometry, taken off the testbed's filter strip rather than
+  // invented. Seven chips in a horizontal scroller on a 402pt screen.
+  const chip = (label, x, width) => ({
+    label, type: 'Button', source: 'ax',
+    x: Math.round(x + width / 2), y: 191,
+    frame: { x, y: 178, width, height: 25.33 },
+  });
+  const entry = {
+    targets: [
+      chip('Low light', 282.3, 82.7),      // fully visible
+      chip('Flowering', 372.7, 86.7),      // 29pt on screen, centre at 416
+      chip('Trailing', 467.3, 72.3),       // nothing on screen
+      // What the map offered in Flowering's place: OCR's reading of the visible
+      // sliver, whose own box is inside the viewport so every filter passed it.
+      { label: 'Flc', type: 'StaticText', source: 'ocr', x: 392, y: 191, frame: { x: 384, y: 184, width: 16, height: 14 } },
+    ],
+  };
+
+  const clip = regions.clipping(entry.targets[1], screen);
+  assert.ok(clip.clipped);
+  assert.ok(clip.usable, '29pt of a real control is reachable');
+  assert.equal(Math.round(clip.visibleWidth), 29);
+  // The clamp: the centre of what can be seen, never the centre of the element,
+  // which is off the screen at x=416.
+  assert.ok(clip.point.x < screen.width, 'the tap point is on the screen');
+  assert.equal(clip.point.x, 387);
+
+  // Nothing on screen is not "clipped but usable".
+  assert.equal(regions.clipping(entry.targets[2], screen).usable, false);
+
+  const { rows } = view.rowsFor(entry, { screen });
+  const byLabel = Object.fromEntries(rows.map((r) => [r.label, r]));
+  assert.ok(byLabel.Flowering, 'the real control is in the map under its real name');
+  assert.equal(byLabel.Flowering.x, 387, 'at the clamped point');
+  assert.equal(byLabel.Flowering.clipped, true);
+  assert.ok(!byLabel.Trailing, 'and one with nothing on screen still is not');
+
+  // The whole point. Before this, the map dropped `Flowering` and kept `Flc` —
+  // so it did not merely omit a control, it offered a different, meaningless
+  // name for it at a coordinate that looks perfectly ordinary. That is what
+  // made a reporter stop trusting our coordinates at the screen edge.
+  const printed = view.render({
+    device: { name: 'iPhone 17 Pro' }, identity: {}, rows, screen, truncated: 0, collapsed: new Map(),
+  });
+  assert.match(printed, /Flowering/);
+  assert.match(printed, /partly off-screen/);
+
+  // And the conservatism that was bought with a real bug is untouched: a
+  // clipped element's CENTRE is still outside, so `locate`/`scrollTo` keep
+  // treating it as "in the tree but not in view" and keep scrolling to it,
+  // rather than declaring a 29pt sliver good enough.
+  assert.equal(regions.offViewport(entry.targets[1], screen), true);
+});
