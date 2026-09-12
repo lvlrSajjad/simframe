@@ -650,6 +650,18 @@ accepted as the name that loop used to have.
   a support banner was swallowing — a banner that was *in the element list the
   same call printed*. Nothing said "there is something at y≈753 and you started
   at y=750".
+- **A control half off the edge is offered, clamped, and says so.** A filter
+  chip with 29 pt of itself visible used to be dropped — the off-screen test
+  reads the *centre* — and OCR's reading of that same sliver, a box labelled
+  `Flc`, was printed in its place. So the map did not merely omit a control; it
+  offered a meaningless name for it at an ordinary-looking coordinate. Now:
+
+  ```
+  #6 button 387,191  Flowering  (partly off-screen — the coordinate is the middle of the visible part)
+  ```
+
+  `scrollTo` is deliberately unchanged: a clipped element is still "not in
+  view", so it still scrolls rather than calling a sliver good enough.
 
 ## CLI
 
