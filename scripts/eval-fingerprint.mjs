@@ -129,7 +129,24 @@ for (let round = 1; round <= rounds; round += 1) {
     if (screen.steps?.length) {
       // Verification is off: this measures fingerprints, and a wrong-turn
       // verdict computed from the very tokens under test would be circular.
-      await actions.runScript(device, { steps: screen.steps, verify: false });
+      //
+      // The tour asserts arrival rather than sleeping through it, so a step
+      // here can now fail — `openUrl` returns NSPOSIXErrorDomain 60 on a loaded
+      // hosted runner, and a page that never renders no longer passes silently
+      // as a six-token reading. That is the trade this harness wants: a loud
+      // failure naming the screen, over a quiet one that shows up thirty lines
+      // later as a threshold with no clearance. Everything read so far is
+      // written out first, because a failing run is the one whose evidence
+      // matters.
+      try {
+        await actions.runScript(device, { steps: screen.steps, verify: false });
+      } catch (err) {
+        save({ abandonedAt: { screen: screen.name, round, error: err.message } });
+        console.error(`\nFAIL round ${round}, "${screen.name}" never arrived: ${err.message}`);
+        console.error('The tour waits for something each screen actually shows. This is that wait');
+        console.error('giving up — not a fingerprint result. Check the app, the network, or the runner.');
+        process.exit(1);
+      }
     }
     const id = await api.screenIdentity(device, { fresh: true, confirmNovel: false });
     // Did we actually arrive? Two differently-named screens reading the same
@@ -339,7 +356,16 @@ console.log(`${thresholdInGap ? 'ok  ' : 'WARN'} the threshold ${thresholdInGap 
 const worstSame = [...same].sort((a, b) => a.similarity - b.similarity)[0];
 const worstDifferent = [...different].sort((a, b) => b.similarity - a.similarity)[0];
 if (worstSame) {
-  console.log(`\nweakest same-screen pair:   ${worstSame.a.name} r${worstSame.a.round} vs r${worstSame.b.round} = ${f(worstSame.similarity)} (${worstSame.a.count} vs ${worstSame.b.count} tokens)`);
+  // Say whether either side was read off a screen that was still moving.
+  //
+  // The counts have always been printed and the settle flag never was, so a red
+  // run showing `11 vs 6 tokens` left it open whether the fingerprint had
+  // drifted or one reading had simply been taken too early. It is printed per
+  // reading above, thirty lines away and on a different row; here it is beside
+  // the number it explains.
+  const moving = [worstSame.a, worstSame.b].filter((r) => r.settled === false).length;
+  const movingNote = moving ? `, ${moving === 2 ? 'both readings' : 'one reading'} taken on a screen that never settled` : '';
+  console.log(`\nweakest same-screen pair:   ${worstSame.a.name} r${worstSame.a.round} vs r${worstSame.b.round} = ${f(worstSame.similarity)} (${worstSame.a.count} vs ${worstSame.b.count} tokens${movingNote})`);
 }
 if (worstDifferent) {
   console.log(`closest different-screen pair: ${worstDifferent.a.name} vs ${worstDifferent.b.name} = ${f(worstDifferent.similarity)}`);

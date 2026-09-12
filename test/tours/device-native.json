@@ -10,7 +10,7 @@
         }
       },
       {
-        "pause": 1400
+        "waitFor": "General"
       }
     ],
     "intents": [
@@ -27,7 +27,15 @@
         "openUrl": "https://example.com"
       },
       {
-        "pause": 3000
+        "waitFor": {
+          "value": "Example Domain",
+          "timeoutMs": 20000
+        }
+      },
+      {
+        "settle": {
+          "stableMs": 600
+        }
       }
     ],
     "intents": [
@@ -47,7 +55,12 @@
         }
       },
       {
-        "pause": 1600
+        "waitFor": {
+          "any": [
+            "Continue",
+            "Reminders"
+          ]
+        }
       }
     ],
     "intents": [
@@ -66,7 +79,7 @@
         }
       },
       {
-        "pause": 1600
+        "waitFor": "Contacts"
       }
     ],
     "intents": [
@@ -85,13 +98,13 @@
         }
       },
       {
-        "pause": 1400
+        "waitFor": "General"
       },
       {
         "tap": "General"
       },
       {
-        "pause": 1500
+        "waitFor": "About"
       }
     ],
     "intents": [
@@ -110,13 +123,13 @@
         }
       },
       {
-        "pause": 1400
+        "waitFor": "Accessibility"
       },
       {
         "tap": "Accessibility"
       },
       {
-        "pause": 1500
+        "waitFor": "VoiceOver"
       }
     ],
     "intents": [
