@@ -1,13 +1,17 @@
 # Handoff — 2026-09-12
 
-**0.12.2 is cut and waiting on CI.** The tag `v0.12.2` exists locally and is
-**deliberately unpushed** until the run on `25e6f8e` is green — the release
-workflow fires on `v*`, and the standing rule is not to publish on a red CI.
-Pushing the tag is the last step: `git push origin v0.12.2`.
+**0.12.2 is live on npm as `latest`**, tagged at `b4c9fb0`. Verified twice and
+independently of the release workflow's exit code: `npm view simframe version`
+-> `0.12.2`, and the published tarball pulled down and checked to contain
+`src/ollama.js`, the new `screenmap`/`navigate`, and `scripts/replay-rulings.mjs`.
+CI was green on that commit including `integration` before the tag was pushed.
+
+`origin/main` is current; nothing is held. The bench device is shut down and
+Metro is still on 8083 with the testbed installed.
 
 ## What went in
 
-**Three CI failures, all fixed and all different.**
+**Five CI failures, all fixed, and only two of them were the same bug family.**
 
 - The fingerprint eval was red on *the tour*, not the threshold. Six fixed
   sleeps, one of them waiting 3 s for a network page load; on a loaded runner
@@ -18,6 +22,23 @@ Pushing the tag is the last step: `git push origin v0.12.2`.
   an empty detail. Now `route-halted` and `arrived-elsewhere`.
 - The 9271 ms settle was already fixed the night before in `b504631`; that log
   predated it.
+- The reset step then failed at **25 s** with `screen unidentified · STILL
+  MOVING · no elements read`. Not widened a third time: it retries and dumps
+  `simframe state --json` and `simframe ui` on each failed attempt.
+- And the next run failed *earlier still* — `simframe start` gave up while the
+  daemon was **working**. Its own log, captured eight seconds later, read
+  `frame=#1 age=1514ms, 1.0 fps, median 75.08ms`. The display had taken ~27 s to
+  produce a first frame against a 20 s budget. Fixed at the root: a daemon we
+  can see running earns a bounded 60 s, and "no daemon came up" is now a
+  different sentence from "the daemon is running and the display produced
+  nothing". That also explains the previous failure, so 126 is probably one
+  phenomenon and not two.
+
+**The pattern worth carrying.** Three separate times on that one step a budget
+was widened on a plausible mechanism rather than a diagnosis, and two of those
+were mine. What broke the run of guesses was the on-failure daemon log — a
+diagnostic somebody had added earlier for exactly this. Add the diagnostic
+before the third guess, not after.
 
 **Item 120** — a coordinate gesture that changes nothing now says what it landed
 on. Verified live. It nearly shipped keyed on `settled.noVisibleChange` alone,
@@ -89,8 +110,8 @@ times each, same brief, same three-word schema.
 
 ## State of the machine
 
-- **Bench device `326464A4`**: booted with a daemon during this session. Shut it
-  down when done. Metro is on **8083** with the testbed installed.
+- **Bench device `326464A4`**: shut down. Metro is on **8083** with the testbed
+  installed and its app built.
 - **Ollama** has `qwen3:8b` and `qwen3:14b`. `SIMFRAME_SUPERVISOR=ollama:qwen3:8b`
   works and `doctor` reports it honestly, including "still loading" as distinct
   from "did not answer".
