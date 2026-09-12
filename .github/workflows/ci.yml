@@ -79,6 +79,13 @@ jobs:
           SIMFRAME_PRIVATE_STRINGS: ${{ secrets.SIMFRAME_PRIVATE_STRINGS }}
         run: node scripts/check-private.mjs
 
+      # The Markdown article is generated from the page, so the only way they can
+      # disagree is if somebody edited the page and did not regenerate. That
+      # used to be "edit both together", which held until it did not, and then
+      # the note saying so sat there being wrong for weeks.
+      - name: The article's Markdown is in step with its page
+        run: node scripts/article-md.mjs --check
+
       - name: The packaged tarball can actually build the daemon
         # No pipe to `tail` here. `swift build | tail -3` reports tail's exit
         # code, so the previous version of this step could not fail — the one

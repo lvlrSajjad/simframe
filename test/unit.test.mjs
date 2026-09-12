@@ -4636,3 +4636,25 @@ test('the fourth word is an answer, never a decision, and both briefs come from 
   const src = fs.readFileSync(new URL('../src/supervisor.js', import.meta.url), 'utf8');
   assert.match(src, /mayAbstain = false/, 'the default is off');
 });
+
+test('the article and its page are one document, not two', async () => {
+  // They were two, and kept in step by a note at the top of the Markdown saying
+  // to edit both together. It held until the page grew sections the Markdown
+  // never got — the supervisor, the capacity comparison — and then the note was
+  // simply wrong, which is worse than absent because the next person follows it.
+  //
+  // Now the page is the source and the Markdown is generated from it. Two
+  // copies of a document cannot drift when one is derived.
+  const { render } = await import('../scripts/article-md.mjs');
+  const html = fs.readFileSync(new URL('../docs/agents-shouldnt-blink.html', import.meta.url), 'utf8');
+  const md = fs.readFileSync(new URL('../docs/ARTICLE.md', import.meta.url), 'utf8');
+  assert.equal(render(html), md, 'run `node scripts/article-md.mjs` — the page changed and the Markdown did not');
+
+  // And the converter refuses what it does not understand rather than dropping
+  // it. A converter that silently skips an unfamiliar tag produces a document
+  // that looks complete and is not, which is this file's entire failure mode.
+  assert.throws(() => render('<h1>T</h1><p class="kicker">k</p><section><p>a <marquee>b</marquee></p></section>'),
+    /unhandled inline tag/);
+  assert.throws(() => render('<h1>T</h1><p class="kicker">k</p><section><p>&nosuchentity;</p></section>'),
+    /unknown entity/);
+});
