@@ -179,7 +179,17 @@ func serve() async {
     // The window, reported rather than assumed. 4,096 has been a documented
     // constant we repeated; since 26.4 it is queryable, so it is now read from
     // the model and handed to the caller, who prints it in `doctor`.
-    emit(["ready": true, "contextSize": SystemLanguageModel.default.contextSize])
+    // Guarded at 26.4, which is where `contextSize` became queryable — the
+    // enclosing block only promises 26.0, so an SDK between the two would fail
+    // to *compile* and the supervisor would simply not exist on that machine,
+    // reported as "could not build the local supervisor". A peer round is
+    // exactly where that costs somebody an afternoon, and the window is a
+    // nicety: it is printed in `doctor` and nothing depends on it.
+    var hello: [String: Any] = ["ready": true]
+    if #available(macOS 26.4, *) {
+        hello["contextSize"] = SystemLanguageModel.default.contextSize
+    }
+    emit(hello)
     while let line = readLine(strippingNewline: true) {
         if line.isEmpty { continue }
         guard let data = line.data(using: .utf8),
