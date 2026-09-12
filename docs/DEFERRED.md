@@ -1294,6 +1294,31 @@ round yet, and its P0 is the worst finding this project has had.
    fix that did not fire on its own bug report. Found by running it on a device,
    not by reading it.
 
+126. **A screen that moves for a minute and reads as nothing is not a slow
+   screen, and we cannot yet say what it is.** CI's reset step — press home,
+   settle — failed on a hosted runner after **61 s**, with the map printing
+   `screen unidentified · STILL MOVING · no elements read on this screen`. The
+   settle budget had already gone 8 s -> 25 s across two earlier commits, and
+   25 s failed too.
+
+   **What is ruled out.** Not the capture wedge as we detect it: `liveness`
+   reports fine, so `waitFor` returned "did not settle" rather than `stalled`,
+   and the black-frame counter did not fire — the note would have said so. Not
+   a springboard with live widgets either, because those *read*: an earlier
+   failure on this same step printed sixteen elements (FRIDAY, Calendar, Maps,
+   Photos…). This one printed none.
+
+   So the display was producing *changing* frames that both sensors read as
+   empty, for a minute, on a device that had passed `bootstatus`. That is a
+   state nothing in the liveness check has a name for, and it is the kind of
+   gap that makes a wrong answer confident.
+
+   **Not fixed, and deliberately not widened a third time.** The step now
+   retries and dumps `simframe state --json` and `simframe ui` on each failed
+   attempt, so the next occurrence is read instead of inferred. Widening a
+   budget for a screen that may never settle is answering a different question,
+   and it would be the third guess in a row on this one step.
+
 124. **The local helper's `open()` has no timeout, and the safety property says
    it must.** `judge` is documented to return `null` on *every* failure mode —
    "behave as if there is no supervisor" is the one thing in that file that must

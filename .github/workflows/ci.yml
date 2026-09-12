@@ -305,7 +305,36 @@ jobs:
           # springboard animation, which is exactly the kind of thing a loaded
           # build farm makes slow.
           printf '[{"button":"home"},{"settle":{"timeoutMs":25000}}]\n' > /tmp/reset.json
-          simframe do /tmp/reset.json --device="$DEVICE"
+          # Retried, and NOT widened again.
+          #
+          # 8 s failed, so it went to 25 s, and then 25 s failed too — with the
+          # map printing `screen unidentified · STILL MOVING · no elements read
+          # on this screen` after 61 s. A screen that is moving, unreadable and
+          # unidentified for a minute is not a screen that needs thirty more
+          # seconds, and widening a budget twice for a screen that may never
+          # settle is answering the wrong question. Going up again would be the
+          # third guess in a row.
+          #
+          # So: retry, and say what was actually on screen when it failed. The
+          # reset is a *precondition* — the assertion this step exists for is
+          # the frame hash changing after `openUrl`, below — and a precondition
+          # that fails on a cold, loaded runner deserves the same patience the
+          # `openurl` timeout already gets, plus a diagnosis so the next
+          # occurrence is read rather than inferred.
+          for reset in 1 2 3; do
+            if simframe do /tmp/reset.json --device="$DEVICE"; then
+              break
+            fi
+            echo "     (the reset did not settle on attempt $reset — what the device was showing:)"
+            simframe state --device="$DEVICE" --json || true
+            simframe ui --device="$DEVICE" || true
+            if [ "$reset" = 3 ]; then
+              echo "FAIL the device never reached a settled home screen in 3 attempts." >&2
+              echo "     That is not a slow runner; read the state above." >&2
+              exit 1
+            fi
+            sleep 5
+          done
           BEFORE=$(read_state)
           # A settle budget, stated rather than defaulted. The default is a cold
           # p95 plus margin measured on a developer's machine; this runner has
