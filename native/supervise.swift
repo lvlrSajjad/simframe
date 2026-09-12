@@ -40,7 +40,40 @@ struct Judgement {
     var decision: Decision
 }
 
+/**
+ * The same question with a fourth answer: "I cannot tell".
+ *
+ * A second type rather than a fourth case on `Decision`, because the two have
+ * to be *comparable*. `@Generable` fixes the answer space at compile time, so a
+ * binary that can only be asked one way cannot measure whether the token helps
+ * or merely moves the errors around — and "does the model abstain on the ones
+ * it gets wrong, or at random" is the whole question. One binary, both
+ * vocabularies, chosen per request.
+ *
+ * `abstain` is not a new capability and cannot become one. It means "behave as
+ * if there is no supervisor", which is exactly the `null` the caller already
+ * handles on every failure path. The answer space stays the safety property:
+ * this strictly shrinks what the model can cause to happen.
+ */
+@available(macOS 26.0, *)
+@Generable
+enum CautiousDecision: String {
+    case wait
+    case retry
+    case stop
+    case abstain
+}
+
+@available(macOS 26.0, *)
+@Generable
+struct CautiousJudgement {
+    @Guide(description: "wait if the screen is still arriving, retry if the same step should be attempted again, stop if nothing further can work, abstain if you cannot tell from what you were given")
+    var decision: CautiousDecision
+}
+
 struct Situation: Decodable {
+    /// Ask with the fourth word available. Absent means the shipped three.
+    let mayAbstain: Bool?
     let goal: String?
     let step: String
     let expected: String?
@@ -121,6 +154,19 @@ func serve() async {
     are not being asked what to do, only whether this can proceed. Answer with \
     the decision alone.
     """
+
+    // The same brief with the fourth word, built from the first so the two
+    // cannot drift. Everything above applies; this adds one rule and changes
+    // nothing else, which is what makes the comparison mean something.
+    let abstainInstructions = instructions + "\n\n" + """
+    There is a fourth answer: abstain. Use it when the evidence you were \
+    given does not distinguish these cases — when you would be guessing. \
+    Abstaining is not a failure and it is not penalised: it hands the decision \
+    to someone with more context, which costs one step. A wrong stop abandons a \
+    plan that would have worked, and a wrong wait spends a timeout on a screen \
+    that will never change. Prefer abstain to either. Do not abstain merely \
+    because the situation is unusual; abstain because the evidence is absent.
+    """
     // Warm up front so the first real judgement does not pay model load —
     // measured at ~880ms against ~600ms warm.
     //
@@ -157,8 +203,11 @@ func serve() async {
         }
         let started = Date()
         do {
-            let session = LanguageModelSession(instructions: instructions)
-            let out = try await session.respond(to: prompt, generating: Judgement.self)
+            let mayAbstain = s.mayAbstain ?? false
+            let session = LanguageModelSession(instructions: mayAbstain ? abstainInstructions : instructions)
+            let decision: String = mayAbstain
+                ? try await session.respond(to: prompt, generating: CautiousJudgement.self).content.decision.rawValue
+                : try await session.respond(to: prompt, generating: Judgement.self).content.decision.rawValue
             // No reason field, deliberately. Asked for one it confabulated in
             // every observed run: a correct `stop` justified as "screen is
             // elsewhere" when the screen was exactly where the plan expected,
@@ -170,7 +219,7 @@ func serve() async {
             // one."* What the caller gets instead is which rule or which model
             // answered, which is true by construction.
             emit([
-                "decision": out.content.decision.rawValue,
+                "decision": decision,
                 "ms": Int(Date().timeIntervalSince(started) * 1000),
             ])
         } catch let err as LanguageModelSession.GenerationError {

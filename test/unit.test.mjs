@@ -2752,9 +2752,16 @@ test('round 7: the supervisor stops going silent, and code answers what code kno
   // transcript accumulated. A session per judgement fixed it: 15 of 15 answered
   // at 488-533ms with no growth, where it used to die at 7.
   const swift = readFileSync(new URL('../native/supervise.swift', import.meta.url), 'utf8');
-  assert.match(swift, /let session = LanguageModelSession\(instructions: instructions\)/);
-  assert.ok(!/let session = LanguageModelSession[\s\S]{0,200}while let line/.test(swift),
-    'the session is created per request, not once before the loop');
+  // Pinned as a *position*, not as a literal. The claim is that the session is
+  // built inside the read loop, once per judgement; the expression that builds
+  // it grew an argument when the fourth-word vocabulary was added, and this
+  // test failed with nothing wrong — which is the third time a source-shape
+  // assertion in this file has cried wolf.
+  assert.match(swift, /let session = LanguageModelSession\(instructions:/);
+  assert.ok(
+    swift.indexOf('let session = LanguageModelSession(instructions:') > swift.indexOf('while let line'),
+    'the session is created inside the request loop, not once before it',
+  );
   // A request can also exceed the window on its own, so the cap lives where the
   // limit is as well as in the caller.
   assert.match(swift, /let clip = /);
@@ -4588,4 +4595,44 @@ test('121: an element half off the right edge is offered, clamped and labelled a
   // treating it as "in the tree but not in view" and keep scrolling to it,
   // rather than declaring a 29pt sliver good enough.
   assert.equal(regions.offViewport(entry.targets[1], screen), true);
+});
+
+test('the fourth word is an answer, never a decision, and both briefs come from one source', async () => {
+  const supervisor = await import('../src/supervisor.js');
+  const ollama = await import('../src/ollama.js');
+
+  // `abstain` must never reach a caller as something to act on. It means
+  // "behave as if there is no supervisor", which is the null every failure path
+  // already handles — so it strictly shrinks what the model can cause, which is
+  // why a component whose answer space IS its safety property can afford it.
+  assert.equal(supervisor.decisionOf({ decision: 'abstain' }), null);
+  assert.ok(!supervisor.DECISIONS.has(supervisor.ABSTAIN), 'not a decision');
+  for (const w of ['wait', 'retry', 'stop']) {
+    assert.equal(supervisor.decisionOf({ decision: w }), w, 'the three still work');
+  }
+
+  // The four-word brief is the three-word brief plus one paragraph, and that is
+  // asserted rather than intended: if the two were written separately, a
+  // before/after comparison would be measuring two prompts instead of one
+  // change, and nothing in the numbers would say so.
+  const three = ollama.readBrief(undefined, { mayAbstain: false });
+  const four = ollama.readBrief(undefined, { mayAbstain: true });
+  assert.ok(four.startsWith(three), 'strictly a superset');
+  assert.match(four.slice(three.length), /abstain/);
+  assert.ok(!three.includes('abstain'), 'and the three-word brief never mentions it');
+
+  // Both arms offer the same four, and the Swift enum is the authority.
+  assert.deepEqual(ollama.schemaFor({ mayAbstain: true }).properties.decision.enum,
+    ['wait', 'retry', 'stop', 'abstain']);
+  assert.deepEqual(ollama.schemaFor().properties.decision.enum, ['wait', 'retry', 'stop']);
+  const swift = fs.readFileSync(new URL('../native/supervise.swift', import.meta.url), 'utf8');
+  const cautious = swift.slice(swift.indexOf('enum CautiousDecision'), swift.indexOf('struct CautiousJudgement'));
+  assert.deepEqual([...cautious.matchAll(/case (\w+)/g)].map((m) => m[1]),
+    ['wait', 'retry', 'stop', 'abstain']);
+
+  // Off unless asked. Measured: telling the Apple model about the fourth word
+  // cost it about a third of its accuracy and it never used the word once, so
+  // the default here is load-bearing and not a formality.
+  const src = fs.readFileSync(new URL('../src/supervisor.js', import.meta.url), 'utf8');
+  assert.match(src, /mayAbstain = false/, 'the default is off');
 });

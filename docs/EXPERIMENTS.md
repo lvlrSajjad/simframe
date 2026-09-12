@@ -373,6 +373,62 @@ than a tier that is slightly more accurate, and nothing here measures confidence
 yet. n=22 on five designed fixture shapes, so this rules the simple version out
 rather than settling the idea.
 
+## 12. The fourth word made the model worse without ever being used
+
+**What we believed:** that an `abstain` token was the obvious next move — three
+populations in a row had errors in one direction only, and a judge that can
+decline is strictly safer than one that cannot. Item 100 has been near the top
+of the list for weeks.
+
+**What we measured**, on the same 22 situations, with a second `@Generable` type
+in the same binary so one build answers both vocabularies:
+
+| arm | three words | four words | abstentions |
+| --- | --- | --- | --- |
+| Apple ~3B | 77 / 82 / 86% | **45 / 50 / 55%** | **0 of 22** |
+| `qwen3:8b` | 91% | 95% | 0 of 22 |
+
+**Apple never abstained once and lost about a third of its accuracy for having
+been told it could.** The brief was the three-word brief plus one paragraph,
+built from it by concatenation so the two could not drift; nothing else changed.
+So the paragraph changed how it answered the *original* question. That is prompt
+sensitivity, not judgement, and it is invisible without a before/after on
+identical inputs.
+
+**What changed:** the fourth word stays off for the Apple arm, and item 100 is
+no longer "add the token" — it is "find a model that will actually use it". The
+capability stays in the tree because it is the apparatus for the next attempt,
+and nothing here tested a model that abstains, because neither of these did.
+
+**The general form, and it is the one this file keeps finding:** a change that
+is obviously right can be wrong in a way that has nothing to do with the
+argument for it. The argument for abstention is still sound. The model just
+cannot be told about it for free.
+
+## 13. The checker you want already exists, and it cannot cover the one case that matters
+
+**What was proposed:** run the local model, check whether its answer was right,
+and call Claude if it was not.
+
+**Why the direct version is impossible:** a checker that can tell you an answer
+is wrong *is* the correct answer. If something local could verify `stop`, that
+thing should have been asked in the first place.
+
+**What is possible, and is already running:** you cannot check the decision, but
+you can check the *outcome*. Acting on `wait` or `retry` re-runs the step, and
+whether it worked is the verdict on the ruling — `still_failed` in the ruling
+log is exactly "the model was checked and was wrong", and it escalates. On the
+22 live rulings that loop handled **9 of 22 with no round trip** and escalated
+13, which at 10-16 s a round trip is roughly 90-145 s saved. That, and not
+accuracy, is what the supervisor should be judged on.
+
+**And the asymmetry is the part worth keeping.** `stop` produces no evidence —
+you stopped, so you never learn whether continuing would have worked. It already
+means "hand back to Claude with the unattempted steps" rather than "give up", so
+it is an escalation and not an abandonment. But it is the one word whose
+correctness nothing local can ever confirm, which is why the direction a model
+errs in matters more than how often it errs.
+
 ### What replay cannot say
 
 Whether acting on a ruling actually *recovered* the flow is a fact about the

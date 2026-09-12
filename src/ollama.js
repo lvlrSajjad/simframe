@@ -49,13 +49,23 @@ export const DEFAULT_HOST = 'http://127.0.0.1:11434';
  * would produce exactly the invisible unfairness this function exists to
  * prevent.
  */
-export function readBrief(file = SWIFT) {
+export function readBrief(file = SWIFT, { mayAbstain = false } = {}) {
   const src = fs.readFileSync(file, 'utf8');
-  const open = src.indexOf('let instructions = """');
-  if (open === -1) throw new Error(`no instructions block in ${file}`);
+  const base = block(src, 'let instructions = """', file);
+  if (!mayAbstain) return base;
+  // The addendum, from the same file and joined the way the Swift joins it.
+  // The fourth word has to reach both arms identically or the comparison is
+  // measuring two different briefs, which is the failure this whole function
+  // exists to prevent.
+  return `${base}\n\n${block(src, 'let abstainInstructions = instructions + "\\n\\n" + """', file)}`;
+}
+
+function block(src, opener, file) {
+  const open = src.indexOf(opener);
+  if (open === -1) throw new Error(`no ${JSON.stringify(opener)} block in ${file}`);
   const bodyStart = src.indexOf('\n', open) + 1;
   const close = src.indexOf('"""', bodyStart);
-  if (close === -1) throw new Error(`unterminated instructions block in ${file}`);
+  if (close === -1) throw new Error(`unterminated block in ${file}`);
   return src
     .slice(bodyStart, close)
     .split('\n')
@@ -106,11 +116,28 @@ export function promptFor(s = {}) {
  * against would be a second difference between the arms, and the rationale is
  * the one thing a supervisor is explicitly not trusted for.
  */
-export const SCHEMA = {
+export const DECISION_WORDS = ['wait', 'retry', 'stop'];
+
+/**
+ * The fourth word, available on request.
+ *
+ * Not a new capability and it cannot become one: `abstain` means "behave as if
+ * there is no supervisor", which is the `null` every caller already handles on
+ * every failure path. It strictly *shrinks* what the model can cause to happen,
+ * which is why a component whose answer space is its safety property can afford
+ * to grow one.
+ */
+export const ABSTAIN = 'abstain';
+
+export const schemaFor = ({ mayAbstain = false } = {}) => ({
   type: 'object',
-  properties: { decision: { type: 'string', enum: ['wait', 'retry', 'stop'] } },
+  properties: {
+    decision: { type: 'string', enum: mayAbstain ? [...DECISION_WORDS, ABSTAIN] : DECISION_WORDS },
+  },
   required: ['decision'],
-};
+});
+
+export const SCHEMA = schemaFor();
 
 /** Parse `ollama`, `ollama:qwen3:14b`, `ollama:qwen3:8b@http://host:port`. */
 export function parseTarget(raw) {
@@ -147,15 +174,16 @@ async function post(host, route, body, timeoutMs) {
  */
 export async function ask(target, situation, timeoutMs = 2500) {
   const { model, host } = target;
+  const mayAbstain = Boolean(situation?.mayAbstain);
   const started = Date.now();
   const out = await post(host, '/api/chat', {
     model,
     messages: [
-      { role: 'system', content: readBrief() },
+      { role: 'system', content: readBrief(SWIFT, { mayAbstain }) },
       { role: 'user', content: promptFor(situation) },
     ],
     stream: false,
-    format: SCHEMA,
+    format: schemaFor({ mayAbstain }),
     // Qwen3 reasons out loud by default. Turned off for two reasons and both
     // are about fairness rather than speed: the Apple arm does not deliberate
     // either, and a supervisor that takes twenty seconds to answer has already

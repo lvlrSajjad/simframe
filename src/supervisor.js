@@ -84,6 +84,18 @@ function backendFor(want) {
  * text — so it broke when the branch grew an else, with nothing actually wrong.
  * A property this important deserves an assertion that runs it.
  */
+/**
+ * The fourth word, and why it is not in `DECISIONS`.
+ *
+ * `abstain` means "I cannot tell from what I was given", and the only correct
+ * thing to do with it is exactly what this module already does with every
+ * failure: return `null`, and behave as if there is no supervisor. So it is a
+ * recognised *answer* and not a recognised *decision*, and keeping those apart
+ * is the point — a caller must never be able to act on it, and a log must be
+ * able to tell it from a timeout, a refusal and a model that was never there.
+ */
+export const ABSTAIN = 'abstain';
+
 export function decisionOf(answer) {
   // A string, checked rather than coerced. `String(["wait"])` is `"wait"`, so a
   // `String(...)` coercion here let `{decision: ["wait"]}` through the one gate
@@ -113,7 +125,7 @@ export function requested(options) {
  */
 export async function judge({
   goal, step, expected, failure, screen, stillMs, note, options, timeoutMs = 2500,
-  detail,
+  detail, mayAbstain = false,
 } = {}) {
   const want = requested(options);
   if (!want) return null;
@@ -131,6 +143,7 @@ export async function judge({
     screen: (screen ?? []).filter(Boolean).map((s) => String(s).slice(0, 40)).slice(0, 25),
     stillMs: Number.isFinite(stillMs) ? Math.round(stillMs) : null,
     note: note ? String(note).slice(0, 200) : null,
+    mayAbstain: Boolean(mayAbstain),
   }, timeoutMs);
   const decision = decisionOf(answer);
   if (decision == null) {
@@ -144,7 +157,12 @@ export async function judge({
     // supervisor did not answer": a timeout, a guardrail refusal and a model
     // that was never installed were one indistinguishable line.
     if (detail && typeof detail === 'object') {
-      detail.kind = answer?.kind
+      // An abstention is an answer, and the least interesting thing a log can
+      // say about it is that the supervisor "did not answer". It is the model
+      // declining on purpose, which is the one failure mode worth encouraging.
+      detail.kind = answer?.decision === ABSTAIN
+        ? 'abstained'
+        : answer?.kind
         ?? (answer == null ? 'no answer' : answer.decision ? 'outside the vocabulary' : 'unparseable');
       if (answer?.error) detail.error = String(answer.error).slice(0, 200);
     }

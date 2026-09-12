@@ -76,6 +76,8 @@ if (baseline > 0.65) {
 const STILL_MS_THRESHOLD = 3000;
 console.log(`\nthe brief every model arm gets is ${ollama.readBrief().length} characters, read from native/supervise.swift`);
 
+const withAbstain = process.argv.includes('--abstain');
+
 const results = [];
 for (const arm of arms) {
   const judged = [];
@@ -87,6 +89,7 @@ for (const arm of arms) {
     const detail = {};
     const ruling = await supervisor.judge({
       ...r.situation,
+      mayAbstain: withAbstain,
       options: { supervisor: arm },
       // Wide on purpose. The shipped budget is 2.5s and a 14B will exceed it;
       // capping here would score the larger model on *latency* while calling it
@@ -96,7 +99,7 @@ for (const arm of arms) {
       detail,
     });
     if (!ruling) unanswered += 1;
-    judged.push({ r, ruling, detail });
+    judged.push({ r, ruling, detail, abstained: detail.kind === 'abstained' });
     process.stdout.write('.');
   }
   const answered = judged.filter((j) => j.ruling);
@@ -130,6 +133,24 @@ console.log(`${`always "${commonest[0]}"`.padEnd(26)} ${pct(baseline).padStart(9
 console.log(`${`stillMs > ${STILL_MS_THRESHOLD}ms`.padEnd(26)} ${pct(stillRule).padStart(9)} ${'0ms'.padStart(9)} ${'—'.padStart(10)}`);
 for (const r of results) {
   console.log(`${r.arm.padEnd(26)} ${pct(r.accuracy).padStart(9)} ${`${r.medianMs ?? '—'}ms`.padStart(9)} ${`${r.unanswered}`.padStart(10)}`);
+}
+
+if (withAbstain) {
+  console.log(`\n--- item 100: the fourth word ---`);
+  console.log('The question is not whether it abstains. It is whether it abstains on');
+  console.log('the ones it would have got WRONG, or at random. A judge that declines');
+  console.log('uniformly has added latency and a round trip and bought nothing.\n');
+  console.log(`${'arm'.padEnd(22)} ${'answered'.padStart(9)} ${'of those'.padStart(9)} ${'abstained'.padStart(10)} ${'escalations'.padStart(12)}`);
+  console.log('-'.repeat(66));
+  for (const r of results) {
+    const answered = r.judged.filter((j) => j.ruling);
+    const right = answered.filter((j) => satisfies(j.ruling.decision, want(j.r))).length;
+    const abstained = r.judged.filter((j) => j.abstained).length;
+    console.log(`${r.arm.padEnd(22)} ${`${answered.length}/${rows.length}`.padStart(9)} ${pct(right / (answered.length || 1)).padStart(9)} ${`${abstained}`.padStart(10)} ${pct(abstained / rows.length).padStart(12)}`);
+  }
+  console.log('\n`of those` is accuracy on the questions it chose to answer. If the fourth');
+  console.log('word is working, that number is higher than the three-word accuracy above');
+  console.log('by more than the abstention rate would give by chance.');
 }
 
 console.log('\nerrors, by arm:');

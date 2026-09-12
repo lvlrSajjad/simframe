@@ -3875,3 +3875,55 @@ confidence band around a duration can see.
 
 The shape of the cascade is right. The hard part is the abstain signal, which
 is item 100 reached from a different direction.
+
+### Item 100 — the fourth word, measured, and it is a warning
+
+`abstain` added as a second `@Generable` type in the same binary, so one build
+answers both vocabularies and the comparison is exact. The brief is the
+three-word brief plus one paragraph, built from it by concatenation so the two
+cannot drift. Same 22 situations.
+
+| arm | three words | four words | abstentions |
+| --- | --- | --- | --- |
+| Apple ~3B | 77 / 82 / 86% | **45 / 50 / 55%** | **0 of 22** |
+| `qwen3:8b` | 91% | 95% | 0 of 22 |
+
+**Apple never used the fourth word once, and got ~32 points worse for having
+been told about it.** Three runs each way; the collapse is larger than its own
+run-to-run spread by a wide margin. The added paragraph changed how it answered
+the *original* question, which is prompt sensitivity rather than judgement, and
+it is exactly the kind of effect that would have been invisible without a
+before/after on identical inputs.
+
+`qwen3:8b` moved 91% -> 95%, also without abstaining once. One ruling. Noise.
+
+**What this does not say.** Not that an abstain token is a bad idea — nothing
+here tested a model that *does* abstain, because neither did. It says that
+adding the option to this brief, for this model, costs a third of its accuracy
+and buys nothing, so **the fourth word must stay off for the Apple arm** until
+something changes. The capability stays in the code because it is the apparatus
+for the next attempt, and it is off by default.
+
+### What the supervisor is worth, in round trips
+
+Scored on the same 22 live rulings, counting what each one cost rather than
+whether it was right.
+
+| | |
+| --- | --- |
+| handled locally, no round trip (`wait`/`retry` that worked) | **9 of 22** |
+| escalated to Claude | 13 of 22 |
+| decisions | `wait` 14, `stop` 8 |
+| outcomes | `recovered` 6, `still_failed` 8, `stopped` 8 |
+
+At 10-16 s a round trip, the local tier saved roughly **90-145 s** on this
+population. That is the number the supervisor should be judged on, not accuracy.
+
+**And the check that makes this safe is already there and is asymmetric.**
+Acting on `wait`/`retry` produces evidence — the step is re-run, and whether it
+worked is the verdict on the ruling. `still_failed` is precisely "the model was
+checked and was wrong", and it escalates. Acting on `stop` produces none: you
+stopped, so you never learn whether continuing would have worked. `stop` already
+means "hand back to Claude with the unattempted steps", so it is an escalation
+rather than an abandonment — but it is the one word whose correctness nothing
+local can ever confirm.
