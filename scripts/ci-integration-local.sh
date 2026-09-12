@@ -43,6 +43,15 @@ for (const key of ["input.driver", "ax.driver"]) {
   console.log(`${good ? "ok  " : "FAIL"} ${key} = ${JSON.stringify(d[key])} (want "simframed")`);
   if (!good) failed = true;
 }
+// A configured driver is not an answering driver — the same check as ci.yml.
+// A whole CI run read the screen eighteen times, every reading came back
+// OCR-only, and this step said `ok` because a driver was present.
+{
+  const n = d["ax.elements"];
+  const good = typeof n === "number" && n > 0;
+  console.log(`${good ? "ok  " : "FAIL"} ax.elements = ${JSON.stringify(n)} (want > 0 — the tree must answer, not merely exist)`);
+  if (!good) failed = true;
+}
 if (d.warnings > 0) {
   console.log(`\n${d.warnings} degraded layer(s):`);
   for (const c of d.checks.filter((c) => c.level !== "ok")) console.log(`  ${c.level} ${c.name}: ${c.detail}`);

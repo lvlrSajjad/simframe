@@ -1568,9 +1568,38 @@ async function doctor({ json = false, strict = false, device, options = {} } = {
       // machine could be doing better and silently is not; a driver someone
       // selected on purpose is neither silent nor a surprise.
       const axState = !ax.available ? 'optional' : ax.name === 'simframed' || ax.chosen ? 'ok' : 'warn';
-      add(`accessibility tree (${d.name})`, axState,
-        ax.available ? `${ax.name}: ${ax.version}` : `unavailable: ${ax.reason}`,
+      // Prove a round trip, not a presence — the same correction this file
+      // already made for the supervisor, never carried across to here.
+      //
+      // A CI run read the screen eighteen times and every single reading came
+      // back `ocr` with no `ax` at all, while this check said `ok` because a
+      // driver was configured. It is configured; it answers with nothing. Six
+      // minutes later the fingerprint step failed with a distribution mystery,
+      // and the layer that had actually died was named nowhere. Asking the tree
+      // for the current screen costs one read (~50ms) and turns that into a
+      // first-minute failure with the right sentence on it.
+      let axCount = null;
+      if (ax.available) {
+        try {
+          axCount = (await input.describeAll(d.udid)).length;
+        } catch {
+          axCount = 0;
+        }
+      }
+      add(`accessibility tree (${d.name})`,
+        // `warn`, not `fail`: a genuinely empty screen exists — a springboard
+        // mid-boot, a black frame — and a hard error on one would cry wolf.
+        // The count is exported so a caller that knows the screen is not empty
+        // can assert on it, which is what CI does.
+        ax.available && axCount === 0 ? 'warn' : axState,
+        ax.available
+          ? `${ax.name}: ${ax.version}`
+            + (axCount === 0
+              ? ' — but it returned NO elements for the current screen, so every read is OCR alone'
+              : axCount != null ? `; ${axCount} element(s) on the current screen` : '')
+          : `unavailable: ${ax.reason}`,
         { key: 'ax.driver', value: ax.name });
+      if (axCount != null) add(null, null, null, { key: 'ax.elements', value: axCount });
     }
     if (probed.length) {
       const t0 = Date.now();
@@ -1644,11 +1673,14 @@ async function doctor({ json = false, strict = false, device, options = {} } = {
       warnings: warned.length,
       optional: optional.length,
       ...flat,
-      checks: checks.map(({ name, level, detail }) => ({ name, level, detail })),
+      checks: checks.filter((c) => c.name).map(({ name, level, detail }) => ({ name, level, detail })),
     }, null, 2));
   } else {
     const mark = { ok: 'ok  ', warn: 'WARN', fail: 'FAIL', optional: '--  ' };
-    for (const c of checks) console.log(`${mark[c.level]} ${c.name.padEnd(24)} ${c.detail}`);
+    // A nameless entry is data for `--json` and not a line for a reader — the
+    // element count belongs beside the layer it describes, not on a row of its
+    // own.
+    for (const c of checks) if (c.name) console.log(`${mark[c.level]} ${c.name.padEnd(24)} ${c.detail}`);
     if (warned.length) {
       console.log(`\n${warned.length} layer(s) degraded. simframe still works, but not at full speed or coverage:`);
       for (const c of warned) console.log(`  - ${c.name}: ${c.detail}`);

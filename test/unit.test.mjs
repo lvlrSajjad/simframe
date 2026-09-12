@@ -4728,3 +4728,33 @@ test('a live loop reading a dead surface is a contradiction we can see (SEV-1)',
   assert.ok(!/if \(!res\.live\.ok\) out\.push/.test(cli), 'the CLI no longer gates the note on ok');
   assert.ok(!/return live\?\.ok \? null :/.test(mcp), 'nor does the MCP header');
 });
+
+test('doctor proves the accessibility tree answers, not merely that a driver exists', async () => {
+  // A CI run read the screen eighteen times and every reading came back
+  // `ocr` with no `ax` at all — while this check reported `ok`, because a
+  // driver was configured. It was configured. It answered with nothing. The
+  // failure surfaced six minutes later in the fingerprint step as a
+  // distribution mystery that named no layer.
+  //
+  // The same correction this file already made for the supervisor, which
+  // reported a tier healthy from its own process while the long-lived server's
+  // copy was dead: prove a round trip, not a presence.
+  const src = fs.readFileSync(new URL('../src/cli.js', import.meta.url), 'utf8');
+  const block = src.slice(src.indexOf('const ax = await input.axDriverFor'), src.indexOf("key: 'ax.elements'") + 40);
+  assert.match(block, /describeAll/, 'it asks the tree for the current screen');
+  assert.match(block, /axCount === 0/, 'and reacts to an empty answer');
+  assert.match(block, /'warn'/, 'as a warning — an empty screen is possible and a hard error would cry wolf');
+  assert.match(block, /ax\.elements/, 'exporting the count so a caller who knows better can assert on it');
+
+  // Both CI and its local mirror assert it, because a check that exists in one
+  // and not the other is how the local run came to be green all day while the
+  // hosted one failed.
+  const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const local = fs.readFileSync(new URL('../scripts/ci-integration-local.sh', import.meta.url), 'utf8');
+  for (const [what, text] of [['ci.yml', ci], ['ci-integration-local.sh', local]]) {
+    assert.match(text, /ax\.elements/, `${what} asserts the tree answered`);
+  }
+
+  // And a nameless check is data for --json, never a blank row for a reader.
+  assert.match(src, /for \(const c of checks\) if \(c\.name\)/);
+});

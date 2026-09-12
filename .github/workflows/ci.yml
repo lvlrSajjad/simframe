@@ -270,6 +270,18 @@ jobs:
               console.log(`${ok ? "ok  " : "FAIL"} ${key} = ${JSON.stringify(got)} (want "simframed")`);
               if (!ok) failed = true;
             }
+            // A configured driver is not an answering driver, and this step
+            // said `ok` through a whole run in which every one of eighteen
+            // readings came back OCR-only. The tree was present and returning
+            // nothing; the fingerprint step failed six minutes later with a
+            // distribution mystery and named no layer at all. The device is on
+            // a Settings screen here, so zero elements is not an empty screen.
+            {
+              const n = d["ax.elements"];
+              const ok = typeof n === "number" && n > 0;
+              console.log(`${ok ? "ok  " : "FAIL"} ax.elements = ${JSON.stringify(n)} (want > 0 — the tree must answer, not merely exist)`);
+              if (!ok) failed = true;
+            }
             if (d.warnings > 0) {
               console.log(`\n${d.warnings} degraded layer(s):`);
               for (const c of d.checks.filter((c) => c.level !== "ok")) console.log(`  ${c.level} ${c.name}: ${c.detail}`);
