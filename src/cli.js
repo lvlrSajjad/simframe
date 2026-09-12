@@ -278,6 +278,10 @@ async function main() {
   if (flags.sensor) options.sensor = String(flags.sensor);
   if (flags.planner) options.planner = String(flags.planner);
   if (flags.supervisor) options.supervisor = String(flags.supervisor);
+  // Stated rather than defaulted, which is the same rule the settle budgets
+  // follow. The default is sized on a developer's machine; a loaded build farm
+  // is a different machine and should say so rather than be guessed at.
+  if (flags.readyTimeoutMs) options.readyTimeoutMs = num(flags.readyTimeoutMs);
 
   switch (command) {
     case undefined:

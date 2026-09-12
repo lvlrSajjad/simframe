@@ -110,6 +110,21 @@ async function deviceGeometry(udid, state) {
   };
 }
 
+/**
+ * How long to wait for a daemon to exist at all. A first build is slower than a
+ * spawn, which is what this number is sized for.
+ */
+export const READY_TIMEOUT_MS = 20_000;
+
+/**
+ * How long to keep waiting once the daemon is demonstrably alive.
+ *
+ * Sized from the measurement that caused it: a hosted runner's simulator took
+ * roughly 27 s to produce its first frame while the daemon reported a healthy
+ * 75 ms median. Three times the ordinary budget, and still bounded.
+ */
+export const LIVE_DAEMON_CAP_MS = 60_000;
+
 export function daemonStatus(udid) {
   const meta = store.readJson(store.paths(udid).meta);
   const pid = meta?.pid ?? null;
@@ -146,16 +161,40 @@ export async function ensureDaemon(deviceQuery, options = {}) {
   }
 
   // The daemon may need a first build, which is slower than a spawn.
-  const deadline = Date.now() + (options.readyTimeoutMs ?? 20_000);
-  while (Date.now() < deadline) {
+  const deadline = Date.now() + (options.readyTimeoutMs ?? READY_TIMEOUT_MS);
+  // A live daemon that has not rendered yet is not a failed daemon.
+  //
+  // Measured on a hosted runner: `simframe start` gave up, and the daemon's own
+  // log — captured by the on-failure step eight seconds later — showed
+  // `frame=#1 age=1514ms, 1.0 fps, median 75.08ms`. It was working. The
+  // simulator's display had simply taken about 27 s to produce anything on a
+  // loaded build farm, against a 20 s budget measured on a developer's machine.
+  // Aborting there fails an entire run over a device that was about to work.
+  //
+  // So the budget applies to *getting a daemon*; once we have a live one, the
+  // wait extends to a hard cap. The cap still exists, because a daemon that is
+  // alive and never renders is a real failure and has to be reportable — but it
+  // is now a different sentence from a daemon that never started, and those two
+  // had read identically, which cost a log dive to tell apart.
+  const liveDeadline = Date.now() + LIVE_DAEMON_CAP_MS;
+  let sawLiveDaemon = false;
+  for (;;) {
     const state = store.readJson(p.state);
     if (state && state.capturedAt >= minCapturedAt && Date.now() - state.capturedAt < 30_000) {
       return { device, state, started: !existing.alive };
     }
+    const alive = daemonStatus(device.udid).alive;
+    sawLiveDaemon = sawLiveDaemon || alive;
+    if (Date.now() >= (alive ? liveDeadline : deadline)) break;
     await sleep(80);
   }
   const tail = readLogTail(p.log);
-  throw new Error(`simframe daemon did not produce a frame for ${device.name}${tail ? `\n${tail}` : ''}`);
+  const waited = sawLiveDaemon
+    ? `the daemon is running and the display produced no frame in ${Math.round(LIVE_DAEMON_CAP_MS / 1000)}s`
+    : 'no daemon process came up';
+  throw new Error(
+    `simframe daemon did not produce a frame for ${device.name} — ${waited}${tail ? `\n${tail}` : ''}`,
+  );
 }
 
 /** Why the daemon was not used, when it was not. Surfaced by doctor. */

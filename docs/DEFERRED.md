@@ -1319,6 +1319,20 @@ round yet, and its P0 is the worst finding this project has had.
    budget for a screen that may never settle is answering a different question,
    and it would be the third guess in a row on this one step.
 
+   **And the very next run made this much more likely to be one phenomenon.**
+   `simframe start` failed *before* the reset step ever ran — and the
+   on-failure daemon log, captured eight seconds later, showed the daemon
+   working: `frame=#1 age=1514ms`, `1.0 fps, median 75.08ms`. It was not broken.
+   The simulator's display had taken about **27 s** to produce its first frame
+   against a 20 s budget. So the reading that now fits both failures is not "a
+   weird state" but *this runner brings the simulator display up far slower than
+   the budgets assume* — first frame at ~27 s, readable content later still,
+   which is what a screen that is moving and reads as nothing looks like from
+   above. Fixed at the root in `ensureDaemon`: a daemon we can see running earns
+   a longer, still-bounded wait, and "no daemon came up" and "the daemon is
+   running and the display produced nothing" are now different sentences. They
+   had read identically, which is what cost the log dive.
+
 124. **The local helper's `open()` has no timeout, and the safety property says
    it must.** `judge` is documented to return `null` on *every* failure mode —
    "behave as if there is no supervisor" is the one thing in that file that must

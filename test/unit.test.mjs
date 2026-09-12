@@ -4508,3 +4508,25 @@ test('both supervisor arms are briefed from one source, and constrained to the s
   // Absent fields leave no empty line behind.
   assert.equal(ollama.promptFor({ step: 'a', failure: 'b' }).split('\n').length, 2);
 });
+
+test('a live daemon that has not rendered yet is not a failed daemon', async () => {
+  const api = await import('../src/index.js');
+
+  // The two budgets are different questions and must not collapse into one.
+  // Getting a daemon at all is a spawn (or a first build); getting a frame out
+  // of a simulator display is the device's business, and on a loaded build farm
+  // it took about 27s while the daemon itself reported a healthy 75ms median.
+  // Giving up there failed an entire CI run over a device that was working.
+  assert.ok(api.LIVE_DAEMON_CAP_MS > api.READY_TIMEOUT_MS,
+    'a daemon we can see running earns more patience than one we cannot');
+  assert.ok(api.LIVE_DAEMON_CAP_MS <= 120_000,
+    'and it is still bounded — a daemon that never renders has to stay reportable');
+
+  // The distinction has to reach the message, because the two cases have
+  // different remedies and reading them apart cost a dive into a daemon log
+  // that a later step happened to capture.
+  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  const thrower = src.slice(src.indexOf('const tail = readLogTail(p.log)'), src.indexOf('export function stopDaemon'));
+  assert.match(thrower, /no daemon process came up/);
+  assert.match(thrower, /the display produced no frame/);
+});
