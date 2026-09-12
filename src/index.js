@@ -126,22 +126,31 @@ export const READY_TIMEOUT_MS = 20_000;
 export const LIVE_DAEMON_CAP_MS = 60_000;
 
 /**
- * How long a screen may sit perfectly still before stillness itself is evidence.
+ * How many gestures may land on a motionless screen before that is evidence.
  *
- * Generous on purpose: a person reading a screen leaves it alone for a minute
- * without anything being wrong, and the signal below only means something when
- * input was delivered *inside* that quiet window.
+ * **This replaces a duration threshold, and the replacement is the point.** The
+ * first version asked "has the screen been still for a long time?" and needed
+ * 20 s before it would speak. A field report then caught a frame roughly three
+ * hours stale, presented as 130 ms old, on a screen still for **8.2 seconds** —
+ * so the check sat silently under its own gate during exactly the failure it
+ * was written for. A threshold chosen from one earlier example is not a
+ * mechanism.
+ *
+ * What says "dead surface" is not how long the screen has been quiet. It is
+ * that we kept touching it and *nothing moved at all*. One tap that changes
+ * nothing is ordinary — a disabled control, a form refusing a submit. Three in
+ * a row, with not one pixel of response, is a different claim.
  */
-export const SURFACE_SUSPECT_MS = 20_000;
+export const SURFACE_SUSPECT_INPUTS = 3;
 
 /**
  * Slack between "input landed" and "the screen should have moved".
  *
- * A tap that legitimately changes nothing is ordinary — a disabled control, a
- * form rejecting a submit — so the input has to sit well inside the quiet
- * period before the two numbers genuinely contradict each other.
+ * A gesture only counts against the surface if it landed *inside* the quiet
+ * period with room to spare — otherwise the tap that ends the quiet period
+ * counts as evidence against it.
  */
-export const SURFACE_MARGIN_MS = 5_000;
+export const SURFACE_MARGIN_MS = 400;
 
 export function daemonStatus(udid) {
   const meta = store.readJson(store.paths(udid).meta);
@@ -464,17 +473,22 @@ export function liveness(udid, state) {
   // exactly the kind this project keeps paying for. It says what it sees and
   // names the arbiter.
   const stableForMs = state?.stableForMs;
-  const lastInput = store.lastInputAt(udid);
-  if (Number.isFinite(stableForMs) && lastInput && stableForMs > SURFACE_SUSPECT_MS) {
-    const sinceInput = Date.now() - lastInput;
-    if (sinceInput < stableForMs - SURFACE_MARGIN_MS) {
+  if (Number.isFinite(stableForMs)) {
+    // The moment the screen last moved. Every gesture delivered after it landed
+    // on a screen that did not react.
+    const lastChange = Date.now() - stableForMs + SURFACE_MARGIN_MS;
+    const ignored = store.inputTimes(udid).filter((t) => t > lastChange);
+    if (ignored.length >= SURFACE_SUSPECT_INPUTS) {
+      const quiet = Math.round(stableForMs / 1000);
       return {
         ok: true,
         ageMs,
         stalled: false,
         suspectSurface: true,
-        note: `the screen has not changed in ${Math.round(stableForMs / 1000)}s, but input was delivered `
-          + `${Math.round(sinceInput / 1000)}s ago — so the frames are new and the surface behind them may be dead. `
+        ignoredInputs: ignored.length,
+        note: `${ignored.length} gestures have been delivered without the screen moving at all `
+          + `(still for ${quiet < 1 ? `${Math.round(stableForMs)}ms` : `${quiet}s`}), `
+          + 'so the frames are new and the surface behind them may be dead. '
           + 'The accessibility tree is read separately and is the tiebreaker; `simframe revive` re-attaches capture.',
       };
     }
@@ -1526,7 +1540,28 @@ async function locateWith(
   const target = index != null ? candidates[index] : candidates[0];
   if (!target) {
     const visible = entry.targets.filter((t) => t.label);
-    const sample = visible.slice(0, 12).map((t) => t.label).join(', ');
+    const shown = visible.slice(0, 12).map((t) => t.label);
+    // Say when the list is cut. A field report found `"Work Orders" is not on
+    // this screen. Visible: …` on a screen whose own element map, three lines
+    // below in the same reply, listed `#25 text 200,836 Work Orders` — it was
+    // simply past the twelfth entry. A truncated list that does not announce
+    // its truncation reads as an exhaustive one.
+    const sample = shown.join(', ') + (visible.length > shown.length ? `, …and ${visible.length - shown.length} more` : '');
+    // An index past the end is not an absent element, and reporting it as one
+    // sent a tester looking for a control that was on the screen all along.
+    // `{"tap": "Work Orders", "index": 1}` on a screen with exactly one match
+    // said "not on this screen" while the map listed it.
+    if (index != null && candidates.length) {
+      throw metrics.tag(
+        new Error(
+          `"${query}" matches ${candidates.length} thing${candidates.length === 1 ? '' : 's'} on this screen,`
+          + ` so index ${index} is out of range — valid indices are 0..${candidates.length - 1}.`
+          + ` Nearest: ${candidates.slice(0, 4).map((c) => `[${candidates.indexOf(c)}] ${JSON.stringify(String(c.label ?? '').slice(0, 28))}`).join(', ')}`,
+        ),
+        'ambiguous_intent',
+        { candidates: candidates.slice(0, 8), intent: query, ambiguous: true },
+      );
+    }
     throw metrics.tag(
       new Error(`"${query}" is not on this screen. Visible: ${sample || '(nothing readable)'}`),
       from === 'memory' ? 'ambiguous_intent' : 'unknown_screen',

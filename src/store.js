@@ -50,22 +50,45 @@ export function paths(udid) {
  * had was green. A screen that has not moved since before we last touched it,
  * over and over, is a contradiction the daemon can notice locally.
  */
+const INPUT_MEMORY = 8;
+
 export function noteInput(udid, at = Date.now()) {
   try {
-    writeAtomic(paths(udid).lastInput, String(at));
+    writeAtomic(paths(udid).lastInput, [...inputTimes(udid), at].slice(-INPUT_MEMORY).join(','));
   } catch {
     /* a timestamp nothing depends on for correctness must not fail an action */
   }
 }
 
-export function lastInputAt(udid) {
+/**
+ * The last few input timestamps, oldest first.
+ *
+ * A list rather than a single timestamp, and that is the whole correction.
+ * The first version kept only the latest, so the only question it could ask was
+ * "has the screen been still for a long time?" — which needed a duration
+ * threshold, and the threshold is what defeated it. A field report caught a
+ * three-hour-stale frame on a screen that had been still for **8.2 seconds**,
+ * under a 20-second gate, so the check could not fire on the case it was
+ * written for.
+ *
+ * What actually says "dead surface" is not duration. It is **several gestures
+ * delivered with no pixel moving at all** — one tap that changes nothing is
+ * ordinary, and three in a row are not.
+ */
+export function inputTimes(udid) {
   try {
-    const raw = fs.readFileSync(paths(udid).lastInput, 'utf8');
-    const at = Number(raw);
-    return Number.isFinite(at) ? at : null;
+    return fs.readFileSync(paths(udid).lastInput, 'utf8')
+      .split(',')
+      .map(Number)
+      .filter(Number.isFinite);
   } catch {
-    return null;
+    return [];
   }
+}
+
+export function lastInputAt(udid) {
+  const times = inputTimes(udid);
+  return times.length ? times[times.length - 1] : null;
 }
 
 export function captureHealth(udid) {

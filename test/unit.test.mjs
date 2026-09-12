@@ -2449,10 +2449,13 @@ test('waiting for something already on screen stops immediately', async () => {
   const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
   const waitFor = src.slice(src.indexOf("case 'waitFor'"), src.indexOf("case 'assert'"));
   assert.match(waitFor, /escalationOf\(err\)\?\.ambiguous/);
-  assert.match(waitFor, /waiting cannot make it unique/);
+  // It used to stop by *throwing*, and a field session lost a whole batch to
+  // that on a screen it was correctly standing on. It now stops by succeeding:
+  // waiting is still pointless, and the answer to "has it arrived" is yes.
+  assert.match(waitFor, /the wait is satisfied/);
   const waitText = src.slice(src.indexOf("case 'waitText'"), src.indexOf("case 'assertText'"));
-  assert.match(waitText, /matched \\d\+ elements/);
-  assert.match(waitText, /waiting cannot make it unique/);
+  assert.match(waitText, /matched \(\\d\+\) elements/);
+  assert.match(waitText, /the wait is satisfied/);
 
   // A launch that changed nothing is ambiguous between "already in front" and
   // "did not come forward", and the step is the only place that can say so.
@@ -4692,32 +4695,51 @@ test('a live loop reading a dead surface is a contradiction we can see (SEV-1)',
 
   const now = Date.now();
   const fresh = { capturedAt: now - 60, seq: 1806, stableForMs: 159_753 };
+  const clear = () => fs.rmSync(path.join(dir, 'last-input'), { force: true });
 
-  // The reported figures: a frame 60ms old, a screen still for 160 seconds, and
-  // input delivered 12 seconds ago — i.e. three gestures landed *inside* the
-  // quiet period. `sim_look` served a login screen for three minutes here while
-  // announcing it as 66ms old, and nothing warned.
-  store.noteInput(udid, now - 12_000);
+  // Three gestures delivered inside the quiet period. `sim_look` served a login
+  // screen for three minutes here while announcing it as 66ms old.
+  clear();
+  for (const ago of [12_000, 8_000, 4_000]) store.noteInput(udid, now - ago);
   const wedged = api.liveness(udid, fresh);
   assert.equal(wedged.suspectSurface, true);
+  assert.equal(wedged.ignoredInputs, 3);
   assert.match(wedged.note, /surface behind them may be dead/);
   assert.match(wedged.note, /accessibility tree/, 'and it names the tiebreaker');
   // Deliberately not a failure. A screen that genuinely rejects every tap is
   // real, and turning that into a hard error is a confident wrong answer.
   assert.equal(wedged.ok, true);
 
-  // A screen that moved after the input is ordinary, however long it has since
-  // been still.
-  store.noteInput(udid, now - 200_000);
+  // **The case the first version could not see.** A second field report caught
+  // a frame roughly three hours stale, presented as 130ms old, on a screen
+  // still for 8,183ms — under a 20-second duration gate, so nothing fired
+  // during exactly the failure the check was written for. Counting ignored
+  // gestures has no such gate: what makes a surface suspect is that we kept
+  // touching it and nothing moved, not how long the quiet lasted.
+  clear();
+  for (const ago of [7_000, 5_000, 2_000]) store.noteInput(udid, now - ago);
+  const short = api.liveness(udid, { capturedAt: now - 130, seq: 1026, stableForMs: 8_183 });
+  assert.equal(short.suspectSurface, true, 'eight seconds of stillness is enough when three gestures were ignored');
+  assert.match(short.note, /8s/);
+
+  // A screen that moved after the gestures is ordinary, however long it has
+  // since been still.
+  clear();
+  for (const ago of [200_000, 190_000, 180_000]) store.noteInput(udid, now - ago);
   assert.ok(!api.liveness(udid, fresh).suspectSurface, 'input older than the quiet period is no contradiction');
 
-  // A tap that legitimately changed nothing must not trip it — that is most
-  // taps on a disabled control.
+  // One tap that legitimately changed nothing must not trip it — that is most
+  // taps on a disabled control, and crying wolf there is how a real one gets
+  // ignored.
+  clear();
   store.noteInput(udid, now - 1_000);
+  assert.ok(!api.liveness(udid, { ...fresh, stableForMs: 3_000 }).suspectSurface);
+  // Two is still not evidence.
+  store.noteInput(udid, now - 500);
   assert.ok(!api.liveness(udid, { ...fresh, stableForMs: 3_000 }).suspectSurface);
 
   // And a device nobody has touched cannot produce the contradiction at all.
-  fs.rmSync(path.join(dir, 'last-input'), { force: true });
+  clear();
   assert.ok(!api.liveness(udid, fresh).suspectSurface, 'no input recorded, no claim made');
 
   // The note has to reach a caller. It reports ok:true, and every consumer used
@@ -4757,4 +4779,51 @@ test('doctor proves the accessibility tree answers, not merely that a driver exi
 
   // And a nameless check is data for --json, never a blank row for a reader.
   assert.match(src, /for \(const c of checks\) if \(c\.name\)/);
+});
+
+test('an ambiguous waitFor is a satisfied waitFor', async () => {
+  // A `waitFor` asks one question — has it arrived — and several matches is a
+  // yes. The old behaviour reasoned exactly that in a comment and then threw:
+  // a field session lost a batch and three queued steps on a screen that was
+  // precisely where the flow wanted to be, then re-issued the lot with an index.
+  //
+  // The ambiguity is real and belongs in the *next* step's selector, not in
+  // this step's verdict.
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const ends = { "case 'waitFor'": "case 'assert'", "case 'waitText'": "case 'assertText'" };
+  for (const [what, marker] of [['waitFor', "case 'waitFor'"], ['waitText', "case 'waitText'"]]) {
+    const body = src.slice(src.indexOf(marker), src.indexOf(ends[marker]));
+    const hit = body.indexOf('the wait is satisfied');
+    assert.ok(hit !== -1, `${what} satisfies an ambiguous match`);
+    // And it returns rather than throwing, which is the whole change.
+    const line = body.lastIndexOf('return', hit);
+    const thrown = body.lastIndexOf('throw', hit);
+    assert.ok(line > thrown, `${what} returns the ambiguous case rather than throwing it`);
+  }
+  // The old message must be gone from both, or the fix is half-applied.
+  assert.ok(!src.includes('not waiting: it is already on screen'),
+    'the refusal that reasoned correctly and then failed anyway is gone');
+});
+
+test('an index past the end is not an absent element', async () => {
+  // `{"tap": "Work Orders", "index": 1}` on a screen with exactly one match
+  // reported `"Work Orders" is not on this screen` — while the element map
+  // three lines below in the same reply listed it. A tester then went looking
+  // for a control that had been there all along.
+  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  const block = src.slice(src.indexOf('const candidates = screenmap.rank'), src.indexOf('return { device, state: current, entry, target, from'));
+  assert.match(block, /index \$\{index\} is out of range/);
+  assert.match(block, /valid indices are 0\.\./, 'and it says what the valid range is');
+  assert.match(block, /Nearest:/, 'and lists what it did match');
+  // Tagged `ambiguous: true`, because the target IS present — which is what
+  // tells a waiting caller that waiting cannot help.
+  assert.match(block, /ambiguous: true/);
+  // The absent case survives, and it is the one that keeps `unknown_screen`.
+  assert.match(block, /is not on this screen\. Visible:/);
+
+  // And the visible list says when it has been cut. The same report found a
+  // control missing from `Visible:` purely because it sat past the twelfth
+  // entry — a truncated list that does not announce its truncation reads as an
+  // exhaustive one.
+  assert.match(block, /and \$\{visible\.length - shown\.length\} more/);
 });

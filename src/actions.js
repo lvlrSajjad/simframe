@@ -2402,10 +2402,12 @@ async function runStep(deviceQuery, udid, step, ctx) {
           // Same rule as `waitFor`, and `matchElement` says it in its own
           // words: a query that matched several elements has found them all
           // already.
-          if (/matched \d+ elements/.test(err.message)) {
-            throw new Error(
-              `${err.message}\n  (not waiting: it is already on screen, and waiting cannot make it unique)`,
-            );
+          // Satisfies the wait, for the same reason as `waitFor` above: several
+          // matches is an answer of "yes, it is here".
+          const many = err.message.match(/matched (\d+) elements/);
+          if (many) {
+            return `"${target}" is on screen (${many[1]} matches)`
+              + ' — the wait is satisfied; pass an index to act on one of them';
           }
         }
         await sleep(250);
@@ -2570,10 +2572,22 @@ async function runStep(deviceQuery, udid, step, ctx) {
           //
           // Distinguished by the tag at the throw site rather than by reading
           // the message, because "not on this screen" tags the same reason.
+          //
+          // And it **satisfies** the wait rather than failing it, which is the
+          // correction. The paragraph above had the reasoning right — ambiguous
+          // means the target is present, several times over — and then threw
+          // anyway. A `waitFor` asks one question, *has it arrived*, and two
+          // matches is a yes. Reported from the field: the batch was abandoned
+          // and three queued steps discarded on a screen that was exactly where
+          // the flow wanted to be, and the tester had to re-issue the lot with
+          // an index. The ambiguity is real and belongs in the next step's
+          // selector, not in this step's verdict.
           if (metrics.escalationOf(err)?.ambiguous) {
-            throw new Error(
-              `${err.message}\n  (not waiting: it is already on screen, and waiting cannot make it unique)`,
-            );
+            // The count comes from the message because the tag is a boolean —
+            // it marks *which kind* of ambiguity, not how many.
+            const n = err.message.match(/matches (\d+) things/)?.[1];
+            return `${query} is on screen${n ? ` (${n} matches)` : ' more than once'}`
+              + ' — the wait is satisfied; pass an index or a #ref to act on one of them';
           }
         }
         if (Date.now() >= limit) break;
