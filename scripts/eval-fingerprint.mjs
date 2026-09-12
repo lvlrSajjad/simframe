@@ -164,8 +164,21 @@ for (let round = 1; round <= rounds; round += 1) {
       // means the navigation did not happen.
       const s = fingerprint.similarity(previous.tokens, id.tokens ?? []);
       if (s >= ARRIVAL_SUSPICION) {
+        // What was actually on screen, not just that it was the wrong thing.
+        //
+        // This check has fired twice on CI and both times the report was a
+        // similarity score and two screen names, which is enough to know the
+        // run is void and not enough to know why. The tour asserts arrival with
+        // a `waitFor` before this ever runs, so a failure here means the
+        // `waitFor` *passed* on a screen that was not the destination — and the
+        // labels are the only thing that can say what that screen was.
+        const labels = (id.entry?.targets ?? [])
+          .map((t) => t.label).filter(Boolean).slice(0, 12).map((l) => l.slice(0, 24));
         arrivalFailures.push(
-          `${previous.name} -> ${screen.name}: similarity ${s.toFixed(2)} — the screen did not change`);
+          `${previous.name} -> ${screen.name}: similarity ${s.toFixed(2)} — the screen did not change`
+          + `\n         sensors: ${(id.entry?.sources ?? []).join('+') || 'none'}`
+          + `, settled: ${id.settled}, frame ${Math.round(Date.now() - (id.state?.capturedAt ?? Date.now()))}ms old`
+          + `\n         on screen: ${labels.length ? labels.join(' · ') : '(nothing readable)'}`);
       }
     }
     readings.push({
@@ -216,6 +229,12 @@ if (arrivalFailures.length) {
   console.error('measure the tour rather than the fingerprint. Fix the tour and re-run.');
   console.error('A `settle` step defaults to mode "stable", which returns instantly in the');
   console.error('moment before an animation begins — action steps already settle on their own.');
+  console.error('');
+  console.error('The tour asserts arrival with a `waitFor` before any reading is taken, so a');
+  console.error('failure here means that wait PASSED on a screen that was not the destination.');
+  console.error('Read the labels above before changing the tour: either the wait matched');
+  console.error('something it should not have, or the reading came off a frame older than the');
+  console.error('navigation — and those have opposite fixes.');
   process.exit(1);
 }
 
