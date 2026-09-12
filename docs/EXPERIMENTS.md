@@ -334,6 +334,45 @@ one. Where the thesis pays undiminished is a decision with no cheap rule
 available — the `seek` container ranker is 564 ms warm against the same
 10–16 s round trip, ~20x cheaper, and nothing free replaces it.
 
+### The cascade — threshold, then the small model, then Claude
+
+The owner's design, and the right shape: answer free where you can, pay for the
+on-device model only where you cannot, and pay a round trip only after that.
+Measured on the same 22 situations, letting the rule abstain in a band around
+its own threshold and handing those to the model:
+
+| abstain band | escalated | cascade accuracy |
+| --- | --- | --- |
+| none — the rule alone | 0/22 | **95%** |
+| ±250 ms → Apple | 2/22 | 91% |
+| ±500 ms → Apple | 3/22 | 91% |
+| ±1,000 ms → Apple | 5/22 | 86% |
+| ±1,500 ms → Apple | 8/22 | 82% |
+| ±1,500 ms → `qwen3:8b` | 8/22 | 91% |
+
+**Every escalation made it worse or left it unchanged. Never better.** And the
+reason is more useful than the table.
+
+**The cascade needs a tier that can say "I don't know", and no tier has one.**
+The threshold is a comparison: it always answers. The supervisor's vocabulary is
+three words and none of them is an abstention. So the question a cascade really
+asks is not "does falling through help" but "what is the abstain signal" — which
+is item 100, arrived at from a completely different direction.
+
+**And the obvious abstain signal is the wrong one here.** Proximity to the
+decision boundary is what you would reach for first. The rule's single error
+sits **3,534 ms from its own threshold** — further out than the median row's
+1,610 ms — so a band wide enough to catch it would escalate 20 of the 22 rows
+first. The error is not a close call. It is a `detail` screen still fetching
+after 6.5 s of stillness, which is wrong for a *semantic* reason that no
+confidence band around a duration can see.
+
+That is the finding to carry: **the shape of the cascade is right and the hard
+part is not the shape.** A tier that knows when it does not know is worth more
+than a tier that is slightly more accurate, and nothing here measures confidence
+yet. n=22 on five designed fixture shapes, so this rules the simple version out
+rather than settling the idea.
+
 ### What replay cannot say
 
 Whether acting on a ruling actually *recovered* the flow is a fact about the

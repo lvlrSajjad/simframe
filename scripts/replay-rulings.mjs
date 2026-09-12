@@ -104,6 +104,7 @@ for (const arm of arms) {
   const lat = answered.map((j) => j.ruling.ms).filter(Number.isFinite).sort((a, b) => a - b);
   results.push({
     arm,
+    judged,
     n: rows.length,
     unanswered,
     // Scored over every situation, not only the answered ones. A judge that
@@ -138,6 +139,43 @@ for (const r of results) {
   const seen = new Map();
   for (const e of r.errors) seen.set(e, (seen.get(e) ?? 0) + 1);
   for (const [e, n] of [...seen].sort((a, b) => b[1] - a[1])) console.log(`    ${String(n).padStart(3)}x ${e}`);
+}
+
+// --- the cascade: threshold -> local model -> Claude -----------------------
+//
+// The owner's proposal, and the numbers are the only way to say whether it
+// helps: answer with the free rule where it is confident, fall through to the
+// on-device model where it is not, and only then pay a round trip.
+//
+// **A cascade needs a tier that can decline, and neither tier has one.** The
+// threshold is a comparison — it always answers. The supervisor's vocabulary is
+// three words and none of them is "I don't know". So the interesting number is
+// not "does a cascade help" but "how much would an abstain token be worth", and
+// that is item 100. This measures it directly, by letting the rule abstain in a
+// band around its own threshold and handing those to the next tier.
+const armDecisions = new Map(results.map((r) => [r.arm, r.judged]));
+console.log('\n--- cascade: the rule answers, the model covers where it abstains ---');
+console.log(`${'abstain band'.padEnd(22)} ${'rule'.padStart(6)} ${'->model'.padStart(8)} ${'cascade'.padStart(9)} ${'model calls'.padStart(12)}`);
+for (const band of [0, 250, 500, 750, 1000, 1500]) {
+  const lo = STILL_MS_THRESHOLD - band;
+  const hi = STILL_MS_THRESHOLD + band;
+  for (const arm of arms) {
+    const judged = armDecisions.get(arm) ?? [];
+    let right = 0;
+    let escalated = 0;
+    for (const [i, r] of rows.entries()) {
+      const still = r.situation.stillMs ?? 0;
+      if (band > 0 && still >= lo && still <= hi) {
+        escalated += 1;
+        const ruling = judged[i]?.ruling;
+        if (ruling && satisfies(ruling.decision, want(r))) right += 1;
+        continue;
+      }
+      if (satisfies(still > STILL_MS_THRESHOLD ? 'stop' : 'wait', want(r))) right += 1;
+    }
+    console.log(`${`+/-${band}ms -> ${arm}`.padEnd(22)} ${pct(stillRule).padStart(6)} ${`${escalated}`.padStart(8)} ${pct(right / rows.length).padStart(9)} ${`${escalated}/${rows.length}`.padStart(12)}`);
+  }
+  if (band === 0) console.log('  (band 0 = no abstention, the rule alone — every row below adds a tier)');
 }
 
 console.log('\nThis scores DECISIONS on identical inputs. It cannot score outcomes —');

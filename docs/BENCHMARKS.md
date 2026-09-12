@@ -3850,3 +3850,28 @@ The plateau is roughly 2,100–3,200 ms, and the `blocked` fixtures cluster at
 collapses. A rule whose correctness depends on a 1.1-second window that the
 fixture design happens to straddle is separating **the fixtures**, not
 necessarily the world. The next measurement is a population nobody designed.
+
+### The cascade, measured on the same 22 situations
+
+The owner's proposal: threshold first, Apple ~3B if the threshold is unsure,
+Claude only after that. Simulated by letting the rule abstain in a band around
+`stillMs > 3000ms` and handing those rows to the model.
+
+| abstain band | escalated | cascade |
+| --- | --- | --- |
+| none — the rule alone | 0/22 | **95%** |
+| ±250 ms -> Apple | 2/22 | 91% |
+| ±500 ms -> Apple | 3/22 | 91% |
+| ±1,000 ms -> Apple | 5/22 | 86% |
+| ±1,500 ms -> Apple | 8/22 | 82% |
+| ±1,500 ms -> `qwen3:8b` | 8/22 | 91% |
+
+Every escalation is worse or equal; none is better. The rule's one error sits
+**3,534 ms from its own boundary**, against a median row distance of 1,610 ms —
+so proximity-to-threshold, the obvious abstain signal, would escalate 20 of 22
+rows before catching the row that was wrong. The error is a `detail` screen
+still fetching after 6.5 s of stillness: wrong for a semantic reason no
+confidence band around a duration can see.
+
+The shape of the cascade is right. The hard part is the abstain signal, which
+is item 100 reached from a different direction.
