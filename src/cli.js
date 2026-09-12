@@ -734,12 +734,25 @@ async function main() {
           `"${target}" matches more than one screen:`,
           ...(res.candidates ?? []).map((c) => `  ${c.name}  (${c.hash.slice(0, 8)})`),
         ],
+        // Both of these walked, so the steps they took are the useful part and
+        // are printed exactly as a flow prints them.
+        'route-halted': () => [
+          ...(res.results ?? []).map(stepLine),
+          `stopped after ${res.ranSteps} of ${res.steps?.length} step(s) on the way to ${res.screen}`,
+        ],
+        'arrived-elsewhere': () => [
+          ...(res.results ?? []).map(stepLine),
+          `ended at ${res.arrived}, wanted ${res.screen} — every step ran, so an edge the graph`
+            + ' remembers no longer leads where it says. Re-walk it and the graph will relearn.',
+        ],
       };
       if (!res.ok && res.reason) {
         emit(flags, res, refusal[res.reason] ?? `${res.reason}: cannot reach "${res.to ?? target}" from here`);
         process.exitCode = 1;
         return;
       }
+      // Everything that is not ok now carries a reason and was handled above,
+      // so this is the arrival path only.
       emit(
         flags,
         res,
@@ -747,9 +760,7 @@ async function main() {
           ? `already on ${res.screen}`
           : [
               ...(res.results ?? []).map(stepLine),
-              res.ok
-                ? `arrived at ${res.screen} in ${res.ranSteps} step(s)`
-                : `ended at ${res.arrived}, wanted ${res.screen}`,
+              `arrived at ${res.screen} in ${res.ranSteps} step(s)`,
             ],
       );
       process.exitCode = res.ok ? 0 : 1;

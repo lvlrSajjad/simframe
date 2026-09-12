@@ -491,7 +491,12 @@ const walked = await jsonRetry(['goto', target.hash], { allowFail: true });
 // neither walking there nor naming why it cannot, so this check failed with an
 // empty detail — the reason was `undefined` — and the check was right to fail.
 // Now there is a name for it, and the list has to know the name.
-const outcomes = ['no-route', 'unreplayable-edge', 'ambiguous', 'unknown-screen', 'no-identity'];
+// `route-halted` and `arrived-elsewhere` are new: a walk that ran and did not
+// land used to return `{ok: false}` with no reason at all, which failed this
+// very check with an empty detail. It was the one outcome here nobody had
+// named, and the check found it.
+const outcomes = ['no-route', 'unreplayable-edge', 'ambiguous', 'unknown-screen', 'no-identity',
+  'route-halted', 'arrived-elsewhere'];
 check(walked.ok === true || outcomes.includes(walked.reason),
   'and asked for a screen it knows, it either walks there or names why it cannot',
   walked.ok ? (walked.already ? 'already there' : `walked ${walked.ranSteps} step(s)`) : walked.reason);

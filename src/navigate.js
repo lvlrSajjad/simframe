@@ -96,14 +96,40 @@ export async function goto(deviceQuery, target, { options, ...runOptions } = {})
 
   const result = await runScript(udid, { steps, stopOnUnexpected: true, ...runOptions });
   const arrived = await api.screenIdentity(udid, {});
-  return {
-    ok: arrived.hash === found.node.hash,
+  const walk = {
     screen: found.name,
     steps,
     ranSteps: result.ranSteps,
     results: result.results,
     arrived: arrived.hash ? arrived.hash.slice(0, 8) : null,
   };
+  if (arrived.hash === found.node.hash) return { ok: true, ...walk };
+
+  // A walk that ran and did not land had no name, and it was the only outcome
+  // here that did not.
+  //
+  // Every refusal above is named, logged and groupable; this one returned
+  // `{ok: false}` with no `reason` at all, so `simframe goto <known hash>` on
+  // CI failed the check that says *"it either walks there or names why it
+  // cannot"* with an empty detail — which is exactly what the check is for, and
+  // it had been sitting under an outcome nobody had named rather than under a
+  // crash.
+  //
+  // Two names, because they are two different faults and only one of them is
+  // about the graph. `route-halted` means a step on the route failed, which is
+  // an ordinary failure of the app or the moment. `arrived-elsewhere` means
+  // every step ran and we are *not where the graph promised* — an edge it
+  // remembers is wrong, and that is worth reading as a claim about memory
+  // rather than about this attempt.
+  const reason = !arrived.hash
+    ? 'no-identity'
+    : (result.ranSteps < steps.length ? 'route-halted' : 'arrived-elsewhere');
+  return refuse(udid, { ok: false, reason, to: found.name, ...walk }, {
+    detail: reason === 'arrived-elsewhere'
+      ? `route to "${found.name}" ran to the end and landed on ${walk.arrived}`
+      : `route to "${found.name}" stopped after ${result.ranSteps} of ${steps.length} step(s)`,
+    flowName: `goto:${target}`,
+  });
 }
 
 export function knownScreens(udid) {

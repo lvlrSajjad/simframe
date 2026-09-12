@@ -4396,3 +4396,57 @@ test('the aim a step reports is the point the finger reached, not the one in the
   // the gesture failed to change.
   assert.match(src, /describePoint\(\s*\n?[\s\S]{0,400}?beforeScreen\?\.entry/, 'diagnosed against the before-screen');
 });
+
+test('a goto that fails always names why, and the name is one everybody knows', async () => {
+  const metrics = await import('../src/metrics.js');
+  const navSrc = fs.readFileSync(new URL('../src/navigate.js', import.meta.url), 'utf8');
+  const checkSrc = fs.readFileSync(new URL('../scripts/ci-memory.mjs', import.meta.url), 'utf8');
+
+  // `goto` is the whole function, from its signature to `knownScreens`.
+  const goto = navSrc.slice(navSrc.indexOf('export async function goto'), navSrc.indexOf('export function knownScreens'));
+
+  // Every refusal it can produce. Pinned as the literals because the drift this
+  // guards is exactly a new literal appearing in one place and nowhere else —
+  // which is what happened: a walk that ran and landed elsewhere returned
+  // `{ok: false}` with no reason at all, and three separate lists stayed
+  // unaware of an outcome that had no name to be unaware of.
+  const produced = [...goto.matchAll(/reason: '([a-z-]+)'/g)].map((m) => m[1]);
+  // The two computed ones, which are chosen by a ternary rather than written at
+  // a `reason:` key.
+  produced.push(...[...goto.matchAll(/^\s*\? '([a-z-]+)'$|^\s*: \(?result\.ranSteps.*\? '([a-z-]+)' : '([a-z-]+)'\)?;$/gm)]
+    .flatMap((m) => m.slice(1).filter(Boolean)));
+
+  assert.ok(produced.includes('arrived-elsewhere'), 'the walk that did not land has a name');
+  assert.ok(produced.includes('route-halted'), 'and so does the walk that stopped early');
+
+  for (const r of new Set(produced)) {
+    assert.ok(
+      metrics.PLAN_REASONS[r],
+      `"${r}" must map to one of the five escalation reasons — an unmapped refusal is never logged`,
+    );
+    assert.ok(
+      metrics.REASONS.includes(metrics.PLAN_REASONS[r]),
+      `"${r}" maps to "${metrics.PLAN_REASONS[r]}", which is not one of the five`,
+    );
+  }
+
+  // And the integration check has to know every name, or it fails on a correct
+  // refusal — which is the failure that started this.
+  const known = JSON.parse(
+    checkSrc
+      .slice(checkSrc.indexOf('const outcomes = ['))
+      .match(/\[[\s\S]*?\]/)[0]
+      .replace(/'/g, '"')
+      .replace(/,(\s*\])/, '$1'),
+  );
+  for (const r of new Set(produced)) {
+    assert.ok(known.includes(r), `ci-memory does not know the refusal "${r}"`);
+  }
+
+  // The one thing the check is really asserting: there is no path out of a
+  // failed goto that carries no reason. `ok: false` and `reason` are written
+  // together every time.
+  for (const m of goto.matchAll(/ok: false[^\n]*/g)) {
+    assert.match(m[0], /reason/, `an \`ok: false\` with no reason: ${m[0].trim()}`);
+  }
+});

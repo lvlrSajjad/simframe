@@ -312,6 +312,11 @@ export const PLAN_REASONS = {
   'no-route': 'no_plan',
   'unreplayable-edge': 'no_plan',
   'unknown-flow': 'no_plan',
+  // A route that ran and did not land. Not `no_plan`: there *was* a plan and it
+  // was followed — what could not be confirmed is that it worked, which is what
+  // `verification_failed` means everywhere else in this file.
+  'route-halted': 'verification_failed',
+  'arrived-elsewhere': 'verification_failed',
 };
 
 /** A short, bounded description of a candidate element, for the log. */
