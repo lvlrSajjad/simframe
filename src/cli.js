@@ -1108,13 +1108,31 @@ async function main() {
 
     case 'supervisions': {
       const dev = await resolveDevice(flags.device);
-      const records = metrics.readSupervisions(dev.udid, { limit: flags.last ? num(flags.last) : undefined });
+      // `--session` works here now, and did not before.
+      //
+      // Reported twice from the field: two different session ids returned
+      // byte-identical output while `escalations --session` filtered correctly.
+      // A flag that exists on one command and is silently inert on its sibling
+      // is worse than an absent one — this command's own footer warns that the
+      // counts pool multiple agents and then offered no way to unpool them.
+      const session = flags.session === true
+        ? metrics.sessionId()
+        : (flags.session ? String(flags.session) : null);
+      const all = metrics.readSupervisions(dev.udid, { limit: flags.last ? num(flags.last) : undefined });
+      const records = session ? all.filter((r) => r?.session_id === session) : all;
       const b = metrics.supervisionBreakdown(records);
       if (flags.out) store.writeAtomic(String(flags.out), `${JSON.stringify({ ...b, records }, null, 2)}\n`);
       emit(flags, { ...b, records: flags.verbose ? records : undefined }, [
         `${b.total} supervisor ruling${b.total === 1 ? '' : 's'} on ${dev.name}`,
-        b.total ? '' : 'Nothing has been judged on this device yet. The supervisor is off unless'
-          + ' SIMFRAME_SUPERVISOR=apple, and a ruling is only recorded when a step actually fails.',
+        // "Nothing here" and "nothing matched your filter" are different
+        // answers, and the first one told a reader the supervisor had never
+        // run on a device holding 111 rulings.
+        b.total
+          ? null
+          : (all.length
+            ? `no ruling in this log belongs to session ${session} — the device has ${all.length}.`
+            : 'Nothing has been judged on this device yet. The supervisor is off unless'
+              + ' SIMFRAME_SUPERVISOR=apple, and a ruling is only recorded when a step actually fails.'),
         ...Object.entries(b.decision_to_outcome)
           .sort((a, c) => c[1] - a[1])
           .map(([k, n]) => `  ${k.padEnd(28)} ${String(n).padStart(4)}`),
@@ -1130,8 +1148,12 @@ async function main() {
               ? ` — ${b.p95_unknown} ruling(s) are on edges with no p95, so they cannot take part in 101's comparison`
               : '')
           : null,
+        session && all.length !== records.length
+          ? `filtered to session ${session}: ${records.length} of ${all.length} ruling(s)`
+          : null,
         b.sessions.length > 1
           ? `WARNING ${b.sessions.length} sessions are pooled here; two agents on one device write one file`
+            + ' — narrow with --session (this process) or --session=<id>'
           : null,
       ].filter((l) => l !== null).join('\n'));
       break;
