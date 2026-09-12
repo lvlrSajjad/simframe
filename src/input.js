@@ -623,6 +623,10 @@ export function shouldRebuildSession({ stale, bootedAt }, rebuiltFor) {
 const rebuiltForBoot = new Map();
 export async function ensureFreshSession(udid) {
   if (!udid) return null;
+  // Every input path calls this first, so it is the one place that knows the
+  // hands are about to move. `liveness` needs that timestamp to tell a calm
+  // screen from a dead surface — see `store.noteInput`.
+  store.noteInput(udid);
   const health = await sessionHealth(udid);
   if (!shouldRebuildSession(health, rebuiltForBoot.get(udid))) return null;
   rebuiltForBoot.set(udid, health.bootedAt);

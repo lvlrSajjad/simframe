@@ -4658,3 +4658,52 @@ test('the article and its page are one document, not two', async () => {
   assert.throws(() => render('<h1>T</h1><p class="kicker">k</p><section><p>&nosuchentity;</p></section>'),
     /unknown entity/);
 });
+
+test('a live loop reading a dead surface is a contradiction we can see (SEV-1)', async () => {
+  const api = await import('../src/index.js');
+  const store = await import('../src/store.js');
+  const udid = 'TEST-SURFACE';
+  const dir = path.join(process.env.SIMFRAME_HOME ?? '', udid);
+  fs.mkdirSync(dir, { recursive: true });
+  // A daemon that is alive and healthy, which is the whole difficulty: every
+  // hard signal is green.
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ pid: process.pid, version: 4, engine: 'simframed' }));
+
+  const now = Date.now();
+  const fresh = { capturedAt: now - 60, seq: 1806, stableForMs: 159_753 };
+
+  // The reported figures: a frame 60ms old, a screen still for 160 seconds, and
+  // input delivered 12 seconds ago — i.e. three gestures landed *inside* the
+  // quiet period. `sim_look` served a login screen for three minutes here while
+  // announcing it as 66ms old, and nothing warned.
+  store.noteInput(udid, now - 12_000);
+  const wedged = api.liveness(udid, fresh);
+  assert.equal(wedged.suspectSurface, true);
+  assert.match(wedged.note, /surface behind them may be dead/);
+  assert.match(wedged.note, /accessibility tree/, 'and it names the tiebreaker');
+  // Deliberately not a failure. A screen that genuinely rejects every tap is
+  // real, and turning that into a hard error is a confident wrong answer.
+  assert.equal(wedged.ok, true);
+
+  // A screen that moved after the input is ordinary, however long it has since
+  // been still.
+  store.noteInput(udid, now - 200_000);
+  assert.ok(!api.liveness(udid, fresh).suspectSurface, 'input older than the quiet period is no contradiction');
+
+  // A tap that legitimately changed nothing must not trip it — that is most
+  // taps on a disabled control.
+  store.noteInput(udid, now - 1_000);
+  assert.ok(!api.liveness(udid, { ...fresh, stableForMs: 3_000 }).suspectSurface);
+
+  // And a device nobody has touched cannot produce the contradiction at all.
+  fs.rmSync(path.join(dir, 'last-input'), { force: true });
+  assert.ok(!api.liveness(udid, fresh).suspectSurface, 'no input recorded, no claim made');
+
+  // The note has to reach a caller. It reports ok:true, and every consumer used
+  // to gate on `!live.ok` — so detecting this and not surfacing it would have
+  // changed nothing at all, which is the actual failure being fixed.
+  const cli = fs.readFileSync(new URL('../src/cli.js', import.meta.url), 'utf8');
+  const mcp = fs.readFileSync(new URL('../src/mcp.js', import.meta.url), 'utf8');
+  assert.ok(!/if \(!res\.live\.ok\) out\.push/.test(cli), 'the CLI no longer gates the note on ok');
+  assert.ok(!/return live\?\.ok \? null :/.test(mcp), 'nor does the MCP header');
+});

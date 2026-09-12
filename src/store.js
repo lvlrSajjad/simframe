@@ -34,10 +34,40 @@ export function paths(udid) {
     // wedged. It cannot ride in state.json: that is written when a frame is
     // recorded, and a stall is the absence of frames.
     captureHealth: path.join(dir, 'capture-health.json'),
+    lastInput: path.join(dir, 'last-input'),
   };
 }
 
 /** What the capture loop last said about its own health, or null if it has no complaint. */
+/**
+ * When input was last delivered to this device.
+ *
+ * Written by every input path and read by `liveness`, which needs it to catch
+ * the one wedge shape nothing else can see: a capture loop that is alive,
+ * incrementing its frame counter, and re-reading a **dead surface**. Field
+ * report, 0.12.2: `age=268ms` next to `stable=159753ms` while three screen
+ * transitions had just happened, and no warning fired because every signal we
+ * had was green. A screen that has not moved since before we last touched it,
+ * over and over, is a contradiction the daemon can notice locally.
+ */
+export function noteInput(udid, at = Date.now()) {
+  try {
+    writeAtomic(paths(udid).lastInput, String(at));
+  } catch {
+    /* a timestamp nothing depends on for correctness must not fail an action */
+  }
+}
+
+export function lastInputAt(udid) {
+  try {
+    const raw = fs.readFileSync(paths(udid).lastInput, 'utf8');
+    const at = Number(raw);
+    return Number.isFinite(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+
 export function captureHealth(udid) {
   return readJson(paths(udid).captureHealth);
 }

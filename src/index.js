@@ -125,6 +125,24 @@ export const READY_TIMEOUT_MS = 20_000;
  */
 export const LIVE_DAEMON_CAP_MS = 60_000;
 
+/**
+ * How long a screen may sit perfectly still before stillness itself is evidence.
+ *
+ * Generous on purpose: a person reading a screen leaves it alone for a minute
+ * without anything being wrong, and the signal below only means something when
+ * input was delivered *inside* that quiet window.
+ */
+export const SURFACE_SUSPECT_MS = 20_000;
+
+/**
+ * Slack between "input landed" and "the screen should have moved".
+ *
+ * A tap that legitimately changes nothing is ordinary — a disabled control, a
+ * form rejecting a submit — so the input has to sit well inside the quiet
+ * period before the two numbers genuinely contradict each other.
+ */
+export const SURFACE_MARGIN_MS = 5_000;
+
 export function daemonStatus(udid) {
   const meta = store.readJson(store.paths(udid).meta);
   const pid = meta?.pid ?? null;
@@ -422,6 +440,44 @@ export function liveness(udid, state) {
   const damageDriven = engine.runningEngine(udid) === 'simframed';
   if (!damageDriven && ageMs > STALE_FRAME_MS) {
     return { ok: false, ageMs, stalled: false, note: `capture loop is stalled: newest frame is ${ageMs}ms old` };
+  }
+
+  // A live loop re-reading a dead surface, which every other signal calls fine.
+  //
+  // Reported from the field on 0.12.2, and it is the most expensive shape this
+  // tool has produced: `sim_look` served the *login screen* for three minutes
+  // while the app was four screens deep in a wizard, and announced the frame as
+  // 66ms old. The daemon was not lying — the frame really was new. It was a new
+  // read of a surface that had stopped updating. Every check above passes: the
+  // process is alive, no read failed, the age is tiny.
+  //
+  // The contradiction is between two numbers we already have. `stableForMs`
+  // says the screen has not changed in N ms; `lastInputAt` says we were
+  // delivering taps and swipes during that window. A screen that has not moved
+  // since *before* we last touched it, for long enough that several gestures
+  // landed inside the quiet period, is not a calm screen. The tester's own
+  // figures: stable for 159,753 ms across three screen transitions.
+  //
+  // Deliberately a WARNING and not a failure. A genuinely inert screen is
+  // possible — a form that rejects every tap, a disabled control tapped twice —
+  // and turning that into a hard error would be a confident wrong answer of
+  // exactly the kind this project keeps paying for. It says what it sees and
+  // names the arbiter.
+  const stableForMs = state?.stableForMs;
+  const lastInput = store.lastInputAt(udid);
+  if (Number.isFinite(stableForMs) && lastInput && stableForMs > SURFACE_SUSPECT_MS) {
+    const sinceInput = Date.now() - lastInput;
+    if (sinceInput < stableForMs - SURFACE_MARGIN_MS) {
+      return {
+        ok: true,
+        ageMs,
+        stalled: false,
+        suspectSurface: true,
+        note: `the screen has not changed in ${Math.round(stableForMs / 1000)}s, but input was delivered `
+          + `${Math.round(sinceInput / 1000)}s ago — so the frames are new and the surface behind them may be dead. `
+          + 'The accessibility tree is read separately and is the tiebreaker; `simframe revive` re-attaches capture.',
+      };
+    }
   }
   return { ok: true, ageMs, stalled: false, note: null };
 }

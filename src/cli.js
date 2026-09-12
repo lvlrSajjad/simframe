@@ -491,7 +491,9 @@ async function main() {
       } else {
         const s = res.state;
         const out = [];
-        if (!res.live.ok) out.push(`WARNING: ${res.live.note}`);
+        // Any note, not only a failing one: a dead surface reports `ok` with
+        // something important to say. See `liveness`.
+        if (res.live.note) out.push(`WARNING: ${res.live.note}`);
         // A cause, rather than five silent no-ops. Every tap on a stale
         // session is dispatched successfully and moves nothing.
         if (res.input?.stale) out.push(`input: stale — ${res.input.reason}`);
@@ -1554,6 +1556,13 @@ async function doctor({ json = false, strict = false, device, options = {} } = {
       for (const d of probed) {
         const live = api.liveness(d.udid, (await api.getState(d.udid)).state);
         if (live.stalled) add(`capture health (${d.name})`, 'fail', live.note, { key: 'capture.stalled', value: true });
+        // A `warn` rather than a `fail`, because a genuinely inert screen is
+        // possible and this is a contradiction between two numbers rather than
+        // a proven fault. It is still the loudest thing `doctor` can say about
+        // the failure that made a tester report a false application state.
+        else if (live.suspectSurface) {
+          add(`capture surface (${d.name})`, 'warn', live.note, { key: 'capture.suspectSurface', value: true });
+        }
       }
     }
   } catch (err) {

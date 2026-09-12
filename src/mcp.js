@@ -459,7 +459,13 @@ function header(device, state, ageMs, extra = '') {
 }
 
 function livenessLine(live) {
-  return live?.ok ? null : `WARNING: ${live.note}`;
+  // `ok` is not the only thing worth saying. A surface that has stopped
+  // updating leaves every hard signal green — the loop is alive, no read
+  // failed, the frame is milliseconds old — and reporting nothing is how
+  // `sim_look` served a three-minute-old login screen while announcing it as
+  // 66ms old. A note that exists must reach the caller.
+  if (live?.note) return `WARNING: ${live.note}`;
+  return null;
 }
 
 function sinceLine(since) {
