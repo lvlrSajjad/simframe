@@ -178,17 +178,42 @@ function isBootedSync(udid) {
   return false;
 }
 
+/**
+ * What went wrong with a `simctl io screenshot`, in one sentence.
+ *
+ * Extracted so it can be *tested* rather than reasoned about, for the same
+ * reason `pickDevice` and `decisionOf` were: this is the line where a wrong
+ * answer was expensive, and it was wrong for a day.
+ */
+export function screenshotFailure(err) {
+  const killed = err.killed || err.signal === 'SIGTERM';
+  // `simctl` opens with `Note: No display specified …` on every run, success or
+  // failure. When the display surface is dead the command does not fail, it
+  // *hangs* — so at kill time that Note is the only thing on stderr, and the
+  // tool reported a benign informational line as the reason a capture failed.
+  // That is how this wedge stayed nameless through five CI failures.
+  const lines = String(err.stderr || '').trim().split('\n').map((l) => l.trim()).filter(Boolean);
+  const real = lines.filter((l) => !/^Note:/i.test(l)).pop();
+  if (killed && !real) {
+    // Run to completion the device names it exactly:
+    //   NSPOSIXErrorDomain code 60 — Timeout waiting for screen surfaces
+    // which is CoreSimulator saying the surface is gone, and the closest thing
+    // to a positive test for the wedge that exists.
+    return 'simctl screenshot did not return within 10s. The display surface is not answering'
+      + ' — run to completion it reports "Timeout waiting for screen surfaces" (NSPOSIXErrorDomain 60).'
+      + ' This is the device, not the capture loop: `simframe revive` restarts it.';
+  }
+  const detail = real ?? lines.pop();
+  return detail ? `simctl screenshot failed: ${detail}` : `simctl screenshot failed: ${err.message}`;
+}
+
 async function screenshot(udid, outFile, { mask = 'ignored' } = {}) {
   try {
     await run('xcrun', ['simctl', 'io', udid, 'screenshot', '--type=png', `--mask=${mask}`, outFile], {
       timeout: 10_000,
     });
   } catch (err) {
-    // Same reason as launchApp: execFile's message is "Command failed: <the
-    // whole command>" and simctl's actual complaint is in stderr. A CI failure
-    // here reported the command and nothing about why it did not work.
-    const detail = (err.stderr || '').trim().split('\n').filter(Boolean).pop();
-    throw new Error(detail ? `simctl screenshot failed: ${detail}` : `simctl screenshot failed: ${err.message}`);
+    throw new Error(screenshotFailure(err));
   }
 }
 

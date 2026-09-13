@@ -467,6 +467,77 @@ async function main() {
     }
 
     case 'frame': {
+      // `--fresh` captures independently of the daemon, and then says whether
+      // the two agree.
+      //
+      // This is the arbiter three field reports had to leave simframe to get.
+      // When `sim_look` served a three-hour-stale image labelled `130ms old`,
+      // the thing that finally settled it was `xcrun simctl io … screenshot` —
+      // run by hand, outside the tool, because nothing inside offered an
+      // independent read. Worse, the obvious candidate lies: `--engine` decides
+      // how to *start* a daemon, so passing `--engine=screenshot` to a read
+      // command returns the running daemon's cached frame. A tester compared
+      // the two, got byte-identical files with the same frame number, and
+      // reasonably concluded "the fallback engine is not an escape hatch".
+      //
+      // One command now answers the question the escape hatch was for: capture
+      // the screen twice by two different paths and report whether they agree.
+      if (flags.fresh) {
+        const dev = await resolveDevice(device);
+        const out = flags.out || path.join(process.cwd(), 'simframe.png');
+        await screenshot(dev.udid, out);
+        const png = fs.readFileSync(out);
+        // The daemon's own newest frame, for comparison. Absent is fine and
+        // interesting in itself: an independent capture that works while the
+        // daemon has none is exactly the wedge.
+        let cached = null;
+        try {
+          cached = await api.getFrame(device, { detail: flags.detail ?? 'normal', options });
+        } catch { /* no daemon, or it has nothing — reported below */ }
+        // Compared by *content*, never by bytes. The direct capture is a
+        // full-resolution PNG and the daemon's is downscaled, so a byte
+        // comparison says "different" every time — which is a confident wrong
+        // answer about the one question this command exists to settle. Both
+        // are decoded and reduced to the same region signature the change
+        // detector already uses, and `signatureDiff` is the same measure that
+        // decides whether a screen moved.
+        let diff = null;
+        if (cached) {
+          try {
+            const a = analyze.regionSignature(decodePng(png));
+            const b = analyze.regionSignature(decodePng(cached.png));
+            diff = analyze.signatureDiff(a, b);
+          } catch { /* an undecodable frame is reported as "could not compare" */ }
+        }
+        // The threshold the daemon itself calls a change. Below it the two
+        // paths are looking at the same screen.
+        const same = diff == null ? null : diff <= analyze.PATHS_AGREE;
+        emit(
+          flags,
+          {
+            file: out,
+            fresh: true,
+            bytes: png.length,
+            daemonSeq: cached?.state?.seq ?? null,
+            daemonAgeMs: cached?.ageMs ?? null,
+            agrees: same,
+            difference: diff == null ? null : Number(diff.toFixed(4)),
+          },
+          [
+            `${out} — captured directly from the device, ${png.length} bytes`,
+            cached
+              ? `the daemon's newest frame is #${cached.state.seq}, ${cached.ageMs}ms old`
+                + (same == null
+                  ? ' — could not be compared (one of the two would not decode)'
+                  : same
+                    ? ` — the two paths agree (difference ${diff.toFixed(4)}, under the ${analyze.PATHS_AGREE} two paths may differ by)`
+                    : ` — they DISAGREE (difference ${diff.toFixed(4)}). Two capture paths see different screens;`
+                      + ' this file is the one that bypassed the daemon. `simframe revive` re-attaches capture.')
+              : 'the daemon has no frame to compare against, while a direct capture worked',
+          ],
+        );
+        return;
+      }
       const res = await api.getFrame(device, { detail: flags.detail ?? 'normal', options });
       const out = flags.out || path.join(process.cwd(), 'simframe.png');
       fs.writeFileSync(out, res.png);

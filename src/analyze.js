@@ -65,6 +65,25 @@ export function signatureDiff(a, b) {
  */
 export const CELL_CHANGE = 0.012;
 
+/**
+ * How far two *capture paths* may differ and still be looking at one screen.
+ *
+ * Not the change threshold, and the distinction matters. `signatureDiff > 0.004`
+ * asks whether a screen moved between two frames from the *same* path. This asks
+ * whether the daemon's frame and an independent `simctl` screenshot show the
+ * same thing — and they never match closely, because one is downscaled by the
+ * capture loop and the other is a full-resolution PNG scaled here.
+ *
+ * Measured on this device, which is the only reason a number appears:
+ *
+ *   same screen, two paths       0.00123  (three runs, identical to five places)
+ *   two different screens        0.68603  (before and after a home press)
+ *
+ * A separation of 550x, so the threshold is not delicate. 0.02 is sixteen times
+ * the scaling cost and thirty-four times under the signal.
+ */
+export const PATHS_AGREE = 0.02;
+
 /** The largest single-region change between two signatures, 0-1. */
 export function maxCellDelta(a, b) {
   const deltas = regionDeltas(a, b);

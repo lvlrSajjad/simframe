@@ -4861,3 +4861,69 @@ test('a check over an empty collection is untested, not passed', async () => {
   assert.match(block, /the device at that moment/);
   assert.match(block, /live\?\.note/, 'including the liveness note, which carries the ignored-gesture check');
 });
+
+test('a wedged display is named, not reported as a benign note (126)', async () => {
+  const { screenshotFailure } = await import('../src/platform/ios.js');
+
+  // The exact shape that hid this for a day. `simctl` prints its Note on every
+  // run; when the display surface is dead the command *hangs*, we kill it at
+  // the timeout, and that Note is the only thing on stderr by then. The tool
+  // then reported an informational line as the reason a capture failed — and
+  // this wedge went nameless through five separate CI failures wearing five
+  // different symptoms.
+  const hung = Object.assign(new Error('Command failed'), {
+    killed: true,
+    stderr: 'Note: No display specified. Defaulting to display: 6D9407E2 (screenID: 1, name: LCD)\n',
+  });
+  const said = screenshotFailure(hung);
+  assert.ok(!said.includes('No display specified'), 'the Note is not the reason');
+  assert.match(said, /display surface is not answering/);
+  assert.match(said, /Timeout waiting for screen surfaces/, 'it quotes what the device itself says');
+  assert.match(said, /simframe revive/, 'and names the cure');
+
+  // Run to completion, the real complaint is on stderr under the Note, and it
+  // wins.
+  const real = Object.assign(new Error('Command failed'), {
+    stderr: 'Note: No display specified. Defaulting to display: 6D9407E2\n'
+      + 'An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=60):\n'
+      + 'Timeout waiting for screen surfaces\n',
+  });
+  assert.match(screenshotFailure(real), /Timeout waiting for screen surfaces/);
+  assert.ok(!screenshotFailure(real).includes('No display specified'));
+
+  // An ordinary failure still reports itself.
+  assert.match(
+    screenshotFailure(Object.assign(new Error('x'), { stderr: 'Invalid device: nope\n' })),
+    /Invalid device: nope/,
+  );
+  // And one with nothing to say falls back to the thrown message rather than
+  // to silence.
+  assert.match(screenshotFailure(new Error('spawn ENOENT')), /spawn ENOENT/);
+});
+
+test('two capture paths are compared by content, and the threshold is measured', async () => {
+  const analyze = await import('../src/analyze.js');
+  // `simframe frame --fresh` is the arbiter three field reports had to leave
+  // simframe to get — one of them cross-checked with `xcrun simctl io` for a
+  // whole session after an image was served as 130ms old and was three hours
+  // stale. The obvious in-tool candidate lied: `--engine` picks how to *start*
+  // a daemon, so passing it to a read command returns the same cached frame,
+  // and a tester reasonably concluded the fallback engine was no escape hatch.
+  //
+  // The comparison must be by content. A byte comparison says "different" every
+  // time — the direct capture is full resolution and the daemon's is
+  // downscaled — which would be a confident wrong answer about the one question
+  // the command exists to settle. It said exactly that until it was measured.
+  assert.ok(analyze.PATHS_AGREE > 0.00123, 'above the measured cost of scaling alone');
+  assert.ok(analyze.PATHS_AGREE < 0.686, 'and far below two genuinely different screens');
+  // Not the change threshold: that asks whether one path moved between frames.
+  assert.notEqual(analyze.PATHS_AGREE, analyze.CELL_CHANGE);
+
+  const cli = fs.readFileSync(new URL('../src/cli.js', import.meta.url), 'utf8');
+  const block = cli.slice(cli.indexOf("case 'frame':"), cli.indexOf("case 'mark':"));
+  assert.match(block, /regionSignature/, 'compared by signature, not by bytes');
+  assert.match(block, /PATHS_AGREE/);
+  assert.ok(!/Buffer\.compare/.test(block), 'the byte comparison is gone');
+  assert.match(block, /the daemon has no frame to compare against/,
+    'and a direct capture working while the daemon has nothing is itself the wedge');
+});

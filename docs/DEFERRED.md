@@ -1338,7 +1338,51 @@ round yet, and its P0 is the worst finding this project has had.
    fix that did not fire on its own bug report. Found by running it on a device,
    not by reading it.
 
-126. **A screen that moves for a minute and reads as nothing is not a slow
+126. **SOLVED — the device was naming it all along and we printed the wrong
+   line.** `simctl io screenshot` on a wedged display does not fail, it
+   **hangs**; `run` kills it at 10 s; and `simctl` opens every invocation with
+   `Note: No display specified. Defaulting to display …`. So at kill time that
+   Note was the *only* thing on stderr, and our handler — which takes the last
+   stderr line — reported an informational message as the reason a capture
+   failed.
+
+   Run to completion the device is unambiguous:
+
+   ```
+   An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=60):
+   Timeout waiting for screen surfaces
+   ```
+
+   That is CoreSimulator saying the display surface is gone, and it is the
+   closest thing to a positive test for this wedge that exists. It went unread
+   through **five** CI failures wearing five different symptoms — a 27 s first
+   frame, a screen moving while reading as empty, a tree returning nothing for
+   eighteen readings, a three-hour-stale frame sold as 130 ms, and an empty map
+   on a live device. One cause, five faces, and the name was in the error we
+   were throwing away.
+
+   Fixed in `screenshotFailure`, extracted so a test can run it — the same rule
+   `pickDevice` and `decisionOf` follow, because this is the line where a wrong
+   answer was expensive. A `Note:` never wins over a real complaint, and a kill
+   with nothing but a Note is reported as the surface not answering, naming
+   `simframe revive`.
+
+   **And the arbiter now exists inside the tool.** `simframe frame --fresh`
+   captures directly through the platform, bypassing the daemon, and reports
+   whether the two paths agree — which is what every field round had to leave
+   simframe to do with `xcrun` by hand. The obvious candidate lied: `--engine`
+   decides how to *start* a daemon, so passing it to a read command returns the
+   same cached frame, and a tester compared the two, got byte-identical files,
+   and reasonably concluded the fallback engine was not an escape hatch.
+   Compared by region signature rather than bytes, on a threshold that was
+   measured rather than chosen: same screen two paths **0.00123**, two different
+   screens **0.686**, so `PATHS_AGREE = 0.02` sits 16x above the scaling cost
+   and 34x under the signal.
+
+   The original entry follows, unedited, because the reasoning it records is
+   the reason the answer took so long.
+
+   **A screen that moves for a minute and reads as nothing is not a slow
    screen, and we cannot yet say what it is.** CI's reset step — press home,
    settle — failed on a hosted runner after **61 s**, with the map printing
    `screen unidentified · STILL MOVING · no elements read on this screen`. The
