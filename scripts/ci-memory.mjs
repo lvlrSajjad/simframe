@@ -263,14 +263,38 @@ check(Number.isFinite(map.points?.width) && Number.isFinite(map.points?.height),
   'the map knows the screen size in points', `${map.points?.width}x${map.points?.height}pt`);
 
 const refs = (map.elements ?? []).map((e) => e.ref);
-check(refs.every((r, i) => r === i + 1),
-  'refs are numbered 1..n with no gaps', `#1..#${refs.length}`);
-check((map.elements ?? []).every((e) =>
-  Number.isInteger(e.x) && Number.isInteger(e.y)
-  && e.y >= 0 && e.y <= map.points.height && e.x >= 0 && e.x <= map.points.width),
-  'every element has a tap point on the screen');
-check(!(map.elements ?? []).some((e) => e.region === 'status-bar'),
-  'the status bar is not offered as something to tap');
+// Three checks over a collection, and `every`/`!some` are all true of an empty
+// one. On a CI run whose map came back with **0 elements** they printed
+// `ok   refs are numbered 1..n with no gaps — #1..#0` and two more like it:
+// three lines of reassurance about nothing, directly under the failure that
+// said the map was empty.
+//
+// That is the exact defect three field reports spent a day describing — a
+// confident statement that verified nothing — and the harness was doing it to
+// itself in the same output. Untested is not passed.
+if (!map.elements?.length) {
+  for (const label of [
+    'refs are numbered 1..n with no gaps',
+    'every element has a tap point on the screen',
+    'the status bar is not offered as something to tap',
+  ]) skip(label, 'the map was empty, so there was nothing to check');
+  // And say what the device was showing, because an empty map on a live device
+  // is the shape this project has chased under four different symptoms. The
+  // liveness note carries the ignored-gesture check; `stableForMs` and the
+  // frame age are the two numbers whose disagreement names a dead surface.
+  const st = await jsonRetry(['state'], { allowFail: true });
+  console.log(`     the device at that moment: frame #${st?.seq ?? '?'}, `
+    + `${st?.stableForMs ?? '?'}ms still, ${st?.live?.note ?? 'liveness reported nothing'}`);
+} else {
+  check(refs.every((r, i) => r === i + 1),
+    'refs are numbered 1..n with no gaps', `#1..#${refs.length}`);
+  check(map.elements.every((e) =>
+    Number.isInteger(e.x) && Number.isInteger(e.y)
+    && e.y >= 0 && e.y <= map.points.height && e.x >= 0 && e.x <= map.points.width),
+    'every element has a tap point on the screen');
+  check(!map.elements.some((e) => e.region === 'status-bar'),
+    'the status bar is not offered as something to tap');
+}
 
 console.log('\n--- element refs ---');
 // Re-read on a screen we chose, rather than on whatever the device happened to

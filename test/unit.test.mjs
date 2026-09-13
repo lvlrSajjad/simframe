@@ -4827,3 +4827,37 @@ test('an index past the end is not an absent element', async () => {
   // exhaustive one.
   assert.match(block, /and \$\{visible\.length - shown\.length\} more/);
 });
+
+test('a check over an empty collection is untested, not passed', async () => {
+  // A CI run came back with `0 element(s) from ax+ocr` and then printed
+  //   ok   refs are numbered 1..n with no gaps — #1..#0
+  //   ok   every element has a tap point on the screen
+  //   ok   the status bar is not offered as something to tap
+  // Three lines of reassurance about nothing, directly beneath the failure
+  // saying the map was empty — because `every` and `!some` are both true of an
+  // empty array.
+  //
+  // That is the precise defect three field reports spent a day describing, and
+  // the harness was doing it to itself in the same output.
+  const src = fs.readFileSync(new URL('../scripts/ci-memory.mjs', import.meta.url), 'utf8');
+  const block = src.slice(src.indexOf('const refs = (map.elements ?? [])'), src.indexOf('--- element refs ---'));
+  assert.match(block, /if \(!map\.elements\?\.length\)/, 'the empty case is handled before the checks run');
+  // Each label must appear in BOTH arms — the skip list and the real check —
+  // counted by arm rather than by occurrence, because the comment above them
+  // quotes the labels too.
+  const skipArm = block.slice(block.indexOf('for (const label of ['), block.indexOf('} else {'));
+  const checkArm = block.slice(block.indexOf('} else {'));
+  for (const label of [
+    'refs are numbered 1..n with no gaps',
+    'every element has a tap point on the screen',
+    'the status bar is not offered as something to tap',
+  ]) {
+    assert.ok(skipArm.includes(label), `"${label}" is skipped when the map is empty`);
+    assert.ok(checkArm.includes(label), `"${label}" is still checked when it is not`);
+  }
+  assert.match(block, /skip\(label, 'the map was empty/);
+  // And the empty case says what the device was showing, because an empty map
+  // on a live device is the shape this project has chased under four symptoms.
+  assert.match(block, /the device at that moment/);
+  assert.match(block, /live\?\.note/, 'including the liveness note, which carries the ignored-gesture check');
+});
