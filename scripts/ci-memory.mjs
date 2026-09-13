@@ -50,6 +50,9 @@ let failures = 0;
  */
 let deviceDied = null;
 
+/** EX_TEMPFAIL: the device died under the checks, so nothing was tested. */
+const DEVICE_DIED_EXIT = 75;
+
 function check(ok, label, detail = '') {
   if (!ok) failures += 1;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}${detail ? ` — ${detail}` : ''}`);
@@ -171,9 +174,21 @@ async function jsonRetry(args, opts, attempts = 3) {
     console.error(`  ${String(last.message).split('\n')[0]}`);
     console.error('\nEverything after this point would be testing a dead simulator, so the run');
     console.error('stops here. This is not a memory-layer failure — it is the device-state');
-    console.error('problem in docs/DEFERRED.md. A device restart is the only known cure;');
-    console.error('on a hosted runner it means a retry.');
-    process.exit(1);
+    console.error('problem in docs/DEFERRED.md (126). A device restart is the only known cure,');
+    console.error('and `simframe revive` is that restart.');
+    // Exit 75, not 1, and the distinction is the whole point of this file.
+    //
+    // "A check about the memory layer failed" and "the simulator died under the
+    // checks" are different conditions with different responses, and for two CI
+    // rounds they were one exit code — so a caller could only retry everything
+    // or retry nothing. 75 is EX_TEMPFAIL, which is exactly what this is: the
+    // subject under test was never reached.
+    //
+    // The caller reviving and running again is not papering over a product bug.
+    // The wedge is a documented CoreSimulator condition, `frame --fresh` names
+    // it, and `revive` is the cure this project ships for it — CI simply had no
+    // way to say "use it".
+    process.exit(DEVICE_DIED_EXIT);
   }
   throw last;
 }

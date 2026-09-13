@@ -2398,9 +2398,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
       // the difference between re-planning a flow and ignoring a corner of it.
       if (!w.satisfied) {
         if (w.stalled) throw new Error(w.live.note);
-        const m = w.motion;
-        throw new Error(`screen did not settle within ${w.waitedMs}ms`
-          + (m ? ` — the movement is ${m.where}${m.localised ? ` (${m.share}% of it)` : ''}:\n${m.map}` : ''));
+        throw new Error(`screen did not settle within ${w.waitedMs}ms — ${settleEvidence(w)}`);
       }
       // A settle that satisfied while part of the screen is still moving says
       // so. The daemon has boxed the moving part all along and nothing read it;
@@ -2707,4 +2705,42 @@ async function runStep(deviceQuery, udid, step, ctx) {
     default:
       throw new Error(`unknown step "${step.action}"`);
   }
+}
+
+/**
+ * Why a settle gave up, in the numbers that decided it.
+ *
+ * `screen did not settle within 25008ms` names the one quantity that is never
+ * the reason, and two CI cycles went into guessing what was behind it. A wait
+ * turns on three things and the message carried none of them:
+ *
+ *   - how long the screen had actually been still when we gave up
+ *   - how much stillness was being asked for
+ *   - whether any frame arrived during the call at all
+ *
+ * *"Still for 1,200 ms of the 1,400 required"* and *"still for 135,000 ms and no
+ * frame ever arrived"* are opposite diagnoses — the first is a budget a hair too
+ * tight, the second is a stalled pipeline wearing a calm screen — and they had
+ * one sentence between them. So did *"something is animating in the top right"*.
+ *
+ * Ordered by what to do next: what is moving, then how close stillness got,
+ * then whether anything was observed, then black frames.
+ */
+export function settleEvidence(w) {
+  const parts = [];
+  const m = w.motion;
+  if (m) parts.push(`the movement is ${m.where}${m.localised ? ` (${m.share}% of it)` : ''}`);
+  if (Number.isFinite(w.stillForMs) && Number.isFinite(w.stableMsRequired)) {
+    parts.push(`still for ${w.stillForMs}ms of the ${w.stableMsRequired}ms required`);
+  }
+  // Zero frames is the loud one: a wait that observed nothing has not measured
+  // this screen, it has measured a file on disk.
+  if (Number.isFinite(w.framesSeen)) {
+    parts.push(w.framesSeen > 0
+      ? `${w.framesSeen} frame(s) arrived while waiting`
+      : 'NO frame arrived while waiting — capture, not the screen');
+  }
+  if (w.blackFrames > 0) parts.push(`${w.blackFrames} black frame(s) — see the capture wedge`);
+  return (parts.length ? parts.join('; ') : 'nothing observed')
+    + (m ? `\n${m.map}` : '');
 }

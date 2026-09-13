@@ -881,6 +881,20 @@ function timingOfNow(udid, state) {
  */
 export const MOTION_WINDOW_MS = 1000;
 
+/**
+ * How young a frame has to be to count as "the screen right now".
+ *
+ * The daemon's idle floor is 2,000 ms — on a screen with no damage it captures
+ * anyway, at that cadence, precisely so state stays fresh enough to reason
+ * about. So a frame younger than that floor plus a margin is the current
+ * screen; older than it means the loop has missed its own beat, which is what
+ * `liveness` is for.
+ *
+ * Tied to the daemon's floor rather than chosen, because a number chosen here
+ * would drift away from it silently the first time the floor moved.
+ */
+export const FRAME_IS_CURRENT_MS = 2500;
+
 export async function waitFor(
   deviceQuery,
   { mode = 'settle', since, stableMs = 600, timeoutMs = 8000, reactionMs = 2500, baselineHash, options } = {},
@@ -1051,6 +1065,20 @@ export async function waitFor(
     // never satisfied the wait has nothing to point at.
     motion: motionSummary(),
     animating: animatingNow(),
+    /**
+     * Everything that decided this answer, for the failure message.
+     *
+     * Two CI cycles were spent guessing at a `screen did not settle within
+     * 25008ms` — a sentence that names the one number which is never the
+     * reason. The wait turns on three things and the log carried none of them:
+     * how long the screen had actually been still, how much stillness was
+     * being asked for, and whether any frame arrived at all. "Still for 1,200
+     * of the 1,400 ms required" and "still for 135,000 ms and nothing arrived"
+     * are opposite diagnoses and they had one sentence between them.
+     */
+    stillForMs: Number.isFinite(last?.stableForMs) ? last.stableForMs : null,
+    stableMsRequired: stableMs,
+    framesSeen: Number.isFinite(last?.seq) ? last.seq - startSeq : null,
     baselineHash: baselineHashValue,
     baselineResolved,
     waitedMs: Date.now() - startedAt,
@@ -1156,10 +1184,30 @@ export async function waitFor(
         // the caller acted can never satisfy it; once the change is seen,
         // stableForMs is measured from that change. Plain "stable" has no such
         // requirement — an already-still screen genuinely is stable.
-        // At least one frame must arrive during the call, so the answer is
-        // never derived purely from what was already on disk.
+        //
+        // The evidence must be *current*, and that used to be spelled "at least
+        // one frame must arrive during the call". The intent is right and the
+        // spelling made the wait unsatisfiable on exactly the screens it is
+        // asked about most. Capture is damage-driven: a screen that is not
+        // moving produces no new frame by design, so on a still screen the
+        // condition asks for evidence the system has deliberately chosen not to
+        // generate, and the wait burns its whole budget and reports *"screen did
+        // not settle"* about a screen that has been motionless throughout.
+        //
+        // Measured here rather than argued: a flow step reported `did not settle
+        // within 1547ms` while its own evidence line read **still for 3548ms of
+        // the 1400ms required; NO frame arrived while waiting**. Three and a half
+        // seconds of stillness, two and a half times what was asked, refused.
+        //
+        // So currency is a question about time, not about a counter — the same
+        // correction the motion window needed. A frame younger than the capture
+        // loop's own idle floor *is* the screen as it is now. `liveness` is
+        // checked at the top of every iteration and already rejects a stale file
+        // from a dead daemon, which is the case the counter was really guarding.
         const freshFrames = state.seq - startSeq;
-        if (sawChange && freshFrames >= 1 && state.stableForMs >= stableMs) {
+        const age = Date.now() - (state.capturedAt ?? 0);
+        const current = freshFrames >= 1 || age <= FRAME_IS_CURRENT_MS;
+        if (sawChange && current && state.stableForMs >= stableMs) {
           return done(true);
         }
       }

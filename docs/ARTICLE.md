@@ -482,6 +482,9 @@ What makes that more than a nice principle is what it found when applied as a se
 - A header read `84ms old` above an image whose clock was **five hours wrong**, because the state and the image are two separate writes and only one of them was fresh.
 - A refusal said the screen had changed while printing two identical hashes — **eight characters of a seventy-two-character** perceptual hash, whose leading characters coincide by design.
 - A crop that never happened was captioned as one that did, because the region arrived in a shape the parser did not read and the failure had no words.
+- A wait reported `settled after 63ms` on a screen that has never once stopped moving. The capture daemon had the animation boxed at 13×13 pixels and its own flag set to **not settled**, in the same file, next to a counter claiming **79 seconds of stillness** — and nothing above it read either field.
+
+That last one is the pattern at its purest, and it is worth a sentence of its own because of where the right answer was sitting. Stillness was decided from a *mean* over a grid of the frame, and a spinner does not move a mean: measured on a screen built to never settle, the mean difference was 0.00196 against a 0.004 threshold while a single cell moved by 0.0275. The layer underneath had already worked that out, localised it, and published the bounding box. Two components of one system disagreed about whether the screen was moving, one of them was right, and the interface between them carried only the optimistic number. **The bug was not in either component.**
 
 Not one of those would fail a test, because each was a component answering the question it was asked and misreporting how well. The pattern is sharp enough to use as a design rule: **wherever a component can fail to know something, the interesting bug is not the failure — it is whether the failure is distinguishable from success in what it says.**
 

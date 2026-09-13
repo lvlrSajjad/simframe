@@ -77,7 +77,19 @@ else
 fi
 
 step "The memory layer — screen map, refs, graph, verdicts, flows"
-node scripts/ci-memory.mjs --device="$DEVICE" && ok "ci-memory" || bad "ci-memory"
+# Mirrors the job: exit 75 means the display wedged and nothing was tested, so
+# revive once and run again; any other non-zero is a real check failing. The
+# wedge lands on an app switch and hit roughly every other run of this script on
+# the day it was written, which is most of why the job looked flaky.
+if node scripts/ci-memory.mjs --device="$DEVICE"; then
+  ok "ci-memory"
+elif [ $? = 75 ]; then
+  printf '     (the display wedged — DEFERRED 126. Reviving once and running again.)\n'
+  node src/cli.js revive --device="$DEVICE" || true
+  node scripts/ci-memory.mjs --device="$DEVICE" && ok "ci-memory (after one revive)" || bad "ci-memory"
+else
+  bad "ci-memory"
+fi
 
 step "The fingerprint distributions, measured and bounded"
 node scripts/eval-fingerprint.mjs --tour=test/tours/device-native.json --rounds=3 \

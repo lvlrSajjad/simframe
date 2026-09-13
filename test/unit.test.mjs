@@ -5101,3 +5101,51 @@ test('a settle that satisfies while something is animating says so', async () =>
   assert.match(actions, /is still animating/,
     'a satisfied settle must say when part of the screen is still moving');
 });
+
+test('a still screen can satisfy a settle, and a failure says why it did not', async () => {
+  const api = await import('../src/index.js');
+  const { settleEvidence } = await import('../src/actions.js');
+
+  // The condition that could never be met on the screens it is asked about
+  // most. "At least one frame must arrive during the call" is the right intent
+  // and the wrong spelling: capture is damage-driven, so a screen that is not
+  // moving produces no new frame *by design*, and the wait then burns its whole
+  // budget and reports "screen did not settle" about a screen that has been
+  // motionless throughout.
+  //
+  // Measured, not argued: a flow step reported `did not settle within 1547ms`
+  // while its own evidence line read "still for 3548ms of the 1400ms required;
+  // NO frame arrived while waiting". Two and a half times the stillness asked
+  // for, refused. Currency is a question about time, not about a counter — the
+  // same correction the motion window needed — and `liveness` already rejects a
+  // stale file from a dead daemon, which is what the counter was really
+  // guarding.
+  assert.equal(api.FRAME_IS_CURRENT_MS, 2500, 'the daemon idle floor is 2000ms, plus margin');
+  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(src, /freshFrames >= 1 \|\| age <= FRAME_IS_CURRENT_MS/,
+    'a frame younger than the capture loop\'s own idle floor is the current screen');
+
+  // And the message that sent two CI cycles into guessing. "screen did not
+  // settle within 25008ms" names the one quantity that is never the reason.
+  // These two are opposite diagnoses and they had one sentence between them.
+  const tooTight = settleEvidence({ waitedMs: 1547, stillForMs: 1200, stableMsRequired: 1400, framesSeen: 4 });
+  assert.match(tooTight, /still for 1200ms of the 1400ms required/);
+  assert.match(tooTight, /4 frame\(s\) arrived/);
+
+  const noFrames = settleEvidence({ waitedMs: 25008, stillForMs: 135411, stableMsRequired: 500, framesSeen: 0 });
+  assert.match(noFrames, /NO frame arrived while waiting — capture, not the screen/);
+  assert.notEqual(tooTight, noFrames);
+
+  // A moving screen leads with where, because that is what to do something
+  // about; the region map follows on its own line.
+  const moving = settleEvidence({
+    waitedMs: 8000, stillForMs: 20, stableMsRequired: 500, framesSeen: 60,
+    motion: { where: 'top right', share: 78, localised: true, map: '.@..\n....' },
+  });
+  assert.match(moving, /^the movement is top right \(78% of it\)/);
+  assert.match(moving, /\n\.@\.\./);
+
+  // Black frames are the capture wedge and get named as such rather than being
+  // left to look like a slow screen.
+  assert.match(settleEvidence({ framesSeen: 12, blackFrames: 40 }), /40 black frame\(s\)/);
+});

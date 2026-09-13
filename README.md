@@ -644,6 +644,17 @@ app never declared accessible at all is invisible to any accessibility tree, our
 included, and the same line says so: a count of zero on a screen that has one
 would be the more expensive answer.
 
+**What a settle can and cannot see.** Stillness is decided from a mean over a
+grid of the frame, and a small animation does not move a mean. Measured on a
+screen built to never settle — a spinner, frames every 77–95 ms — the mean
+difference was **0.00196** against a 0.004 threshold while one cell moved by
+**0.0275**, and `stableForMs` reported **79 seconds** of stillness. So a settle
+can return satisfied while part of the screen is still moving, and it now says
+so: `settled after 63ms (a 13x13 region is still animating)`. A settle that
+times out names where the movement is instead. Refusing to settle on any
+animation would be right for a spinner and wrong for a blinking cursor, so the
+disagreement is reported rather than resolved by a guessed threshold.
+
 Two honest caveats. OCR reads **text**, so a purely graphical icon with no label
 is invisible to both paths — the tree still gives you its coordinates, and
 `#ref` still taps it. And the confirm-button vocabulary (`APPLY`, `OK`, `SAVE`,

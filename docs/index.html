@@ -361,6 +361,35 @@ recommended the wrong model. Full conditions and the reasons to distrust the
 threshold are in
 <a href="https://github.com/lvlrSajjad/simframe/blob/main/docs/EXPERIMENTS.md">What We Believed First</a>.</p>
 
+<h2>What a settle can and cannot see</h2>
+<p>
+  <code>settle</code> waits for the screen to stop. Stillness is decided from a mean over a
+  grid of the frame, and that has one blind spot worth knowing about before you rely on it:
+  <strong>a small animation does not move a mean.</strong> Measured on a screen built to
+  never settle — a spinner rotating continuously, frames arriving every 77–95&nbsp;ms:
+</p>
+<table>
+  <tbody>
+    <tr><td>mean difference between frames</td><td class="num">0.00196 <em>(threshold 0.004)</em></td></tr>
+    <tr><td>largest single-cell difference</td><td class="num"><strong>0.0275</strong></td></tr>
+    <tr><td>what <code>stableForMs</code> reported</td><td class="num"><strong>79,207&nbsp;ms</strong></td></tr>
+  </tbody>
+</table>
+<p>
+  So a settle can return satisfied while part of the screen is still moving. It now
+  <em>says so</em> — <code>settled after 63ms (a 13x13 region is still animating)</code> —
+  because the capture daemon localises the animation and publishes its bounding box. A
+  settle that times out names where the movement is instead:
+  <code>the movement is top right (78% of it)</code>, with a region map under it.
+</p>
+<p class="note">
+  Deliberately reported rather than acted on. Refusing to settle whenever something is
+  animating would be right for a spinner and wrong for a blinking text cursor, which is
+  also small and also never stops. Separating those two needs a measurement that has not
+  been made, and picking a threshold before making it is how the other numbers on this page
+  got themselves reversed.
+</p>
+
 <h2>Honest limitations</h2>
 <ul>
   <li>The supervisor is <strong>not deterministic</strong> &mdash; 77 / 82 / 86&nbsp;% across three

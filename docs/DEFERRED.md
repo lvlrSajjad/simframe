@@ -1633,6 +1633,58 @@ round yet, and its P0 is the worst finding this project has had.
    degraded note is a real answer about a blank screen. `jsonRetry` could not
    catch this: `ui` did not throw, it returned 200 with nothing in it.
 
+131. **A settle could not be satisfied on a screen that was demonstrably
+   still.** FIXED, 2026-09-13, and it had been costing CI rounds under a message
+   that named the wrong quantity.
+
+   `waitFor` required `state.seq - startSeq >= 1` — *at least one frame must
+   arrive during the call, so the answer is never derived purely from what was
+   already on disk*. The intent is right. The spelling makes it unsatisfiable on
+   exactly the screens it is asked about most: capture is damage-driven, so a
+   screen that is not moving produces no new frame **by design**. The wait then
+   burns its whole budget and reports `screen did not settle` about a screen
+   that never moved.
+
+   Measured rather than argued, once the message was made to carry its own
+   evidence: `did not settle within 1547ms — still for 3548ms of the 1400ms
+   required; NO frame arrived while waiting`. Two and a half times the stillness
+   asked for, refused.
+
+   Currency is a question about time, not about a counter — the same correction
+   the motion window needed hours earlier, in the same file. A frame younger
+   than the capture loop's own idle floor *is* the current screen, and
+   `liveness` already rejects a stale file from a dead daemon, which is the case
+   the counter was really guarding. `FRAME_IS_CURRENT_MS` is 2,500 against the
+   daemon's 2,000 ms floor.
+
+   **The message is the other half and is worth more.** Two CI rounds went into
+   guessing at `screen did not settle within 25008ms` — a sentence naming the
+   one number that is never the reason. A settle failure now carries what
+   decided it: where the movement is, how long the screen had actually been
+   still against how much was required, how many frames arrived, and any black
+   frames. *"Still for 1,200 of the 1,400 ms required"* and *"still for 135,000
+   ms and no frame arrived"* are opposite diagnoses and they had one sentence
+   between them.
+
+132. **CI had no way to use the cure this project ships for the wedge.** FIXED,
+   2026-09-13. DEFERRED 126 has said for weeks that a device restart is the only
+   known cure, and `simframe revive` is that restart; the job could not reach
+   for it because `ci-memory` exited **1** both when a memory-layer check failed
+   on its merits and when the simulator died under the checks. One exit code for
+   two conditions, so a caller could only retry everything or retry nothing.
+
+   It exits **75** (EX_TEMPFAIL) for the second now, and the job revives once and
+   runs again on that code alone. Once — a display that wedges again immediately
+   is not a blink, and a step that retries until it passes tests nothing.
+
+   **The wedge has a trigger, found while chasing this.** Reproduced locally on
+   the integration mirror: it lands on an **app switch** — launching a second app
+   with Safari in the foreground — and hit roughly **every other run**, five
+   times in one session. `frame --fresh` named it correctly every time and
+   `revive` cured it every time. That is the first reproducible trigger anyone
+   has had for 126, and it is a better starting point than the five symptoms
+   were.
+
 123. **`settle` cannot cope with a permanently animated screen**, and aborts the
    rest of the batch when it gives up — expensive when step 1 of 6 was the
    settle. A streaming AI-summary panel, a Lottie and the Intercom widget never
