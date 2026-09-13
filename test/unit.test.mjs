@@ -5002,3 +5002,41 @@ test('a control with no name is still a control, and says so (122)', async () =>
   assert.match(out, /#1 button\s+364,84\s+\(unlabelled\)/);
   assert.match(out, /no accessibility label/);
 });
+
+test('the three ways a daemon can fail to be ready are three sentences', async () => {
+  const api = await import('../src/index.js');
+
+  // 2026-09-13, hosted runner: `simframe start` gave up after 20s with **"no
+  // daemon process came up"**, and the next step of the same job printed
+  // `● iPhone 16 Pro pid=9573 frame=#5 age=652ms` over a daemon log showing it
+  // had been capturing throughout. The sentence did not merely fail to help —
+  // it named the wrong condition, which is the fourth time this project has
+  // done that and the second in two days.
+  //
+  // The cause is worth keeping because it is circular. Node decided whether a
+  // daemon was alive by reading meta.json, which the daemon writes in `claim()`
+  // — *after* `platform.attach`, its slowest startup step. So the live-daemon
+  // cap, which exists precisely for a daemon that is up and slow, could never
+  // be reached in the case that produced it: reaching it required the file
+  // whose absence was the problem. The pid we spawned answers the question
+  // directly, and `startEngine` had been discarding it.
+  assert.match(api.readinessFailure({ sawLiveDaemon: false, sawProcess: false }),
+    /no daemon process came up/);
+  assert.match(api.readinessFailure({ sawLiveDaemon: false, sawProcess: true }),
+    /started but never claimed the device/);
+  assert.match(api.readinessFailure({ sawLiveDaemon: true, sawProcess: true }),
+    /running and the display produced no frame/);
+
+  // Distinguishable is the property, so assert it as one rather than trusting
+  // three separate regexes to stay different from each other.
+  const said = [
+    api.readinessFailure({ sawLiveDaemon: false, sawProcess: false }),
+    api.readinessFailure({ sawLiveDaemon: false, sawProcess: true }),
+    api.readinessFailure({ sawLiveDaemon: true, sawProcess: true }),
+  ];
+  assert.equal(new Set(said).size, 3, 'three conditions, three sentences');
+
+  // And the middle one has to say which way to look, because "it is stuck
+  // attaching" and "it failed to launch" call for opposite next moves.
+  assert.match(said[1], /attaching/);
+});

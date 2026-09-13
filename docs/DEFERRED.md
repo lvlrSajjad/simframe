@@ -1562,6 +1562,52 @@ round yet, and its P0 is the worst finding this project has had.
    the honest output is a count of **0** unnamed controls on a screen that has
    one, which is why the line above says what it says about screenshots.
 
+127. **`simframe start` said "no daemon process came up" about a daemon that was
+   up and capturing.** FIXED, 2026-09-13. A hosted runner gave up after 20 s
+   with that sentence, and the next step of the same job printed
+   `● iPhone 16 Pro pid=9573 frame=#5 age=652ms` over a daemon log showing it
+   had been capturing throughout.
+
+   The cause is circular, which is why the guard that existed could not fire.
+   Node decides whether a daemon is alive by reading `meta.json`, which the
+   daemon writes in `claim()` — **after** `platform.attach`, its slowest startup
+   step. A daemon that has spawned and is attaching to CoreSimulator is
+   therefore indistinguishable, from Node, from one that never launched. The
+   live-daemon cap (`LIVE_DAEMON_CAP_MS`, 60 s) exists precisely for a daemon
+   that is up and slow, and it could never be reached in the case that produced
+   it: reaching it required the file whose absence *was* the problem. The 20 s
+   budget applied instead.
+
+   The spawned pid answers the question directly and `startEngine` was throwing
+   it away. There are now three sentences for three conditions — never launched,
+   launched but still attaching, attached but rendering nothing — and
+   `readinessFailure` is extracted so a test can ask for them without a device,
+   for the same reason `screenshotFailure` was extracted for 126.
+
+   **This is the fourth time this project has shipped a message naming the wrong
+   condition, and the second in two days.** The article's own closing rule is
+   the one being broken: *wherever a component can fail to know something, the
+   interesting bug is not the failure — it is whether the failure is
+   distinguishable from success in what it says.* Worth noting that the previous
+   fix in this family **created** this one: the two-sentence split was added
+   after a runner timeout, and it split on a signal that could not see the
+   condition it was splitting for.
+
+128. **`xcrun simctl openurl` times out on a loaded runner, and we called that a
+   simframe failure.** FIXED, 2026-09-13. `NSPOSIXErrorDomain code 60 —
+   Operation timed out`, three attempts, on a step whose stated assertion is
+   only that *capture notices a change*.
+
+   The retry loop was already there and already documented: `openurl` timing out
+   says simctl stopped waiting, not that the URL failed to open, and simframe
+   deliberately does not retry it internally because an action that fires twice
+   is what the verify barrier exists to prevent. Adding a fourth attempt would
+   have been the third guess in a row at the same number.
+
+   So the step asks the screen instead. If the frame hash moved, the URL opened
+   and capture saw it — the claim is satisfied, and retrying would only risk
+   opening it twice. It fails only when simctl timed out **and** nothing moved.
+
 123. **`settle` cannot cope with a permanently animated screen**, and aborts the
    rest of the batch when it gives up — expensive when step 1 of 6 was the
    settle. A streaming AI-summary panel, a Lottie and the Intercom widget never

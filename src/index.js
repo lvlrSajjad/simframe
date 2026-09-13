@@ -176,10 +176,13 @@ export async function ensureDaemon(deviceQuery, options = {}) {
   // A dead daemon leaves its last state.json behind. Anything captured before
   // we (re)started the loop is not evidence of a live screen, so ignore it.
   const minCapturedAt = existing.alive ? 0 : Date.now();
+  // The pid we spawned, which is the only honest answer to "did a daemon come
+  // up" — see the comment on the wait below.
+  let spawnedPid = null;
   if (!existing.alive) {
     if (acquireSpawnLock(p.lock)) {
       try {
-        await startEngine(device.udid, options);
+        spawnedPid = (await startEngine(device.udid, options)).pid;
       } finally {
         // Hold the lock briefly so a burst of callers does not double-spawn.
         setTimeout(() => releaseSpawnLock(p.lock), 1500).unref?.();
@@ -205,23 +208,62 @@ export async function ensureDaemon(deviceQuery, options = {}) {
   // had read identically, which cost a log dive to tell apart.
   const liveDeadline = Date.now() + LIVE_DAEMON_CAP_MS;
   let sawLiveDaemon = false;
+  let sawProcess = false;
   for (;;) {
     const state = store.readJson(p.state);
     if (state && state.capturedAt >= minCapturedAt && Date.now() - state.capturedAt < 30_000) {
       return { device, state, started: !existing.alive };
     }
-    const alive = daemonStatus(device.udid).alive;
-    sawLiveDaemon = sawLiveDaemon || alive;
-    if (Date.now() >= (alive ? liveDeadline : deadline)) break;
+    // Two different questions, and for a long time one file answered both.
+    //
+    // `daemonStatus` reads meta.json, which the daemon writes in `claim()` —
+    // *after* `platform.attach`, its slowest startup step. So a daemon that has
+    // spawned and is attaching to CoreSimulator is indistinguishable, from
+    // here, from one that never started: both are `alive: false`. That is the
+    // condition the live cap below exists for, and it could never be reached in
+    // the case that produced it, because reaching it required the very file
+    // whose absence was the problem.
+    //
+    // Measured on a hosted runner, 2026-09-13: `simframe start` gave up after
+    // 20 s saying **"no daemon process came up"**, and the next step of the
+    // same job printed `● iPhone 16 Pro pid=9573 frame=#5 age=652ms` with a
+    // daemon log showing it had been capturing the whole time. The sentence was
+    // not merely unhelpful, it named the wrong condition — the fourth time this
+    // project has failed that way and the second time in two days.
+    //
+    // The pid we spawned is the honest signal and it was already in hand;
+    // `startEngine` was discarding it.
+    const claimed = daemonStatus(device.udid).alive;
+    const running = claimed || (spawnedPid != null && store.isProcessAlive(spawnedPid));
+    sawLiveDaemon = sawLiveDaemon || claimed;
+    sawProcess = sawProcess || running;
+    if (Date.now() >= (running ? liveDeadline : deadline)) break;
     await sleep(80);
   }
   const tail = readLogTail(p.log);
-  const waited = sawLiveDaemon
-    ? `the daemon is running and the display produced no frame in ${Math.round(LIVE_DAEMON_CAP_MS / 1000)}s`
-    : 'no daemon process came up';
   throw new Error(
-    `simframe daemon did not produce a frame for ${device.name} — ${waited}${tail ? `\n${tail}` : ''}`,
+    `simframe daemon did not produce a frame for ${device.name} — `
+    + `${readinessFailure({ sawLiveDaemon, sawProcess })}${tail ? `\n${tail}` : ''}`,
   );
+}
+
+/**
+ * Which of three failures this was.
+ *
+ * Extracted so it can be tested, for the reason `screenshotFailure` was: the
+ * whole defect here is a message naming the wrong condition, and a message is
+ * only checkable if something can ask for it without a device. Two of these
+ * three sentences did not exist until a runner produced each of them in turn and
+ * both arrived reading as the third.
+ */
+export function readinessFailure({ sawLiveDaemon, sawProcess }) {
+  const cap = Math.round(LIVE_DAEMON_CAP_MS / 1000);
+  if (sawLiveDaemon) return `the daemon is running and the display produced no frame in ${cap}s`;
+  if (sawProcess) {
+    return `the daemon process started but never claimed the device in ${cap}s`
+      + ' — it is stuck attaching to the simulator rather than failing to launch';
+  }
+  return 'no daemon process came up';
 }
 
 /** Why the daemon was not used, when it was not. Surfaced by doctor. */
@@ -279,14 +321,16 @@ async function startEngine(udid, options) {
     if (built.ok) {
       engineFallbackReason = null;
       recordFallback(udid, null);
-      engine.spawnDaemon(udid, options);
-      return 'simframed';
+      // The pid, not just the name. Whether a daemon came up is a question
+      // about a process, and answering it from meta.json — which the daemon
+      // writes only after attaching — could not tell "never started" from
+      // "still starting". See the wait in `ensureDaemon`.
+      return { engine: 'simframed', pid: engine.spawnDaemon(udid, options)?.pid ?? null };
     }
     engineFallbackReason = built.reason ?? 'simframed unavailable';
     recordFallback(udid, engineFallbackReason);
   }
-  spawnNodeDaemon(udid, options);
-  return 'screenshot';
+  return { engine: 'screenshot', pid: spawnNodeDaemon(udid, options)?.pid ?? null };
 }
 
 function spawnNodeDaemon(udid, options) {
@@ -310,6 +354,7 @@ function spawnNodeDaemon(udid, options) {
     env: process.env,
   });
   child.unref();
+  return child;
 }
 
 function acquireSpawnLock(lockFile) {
