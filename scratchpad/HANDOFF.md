@@ -1,127 +1,144 @@
-# Handoff — 2026-09-12
+# Handoff — 2026-09-13
 
-**0.12.2 is live on npm as `latest`**, tagged at `b4c9fb0`. Verified twice and
-independently of the release workflow's exit code: `npm view simframe version`
--> `0.12.2`, and the published tarball pulled down and checked to contain
-`src/ollama.js`, the new `screenmap`/`navigate`, and `scripts/replay-rulings.mjs`.
-CI was green on that commit including `integration` before the tag was pushed.
+**Nothing is released.** npm is still on **0.12.2**. `package.json` says 0.12.3
+and the next release should be **0.13.0** (`npm version minor`) — the tree
+carries a new supervisor arm, a new experiment harness, a changed escalation
+record shape and a changed `waitFor` contract, and calling that a patch would be
+dishonest. The stale local `v0.12.3` tag has been deleted; it was never pushed.
 
-`origin/main` is current; nothing is held. The bench device is shut down and
-Metro is still on 8083 with the testbed installed.
+Three commits are held locally and unpushed. CI last went red on `3189ee4`, and
+**the reason is now solved — see 126 below.**
 
-## What went in
+## What today was
 
-**Five CI failures, all fixed, and only two of them were the same bug family.**
+Three field reports on a real production app, from three separate agent
+sessions. They are the best input this project has had, and most of the day's
+work came from them. They live outside the repo by design.
 
-- The fingerprint eval was red on *the tour*, not the threshold. Six fixed
-  sleeps, one of them waiting 3 s for a network page load; on a loaded runner
-  one reading of `example.com` had no content tokens at all. Every sleep is now
-  an arrival assertion. Worst same-screen pair 0.31 -> 0.63 locally.
-- `goto` had one outcome with no name — a route that ran and landed elsewhere
-  returned `{ok: false}` and no `reason`, which failed `ci-memory`'s check with
-  an empty detail. Now `route-halted` and `arrived-elsewhere`.
-- The 9271 ms settle was already fixed the night before in `b504631`; that log
-  predated it.
-- The reset step then failed at **25 s** with `screen unidentified · STILL
-  MOVING · no elements read`. Not widened a third time: it retries and dumps
-  `simframe state --json` and `simframe ui` on each failed attempt.
-- And the next run failed *earlier still* — `simframe start` gave up while the
-  daemon was **working**. Its own log, captured eight seconds later, read
-  `frame=#1 age=1514ms, 1.0 fps, median 75.08ms`. The display had taken ~27 s to
-  produce a first frame against a 20 s budget. Fixed at the root: a daemon we
-  can see running earns a bounded 60 s, and "no daemon came up" is now a
-  different sentence from "the daemon is running and the display produced
-  nothing". That also explains the previous failure, so 126 is probably one
-  phenomenon and not two.
+### The three-pass experiment, finished
 
-**The pattern worth carrying.** Three separate times on that one step a budget
-was widened on a plausible mechanism rather than a diagnosis, and two of those
-were mine. What broke the run of guesses was the on-failure daemon log — a
-diagnostic somebody had added earlier for exactly this. Add the diagnostic
-before the third guess, not after.
-
-**Item 120** — a coordinate gesture that changes nothing now says what it landed
-on. Verified live. It nearly shipped keyed on `settled.noVisibleChange` alone,
-which is the pixel detector; the `no-visible-change` *verdict* is the
-fingerprint, and a live swipe produced the second without the first. Keying on
-one would have shipped a fix that did not fire on its own bug report.
-
-**The capacity comparison.** See `docs/EXPERIMENTS.md` — the new article, "What
-we believed first" — and `docs/BENCHMARKS.md` for conditions.
-
-## Two of my own diagnoses that were wrong
-
-- **The "orphaned" collect-rulings processes were not orphans.** They had each
-  finished their work and could not exit: the warm supervisor child holds the
-  event loop open until something calls `close()`, and nothing did. Last night's
-  handoff blamed the task runner for not killing `nohup`'d children. Fixed, and
-  filed as 125. *A process that is idle is not a process that is stuck.*
-- **Item 121 is not what it looks like.** `offViewport` has checked both axes
-  since 0.11.0 and `rowsFor` calls it on every row with the same `screen` object
-  the header prints from. Probed directly: the reported combination — dimensions
-  in the header, an out-of-bounds row below — is not reachable through
-  `screenMap`. Everything ruled out is written into the item. **Do not ship a
-  fix on the current reasoning.** The next step is a reproduction: the testbed
-  needs a horizontally scrolling row.
-
-## The numbers, and what they actually say
-
-22 rulings from one device pass; every arm then answered the identical 22, three
-times each, same brief, same three-word schema.
-
-| arm | accuracy | median | deterministic |
+| pass | operator | graph | `sim_do` calls |
 | --- | --- | --- | --- |
-| always the commonest answer | 55% | — | — |
-| **`stillMs > 3000ms`, no model** | **95%** | **0 ms** | yes |
-| Apple Foundation Models (~3B) | 77 / 82 / 86% | ~640 ms | **no** |
-| `qwen3:8b` (4-bit, 5.2 GB) | **91%** | 919 ms | yes |
-| `qwen3:14b` (4-bit, 9.3 GB) | 82% | 1,489 ms | yes |
+| 1 | fresh | cold | **33** |
+| 3 | fresh | **warm** | **24** |
+| 2 | experienced | warm | **12** |
 
-1. **Capacity did not help.** The 14B is larger, slower and *worse* than the 8B.
-   That question is now answered with numbers and should not be re-opened by
-   reaching for a bigger model.
-2. **The accuracy ranking inverts the safety ranking.** Each arm errs in one
-   direction only and the directions are opposite: Apple always `wait` where
-   `stop` was right, both Qwen arms always `stop` where `wait` was right. A wrong
-   `wait` costs a settle; a wrong `stop` abandons a working plan. Reporting only
-   the percentages would have recommended the wrong model. This is the strongest
-   case yet for item 100's `abstain` token, and it does not depend on the
-   balance or the threshold.
-3. **The shipped arm is non-deterministic** — ±2 rulings on identical inputs.
-   Every previous single-run Apple number in this project carries that noise and
-   was not reporting it.
-4. **The free threshold won again**, out of sample. But its plateau is only
-   ~2,100–3,200 ms and the `blocked` fixtures sit at 3,225–3,699 ms, so it may
-   be separating *the fixture design*. **The next measurement is a population
-   nobody designed — not a bigger model.**
+Pass 3 is the isolation and it settles the attribution:
+
+- **the graph is worth ~27%** (33 -> 24, nothing else changed)
+- **operator knowledge is worth the rest** (24 -> 12)
+
+Peer 2 estimated the graph share at ~23% from escalation rate per step without
+being able to isolate it. The direct measurement says ~27%. Two methods, three
+points apart, n=1 app.
+
+**This has not been written into the docs yet, and the owner has asked for it.**
+Their framing, and it is right: these numbers cost three peer sessions and make
+the project a study case, not just a tool. They belong in EXPERIMENTS, the
+article, README and the site.
+
+### 126 — solved, and it was one cause wearing five faces
+
+`simctl io screenshot` on a wedged display does not fail, it **hangs**. `run`
+kills it at 10 s. `simctl` opens every invocation with `Note: No display
+specified …`, so at kill time that Note is the only thing on stderr — and the
+handler took the last stderr line. We reported an informational message as the
+reason a capture failed.
+
+Run to completion the device is unambiguous:
+
+```
+NSPOSIXErrorDomain code 60 — Timeout waiting for screen surfaces
+```
+
+That went unread through **five** CI failures with five different symptoms: a
+27 s first frame, a screen moving while reading as empty, a tree returning
+nothing for eighteen readings, a three-hour-stale frame sold as 130 ms, and an
+empty map on a live device. All one thing.
+
+`screenshotFailure` is extracted and tested. `simframe frame --fresh` is the
+arbiter every field round had to leave simframe to get — compared by region
+signature, on a threshold that was **measured**: same screen two paths 0.00123,
+two different screens 0.686, so `PATHS_AGREE = 0.02`.
 
 ## Next, in order
 
-1. **121**, by reproduction rather than reasoning (above).
-2. **117** (`scrollTo` calls an element under the tab bar "in view" — half built),
-   **123** (print the region map on settle failure), **114** (check the step's own
-   postcondition before aborting a batch).
-3. **100, the `abstain` token.** Finding 2 above is now its main evidence.
-4. **A messier ruling population.** Five fixture shapes designed by one person is
-   the binding limit on everything in that table.
-5. **124** — `lineServer.open()` has no timeout, and the file's own safety
-   property ("null means behave as if there is no supervisor") requires one.
-   Reasoned, not observed. Stop discarding the child's stderr while there.
+1. **122 — emit unlabeled-but-tappable nodes** as `#7 button 361,234 <unlabeled>`.
+   The cheap half of Phase 16, needs no model, testable on the in-tree testbed.
+   All three peers named this their biggest practical drag; three of peer 3's
+   four flows needed a control that was not in the map. **The owner has approved
+   Phase 16.**
+2. **Write the numbers up** — the three-pass table above and the supervisor
+   results, into EXPERIMENTS / the article / README / the site.
+3. **Cut 0.13.0.** Run `./scripts/ci-integration-local.sh <udid>` first: it has
+   caught every real problem and costs two minutes against CI's thirty.
+4. Then: the premature `settle` (peer 3 — `settled after 62ms` on a
+   still-loading screen, 4-element map, tab labels bound to the wrong
+   coordinates), `--session` binding to the MCP server's id, 117, 123, 114, 118.
+
+## What is fixed and unreleased
+
+120, 121, SEV-1 (rewritten — see below), the `waitFor` ambiguity stop, the
+`index` out-of-range message, the escalation read-vs-assumed split,
+`supervisions --session`, `doctor` proving the ax tree answers, "untested is not
+passed" in `ci-memory`, and 126.
+
+## Mistakes worth keeping
+
+- **I shipped SEV-1 detection gated on 20 s of stillness**, a number taken from
+  one earlier report. The next report's case was 8,183 ms, so it could not fire
+  during exactly the failure it was written for. Rewritten to count *ignored
+  gestures* instead: three gestures with no pixel moving, at any duration. A
+  threshold chosen from one example is not a mechanism.
+- **I announced two wrong causes for the CI failures** — a runner image change
+  that had not happened (I read the `Image Release` line from the wrong job),
+  and a retry-shaped fix for what turned out to be a discarded error string.
+- **My first `--fresh` comparison was a byte comparison**, which calls a
+  full-resolution capture and a downscaled frame different every time. A
+  confident wrong answer about the one question the command exists to settle.
+- **I asked the owner to run a pass-3 experiment that was already done** and
+  sitting in the report they had sent me.
+
+## The measurement results, for anyone picking this up
+
+- **Capacity does not help.** qwen3:14b scored *lower* than qwen3:8b (82% vs
+  91%) on identical inputs, both deterministic, while being 79% larger and 62%
+  slower. Do not reach for a bigger model.
+- **The accuracy ranking inverts the safety ranking.** Every arm errs in one
+  direction only and the directions differ: Apple always `wait` where `stop` was
+  right, both Qwen arms always `stop` where `wait` was right. A wrong `stop`
+  abandons a working plan.
+- **Apple is not deterministic** — 77 / 82 / 86% on identical inputs.
+- **The cascade does not work** at any abstention band tried (95% for the free
+  rule alone; 91 / 86 / 82 as more is handed to the model).
+- **The fourth word made Apple ~32 points worse** and it never used it once.
+- **The supervisor went 0-for-18 in the field**, two independent sessions, at
+  ~1.3 s a ruling. Third population saying the same thing.
+
+## Where we are against the phases
+
+Done: 10, 11, 11.5, 18. Cancelled by their own measurement: 17 (NO-GO), 11.5's
+original premise. Never started: 12, 13, 14, 15, **16**, 19.
+
+The escalation breakdown is supposed to pick the next faculty and has been
+pointing at **16** for a while — partly unread because `verification_failed` was
+mislabelling most of the log as Phase 11 until today.
 
 ## State of the machine
 
-- **Bench device `326464A4`**: shut down. Metro is on **8083** with the testbed
-  installed and its app built.
-- **Ollama** has `qwen3:8b` and `qwen3:14b`. `SIMFRAME_SUPERVISOR=ollama:qwen3:8b`
-  works and `doctor` reports it honestly, including "still loading" as distinct
-  from "did not answer".
-- `scripts/replay-rulings.mjs` is the cheap way to ask a new judge the same
-  questions — one device pass, then seconds per arm.
+- **Our bench device `326464A4` is shut down**, daemon stopped.
+- **`B55AB0AE` is booted and is NOT ours** — it is the device the field rounds
+  ran on. Leave it alone; always pass `--device` explicitly, because both
+  simulators are named "iPhone 17 Pro".
+- Metro is not running. The testbed app is installed on the bench device.
+- Ollama has `qwen3:8b` and `qwen3:14b`.
 
 ## Standing rules
 
-- No third-party app identifier in this repo, from anyone, ever.
-  `scripts/check-private.mjs` enforces it.
+- **No client or third-party project name in this repo, ever** — not the app,
+  not the company, not any of the owner's other projects. `scripts/check-private.mjs`
+  enforces the bundle-id half; the rest is discipline. Verified clean today:
+  zero tracked files mention it.
 - Do not rewrite git history without an explicit, specific instruction.
 - Never `git add -A` without looking first. Verify checks separately, never
   chained with `&&`.
@@ -131,17 +148,18 @@ times each, same brief, same three-word schema.
 - Docs, article and README current **before** a push and release, numbers
   included.
 - `cancel-in-progress` is keyed on the ref: a push to main cancels the in-flight
-  main run. Do not push while waiting on one that matters.
+  main run.
 
 ## Things to distrust
 
 - An MCP server holds its code **and its tool schema** at spawn. A schema change
-  needs a restart; an unknown property passed to an old build sails through and
-  reports itself as correct.
-- The perception harness feeds already-fused element lists, so it cannot catch a
-  fusion-loop bug. `integration` catches those.
+  needs a restart.
 - `doctor` runs in its own process and can report a tier healthy while the
-  long-lived server's copy is dead.
-- The bench device wedges; restart cures it, then `simframe input reset`.
+  long-lived server's copy is dead. It now proves the ax tree *answers*; the
+  same correction has not been made everywhere.
 - A background command piped through `tail` buffers everything until it exits —
   an empty output file is not an idle job.
+- `ps -p $(pgrep …)` prints nothing when pgrep finds nothing, which reads
+  identically to "nothing is running". It hid a stuck background task for hours.
+- A process that is idle is not a process that is stuck. Three "orphaned"
+  scripts had finished their work and could not exit.
