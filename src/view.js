@@ -398,11 +398,42 @@ function valueNote(r) {
   return `= ${v}`;
 }
 
+/**
+ * What to call a row.
+ *
+ * A control with no accessibility label is not necessarily anonymous, and the
+ * order here is by how much the name can be trusted. Its own label first. Then
+ * its `testID`, which is a name a developer chose and which `tap` has always
+ * matched on. Then OCR's reading of it, which is how an icon-only control gets
+ * a name at all and which cannot contradict a label it does not have. Only when
+ * all three are missing is it really unaddressable, and that is the case item
+ * 122 is about: three field reports in a row spent their time on controls that
+ * existed, were tappable, and could be reached by no selector at all.
+ */
+export function displayName(r) {
+  return trim(r.label)
+    || trim(r.identifier)
+    // Only an alias with a word in it. OCR reads the three dots of an overflow
+    // menu as `...`, and on the first live run of this the button was named
+    // `#1 button 364,84 ...` — which looks like a name, cannot be typed into a
+    // selector, and made the count below say there was nothing unnamed here.
+    // `isNoise` already refuses such text as a row of its own; it must not get
+    // in through the alias door either.
+    || (r.aliases ?? []).find((a) => alnum(a))
+    || (matching.isAxTarget(r) ? '(unlabelled)' : '(no text)');
+}
+
+/** A row the map can print and no caller can name. */
+export const unaddressable = (r) =>
+  matching.isAxTarget(r) && !trim(r.label) && !trim(r.identifier)
+  && !(r.aliases ?? []).some((a) => alnum(a));
+
 function renderRow(r) {
+  const shown = displayName(r);
   const name = [
-    trim(r.label) || (matching.isAxTarget(r) ? '(unlabelled)' : '(no text)'),
+    shown,
     valueNote(r),
-    aliasNote(r),
+    aliasNote(r, shown),
   ].filter(Boolean).join(' ');
   const state = [
     r.enabled === false ? 'disabled' : null,
@@ -426,11 +457,14 @@ function renderRow(r) {
  * for, which is useful when they disagree and pure cost when they agree —
  * "WELCOME ~ WELCOME" was a third of some rows.
  */
-function aliasNote(r) {
+function aliasNote(r, shown = r.label) {
   const extra = (r.aliases ?? [])
     .filter((a) => {
       const t = alnum(a);
-      return t && !alnum(r.label).includes(t);
+      // Compared against the name actually printed, not against the label. An
+      // unlabelled control is named by its own alias now, and comparing against
+      // an absent label printed every one of them twice: `Sort ~ Sort`.
+      return t && !alnum(shown).includes(t);
     })
     .slice(0, 2);
   return extra.length ? `~ ${trim(extra.join(' '))}` : null;
@@ -531,6 +565,25 @@ export async function screenMap(deviceQuery, {
       + ' you did not expect to see as belonging to the layer underneath'
     : null;
 
+  // Controls that are on the screen and answer to no name — item 122.
+  //
+  // Counted from the rows about to be printed rather than from the map, so it
+  // is a statement about what the caller can see. The wording is the ask,
+  // near-verbatim from the report that made it: *"a line like 'N on-screen
+  // tappable views have no accessibility label — they cannot be addressed by
+  // selector' would push people toward instrumenting, which is the outcome
+  // everyone wants"*. It is also the honest answer to the second half of that
+  // item, which we cannot fix from here: a view UIKit was never told is
+  // accessible is invisible to the tree, so a screen whose controls are all
+  // undeclared shows this count as 0 and still needs a screenshot.
+  const anonymous = rows.filter(unaddressable).length;
+  const unnamed = anonymous
+    ? `${anonymous} on-screen control(s) have no accessibility label — they are listed with their`
+      + ' coordinates and can be tapped by point or by #ref, but not by name. If what you are'
+      + ' looking for is not in the list either, the app has views that were never declared'
+      + ' accessible and only a screenshot will find those.'
+    : null;
+
   return {
     device,
     identity,
@@ -549,7 +602,8 @@ export async function screenMap(deviceQuery, {
     staleExits,
     cleared,
     overlay,
-    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, cleared, overlay }),
+    unnamed,
+    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, cleared, overlay, unnamed }),
   };
 }
 
@@ -732,7 +786,7 @@ export function ambiguousLabels(rows) {
   return [...seen.values()].filter((n) => n > 1).length;
 }
 
-export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, verdictLine, ambiguities, cleared, overlay }) {
+export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, verdictLine, ambiguities, cleared, overlay, unnamed }) {
   const head = [
     device?.name,
     screen?.width ? `${screen.width}x${screen.height}pt` : null,
@@ -767,6 +821,7 @@ export function render({ device, identity, rows, truncated, collapsed, screen, n
   // already believes, which is the one kind of news that must not be scrolled to.
   if (cleared) lines.push(cleared);
   if (overlay) lines.push(overlay);
+  if (unnamed) lines.push(unnamed);
   const worked = exitsLine(exitList, { stale: staleExits });
   if (worked) lines.push(worked);
 

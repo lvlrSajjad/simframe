@@ -69,10 +69,57 @@ function Filters() {
   );
 }
 
+/**
+ * An icon-only overflow menu with no accessibility label — item 122.
+ *
+ * Three field reports in a row named this as their biggest practical drag: the
+ * three-dot menu on every card, the bottom-sheet drag handle, the back chevron.
+ * All real, all tappable, all on screen, and none of them addressable by any
+ * selector, so every one of them needed a raw `@x,y` read off a screenshot.
+ *
+ * The dots are `View`s and not a `⋯` glyph, and that is the entire point. React
+ * Native collects the text of an accessible element's children into its label,
+ * so a glyph would arrive labelled "⋯" and be a different bug. Drawn shapes
+ * give what a real icon gives: an `AXButton` with a frame, a role, and no name
+ * at all.
+ */
+function OverflowMenu({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} style={styles.overflow} hitSlop={8}>
+      <View style={styles.dot} />
+      <View style={styles.dot} />
+      <View style={styles.dot} />
+    </Pressable>
+  );
+}
+
+/**
+ * A drag handle that is not an accessibility element at all — item 122's
+ * *other* half, and the boundary between them.
+ *
+ * `OverflowMenu` above is in the tree with no label. This is a plain `View`
+ * holding the responder: UIKit is never told it is accessible, so `AXPTranslator`
+ * cannot see it and neither can we. Emitting unlabelled nodes does nothing for
+ * this shape, and a testbed that only contained the half we fixed would let us
+ * claim the whole item was done.
+ */
+function DragHandle() {
+  return (
+    <View
+      style={styles.handleArea}
+      onStartShouldSetResponder={() => true}
+      onResponderRelease={() => {}}
+    >
+      <View style={styles.handle} />
+    </View>
+  );
+}
+
 function ItemsScreen({ navigation }: NativeStackScreenProps<Stack, 'Items'>) {
   const [items, setItems] = useState<Item[] | null>(null);
   const [total, setTotal] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const load = useCallback(async () => {
     setItems(null);
@@ -91,15 +138,24 @@ function ItemsScreen({ navigation }: NativeStackScreenProps<Stack, 'Items'>) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Set on the navigator rather than rendered inline: a `headerRight` lands in
+  // the real `UINavigationController` bar, which is where the reported menus
+  // were.
+  useEffect(() => {
+    navigation.setOptions({ headerRight: () => <OverflowMenu onPress={() => setMenuOpen((v) => !v)} /> });
+  }, [navigation]);
+
+  const count = total == null ? null : (
+    <Text style={styles.countHeader} accessibilityLabel={`${total} plants`}>
+      {total} plants
+    </Text>
+  );
+
   return (
     <View style={styles.fill}>
-      {total != null && (
-        <Text style={styles.countHeader} accessibilityLabel={`${total} plants`}>
-          {total} plants
-        </Text>
-      )}
       {items == null ? (
         <View style={styles.centre}>
+          {count}
           <ActivityIndicator accessibilityLabel="Loading plants" />
           <Text style={styles.muted}>Loading…</Text>
         </View>
@@ -114,7 +170,22 @@ function ItemsScreen({ navigation }: NativeStackScreenProps<Stack, 'Items'>) {
           // A testbed whose own layout is wrong teaches the wrong lesson.
           contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={styles.listContent}
-          ListHeaderComponent={<Filters />}
+          // Everything above the rows goes in here and not above the list, for
+          // the reason written on `Filters`: a sibling of the list is not inset
+          // by `contentInsetAdjustmentBehavior`, so it renders *under* the
+          // navigation bar. The count header had that bug from the day it was
+          // written — it sat at y=0 and simframe correctly dropped it as status
+          // bar, so a line the testbed exists to publish was never once read.
+          ListHeaderComponent={(
+            <>
+              {count}
+              {/* Proof the unlabelled button was actually hit, and nothing else
+                  on this screen says it. A caller who can only reach that menu
+                  from a screenshot coordinate cannot verify this line either. */}
+              {menuOpen && <Text style={styles.menuOpen}>Sort and filter</Text>}
+              <Filters />
+            </>
+          )}
           refreshControl={(
             <RefreshControl
               refreshing={refreshing}
@@ -146,6 +217,7 @@ function ItemDetailScreen({ route }: NativeStackScreenProps<Stack, 'ItemDetail'>
   useEffect(() => { fetchItem(route.params.id).then(setItem); }, [route.params.id]);
   return (
     <View style={styles.fill}>
+      <DragHandle />
       {item == null ? (
         <View style={styles.centre}><ActivityIndicator accessibilityLabel="Loading detail" /></View>
       ) : (
@@ -196,6 +268,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#c6c6c8',
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
+  menuOpen: { paddingHorizontal: 16, paddingTop: 6, fontSize: 15, color: '#0a7c2f' },
+  overflow: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 10 },
+  dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#007aff' },
+  handleArea: { alignItems: 'center', paddingVertical: 10 },
+  handle: { width: 40, height: 5, borderRadius: 3, backgroundColor: '#c7c7cc' },
   rowTitle: { fontSize: 17 },
   chevron: { color: '#c7c7cc', fontSize: 20 },
   detail: { padding: 16, gap: 12 },

@@ -72,8 +72,17 @@ import * as regions from './regions.js';
  *     graph merged them. Both bounds are absolute now. Screens that were
  *     missed at 7 hash differently at 8, and unlike a stale hash that matches
  *     nothing, these matched the *wrong* thing.
+ *
+ * 9 — nothing in this file changed. The element list it is given did: item 122
+ *     stopped dropping accessibility nodes that have no name, so a screen with
+ *     an icon-only control now carries a token for it that it did not carry
+ *     before. That is a better identity — a nav bar with an overflow menu and
+ *     one without are not the same screen — and it is still a different hash
+ *     for the same screen, which is what this number exists to declare. The
+ *     lesson worth keeping is that the rules version is not a version of *this
+ *     file*; it is a version of the token set, and the token set has an input.
  */
-export const TOKEN_RULES_VERSION = 8;
+export const TOKEN_RULES_VERSION = 9;
 
 /** Frames are quantised to this, so sub-pixel drift and a nudged row do not matter. */
 export const GRID = 24;

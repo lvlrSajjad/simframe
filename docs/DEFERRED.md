@@ -1501,6 +1501,67 @@ round yet, and its P0 is the worst finding this project has had.
    addressed by selector"* would push people toward instrumenting, which is the
    outcome everyone wants.
 
+   **HALF DONE, 2026-09-13 — and the half that is done was not the half anyone
+   thought.** These controls were reported as *"absent from the tree"*, three
+   times, by three sessions that had no contact with each other. They were not.
+   `AXPTranslator` had every one of them. `screenmap.build` opened its
+   accessibility loop with `if (!n.frame || !n.label || …) continue;` — a
+   control the app declared and did not name was read, and then dropped by us,
+   one line before it would have been printed. Everything downstream was already
+   waiting for it: `renderRow` has printed `(unlabelled)` for years, and the OCR
+   merge carries a comment explaining that *"an unlabelled element still takes
+   the text outright, because that is how an icon-only control gets a name at
+   all"* — a branch that could never once have executed.
+
+   The premise was measured before the fix, because two phase premises in a row
+   had been false. On the testbed's list screen, of **39 accessibility nodes
+   exactly one is nameless** — the icon-only overflow menu — and it is the one
+   control on that screen no caller could reach. On the Settings root and on
+   Safari it adds **nothing at all**: Apple labels its controls. So this is a
+   change that fires precisely where the reports said it hurts and is invisible
+   elsewhere, which is the shape a fix should have.
+
+   What ships:
+
+   - nameless nodes reach the map, guarded twice — the role must be one the
+     tree calls interactive (a nameless `Other` is layout, and a screen has
+     hundreds), and it must not enclose two or more other elements (the same
+     scenery test the fingerprint uses: a row holding its own labels is not the
+     target, its labels are);
+   - `testID` reaches the map. It arrives as `AXIdentifier`, `input.matchElement`
+     has matched on it since long before this, and the map simply never carried
+     it — so the one name an unlabelled React Native control usually *does* have
+     worked if you guessed it and was invisible if you did not;
+   - a row with no name of its own takes OCR's reading of itself, but only if
+     that reading contains a word. The first live run printed
+     `#1 button 364,84 ...`, because OCR read the three dots — a name that
+     cannot be typed into a selector and that silenced the count below by making
+     the row look addressable;
+   - the line they asked for, near-verbatim, and it says both halves: *"1
+     on-screen control(s) have no accessibility label — they are listed with
+     their coordinates and can be tapped by point or by #ref, but not by name.
+     If what you are looking for is not in the list either, the app has views
+     that were never declared accessible and only a screenshot will find
+     those."*
+   - `TOKEN_RULES_VERSION` 8 → 9. Nothing in `fingerprint.js` changed; its
+     *input* did. A nav bar with an overflow menu and one without are not the
+     same screen, which is a better identity and still a different hash for the
+     same screen.
+
+   Verified end to end on the testbed: the menu is listed, `tap "#1"` hits it,
+   and the screen it opens is visible in the next map. Before this it was
+   reachable only from a coordinate read off a screenshot.
+
+   **STILL OPEN: the view-hierarchy fallback**, which is the ask this does not
+   answer. The testbed now carries both shapes on purpose. `OverflowMenu` is an
+   accessibility element with no name — fixed above. `DragHandle` is a plain
+   `View` holding a `PanResponder`, which UIKit is never told is accessible, so
+   the translator cannot see it and neither can we: the detail screen reports
+   nine nodes and none of them is the handle. No filter on the tree can recover
+   that. It needs a second source — the view hierarchy proper — and until then
+   the honest output is a count of **0** unnamed controls on a screen that has
+   one, which is why the line above says what it says about screenshots.
+
 123. **`settle` cannot cope with a permanently animated screen**, and aborts the
    rest of the batch when it gives up — expensive when step 1 of 6 was the
    settle. A streaming AI-summary panel, a Lottie and the Intercom widget never

@@ -301,10 +301,39 @@ export async function build(udid, {
         : await input.describeAll(udid);
 
       sources.push('ax');
+      // A control the tree gives no name to is still a control — item 122.
+      //
+      // This line used to read `!n.label`, on the reasoning that a row nobody
+      // can name is a row nobody can tap. The whole of item 122 is that the
+      // opposite is true, and three field reports in a row said so
+      // independently: icon-only overflow menus on every card, a bottom-sheet
+      // drag handle, a back chevron. Real, tappable, on screen, and absent from
+      // the map — so every one of them needed a raw `@x,y` read off a
+      // screenshot, which is the exact round trip the text map exists to
+      // remove. Knowing that *a hit target is there* is most of the value even
+      // with no semantics attached to it.
+      //
+      // Measured on the testbed before it was written, because the premise
+      // could have been false: on the list screen, of 39 accessibility nodes
+      // exactly **one** is nameless — and it is the one control on that screen
+      // no caller could reach. This does not flood the map.
+      //
+      // It also settles a thing the reports could not: those controls were
+      // called "absent from the tree", and AXPTranslator had them all along.
+      // What is genuinely absent is the drag handle, a plain view holding a
+      // responder that UIKit is never told is accessible. No filter here can
+      // recover that one; see 122's second half.
       for (const n of nodes) {
-        if (!n.frame || !n.label || isContainer(n)) continue;
+        if (!n.frame || isContainer(n)) continue;
+        if (nameless(n) && !namelessHitTarget(n, nodes)) continue;
         targets.push({
-          label: n.label,
+          label: n.label ?? undefined,
+          // A `testID` arrives as AXIdentifier, and `tap` has matched on it
+          // since long before this — but only down the tree path, because the
+          // map never carried it. So the one name an unlabelled React Native
+          // control usually does have was invisible in the map and worked if
+          // you guessed it.
+          identifier: n.identifier ?? undefined,
           // What the control *contains*, whether it is on, and whether it has
           // focus. All three come off the accessibility tree, the daemon has
           // asked for all three since 0.6.0, and all three were dropped before
@@ -506,6 +535,36 @@ export function isInteractive(target) {
   return INTERACTIVE.test(target.type || '');
 }
 
+/** No name from any source: not a label, not an identifier. */
+export const nameless = (n) => !n?.label && !n?.identifier;
+
+/**
+ * Whether a nameless accessibility node is worth printing as a hit target.
+ *
+ * Two guards, because "has no name" is not the same as "is a control".
+ *
+ * The role has to be one the tree calls interactive. A nameless `Other` is a
+ * layout view and a real screen has hundreds of them; emitting those would bury
+ * the one node that matters under the scenery it sits in.
+ *
+ * And it must not enclose two or more other elements. That is the same test the
+ * fingerprint uses for scenery, reused deliberately rather than invented here:
+ * a table cell holding its own labels is not the target, its labels are.
+ */
+export function namelessHitTarget(node, nodes) {
+  const f = node?.frame;
+  if (!f || !(f.width > 0) || !(f.height > 0)) return false;
+  if (!INTERACTIVE.test(node.type || '')) return false;
+  const encloses = nodes.filter((o) => {
+    const g = o.frame;
+    if (!g || o === node) return false;
+    const cx = g.x + (g.width ?? 0) / 2;
+    const cy = g.y + (g.height ?? 0) / 2;
+    return cx > f.x && cx < f.x + f.width && cy > f.y && cy < f.y + f.height;
+  }).length;
+  return encloses < 2;
+}
+
 /**
  * Rank candidates for a label. Exact beats substring, and a real control beats
  * a caption that happens to read the same — a screen title and a tab are often
@@ -514,7 +573,7 @@ export function isInteractive(target) {
 export function rank(entry, query) {
   if (!entry) return [];
   const q = norm(query);
-  const names = (t) => [t.label, ...(t.aliases || [])].map(norm);
+  const names = (t) => [t.label, t.identifier, ...(t.aliases || [])].map(norm);
   const exact = entry.targets.filter((t) => names(t).includes(q));
   const pool = exact.length
     ? exact

@@ -2390,9 +2390,17 @@ test('a control\'s value, selection and focus survive to the screen map', async 
 
   // And the other boundary, asserted at the source because a dropped field is
   // invisible in behaviour — it reads as a control that has no state.
+  //
+  // Located by walking back from the `source: 'ax'` that ends the block, rather
+  // than by matching its first property. This test has now broken twice on
+  // edits that changed nothing it is about — the ctx literal, and item 122
+  // making the label optional — and a test that fails for reasons outside its
+  // own subject trains people to edit the test. What it is entitled to pin is
+  // that the ax push carries the state fields, and nothing more.
   const src = fs.readFileSync(new URL('../src/screenmap.js', import.meta.url), 'utf8');
-  const target = src.slice(src.indexOf("        targets.push({\n          label: n.label,"));
-  const head = target.slice(0, target.indexOf("source: 'ax'"));
+  const end = src.indexOf("source: 'ax'");
+  assert.ok(end > 0, 'the ax branch of screenmap.build must still push a target');
+  const head = src.slice(src.lastIndexOf('targets.push({', end), end);
   for (const field of ['value', 'selected', 'focused', 'enabled']) {
     assert.match(head, new RegExp(`\\b${field}:`), `an ax target must carry ${field}`);
   }
@@ -3498,7 +3506,10 @@ test('a summary screen is not a keyboard, and its content stays in its identity'
   // constant, so a system-drawn title was chrome or content depending on how
   // many rows sat below it. Two screens of one app, same 62.9pt inset, opposite
   // answers — and the graph merged them.
-  assert.equal(fingerprint.TOKEN_RULES_VERSION, 8);
+  // 9: not a rule change at all — item 122 changed the *input*. Accessibility
+  // nodes with no name are no longer dropped, so a screen with an icon-only
+  // control carries a token it did not carry before and hashes differently.
+  assert.equal(fingerprint.TOKEN_RULES_VERSION, 9);
 });
 
 test('a band is only the keyboard if there is a keyboard in it', async () => {
@@ -4926,4 +4937,68 @@ test('two capture paths are compared by content, and the threshold is measured',
   assert.ok(!/Buffer\.compare/.test(block), 'the byte comparison is gone');
   assert.match(block, /the daemon has no frame to compare against/,
     'and a direct capture working while the daemon has nothing is itself the wedge');
+});
+
+test('a control with no name is still a control, and says so (122)', async () => {
+  const sm = await import('../src/screenmap.js');
+  const v = await import('../src/view.js');
+  const screen = { width: 402, height: 874 };
+
+  // Measured on the testbed before any of this was written, because the premise
+  // could have been false and two phase premises already had been. Of 39
+  // accessibility nodes on its list screen exactly one is nameless — the
+  // icon-only overflow menu at 349,72 — and it was the one control on that
+  // screen no caller could reach. Three field reports in a row lost time to
+  // exactly this shape and all three called it "absent from the tree".
+  // AXPTranslator had it the whole time; we dropped it.
+  const menu = { type: 'Button', label: null, identifier: null,
+    frame: { x: 349, y: 72, width: 30, height: 24 } };
+  assert.ok(sm.nameless(menu));
+  assert.ok(sm.namelessHitTarget(menu, [menu]), 'a nameless button with a footprint is a hit target');
+
+  // The two guards, which are what keeps this from flooding a real map. A
+  // nameless generic view is layout — a screen has hundreds — and a nameless
+  // thing holding two other things is the thing they are arranged in.
+  assert.equal(sm.namelessHitTarget({ ...menu, type: 'Other' }, [menu]), false);
+  const cell = { type: 'Cell', frame: { x: 0, y: 200, width: 402, height: 60 } };
+  const kids = [
+    { type: 'StaticText', label: 'Title', frame: { x: 16, y: 210, width: 100, height: 20 } },
+    { type: 'StaticText', label: 'Detail', frame: { x: 16, y: 232, width: 100, height: 20 } },
+  ];
+  assert.equal(sm.namelessHitTarget(cell, [cell, ...kids]), false,
+    'a row holding its own labels is not the target; its labels are');
+  // Verified against two real UIKit screens, Settings root and Safari, where
+  // this adds nothing at all: Apple labels its controls.
+
+  // What to call the row. Label, then `testID` — which `tap` has matched on
+  // since long before this and the map simply never carried — then OCR.
+  assert.equal(v.displayName({ label: 'Save', identifier: 'save-btn', source: 'ax' }), 'Save');
+  assert.equal(v.displayName({ identifier: 'save-btn', source: 'ax' }), 'save-btn');
+  assert.equal(v.displayName({ aliases: ['Sort'], source: 'ax|ocr' }), 'Sort');
+  assert.equal(v.displayName({ source: 'ax' }), '(unlabelled)');
+
+  // The first live run named the overflow menu `...`, because OCR read its
+  // three dots and an unlabelled element takes OCR's word outright. That looks
+  // like a name, cannot be typed into a selector, and silenced the count below
+  // by making the row look addressable. Text with no word in it is not a name —
+  // the same rule `isNoise` already applies to a row of its own.
+  assert.equal(v.displayName({ aliases: ['...'], source: 'ax|ocr' }), '(unlabelled)');
+  assert.ok(v.unaddressable({ aliases: ['...'], source: 'ax|ocr' }));
+  assert.equal(v.unaddressable({ aliases: ['Sort'], source: 'ax|ocr' }), false);
+  assert.equal(v.unaddressable({ label: 'Save', source: 'ax' }), false);
+  // OCR alone reading a wordless blob is not a control we are hiding from
+  // anyone; it never had a name to lose.
+  assert.equal(v.unaddressable({ aliases: ['...'], source: 'ocr' }), false);
+
+  // And the line the report actually asked for, which is the half that changes
+  // behaviour: knowing a hit target is there removes the screenshot round trip
+  // even with no semantics attached to it.
+  const rows = [
+    { ref: 1, type: 'Button', x: 364, y: 84, region: 'nav-bar', source: 'ax',
+      frame: { x: 349, y: 72, width: 30, height: 24 } },
+  ];
+  const out = v.render({ device: { name: 'x' }, identity: { hash: 'a' }, screen, rows,
+    unnamed: '1 on-screen control(s) have no accessibility label — they are listed with their coordinates' });
+  assert.match(out, /#1 button\s+364,84\s+\(unlabelled\)/);
+  assert.match(out, /no accessibility label/);
 });
