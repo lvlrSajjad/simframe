@@ -1,103 +1,91 @@
-# Handoff — 2026-09-13
+# Handoff — 2026-09-13 (evening)
 
-**Nothing is released.** npm is still on **0.12.2**. `package.json` says 0.12.3
-and the next release should be **0.13.0** (`npm version minor`) — the tree
-carries a new supervisor arm, a new experiment harness, a changed escalation
-record shape and a changed `waitFor` contract, and calling that a patch would be
-dishonest. The stale local `v0.12.3` tag has been deleted; it was never pushed.
+**0.13.0 is published.** npm `latest` is 0.13.0, the MCP registry has
+`io.github.lvlrSajjad/simframe` at 0.13.0, and CI was green on `aa405f5`
+before the tag went up. This project publishes tags + npm + MCP registry and
+has never created GitHub Release objects, so there is nothing missing there.
 
-Three commits are held locally and unpushed. CI last went red on `3189ee4`, and
-**the reason is now solved — see 126 below.**
+## What went into 0.13.0
 
-## What today was
+**122 — controls with no name.** Three field reports called icon-only menus and
+back chevrons "absent from the tree". They were not; `screenmap.build` dropped
+them one line before printing. Measured first: of 39 ax nodes on the testbed's
+list screen exactly one is nameless, and it was the one control no caller could
+reach. Settings and Safari gain nothing. `testID` reaches the map too. The
+second half — a view the app never declared accessible — is still open and the
+new line says so instead of reporting zero.
 
-Three field reports on a real production app, from three separate agent
-sessions. They are the best input this project has had, and most of the day's
-work came from them. They live outside the repo by design.
+**The numbers are written up.** Three-pass table and the graph's ~27% in
+BENCHMARKS, EXPERIMENTS §14, the article, the site and the README, which now
+opens with a study-case block.
 
-### The three-pass experiment, finished
+**123's cheap half.** A settle that times out names where the movement is and
+draws the region map.
 
-| pass | operator | graph | `sim_do` calls |
-| --- | --- | --- | --- |
-| 1 | fresh | cold | **33** |
-| 3 | fresh | **warm** | **24** |
-| 2 | experienced | warm | **12** |
+**126 has a trigger.** The wedge lands on an **app switch** — launching a second
+app with Safari in front — and hit roughly every other run of the local mirror,
+five times in one session. `frame --fresh` named it every time, `revive` cured
+it every time. First reproducible trigger anyone has had for it.
 
-Pass 3 is the isolation and it settles the attribution:
+## Six defects, and five of them were one disease
 
-- **the graph is worth ~27%** (33 -> 24, nothing else changed)
-- **operator knowledge is worth the rest** (24 -> 12)
+Every CI failure today was a component reporting a condition it could not
+distinguish from a different one. The article's own closing rule.
 
-Peer 2 estimated the graph share at ~23% from escalation rate per step without
-being able to isolate it. The direct measurement says ~27%. Two methods, three
-points apart, n=1 app.
+- **127** `simframe start` said "no daemon process came up" about a daemon that
+  was up and capturing. Circular: aliveness was read from `meta.json`, which the
+  daemon writes *after* its slowest startup step, so the 60s live cap could
+  never be reached in the case it exists for. The previous fix in this family
+  **created** this one.
+- **128** `simctl openurl` timing out is a statement about simctl's patience,
+  not about whether the URL opened. The step asks the screen now.
+- **129** A bad ax read reported "idb is not installed" — a tool we deliberately
+  do not use on CI. The daemon had sent `axError` all along and nothing read it,
+  while the OCR branch eight lines below reads `ocrError`.
+- **130** `stableForMs` reported **79,207 ms** of stillness on a screen
+  animating at 85 ms a frame, in the same file carrying `motion.animating` and
+  `settled: false`. The premature settle, isolated. **Reported, not fixed** —
+  see below.
+- **131** A settle could not be satisfied on a screen still for 3,548 ms of a
+  required 1,400, because it demanded a frame newer than the call and a still
+  screen produces none by design. Currency is time, not a counter.
+- **132** `ci-memory` exited 1 both for a real failure and for the device dying.
+  75 now, and the job revives once on that code alone.
 
-**This has not been written into the docs yet, and the owner has asked for it.**
-Their framing, and it is right: these numbers cost three peer sessions and make
-the project a study case, not just a tool. They belong in EXPERIMENTS, the
-article, README and the site.
+## The open decision, with its number attached
 
-### 126 — solved, and it was one cause wearing five faces
-
-`simctl io screenshot` on a wedged display does not fail, it **hangs**. `run`
-kills it at 10 s. `simctl` opens every invocation with `Note: No display
-specified …`, so at kill time that Note is the only thing on stderr — and the
-handler took the last stderr line. We reported an informational message as the
-reason a capture failed.
-
-Run to completion the device is unambiguous:
-
-```
-NSPOSIXErrorDomain code 60 — Timeout waiting for screen surfaces
-```
-
-That went unread through **five** CI failures with five different symptoms: a
-27 s first frame, a screen moving while reading as empty, a tree returning
-nothing for eighteen readings, a three-hour-stale frame sold as 130 ms, and an
-empty map on a live device. All one thing.
-
-`screenshotFailure` is extracted and tested. `simframe frame --fresh` is the
-arbiter every field round had to leave simframe to get — compared by region
-signature, on a threshold that was **measured**: same screen two paths 0.00123,
-two different screens 0.686, so `PATHS_AGREE = 0.02`.
+**130 is deliberately unfixed.** Requiring the daemon's `settled` flag would be
+right for a spinner and wrong for a text caret — also small, also persistent,
+and it must never stop a screen settling. **The next step is a measurement, not
+a fix**: a blinking caret's per-cell delta and duty cycle against a spinner's,
+on this device. If they separate, stillness can use the per-cell signal and the
+premature settle goes away. If they do not, the answer is 123's expensive half —
+let the caller name a region to ignore.
 
 ## Next, in order
 
-1. **122 — emit unlabeled-but-tappable nodes** as `#7 button 361,234 <unlabeled>`.
-   The cheap half of Phase 16, needs no model, testable on the in-tree testbed.
-   All three peers named this their biggest practical drag; three of peer 3's
-   four flows needed a control that was not in the map. **The owner has approved
-   Phase 16.**
-2. **Write the numbers up** — the three-pass table above and the supervisor
-   results, into EXPERIMENTS / the article / README / the site.
-3. **Cut 0.13.0.** Run `./scripts/ci-integration-local.sh <udid>` first: it has
-   caught every real problem and costs two minutes against CI's thirty.
-4. Then: the premature `settle` (peer 3 — `settled after 62ms` on a
-   still-loading screen, 4-element map, tab labels bound to the wrong
-   coordinates), `--session` binding to the MCP server's id, 117, 123, 114, 118.
+1. **The caret measurement above.** It unblocks 130 and probably 123.
+2. `--session` binding to the MCP server's id, then 117, 114, 118.
+3. **graphify prototype** on the in-tree testbed, aimed at *control inventory*
+   rather than route memory — per peer 2's reframing and the owner's two cases:
+   static-ish repeated screens, versus one screen whose state change entirely
+   changes its shape.
 
-## What is fixed and unreleased
+## Mistakes worth keeping from today
 
-120, 121, SEV-1 (rewritten — see below), the `waitFor` ambiguity stop, the
-`index` out-of-range message, the escalation read-vs-assumed split,
-`supervisions --session`, `doctor` proving the ax tree answers, "untested is not
-passed" in `ci-memory`, and 126.
-
-## Mistakes worth keeping
-
-- **I shipped SEV-1 detection gated on 20 s of stillness**, a number taken from
-  one earlier report. The next report's case was 8,183 ms, so it could not fire
-  during exactly the failure it was written for. Rewritten to count *ignored
-  gestures* instead: three gestures with no pixel moving, at any duration. A
-  threshold chosen from one example is not a mechanism.
-- **I announced two wrong causes for the CI failures** — a runner image change
-  that had not happened (I read the `Image Release` line from the wrong job),
-  and a retry-shaped fix for what turned out to be a discarded error string.
-- **My first `--fresh` comparison was a byte comparison**, which calls a
-  full-resolution capture and a downscaled frame different every time. A
-  confident wrong answer about the one question the command exists to settle.
-- **I asked the owner to run a pass-3 experiment that was already done** and
-  sitting in the report they had sent me.
+- **I made the same mistake twice in one day in one file.** The motion window
+  was in frames when it had to be in time, and two hours later the settle's
+  freshness check was in frames when it had to be in time. Frames are not a
+  clock: capture is damage-driven with a 2 s idle floor.
+- **I shipped a motion report that did not fire on the real failure path.** CI
+  showed the bare message before I did. The fix was to make the message carry
+  its own evidence, which then answered the question in one run.
+- **I read a null field and nearly concluded the tracking was broken.** It was
+  the reporting: `cli.js wait` builds a hand-written payload and dropped it.
+- **`pgrep -fl "react-native start"` found nothing while Metro was running**,
+  because `npx` execs a node process whose command line does not carry that
+  string. The owner's task chip was the reliable signal; my process check was
+  not. Second time this shape has cost something.
 
 ## The measurement results, for anyone picking this up
 
@@ -126,11 +114,16 @@ mislabelling most of the log as Phase 11 until today.
 
 ## State of the machine
 
-- **Our bench device `326464A4` is shut down**, daemon stopped.
+- **Our bench device `326464A4` is booted** with a daemon running; shut it down
+  if you are done. It wedged five times today — see 126's trigger above.
 - **`B55AB0AE` is booted and is NOT ours** — it is the device the field rounds
   ran on. Leave it alone; always pass `--device` explicitly, because both
   simulators are named "iPhone 17 Pro".
-- Metro is not running. The testbed app is installed on the bench device.
+- Metro is not running. The testbed app is installed on the bench device, and
+  the testbed now carries two deliberate shapes: an unlabelled overflow menu
+  (122) and a spinner that never settles (123/130). The spinner is 120pt on
+  purpose — at 28pt it settles in 247ms and reproduces the premature settle
+  instead.
 - Ollama has `qwen3:8b` and `qwen3:14b`.
 
 ## Standing rules
