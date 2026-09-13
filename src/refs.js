@@ -149,7 +149,18 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
   // numbers. Refusing costs a re-read; guessing taps whatever is at those
   // coordinates now.
   if (screenKnown === false) {
-    throw new Error(`#${n} cannot be trusted here — simframe does not recognise this screen. Read it again (sim_ui) to renumber.`);
+    // Flagged, like every other refusal in this function, and it was the one
+    // that was not.
+    //
+    // We tell callers to read `staleRef` rather than the sentence — the CI check
+    // for this very guard carries a comment saying it matched on prose twice and
+    // went red twice, so it reads the contract now. Then it went red a third
+    // time, on a refusal that was correct, well worded, and carried no field at
+    // all: `#1 cannot be trusted here — simframe does not recognise this
+    // screen`, reported by the harness as `no reason`. A refusal a human can
+    // read and a program cannot is the same defect as a failure that reads like
+    // a success, one level down.
+    throw staleError('simframe does not recognise this screen', 'unknown-screen');
   }
   // The pixel check stays, but only as a backstop, and only where it means
   // something. A dark or near-uniform screen produces a layout hash of almost

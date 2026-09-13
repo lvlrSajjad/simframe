@@ -119,6 +119,43 @@ export function regionMap(deltas, cols = REGION_COLS) {
   return lines.join('\n');
 }
 
+/**
+ * Where the movement is, in words — item 123.
+ *
+ * A settle that gives up says only that it gave up, and the reporter who asked
+ * for this put the cost plainly: a streaming summary panel, a Lottie and a
+ * support widget never settle, so the settle fails, and because a failed step
+ * aborts the batch it takes the other five steps with it. Their workaround was
+ * `pause` plus `continueOnError`, which they called *"strictly worse than a
+ * settle that knows what to ignore"*. Knowing what to ignore is the expensive
+ * half. Saying **where** is nearly free, and it is what turns "did not settle"
+ * into "there is a spinner in the top-right and nobody cares about it".
+ *
+ * Deliberately coarse. Thirds of the screen in each axis, named the way a person
+ * would point at it, and a share so a caller can tell one spinner from a screen
+ * that is genuinely still in flight.
+ */
+export function describeMotion(deltas, cols = REGION_COLS) {
+  const total = deltas.reduce((a, b) => a + b, 0);
+  if (!deltas.length || total <= 0) return null;
+  const rows = Math.ceil(deltas.length / cols);
+  const bands = new Map();
+  const third = (i, n) => (i < n / 3 ? 0 : i < (2 * n) / 3 ? 1 : 2);
+  const DOWN = ['top', 'middle', 'bottom'];
+  const ACROSS = ['left', 'centre', 'right'];
+  deltas.forEach((d, i) => {
+    const key = `${DOWN[third(Math.floor(i / cols), rows)]}-${ACROSS[third(i % cols, cols)]}`;
+    bands.set(key, (bands.get(key) ?? 0) + d);
+  });
+  const ranked = [...bands.entries()].sort((a, b) => b[1] - a[1]);
+  const [where, amount] = ranked[0];
+  const share = Math.round((amount / total) * 100);
+  // A single band holding most of the movement is a localised animation; spread
+  // evenly, the whole screen is in flight and naming a corner would mislead.
+  if (share < 40) return { where: 'spread across the screen', share, localised: false };
+  return { where: where.replace('-', ' '), share, localised: true };
+}
+
 /** Signatures live in state.json, so they are stored as compact hex. */
 export function signatureToHex(sig) {
   return sig.map((v) => v.toString(16).padStart(2, '0')).join('');

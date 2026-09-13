@@ -3969,3 +3969,48 @@ that is the part simframe currently cannot carry between sessions.
 **Cost of the measurement.** Three peer sessions, most of a day, and one wasted
 request — the pass-3 experiment was commissioned a second time by me after it had
 already been delivered and was sitting in a report I had been sent.
+
+## 2026-09-13 — the settle signal, and 79 seconds of stillness on a moving screen
+
+Item 123 asked for the cheap half — *say where the screen is still moving when a
+settle gives up*. Building the reproduction for it found the expensive half by
+accident, which is the only reason there are numbers here.
+
+The testbed's Diagnostics tab now carries a spinner that never stops. On it:
+
+| | |
+| --- | --- |
+| frames arriving | every **77–95 ms** — capture sees it perfectly |
+| `state.diff` (mean over the grid) | **0.00196**, against a 0.004 still threshold |
+| max per-cell delta | **0.0275**, against `CELL_CHANGE` 0.012 |
+| `state.motion.animating` | boxed, **13x13** |
+| `state.motion.settled` | **false** |
+| `state.stableForMs` | **79,207** |
+
+Seventy-nine seconds of claimed stillness on a screen that had never once
+stopped, in the same file that says it is not settled and where the moving part
+is. `waitFor` read only `stableForMs`, so `simframe wait` answered **settled
+after 63 ms** — which is, to within a millisecond, the `settled after 62ms` a
+field report had already filed against a still-loading screen.
+
+**Two sizes, because the first was measured rather than guessed twice.** At
+**28pt** the same spinner settles in 247 ms: one grid cell is roughly 80x87
+captured pixels and a 28pt disc cannot move that mean. At **120pt** it is over
+the daemon's per-cell threshold and `motion.animating` fires. The testbed uses
+120 so that item 123 has a screen that genuinely never settles; turning it back
+down reproduces the premature settle instead.
+
+**What shipped is the report, not the decision.** Requiring the daemon's
+`settled` flag would be right for a spinner and wrong for a text caret — also
+small, also persistent, and it must never stop a screen from settling. Choosing
+between them needs a caret measured, which has not been done. So the two signals
+that disagreed now both reach the caller: a settle that satisfies while
+something is animating says `settled after 63ms (a 13x13 region is still
+animating)`, and one that times out says where the movement is.
+
+**Where the motion map looks back over is in time, not in frames.** The first
+version kept the last eight frame pairs, reasoning that eight polls is about
+half a second. Capture is damage-driven with a slow idle floor: on a quiet
+screen eight frames spanned **sixteen seconds** and the window still held the
+transition that had brought us to the screen, so a home screen with one animated
+widget reported movement in all thirty-two regions. `MOTION_WINDOW_MS` is 1,000.

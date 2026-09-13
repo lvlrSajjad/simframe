@@ -2386,8 +2386,28 @@ async function runStep(deviceQuery, udid, step, ctx) {
         timeoutMs: step.timeoutMs ?? 8000,
         options: ctx.options,
       });
-      if (!w.satisfied) throw new Error(w.stalled ? w.live.note : `screen did not settle within ${w.waitedMs}ms`);
-      return `settled after ${w.waitedMs}ms`;
+      // Say where it is still moving — item 123.
+      //
+      // "did not settle within 25000ms" is true and unactionable, and a failed
+      // step aborts the rest of the batch, so a spinner nobody cares about can
+      // cost five steps that would have worked. The reporter who asked for this
+      // had landed on `pause` plus `continueOnError` and called it *"strictly
+      // worse than a settle that knows what to ignore"*. Knowing what to ignore
+      // is the expensive half and is not built. Saying where is nearly free —
+      // the signatures were already read to detect small changes — and it is
+      // the difference between re-planning a flow and ignoring a corner of it.
+      if (!w.satisfied) {
+        if (w.stalled) throw new Error(w.live.note);
+        const m = w.motion;
+        throw new Error(`screen did not settle within ${w.waitedMs}ms`
+          + (m ? ` — the movement is ${m.where}${m.localised ? ` (${m.share}% of it)` : ''}:\n${m.map}` : ''));
+      }
+      // A settle that satisfied while part of the screen is still moving says
+      // so. The daemon has boxed the moving part all along and nothing read it;
+      // measured at 79s of claimed stillness on a screen animating at 85ms a
+      // frame. Not treated as a failure — see the note on `animatingNow`.
+      return `settled after ${w.waitedMs}ms`
+        + (w.animating ? ` (a ${w.animating.width}x${w.animating.height} region is still animating)` : '');
     }
     case 'waitText': {
       const target = step.value ?? step.text;

@@ -1645,6 +1645,59 @@ round yet, and its P0 is the worst finding this project has had.
    Then allow settling on a region or excluding one:
    `{"settle": {"ignore": [[0,560],[402,700]]}}`.
 
+   **CHEAP HALF DONE, 2026-09-13.** A settle that times out now names where the
+   movement is and draws it — `the movement is top right (78% of it)` over the
+   ASCII region map. `simframe wait` prints the same. The expensive half —
+   settling on a region, or ignoring one — is still open and is the ask that
+   removes the workaround.
+
+   **Two things were learned building it, and both were worth more than the
+   feature.**
+
+   The motion window is **in time, not in frames**, and the first version was in
+   frames. Eight frame pairs at a 60 ms poll floor sounded like half a second;
+   capture is damage-driven with a slow idle floor, so on a quiet screen eight
+   frames spanned **sixteen seconds** and the window still held the transition
+   that had brought us to the screen. A home screen with one animated widget
+   reported movement in all thirty-two regions. `MOTION_WINDOW_MS` is 1,000.
+
+   And item 123's reproduction found **130** below.
+
+130. **`stableForMs` reported 79 seconds of stillness on a screen that never
+   stopped moving.** Reported as the *premature settle* — `settled after 62ms`
+   on a still-loading screen with tab labels bound to the wrong coordinates —
+   and now isolated on the testbed, which carries a spinner that never settles
+   for exactly this.
+
+   Measured on it: frames arriving every **77–95 ms**, `state.diff` **0.00196**
+   against a 0.004 still threshold, max per-cell delta **0.0275** against
+   `CELL_CHANGE` 0.012, `state.motion.animating` boxed at **13x13**,
+   `state.motion.settled` **false** — and `state.stableForMs` **79,207**.
+   `simframe wait` answered **settled after 63 ms**, which is the reported
+   number to within a millisecond.
+
+   The daemon has been right the whole time. `Motion.state` localises a small
+   persistent animation, publishes its bounding box as `motion.animating`, and
+   carries its own `settled` flag that accounts for it. **Nothing in JavaScript
+   read either of them.** `waitFor` decided stillness from `stableForMs`, a mean
+   over the grid, and a spinner does not move a mean.
+
+   **What shipped is the report, not the decision, and that is deliberate.**
+   Requiring the daemon's `settled` flag here would be right for a spinner and
+   wrong for a text caret — also small, also persistent, and it must never stop
+   a screen from settling. `analyze.CELL_CHANGE` already carries that reasoning
+   for the *change* signal and says stillness deliberately stays on the mean for
+   this reason. Choosing between them needs a caret measured on this device, and
+   it has not been. Picking a number today would be the fifth guessed threshold
+   in this file.
+
+   So both signals now reach the caller: `settled after 63ms (a 13x13 region is
+   still animating)`. **The next step is a measurement, not a fix** — a blinking
+   caret's per-cell delta and duty cycle against a spinner's, on this device. If
+   they separate, stillness can use the per-cell signal and the premature settle
+   goes away. If they do not, the answer is 123's expensive half: let the caller
+   say which region to ignore.
+
 **Praised, and specifically so it survives a refactor.** `sim_do` batching is
 *"the single best thing here"* and was used for nearly everything — a whole flow
 with per-step verdicts in one round trip is "a completely different experience

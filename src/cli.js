@@ -619,20 +619,36 @@ async function main() {
           changedBeforeWait: Boolean(res.changedBeforeWait),
           noVisibleChange: Boolean(res.noVisibleChange),
           stalled: Boolean(res.stalled),
+          // Where it was still moving, when it never stopped — item 123.
+          //
+          // `waitFor` has computed this since it learned to, and this payload
+          // is hand-built, so the field existed and no caller could see it. I
+          // read a null here and nearly concluded the tracking was broken; it
+          // was the reporting.
+          motion: res.motion ?? null,
+          animating: res.animating ?? null,
           hash: res.state?.hash,
           seq: res.state?.seq,
         },
         () => {
           if (res.satisfied) {
             return `${res.mode === 'change' ? 'changed' : 'settled'} after ${res.waitedMs}ms — frame #${res.state.seq}` +
-              (res.changedBeforeWait ? ' (change had already happened before the call)' : '');
+              (res.changedBeforeWait ? ' (change had already happened before the call)' : '') +
+              (res.animating
+                ? `\nbut a ${res.animating.width}x${res.animating.height} region is still animating`
+                  + ' — the stillness signal is a mean and cannot see it'
+                : '');
           }
           if (res.noVisibleChange) {
             return `no visible change after ${res.waitedMs}ms — screen stable, nothing moved (the action may have had no visible effect)`;
           }
           if (res.stalled) return `capture stalled after ${res.waitedMs}ms — ${res.live.note}`;
           return `timed out after ${res.waitedMs}ms — no ${res.mode === 'change' ? 'change' : 'settle'}` +
-            (res.sawChange ? '' : '; if the change happened before this call, pass `--since` from `simframe mark`');
+            (res.sawChange ? '' : '; if the change happened before this call, pass `--since` from `simframe mark`') +
+            (res.motion
+              ? `\nthe movement is ${res.motion.where}`
+                + `${res.motion.localised ? ` (${res.motion.share}% of it)` : ''}:\n${res.motion.map}`
+              : '');
         },
       );
       process.exitCode = res.satisfied ? 0 : 1;

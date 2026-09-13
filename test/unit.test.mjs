@@ -5040,3 +5040,64 @@ test('the three ways a daemon can fail to be ready are three sentences', async (
   // attaching" and "it failed to launch" call for opposite next moves.
   assert.match(said[1], /attaching/);
 });
+
+test('a settle that gives up says where the screen is still moving (123)', async () => {
+  const a = await import('../src/analyze.js');
+
+  // One band holding most of the movement is a localised animation and is worth
+  // naming; movement spread evenly is a screen in flight and naming a corner
+  // would mislead. The reporter's ask was a sentence like "the moving region is
+  // the top-right 15%", because a spinner nobody cares about should not cost
+  // the other five steps of a six-step batch.
+  const corner = new Array(32).fill(0);
+  corner[3] = 0.5;
+  corner[7] = 0.4;
+  assert.deepEqual(a.describeMotion(corner), { where: 'top right', share: 100, localised: true });
+
+  const everywhere = new Array(32).fill(0.1);
+  assert.equal(a.describeMotion(everywhere).localised, false);
+  assert.match(a.describeMotion(everywhere).where, /spread/);
+
+  // A still screen has nothing to point at, and saying "top left" about zero
+  // movement would be the confident wrong answer this file is full of.
+  assert.equal(a.describeMotion(new Array(32).fill(0)), null);
+  assert.equal(a.describeMotion([]), null);
+
+  // The window is in TIME, not in frames, and that is the whole of it.
+  //
+  // The first version kept the last eight frame *pairs*, on the reasoning that
+  // eight polls at the 60ms floor is about half a second. Capture is
+  // damage-driven with a slow idle floor, so on a quiet screen eight frames
+  // spanned sixteen seconds — and the window still contained the transition
+  // that had brought us to the screen. A home screen with one animated widget
+  // duly reported movement in all thirty-two regions and "spread across the
+  // screen". Frames are not a clock.
+  const api = await import('../src/index.js');
+  assert.equal(api.MOTION_WINDOW_MS, 1000);
+});
+
+test('a settle that satisfies while something is animating says so', async () => {
+  // Measured on the testbed's Diagnostics tab, which now carries a spinner that
+  // never stops: frames every 77-95ms, `motion.animating` boxed at 13x13,
+  // `motion.settled` false — and `stableForMs` **79,207**. Seventy-nine seconds
+  // of claimed stillness on a screen that had never once stopped, in the same
+  // state file that says it is not settled and where the moving part is.
+  //
+  // `waitFor` read only `stableForMs`, which is a mean over the grid, and a
+  // spinner does not move a mean. So `wait` answered "settled after 63ms" — to
+  // within a millisecond the `settled after 62ms` a field report had already
+  // filed against a still-loading screen.
+  //
+  // What is asserted here is the *reporting*, deliberately, and not the
+  // decision. Requiring the daemon's `settled` flag would be right for a
+  // spinner and wrong for a text caret, which is also small and also
+  // persistent and must never stop a screen from settling. That choice needs a
+  // caret measured; it has not been. Until then both signals reach the caller
+  // instead of the optimistic one silently winning.
+  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(src, /animating:\s*animatingNow\(\)/,
+    'waitFor must carry the daemon\'s animating box to its caller');
+  const actions = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(actions, /is still animating/,
+    'a satisfied settle must say when part of the screen is still moving');
+});

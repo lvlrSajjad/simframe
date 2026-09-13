@@ -349,7 +349,8 @@ if (first) {
   // hashes only have to agree with that, and they only get a say when they are
   // informative enough to have one.
   const moved = !informativeHash(before) || !informativeHash(after) || before !== after;
-  if (!ran(left)) skip('the screen actually changed before testing the stale ref',
+  const launched = ran(left);
+  if (!launched) skip('the screen actually changed before testing the stale ref',
     'the second app never launched, so there was no screen change to test against');
   else check(moved, 'the screen actually changed before testing the stale ref',
     `${before.slice(0, 10)} -> ${after.slice(0, 10)}`
@@ -358,7 +359,16 @@ if (first) {
   // reports "the stale-ref guard failed" for a device that never left the
   // screen, which is a false accusation against the one layer this file exists
   // to defend — and it is how this check has failed twice.
-  if (moved) {
+  // A skip has to propagate. The precondition above reported NOT TESTED and this
+  // check ran anyway and failed — which is the harness doing to itself, one line
+  // later, exactly what `skip` was written to stop it doing. `moved` is true
+  // when a hash is too degenerate to have a say, and that is right for "did the
+  // screen change" and wrong as a licence to run a check whose setup is known
+  // not to have happened.
+  if (!launched) {
+    skip('a ref numbered on another screen refuses instead of tapping those coordinates',
+      'we never reached another screen, so there was nothing to refuse from');
+  } else if (moved) {
     // This matched on prose twice and went red twice, both times for a refusal
     // that was correct and better worded than the alternation knew — most
     // recently `"Welcome to Reminders" is not on this screen`, which refuses

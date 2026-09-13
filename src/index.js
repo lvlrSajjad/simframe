@@ -13,6 +13,7 @@ import {
   isBlackFrame,
   maxCellDelta,
   CELL_CHANGE,
+  describeMotion,
   regionDeltas,
   regionMap,
   signatureDiff,
@@ -863,6 +864,23 @@ function timingOfNow(udid, state) {
  * sampled after the fact is the single most common way to wait for a change
  * that has already happened.
  */
+/**
+ * How far back "still moving" looks, in milliseconds.
+ *
+ * **In time, not in frames**, and that distinction is the whole of it. The
+ * first version kept the last eight frame pairs, on the reasoning that at a
+ * 60 ms poll floor eight frames is about half a second. Frames are not a clock:
+ * capture is damage-driven with a slow idle floor, so on a quiet screen eight
+ * frames spanned *sixteen seconds* — and the window still held the transition
+ * that had brought us to the screen. A home screen with one animated widget
+ * duly reported movement in all thirty-two regions.
+ *
+ * One second, long enough that a stepping animation is not missed between two
+ * frames and short enough that the entry transition is gone by the time a
+ * settle gives up.
+ */
+export const MOTION_WINDOW_MS = 1000;
+
 export async function waitFor(
   deviceQuery,
   { mode = 'settle', since, stableMs = 600, timeoutMs = 8000, reactionMs = 2500, baselineHash, options } = {},
@@ -904,6 +922,29 @@ export async function waitFor(
     ? hexToSignature(resolved.entry.sig)
     : (requested == null ? hexToSignature(currentSig(first) ?? '') : null);
   let smallChange = false;
+  /**
+   * Where the screen moved while we waited — item 123.
+   *
+   * The per-region maximum over a trailing window of frame pairs, so a settle
+   * that gives up can say *where* rather than only that it did.
+   *
+   * A window and not a running max over the whole wait, which is what the first
+   * version did and it was useless: every wait begins with the transition that
+   * brought us here, so a home screen with one animated widget reported
+   * movement in all thirty-two regions and "spread across the screen". The
+   * question a settle failure asks is *what is still moving*, not what has
+   * moved at any point since we started looking.
+   *
+   * A window rather than the last pair alone, because a blinking or stepping
+   * animation is between frames as often as not, and a single pair would
+   * report a still screen that is not one.
+   *
+   * Costs one subtraction per region per frame over a signature that was
+   * already read and parsed for `smallChange`.
+   */
+  const motionRing = [];
+  let motionPrev = null;
+  let motionSeq = null;
   /** Frames the display was not rendering at all. See `isBlackFrame`. */
   let blackFrames = 0;
   let blackSinceStart = null;
@@ -949,6 +990,46 @@ export async function waitFor(
     sawChange = false;
   }
 
+  /**
+   * What the daemon says is animating, if anything — and it has always known.
+   *
+   * `Motion.state` in the daemon localises a small persistent animation and
+   * publishes it as `motion.animating`, a bounding box, alongside its own
+   * `settled` flag. Nothing in JavaScript read either. `waitFor` decided
+   * stillness from `stableForMs` alone, which is derived from a *mean* over the
+   * grid, and a spinner does not move a mean.
+   *
+   * Measured on the testbed's Diagnostics screen, which now carries one on
+   * purpose: frames arriving every 85 ms, `motion.animating` boxed at 13x13,
+   * `motion.settled` **false** — and `stableForMs` **79,207**. Seventy-nine
+   * seconds of claimed stillness on a screen that had never once stopped. A
+   * field report had already called this in as `settled after 62ms` on a
+   * still-loading screen.
+   *
+   * Deliberately reported and **not** acted on. Requiring the daemon's `settled`
+   * here would be correct for a spinner and wrong for a text caret, which is
+   * also small, also persistent, and must never stop a screen from settling —
+   * and choosing between them needs a caret measured, not a threshold picked
+   * today. So the disagreement becomes visible instead of being resolved by
+   * guess: the caller is told a part of the screen is still moving and where,
+   * and can decide. The decision is an open item with a number attached to it.
+   */
+  const animatingNow = () => {
+    const box = last?.motion?.animating;
+    if (!box) return null;
+    return { ...box, daemonSettled: last.motion.settled === true };
+  };
+
+  /** The last second of movement, collapsed to one per-region maximum. */
+  function motionSummary() {
+    const cutoff = Date.now() - MOTION_WINDOW_MS;
+    const recent = motionRing.filter((e) => e.at >= cutoff);
+    if (!recent.length) return null;
+    const max = recent[0].deltas.map((_, i) => Math.max(...recent.map((e) => e.deltas[i] ?? 0)));
+    if (!max.some((d) => d > 0)) return null;
+    return { deltas: max, map: regionMap(max), windowMs: MOTION_WINDOW_MS, ...describeMotion(max) };
+  }
+
   const done = (satisfied, extra = {}) => ({
     device,
     state: last,
@@ -966,6 +1047,10 @@ export async function waitFor(
     // because the app drew black. What makes it the capture wedge is that it
     // stays black while input is being delivered, and the caller knows that.
     blackMs: blackSinceStart ? Date.now() - blackSinceStart : 0,
+    // Only worth carrying when something actually moved; a still screen that
+    // never satisfied the wait has nothing to point at.
+    motion: motionSummary(),
+    animating: animatingNow(),
     baselineHash: baselineHashValue,
     baselineResolved,
     waitedMs: Date.now() - startedAt,
@@ -1017,6 +1102,23 @@ export async function waitFor(
           sawChange = true;
           smallChange = true;
         }
+      }
+
+      // Track where it is moving, on new frames only — comparing a frame with
+      // itself is a row of zeros that would dilute nothing but waste the work.
+      if (state.seq !== motionSeq) {
+        const sigHex = currentSig(state);
+        const sig = sigHex ? hexToSignature(sigHex) : null;
+        if (sig) {
+          if (motionPrev) {
+            motionRing.push({ at: Date.now(), deltas: regionDeltas(sig, motionPrev) });
+            // Bounded in time by the summary and in length here, so a screen
+            // rendering at 60 fps for ten seconds cannot grow this without end.
+            while (motionRing.length > 240) motionRing.shift();
+          }
+          motionPrev = sig;
+        }
+        motionSeq = state.seq;
       }
 
       // A pause that turned out not to be the end of the transition. Only
