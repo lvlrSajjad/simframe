@@ -244,7 +244,36 @@ if (failures) {
 
 console.log('\n--- the screen map ---');
 await jsonRetry(['do', LOOP], { allowFail: true });
-const map = await jsonRetry(['ui']);
+const map = await readableMap();
+
+/**
+ * A map that is empty *and* says a sensor failed is a blink, not a result.
+ *
+ * `jsonRetry` retries a command that throws, and this one did not throw: `ui`
+ * returned 200 with zero elements and a degraded note, which is the shape of
+ * failure this whole repo keeps writing rules about. The run that made this
+ * necessary had the accessibility read time out once, report an empty map, and
+ * then resolve a ref correctly sixty seconds later on the same device — so the
+ * device was fine and the check had caught one bad read.
+ *
+ * Deliberately narrow. An empty map with **no** degraded sensor is a real
+ * answer — that is a blank screen and the check should fail on it. Only an
+ * empty map that admits a layer did not answer is worth asking again, and after
+ * three attempts it fails with what the sensor said, which is the diagnosis
+ * either way.
+ */
+async function readableMap(attempts = 3) {
+  let last;
+  for (let i = 0; i < attempts; i += 1) {
+    last = await jsonRetry(['ui']);
+    if (last.elements?.length || !(last.degraded ?? []).length) return last;
+    if (i < attempts - 1) {
+      console.log(`     (the map came back empty and a sensor said why — retrying \`ui\`: ${(last.degraded ?? []).join('; ')})`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  return last;
+}
 
 // Report what actually answered rather than asserting the runner's situation.
 // This line used to read "with no accessibility tree available" unconditionally,

@@ -1608,6 +1608,31 @@ round yet, and its P0 is the worst finding this project has had.
    and capture saw it — the claim is satisfied, and retrying would only risk
    opening it twice. It fails only when simctl timed out **and** nothing moved.
 
+129. **A bad accessibility read was reported as "idb is not installed".** FIXED,
+   2026-09-13. The daemon's ax read timed out once on a hosted runner.
+   `screenmap.build` then called `describeAll`, which asked the same daemon
+   again, got the same nothing, fell through to idb, and the map reported
+   *"idb is not installed, so simframe can observe the screen but cannot touch
+   it — install it with: brew tap facebook/fb…"*.
+
+   Three wrong things in a row. It re-asked the thing that had just failed,
+   costing a second 20 s. It blamed a tool this project deliberately does not
+   use on CI. And it pointed whoever read it at an install that would have
+   changed nothing — the same read worked correctly sixty seconds later on the
+   same device, and a ref resolved against it.
+
+   The daemon has sent `axError` since it learned to time its own reads and
+   **nothing in JavaScript had ever read it**. The asymmetry is what makes it
+   obvious in hindsight: the OCR branch eight lines below reads `ocrError` and
+   reports it. One sensor could say why it failed; the other borrowed a
+   different tool's excuse. Now the daemon's own reason is reported, and idb is
+   the fallback only when there is no daemon to ask.
+
+   `ci-memory` also treats an empty map that *admits a sensor failed* as a blink
+   rather than a result, and asks again — narrowly, because an empty map with no
+   degraded note is a real answer about a blank screen. `jsonRetry` could not
+   catch this: `ui` did not throw, it returned 200 with nothing in it.
+
 123. **`settle` cannot cope with a permanently animated screen**, and aborts the
    rest of the batch when it gives up — expensive when step 1 of 6 was the
    settle. A streaming AI-summary panel, a Lottie and the Intercom widget never

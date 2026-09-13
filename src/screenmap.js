@@ -296,9 +296,29 @@ export async function build(udid, {
     try {
       // The tree is already in hand when the daemon answered; describeAll would
       // only ask for it a second time.
-      const nodes = daemonScreen?.sources?.includes('ax')
-        ? daemonScreen.elements.filter((e) => e.source?.includes('ax')).map(input.elementToNode)
-        : await input.describeAll(udid);
+      //
+      // And when the daemon answered *without* a tree, asking again is asking
+      // the thing that just failed. That path cost a red CI run and a wrong
+      // diagnosis: the daemon's ax read timed out, `describeAll` re-asked it
+      // (another 20s), got the same nothing, fell through to idb, and the map
+      // reported **"idb is not installed, so simframe can observe the screen but
+      // cannot touch it"**. A sentence about a tool this project deliberately
+      // does not use on CI, printed because a different tool had a bad read —
+      // and it points whoever reads it at installing idb, which would change
+      // nothing. The same read worked a minute later.
+      //
+      // The daemon has sent `axError` since it learned to time its own reads,
+      // and nothing here had ever read it. The OCR branch below reads
+      // `ocrError`, which is what makes the asymmetry visible: one sensor could
+      // say why it failed and the other borrowed a different tool's excuse.
+      let nodes;
+      if (daemonScreen?.sources?.includes('ax')) {
+        nodes = daemonScreen.elements.filter((e) => e.source?.includes('ax')).map(input.elementToNode);
+      } else if (daemonScreen) {
+        throw new Error(daemonScreen.axError ?? 'the daemon read the screen and the accessibility tree did not answer');
+      } else {
+        nodes = await input.describeAll(udid);
+      }
 
       sources.push('ax');
       // A control the tree gives no name to is still a control — item 122.
