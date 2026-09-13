@@ -263,6 +263,34 @@ simframe state --since=$H   <span class="cmt"># what moved, as text</span></pre>
   collision floor rather than being tuned to maximise hits.
 </p>
 
+<h2>What the memory is actually worth</h2>
+<p>
+  Three sessions drove the same task family on the same production app, and the third one
+  existed only to hold a variable still. Pass&nbsp;2 was faster than pass&nbsp;1 by
+  twenty-one model round trips — but it had a warm graph <em>and</em> an operator who had
+  already driven the app. Pass&nbsp;3 used a fresh operator against the warm graph.
+</p>
+<table>
+  <thead><tr><th>Pass</th><th>Operator</th><th>Graph</th><th class="num">round trips</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>fresh</td><td>cold</td><td class="num"><strong>33</strong></td></tr>
+    <tr><td>3</td><td>fresh</td><td><strong>warm</strong></td><td class="num"><strong>24</strong></td></tr>
+    <tr><td>2</td><td>experienced</td><td>warm</td><td class="num"><strong>12</strong></td></tr>
+  </tbody>
+</table>
+<p>
+  <strong>The graph is worth ~27&nbsp;%</strong> of the round trips. Operator knowledge is
+  worth the rest — half of everything left after the graph had taken its share. A second
+  reporter, with no way to isolate the graph, derived <strong>~23&nbsp;%</strong> from
+  escalation rate per step without knowing that number.
+</p>
+<p class="note">
+  One app, one operator per pass, so operator variance and operator experience are not
+  separated from each other. Round trips are not seconds. The part worth taking away is
+  the direction: the memory is real and it is the smaller half, and what an operator
+  learns is the larger half that no tool here carries yet.
+</p>
+
 <h2>Does this work on <em>your</em> app?</h2>
 <p>
   Nothing here is written for a particular app. What varies is how much accessibility
@@ -273,6 +301,13 @@ simframe state --since=$H   <span class="cmt"># what moved, as text</span></pre>
   <li><strong>Partial tree</strong> (custom tab bars, icon buttons) → OCR fills the gaps; tap by the visible text.</li>
   <li><strong>No tree at all</strong> → OCR alone still yields labels and coordinates.</li>
 </ul>
+<p>
+  A control the app declares but never names — an icon-only overflow menu, a back chevron —
+  is listed with its coordinates and can be tapped by <code>#ref</code> rather than by
+  name, and the map says how many such controls are on the screen. A view the app never
+  declared accessible at all is invisible to any tree, ours included; the same line says
+  so, because a count of zero on a screen that has one would be the more expensive answer.
+</p>
 <p class="note">
   Run <code>simframe ui</code> on any screen to see exactly what simframe can see, each
   target marked <code>ax</code> or <code>ocr</code>. Two honest caveats: OCR reads

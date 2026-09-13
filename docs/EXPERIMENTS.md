@@ -442,6 +442,53 @@ sufficient.
 
 ---
 
+## 14. The graph is worth a quarter of the round trips, and the operator is worth more
+
+**What we believed:** that a warm transition graph was the main reason a second
+run of a flow is faster than the first. It is the feature the whole memory layer
+exists for, and two field rounds appeared to confirm it — 33 `sim_do` calls on
+the first pass, 12 on the second.
+
+**Why those two rounds proved nothing.** The second pass had a warm graph *and*
+an operator who had already driven the app once. Both changed together, so the
+21-call gap could be attributed entirely to either one, and we had been
+attributing it to the graph because the graph is the part we built.
+
+**The experiment:** a third session, on the same app and the same task family,
+with an operator who had never seen it, and the graph left warm from pass 1. One
+variable held still.
+
+| pass | operator | graph | `sim_do` calls |
+| --- | --- | --- | --- |
+| 1 | fresh | cold | **33** |
+| 3 | fresh | **warm** | **24** |
+| 2 | experienced | warm | **12** |
+
+**What it says.** The graph is worth **~27%** — nine calls of the thirty-three.
+Operator knowledge is worth **the remaining twelve**, which is half of what was
+left after the graph had taken its share. The thing we built is real and it is
+the smaller half.
+
+**The corroboration is the best in this file.** Peer 2 had no way to isolate the
+graph and estimated its contribution indirectly, from escalation rate per step,
+at **~23%**. The direct measurement says 27%. Two methods, three points apart,
+neither knowing the other's number.
+
+**What changed because of it.** Nothing was undone, which makes this the rare
+entry where the measurement confirmed the feature and still redirected the work.
+The larger share belongs to what an operator learns and simframe cannot yet
+carry between sessions — which route through a screen is the fast one, which
+control is a trap, what this app calls the thing you are looking for. That is
+now the case for the next faculty, and it is a case made of a number rather than
+of an intuition.
+
+**Caveats, stated because the number will be quoted.** n=1 app. One operator per
+pass, so operator variance and operator *experience* are not separated from each
+other. `sim_do` calls are round trips, not seconds; they correlate with waiting
+but a round trip on a slow screen and one on a fast screen count the same.
+
+---
+
 ## What the whole file adds up to
 
 Three habits, each bought with a reversal above.
@@ -456,3 +503,8 @@ chosen after seeing the answers is not a threshold. Entry 1, and the reason
 **A confident wrong answer costs more than a refusal.** Entry 9 is the clearest
 case, and it is why the supervisor may only say three words: the answer space is
 the safety property, not a confidence threshold.
+
+**Two variables that always move together have never been measured.** Entry 14.
+Two field rounds agreed with each other and with us for a day, and neither could
+have told us we were crediting the wrong half. The isolating run cost one peer
+session; the belief it corrected had already shaped a phase plan.

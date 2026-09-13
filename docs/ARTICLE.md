@@ -439,6 +439,34 @@ Intent resolution went from 26 of 28 to 22 of 28 without it, and the shape of th
 
 Android also found the sharpest version of a bug this project has now hit four times. Chrome’s address bar is chrome by every structural test there is — a short row at the top with a gap under it — so the URL went into the screen’s *identity*. A URL in a fingerprint does not degrade recognition, it inverts it: every visit to a new page mints a new screen, the memory fills with screens that will never recur, and every learned route through the browser breaks the moment the page changes. The rule now is that a label has to be a name before it can be an identity — two letters at minimum, and not an address.
 
+*The memory, isolated*
+
+## The graph is worth a quarter of the round trips
+
+Memory is the third faculty in this piece and the one I was least able to defend with a number. A second run of a flow is obviously faster than the first. Attributing that to the graph, rather than to the person driving it, turns out to be a different claim entirely — and for a day I was making it without evidence.
+
+Two field rounds looked like proof. Same app, same task family, **33** model round trips on the first pass and **12** on the second. But the second pass had a warm graph *and* an operator who had already driven the app once. Both variables moved together, so the whole twenty-one-call gap could belong to either, and I was crediting it to the graph because the graph is the part I built.
+
+So a third session ran the same task family on the same app with an operator who had never seen it, against the graph pass 1 had left warm. One variable held still.
+
+**Round trips to the model, three passes**
+
+| Pass | Operator | Graph | `sim_do` calls |
+| --- | --- | --- | --- |
+| 1 | fresh | cold | **33** |
+| 3 | fresh | **warm** | **24** |
+| 2 | experienced | warm | **12** |
+
+- **The graph is worth ~27 per cent** — nine calls of the thirty-three, bought by nothing but having walked those routes before.
+- **Operator knowledge is worth the other twelve**, which is half of everything left after the graph had taken its share.
+- **An independent estimate agrees to three points.** The second reporter had no way to isolate the graph and derived its contribution from escalation rate per step: **~23 per cent**. Neither knew the other’s number.
+
+The thing I built is real and it is the smaller half. I find that more useful than a flattering number would have been, because it says exactly where the next work is: the larger share belongs to what an operator learns and this tool cannot yet carry between sessions — which route through a screen is the fast one, which control is a trap, what this particular app calls the thing you are looking for. A transition graph remembers that a tap on *Assets* led to a list. It does not remember that the list takes four seconds and the search field above it does not work until it has.
+
+Stated with its limits, because the number will get quoted: one app, one operator per pass, so operator variance and operator *experience* are not separated from each other. And `sim_do` calls are round trips rather than seconds — they track waiting closely, but a round trip on a slow screen and one on a fast screen count the same.
+
+The measurement cost three peer sessions and most of a day, and one of those requests was wasted: I commissioned the isolating run a second time, after it had already been delivered and was sitting in a report I had been sent.
+
 *What three strangers agreed on*
 
 ## The bill for a confident wrong answer

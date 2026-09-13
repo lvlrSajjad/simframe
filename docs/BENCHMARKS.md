@@ -3927,3 +3927,45 @@ stopped, so you never learn whether continuing would have worked. `stop` already
 means "hand back to Claude with the unattempted steps", so it is an escalation
 rather than an abandonment — but it is the one word whose correctness nothing
 local can ever confirm.
+
+## 2026-09-13 — what the graph is worth, isolated
+
+Three field rounds on one real production app, run by three separate agent
+sessions that had no contact with each other. The measure is **`sim_do` calls**:
+the number of times the flow had to come back to the model. That is the quantity
+every phase of the human-parity series exists to reduce, and it is the one an
+operator feels as waiting.
+
+Two things differ between rounds and they had always moved together, which is
+why the first two rounds could not settle anything. Pass 3 was commissioned to
+hold one of them still.
+
+| pass | operator | graph | `sim_do` calls |
+| --- | --- | --- | --- |
+| 1 | fresh | cold | **33** |
+| 3 | fresh | **warm** | **24** |
+| 2 | experienced | warm | **12** |
+
+Pass 3 is the isolation: same task family, same app, an operator who had never
+seen it, and the graph left warm from pass 1. Nothing else changed.
+
+- **The graph is worth ~27%** of the round trips — 33 → 24, 9 calls.
+- **Operator knowledge is worth the rest** — 24 → 12, another 12 calls, which is
+  half of what was left after the graph had taken its share.
+
+**Two methods, three points apart.** Peer 2 could not isolate the graph and
+estimated its share indirectly, from escalation rate per step, at **~23%**. The
+direct measurement says 27%. Neither knew the other's number. That is the
+strongest agreement anything in this project has produced, and it is still n=1
+app with one operator per pass.
+
+**What this does not say.** Not that a warm graph saves 27% in general — it says
+that on this app, on this task family, the memory of routes already walked
+removed a quarter of the model turns while the operator learned nothing. And the
+larger share belonging to the operator is not a disappointment: it is the
+strongest argument in the file for writing down what an operator learns, because
+that is the part simframe currently cannot carry between sessions.
+
+**Cost of the measurement.** Three peer sessions, most of a day, and one wasted
+request — the pass-3 experiment was commissioned a second time by me after it had
+already been delivered and was sitting in a report I had been sent.

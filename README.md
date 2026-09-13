@@ -30,6 +30,41 @@ flows run in one call, screens the agent has seen before are answered from
 memory, and every answer is text with tap points in it. Nothing returns an
 image unless you ask for one.
 
+### It is also a study case, and the numbers are the point
+
+Almost everything here was decided by a measurement rather than by an argument,
+and several of those measurements **reversed a decision that had already
+shipped**. They are written down in full, with what we expected beforehand, what
+it cost to find out, and the mistakes made getting there — because a benchmark
+that only records the winner teaches nothing.
+
+| | |
+| --- | --- |
+| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | the record: N, median, p95, machine, every round |
+| [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) | what we believed *before* measuring, and the fourteen times it was wrong |
+| [`docs/DEFERRED.md`](docs/DEFERRED.md) | every known defect, open or closed, with the evidence |
+| [`docs/ARTICLE.md`](docs/ARTICLE.md) | the argument the whole thing adds up to |
+
+The headline results, all free to reuse:
+
+- **A warm transition graph removes ~27% of an agent's model round trips** —
+  isolated with a three-pass field experiment, and corroborated to three points
+  by an independent estimate. Operator knowledge is worth twice that, and no
+  tool here carries it yet. ([§14](docs/EXPERIMENTS.md))
+- **A bigger local judge is not a better one.** `qwen3:14b` scored *lower* than
+  `qwen3:8b` — 82% against 91% — while being 79% larger and 62% slower. A
+  one-line threshold on a number already computed beat all of them at **95% and
+  zero latency**.
+- **Every interactive element came from the accessibility tree — 72 of 72 — and
+  83% of them have no text at all.** Screen *recognition*, though, did not need
+  the tree once. The ladder splits there: semantics need a tree, identity needs
+  pixels.
+- **Capture is ~31× faster than a screenshot** for the same work, and the
+  capture primitive itself about a thousand times faster.
+- **Three independent reporters converged on one thing**: a refusal is cheap and
+  a confident wrong answer is expensive. Every serious bug they found was a
+  component reporting more certainty than it had.
+
 ## What changed, measured
 
 Same four-tab navigation flow, on a real production app:
@@ -564,6 +599,29 @@ simframe flow save checkout ./checkout.json
 simframe flow run checkout
 ```
 
+### What the memory is worth, isolated
+
+Three agent sessions drove the same task family on the same production app. The
+third existed only to hold a variable still: pass 2 beat pass 1 by twenty-one
+model round trips, but it had a warm graph *and* an operator who had already
+driven the app once, so the gap could belong to either.
+
+| pass | operator | graph | round trips |
+| --- | --- | --- | --- |
+| 1 | fresh | cold | **33** |
+| 3 | fresh | **warm** | **24** |
+| 2 | experienced | warm | **12** |
+
+**The graph is worth ~27%** of the round trips. Operator knowledge is worth the
+rest — half of everything left after the graph had taken its share. A second
+reporter, unable to isolate the graph, derived **~23%** from escalation rate per
+step without knowing that number.
+
+One app, one operator per pass, and round trips are not seconds. What it settles
+is the direction: the memory is real, it is the smaller half, and the larger half
+is what an operator learns and no tool here carries between sessions yet. Full
+working in [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) §14.
+
 ## Does this work on *your* app?
 
 Nothing in simframe is written for a particular app. What varies between apps is
@@ -579,9 +637,16 @@ Run `simframe ui` on any screen to see exactly what simframe can see, with each
 target marked `ax` or `ocr`. If something you can read is not listed, that is a
 bug worth reporting.
 
+A control the app **declares but never names** — an icon-only overflow menu, a
+back chevron — is listed with its coordinates and tappable by `#ref` rather than
+by name, and the map counts how many such controls are on the screen. A view the
+app never declared accessible at all is invisible to any accessibility tree, ours
+included, and the same line says so: a count of zero on a screen that has one
+would be the more expensive answer.
+
 Two honest caveats. OCR reads **text**, so a purely graphical icon with no label
-is invisible to both paths — use `sim_ui` to get its coordinates from the tree,
-or tap by position. And the confirm-button vocabulary (`APPLY`, `OK`, `SAVE`,
+is invisible to both paths — the tree still gives you its coordinates, and
+`#ref` still taps it. And the confirm-button vocabulary (`APPLY`, `OK`, `SAVE`,
 `DONE`…) is English; a localised UI needs those words extended.
 
 ## Measured
