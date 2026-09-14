@@ -5296,15 +5296,27 @@ test('a wait resolves against the live screen, not against memory', async () => 
   // session. `waitFor` was left behind, which is the part worth remembering:
   // the fix was applied to the symptom that had been reported rather than to
   // the class.
-  assert.doesNotMatch(src, /refresh: attempt > 0/,
+  // Comments stripped first, because the paragraph explaining this defect quotes
+  // the very string it forbids — the first version of this assertion failed on
+  // its own prose, and `npm test | tail -3` hid the `# fail` line while I read
+  // the three lines under it. Check what the file DOES, not what it says.
+  const code = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  assert.doesNotMatch(code, /refresh: attempt > 0/,
     'no wait may resolve its first look against the recalled map');
 
-  // Both branches — a single target and {"any": [...]} — and both opt out the
-  // same way `assert` does, so the contract is one contract.
-  const waits = [...src.matchAll(/api\.locate\([^)]*refresh:[^,)]*/g)].map((m) => m[0]);
-  assert.ok(waits.length >= 3, 'expected the wait and assert call sites');
-  for (const call of waits) {
-    assert.match(call, /refresh: step\.refresh !== false/,
-      `every verification read must be fresh by default: ${call}`);
-  }
+  // Three fresh reads: both `waitFor` branches — a single target and
+  // {"any": [...]} — and `assert`. All opt out the same way, so the contract is
+  // one contract rather than three.
+  const fresh = [...code.matchAll(/refresh: step\.refresh !== false/g)].length;
+  assert.ok(fresh >= 3, `expected both waits and the assert to read fresh, found ${fresh}`);
+
+  // Deliberately NOT every `api.locate`. An ACTION resolves its target from the
+  // map on purpose — that is what makes a tap cost a file read rather than a
+  // perception pass — and the action's own verdict checks the outcome
+  // afterwards. Only a *check* has no second opinion, which is why only checks
+  // are required to be fresh. The first version of this assertion swept in
+  // `type`'s field lookup and would have undone that design in the name of
+  // tidiness.
+  assert.match(src, /api\.locate\(deviceQuery, step\.into, \{ index: step\.index, refresh: step\.refresh \}/,
+    'an action still resolves from the map; this test is about checks');
 });
