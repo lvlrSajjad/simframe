@@ -2072,6 +2072,41 @@ on."*
    none of the tour's eight selectors trigger a synonym group at all, so that
    branch never executes on this tour.
 
+145. **`simctl openurl` was catalogued, declared fixed, and left in place in
+   three of the four checks that used it.** FIXED, 2026-09-15. Item 142 lists
+   "`simctl openurl` timing out | 4 runs | fixed — vehicle changed" and the
+   vehicle was changed **in the workflow step only**. `ci-memory.mjs`'s graph
+   loop, its novel action, and the fingerprint tour's browser screen all stayed
+   on it. Same class-versus-symptom error as the `waitFor`/`assert` twin: the
+   fix went where the report pointed, not everywhere the cause reached.
+
+   It came back on 2026-09-14. Passes 2 and 3 of the graph loop halted at step
+   0, and the harness reported **"the outcome is predicted — pass 0"** — naming
+   the graph for something Safari did, three checks downstream of the real
+   cause.
+
+   **Flaky, not broken, and the distinction was measured.** The same commit
+   (`a30c8cc`) failed and then passed on a plain re-run with no code change. So
+   `openurl` is intermittent on a loaded runner, which is exactly what 142 said
+   before it was half-fixed.
+
+   Two changes. The loop is now `launch com.apple.Preferences` + `button: home`
+   — the closed loop it always wanted, on the vehicle 142 measured and proved
+   (*from inside an app, pressing home always changes the screen*), with no
+   network and no browser cold start. And the prediction precondition, which was
+   right in principle and too coarse in practice: it asked whether *any* pass
+   ran, but prediction is only observable on a pass **after** the one that
+   taught the edge, so pass 1 running was never enough. It now says which later
+   passes failed to dispatch and skips instead of failing — the same "untested
+   is not broken" rule the novel action three checks above already applied
+   correctly.
+
+   **Still on `openurl`:** the fingerprint tour's `browser` screen. That one is a
+   perception *subject* rather than harness plumbing — a static page whose
+   structure should be identical every visit — so replacing it would change what
+   is measured. It is the remaining known-fragile step and it is why 144's cold
+   Safari problem is worth fixing rather than routing around.
+
 144. **Sharding the integration job made CI 51% faster and 0-for-3 reliable.**
    REVERTED, 2026-09-14. Kept here because the measurements are good and the
    next attempt should start from them rather than re-derive them.

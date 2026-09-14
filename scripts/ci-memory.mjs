@@ -225,10 +225,28 @@ function writeFlow(name, steps) {
   return file;
 }
 
-// A closed loop: openUrl puts Safari in front, home leaves it. Both ends are
-// screens the graph can learn, and every pass starts where the last one ended.
+// A closed loop: launching an app puts it in front, home leaves it. Both ends
+// are screens the graph can learn, and every pass starts where the last one
+// ended.
+//
+// **It used to be `openUrl https://example.com`, and that was the bug.** Item
+// 142 catalogued `simctl openurl` timing out on a loaded runner as a failure
+// class, marked it "fixed — vehicle changed", and changed the vehicle in the
+// *workflow's* step only. This loop was left on it, and so was the novel action
+// below. That is the same class-versus-symptom error the `waitFor`/`assert`
+// twin recorded: the fix went where the report pointed instead of everywhere
+// the cause reached.
+//
+// It came back on 2026-09-14: passes 2 and 3 halted at step 0, the graph never
+// got the chance to predict, and the failure read as "the outcome is predicted
+// — pass 0", which names the graph for something Safari did.
+//
+// The replacement is the vehicle item 142 measured and proved for exactly this:
+// **from inside an app, pressing home always changes the screen.** Settings is
+// already installed everywhere this runs, the launch needs no network, and
+// neither end depends on a browser cold-starting on a shared machine.
 const LOOP = writeFlow('simframe-ci-loop.json', [
-  { openUrl: 'https://example.com' },
+  { launch: { value: 'com.apple.Preferences', relaunch: true } },
   { button: 'home' },
 ]);
 // Leaving whatever screen the map was read on.
@@ -537,10 +555,23 @@ if (novelRan && novelMoved) {
 // so a run in which every pass failed to dispatch says nothing about
 // prediction. It failed the build as `pass 0` while the real cause was a
 // simctl launch timing out, three checks upstream.
-const anyPassRan = passes.some((p) => Array.isArray(p.run?.results) && p.run.results.some((r) => r.ok !== false));
-if (!anyPassRan) {
+//
+// **The rule was right and the test of it was too coarse.** `anyPassRan` asks
+// whether *any* pass ran, but prediction can only be observed on a pass AFTER
+// the one that taught the edge — so pass 1 running is not enough. On
+// 2026-09-14 pass 1 ran, passes 2 and 3 halted at step 0, and this reported
+// `pass 0` as though the graph had declined to predict. Nothing had asked it
+// to. Same sentence as the novel action three checks above: untested is not
+// broken, and the guard has to test the pass the claim actually depends on.
+const dispatched = (p) => Array.isArray(p.run?.results) && p.run.results.some((r) => r.ok !== false);
+const laterPassRan = passes.slice(1).some(dispatched);
+if (!passes.some(dispatched)) {
   skip('and once the graph has seen it, the outcome is predicted',
     'no pass dispatched a step, so the graph was never given anything to learn');
+} else if (!laterPassRan) {
+  skip('and once the graph has seen it, the outcome is predicted',
+    `only the first pass dispatched a step (${passes.slice(1).map((p, i) => `pass ${i + 2}: [${p.verdicts.join(', ')}]`).join('; ')})`
+    + ' — prediction is only observable on a pass after the one that taught the edge');
 } else {
   check(passes.some((p) => p.verdicts.includes('ok')),
     'and once the graph has seen it, the outcome is predicted',
