@@ -1751,6 +1751,146 @@ round yet, and its P0 is the worst finding this project has had.
    fear to a known trade-off with a named solution**, which is the whole point of
    measuring first.
 
+## The 0.13.0 field round
+
+One session on a real production app, diagnosing and then verifying a QA-failed
+bug — not a scripted demo. Roughly 20 calls. *"Nothing blocked the task. Every
+issue below cost minutes, not the outcome."*
+
+Praised, so it survives a refactor: the **last-action verdict line** (*"the
+single best feature"*), `sim_look` with `region` + `detail:"high"` (*"the most
+valuable single call of the session"* — it showed which radio was selected where
+the text map could not), **OCR-vs-accessibility disagreement shown inline**, the
+**occlusion warning** (*"fired exactly when a bottom sheet was presented, and not
+otherwise"*), and **UDID addressing** — the name-collision misrouting from an
+earlier round did not recur.
+
+The one sentence to keep: *"a tool admitting its own settle heuristic may have
+lied, and naming the plausible cause. Most automation reports success and moves
+on."*
+
+135. **Ambiguity refused a question it answers.** FIXED, 2026-09-14.
+   `assert <name> is visible` **failed, and aborted the batch**, on a screen
+   where the name matched **two** elements. Two matches means the thing is
+   definitively there; the assertion's own semantics were satisfied twice over.
+   The reporter praised the message in the same breath — candidates, coordinates
+   and scores — so what was wrong was the verdict, not the diagnosis.
+
+   The `gone` direction had the mirror-image bug and nobody had hit it yet: *any*
+   error returned "is gone", so a query matching two visible elements would have
+   been reported absent. Ambiguity is the one error that is positive evidence of
+   presence, and it was being read as proof of absence.
+
+   Strict single-match resolution stays for `tap`, `value`, `enabled` and
+   `disabled`, where answering about the wrong element is how a confident wrong
+   answer gets made.
+
+136. **Two output lines that meant two things each.** FIXED, 2026-09-14.
+
+   `FLOW FAILED — 3/3 steps` reads like a success, and the reporter had the
+   diagnosis exactly: the denominator means *attempted* on failure and
+   *succeeded* on success, so one shape carries opposite meanings. It now says
+   `FLOW FAILED — 2 ok, 1 failed (of 3)`, and names steps a stopped flow never
+   reached — which is what tells a caller to resume rather than re-plan. One
+   renderer, shared by the CLI and the MCP server, because those two had been
+   formatting it separately.
+
+   And an unnamed screen was labelled with a second hash: `screen 299dd147
+   "a9505378"`, against `screen 089bec77 "time sheets"` for a named one.
+   `graph.describe` fell back to the node's own short hash, and the map prints
+   the name in quotes — so a hash arrived dressed as a title. It returns `null`
+   now; a listing supplies its own fallback, which is a presentation decision
+   and belongs where the presenting happens. `goto <short hash>` still works.
+
+137. **A build under field test could not state its own build, and device
+   discovery fell out of the tool.** PARTLY FIXED, 2026-09-14.
+
+   The session was told to test 0.13.0. The globally installed CLI resolved to
+   0.12.2 while the MCP server ran from a checkout, and answering *"am I on the
+   build under test?"* took three shell calls and a read of the client config.
+   `sim_devices` now leads with `simframe <version>` — the one call every
+   session starts with.
+
+   Worse: `sim_devices` listed only booted devices and gave no hint that the
+   host had **eight others**, so a session told to avoid a colleague's simulator
+   left the tool entirely for `xcrun simctl list` and `xcrun simctl boot`. *"For
+   a tool whose entire job is driving simulators, shelling out to simctl to pick
+   and boot one is a conspicuous hole — and it is the very first thing a session
+   needs."* The CLI has had `--all` all along; only the MCP surface lacked it.
+
+   `all:true` now accounts for every device, and `match:"…"` lists the ones you
+   mean. **Summarised, not dumped** — the first version listed all of them and
+   produced **126 rows** on this host, two thousand tokens from a tool whose
+   argument is that text is cheaper than a screenshot. Booted devices in full,
+   the rest grouped by runtime with counts.
+
+   **STILL OPEN: nothing can boot a device.** `restartDevice` exists behind the
+   Platform boundary and iOS implements it, so the capability is nearly there —
+   what is missing is a boot-only path and an MCP surface. The reporter offered
+   two designs: a boot action, or auto-boot when `sim_launch` names a shut-down
+   device. Auto-boot is the better ergonomics and changes machine state, which
+   is why it is written down here rather than quietly added. Android must
+   decline with a reason, as it already does for `restartDevice`.
+
+138. **A long descriptive selector partial-matches, and `or` never gets a
+   chance.** OPEN. `{"tap": "<long phrase containing a heading's text>", "or":
+   ["#14", "@203,372"]}` matched the *heading* rather than the row, returned
+   `ok … [no visible change]`, and the flow failed two steps later. Re-issuing
+   as `{"tap": "#14"}` worked first try.
+
+   The resolver did what it was told — the phrase did contain that heading's
+   text. The reporter's framing is the useful part: *prefix-matched a long
+   phrase* + *no visible change* + *an untried `or` list* is exactly the case
+   where trying the fallback would have been right.
+
+   Their suggestion, and it is the right shape: when a step resolves but yields
+   `no-visible-change` **and** an `or` list is present, try the next candidate
+   before returning `ok`. At minimum, downgrade that step's verdict from `ok` to
+   something the caller is forced to inspect. Note this is the *opposite* of the
+   rule that keeps simframe from retrying `openurl` — the distinction is that an
+   `or` list is the caller's own stated fallback, not the driver's initiative.
+
+139. **`waitFor` burns its whole timeout on a provably idle screen.** OPEN. A
+   180-second wait for a control that never appeared, on a screen static within
+   about 12 seconds — the app had logged itself out. Cost ~3 minutes.
+
+   The failure message is good and was praised for listing what *is* on screen.
+   It arrived three minutes late. Stillness is already tracked and already
+   printed elsewhere (`still for 17816ms`), so the information exists.
+
+   Suggested: an optional `failIfStillFor` — *"if nothing has moved in 15s and
+   the target is absent, stop early"* — or at minimum report
+   stillness-at-failure so the next attempt can be tuned. Worth pairing with
+   134, which is what makes "nothing has moved" trustworthy: before the
+   animation threshold was measured, a static screen claimed something was
+   animating on 54% of its frames.
+
+140. **Feature idea: read the app's own storage.** OPEN, and the reporter rates
+   it the highest-leverage thing in the session — *which was not a simframe
+   call*. Reading the app's persisted state store straight out of the
+   simulator's data container gave the exact wrong value the app had saved,
+   proving the bug **without a live session, without logging in, and before the
+   device was even booted**, and then confirmed the fix by re-reading it.
+
+   A `sim_storage`-style read — async storage, `UserDefaults`, possibly the
+   app's Documents directory — *"would turn a whole class of 'why is the UI
+   showing this?' questions into a single call, and would pair naturally with
+   the perception tools: `sim_ui` says what is drawn, `sim_storage` says what
+   the app believes."*
+
+   That last sentence is the strongest argument for it and is worth keeping
+   verbatim. It is also a read of arbitrary app data, so it needs a think about
+   what it will print into a transcript.
+
+141. **The harness truncated away the reason a check failed.** FIXED,
+   2026-09-14, found while running the above. `ci-memory` printed
+   `simframe doctor --json failed: {"ok": false, "strict": true, "failu` — the
+   word "failures" cut in half, one character before the only content that
+   mattered, at a 400-character cap applied to raw JSON. A failed JSON report is
+   now reduced to the checks that failed. A harness that truncates away the
+   reason is doing to its reader exactly what this file keeps recording items
+   about.
+
 123. **`settle` cannot cope with a permanently animated screen**, and aborts the
    rest of the batch when it gives up — expensive when step 1 of 6 was the
    settle. A streaming AI-summary panel, a Lottie and the Intercom widget never

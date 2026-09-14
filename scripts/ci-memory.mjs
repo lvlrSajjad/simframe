@@ -111,7 +111,14 @@ async function cli(args, { expectFail = false, allowFail = false } = {}) {
     // detail has been truncated for legibility, and the first version of this
     // guard looked for "did not produce a frame" in a string that had been cut
     // to "simframe daemon di". The full text only exists at this boundary.
-    throw new Error(`simframe ${full.join(' ')} failed: ${why.slice(0, 400)}`);
+    //
+    // And when the payload is a JSON report, say what failed rather than
+    // handing back its first hundred characters. A run of this printed
+    // `simframe doctor --json failed: {\n "ok": false,\n "strict": true,\n
+    // "failu` — the word "failures" cut in half, one character before the only
+    // content that mattered. A harness that truncates away the reason is doing
+    // to its reader exactly what this repo keeps writing items about.
+    throw new Error(`simframe ${full.join(' ')} failed: ${summarise(why)}`);
   }
 }
 
@@ -191,6 +198,23 @@ async function jsonRetry(args, opts, attempts = 3) {
     process.exit(DEVICE_DIED_EXIT);
   }
   throw last;
+}
+
+/** A failed JSON report, reduced to the part that says what went wrong. */
+function summarise(why) {
+  try {
+    const parsed = JSON.parse(why);
+    const failures = parsed.failures ?? parsed.failing ?? null;
+    if (Array.isArray(failures) && failures.length) {
+      return failures
+        .map((f) => (typeof f === 'string' ? f : `${f.name ?? f.check ?? '?'}: ${f.detail ?? f.note ?? f.message ?? ''}`.trim()))
+        .join('; ')
+        .slice(0, 400);
+    }
+    const bad = (parsed.checks ?? []).filter((c) => c.ok === false);
+    if (bad.length) return bad.map((c) => `${c.name}: ${c.detail ?? ''}`.trim()).join('; ').slice(0, 400);
+  } catch { /* not JSON, or not a shape we know — fall through to the raw text */ }
+  return why.slice(0, 400);
 }
 
 const markHash = async () => (await jsonRetry(['mark'])).hash;

@@ -133,7 +133,10 @@ export async function goto(deviceQuery, target, { options, ...runOptions } = {})
 }
 
 export function knownScreens(udid) {
-  return graph.allNodes(udid).map((n) => ({ name: graph.describe(n), hash: n.hash.slice(0, 8), edges: n.edges.length }));
+  // A listing needs a handle for every row, so an unnamed screen falls back to
+  // its own short hash here — where it is plainly the hash column's value and
+  // not a title in quotes.
+  return graph.allNodes(udid).map((n) => ({ name: graph.describe(n) ?? n.hash.slice(0, 8), hash: n.hash.slice(0, 8), edges: n.edges.length }));
 }
 
 /**

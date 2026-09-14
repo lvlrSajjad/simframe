@@ -801,7 +801,7 @@ async function main() {
         },
         [
           ...res.results.map(stepLine),
-          `${res.ok ? 'flow completed' : 'FLOW FAILED'} — ${res.ranSteps}/${res.totalSteps} steps in ${res.totalMs}ms`,
+          actions.flowSummary(res),
           saved && (saved.ok ? `saved flow "${saved.name}" — ${saved.steps} steps` : `not saved: ${saved.reason}`),
           map && `\n${map}`,
         ],
@@ -920,7 +920,7 @@ async function main() {
         }
         emit(flags, res, [
           ...(res.results ?? []).map(stepLine),
-          `${res.ok ? 'flow completed' : 'FLOW FAILED'} — ${res.ranSteps}/${res.totalSteps} steps`,
+          actions.flowSummary(res, { withTime: false }),
         ]);
         process.exitCode = res.ok ? 0 : 1;
         return;

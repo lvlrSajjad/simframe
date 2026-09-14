@@ -442,9 +442,18 @@ test('a screen is named by its nav title, not by a button that sits up there', (
   assert.equal(describe(n), 'invoices');
 });
 
-test('a screen with no title falls back to its tabs, then to its hash', () => {
+test('a screen with no title falls back to its tabs, and then to nothing', () => {
   assert.equal(describe(node([tabItem('Home', 20), tabItem('More', 300)])), 'home / more');
-  assert.equal(describe(node([])), 'a'.repeat(8));
+  // It used to return the short hash here, and the map prints the name in
+  // quotes after the identity hash — so an unnamed screen read
+  // `screen 299dd147 "a9505378"`: two hashes, one of them dressed as a title.
+  // Reported from the field on 0.13.0, with the fix attached: omit the quoted
+  // part rather than echo a second hash.
+  //
+  // A listing still needs a handle per row, and `goto <short hash>` still has to
+  // work, so both supply their own fallback — which is a presentation decision
+  // and belongs where the presenting happens.
+  assert.equal(describe(node([])), null);
 });
 
 test('the nav slot is part of identity, so a title and a button do not collide', () => {
@@ -5192,4 +5201,43 @@ test('a blinking caret is not an animation, and the threshold is measured (130)'
     'the animation gate must require a minimum number of moving cells');
   assert.doesNotMatch(swift, /if fraction > 0 && fraction < 0\.06/,
     'the old any-single-cell gate must not come back');
+});
+
+test('a presence question is answered by ambiguity, not refused by it', async () => {
+  const { flowSummary } = await import('../src/actions.js');
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+
+  // Reported from the field on 0.13.0: `assert Administrator is visible` FAILED,
+  // and aborted the rest of the batch, on a screen with **two** Administrators.
+  // Two matches means the thing is definitively there — the assertion's own
+  // semantics were satisfied twice over. The message was praised in the same
+  // breath (candidates, coordinates, scores), so what was wrong was the verdict.
+  //
+  // The `gone` direction had the mirror-image bug and nobody had hit it yet: any
+  // error at all returned "is gone", so a query matching two *visible* elements
+  // would have been reported absent. Ambiguity is the one error that is positive
+  // evidence of presence, and it was being read as proof of absence.
+  assert.match(src, /if \(want === 'visible'\) return .*is visible/,
+    'ambiguity satisfies a visibility assertion');
+  assert.match(src, /if \(want === 'gone'\) throw new Error\(`\$\{query\}: still here/,
+    'ambiguity fails a gone assertion');
+  // Strict single-match resolution stays where picking the wrong element gives a
+  // confident wrong answer about a particular thing.
+  assert.doesNotMatch(src, /want === 'enabled' && err\.ambiguous/,
+    'enabled/disabled/value must still refuse an ambiguous query');
+
+  // And the summary line, which a reporter said reads like a success:
+  // `FLOW FAILED — 3/3 steps`. The denominator meant *attempted* on failure and
+  // *succeeded* on success, so one shape carried opposite meanings.
+  assert.equal(
+    flowSummary({ ok: true, ranSteps: 5, totalSteps: 5, totalMs: 10 }),
+    'flow completed — 5/5 steps in 10ms');
+  assert.equal(
+    flowSummary({ ok: false, ranSteps: 3, totalSteps: 3, totalMs: 6123, results: [{ ok: true }, { ok: true }, { ok: false }] }),
+    'FLOW FAILED — 2 ok, 1 failed (of 3) in 6123ms');
+  // Steps a stopped flow never reached are neither ok nor failed, and saying so
+  // is what tells a caller to resume rather than re-plan.
+  assert.match(
+    flowSummary({ ok: false, ranSteps: 1, totalSteps: 6, results: [{ ok: false }] }),
+    /0 ok, 1 failed, 5 not attempted \(of 6\)/);
 });

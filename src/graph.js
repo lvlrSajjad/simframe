@@ -396,7 +396,18 @@ export function describe(node) {
   if (tabs.length) return tabs.slice(0, 3).join(' / ');
   const anyChrome = labels(/:(nav-bar|tab-bar):/);
   if (anyChrome.length) return anyChrome.slice(0, 3).join(' ');
-  return node.hash.slice(0, 8);
+  // No name. Say so, rather than handing back a hash dressed as one.
+  //
+  // This fell back to `node.hash.slice(0, 8)`, and the map prints the name in
+  // quotes after the identity hash — so an unnamed screen read
+  // `screen 299dd147 "a9505378"`: two hashes, one of them looking like a title,
+  // beside the `screen 089bec77 "time sheets"` a named screen produces.
+  // Reported from the field, with the right fix attached: omit the quoted part
+  // rather than echo a second hash.
+  //
+  // Callers that need *something* to print in a list supply their own fallback,
+  // which is a decision about presentation and belongs at the point of display.
+  return null;
 }
 
 /** Find a known screen by what a human would call it. */
@@ -404,7 +415,9 @@ export function findScreen(udid, query) {
   const wanted = String(query ?? '').trim();
   if (!wanted) return null;
   const scored = allNodes(udid)
-    .map((node) => ({ node, name: describe(node) }))
+    // The short hash stays searchable: `goto 089bec77` worked before `describe`
+    // stopped inventing names and must keep working.
+    .map((node) => ({ node, name: describe(node) ?? node.hash.slice(0, 8) }))
     .map((c) => ({ ...c, score: matching.nameScore(c.name, wanted) }))
     .filter((c) => c.score > 0)
     .sort((a, b) => b.score - a.score);

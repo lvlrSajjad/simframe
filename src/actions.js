@@ -2639,6 +2639,32 @@ async function runStep(deviceQuery, udid, step, ctx) {
         // is the opposite of what you want learned."*
         found = await api.locate(deviceQuery, query, { index: step.index, refresh: step.refresh !== false, options: ctx.options });
       } catch (err) {
+        // Ambiguity answers "is it there", and it answers it *yes*.
+        //
+        // `locate` refuses a query that matches several elements, which is right
+        // for `tap` — picking the wrong one of two taps the wrong thing — and
+        // wrong for a question about presence. Reported from the field on
+        // 0.13.0: `assert Administrator is visible` failed, and aborted the rest
+        // of the batch, against a screen with **two** Administrators on it. The
+        // assertion's own semantics were satisfied twice over. The message was
+        // praised in the same breath — candidates, coordinates and scores — so
+        // what was wrong was the verdict, not the diagnosis.
+        //
+        // The `gone` direction had the mirror-image bug and nobody had hit it
+        // yet: any error at all returned "is gone", so a query matching two
+        // visible elements would have reported them absent. Ambiguity is the one
+        // error that is positive evidence of presence, and it was being read as
+        // proof of absence.
+        //
+        // Strict single-match resolution stays for `enabled`, `disabled` and
+        // `value`, where the question is about a *particular* element and
+        // answering it from the wrong one is how a confident wrong answer gets
+        // made.
+        if (err.ambiguous && err.candidates?.length) {
+          const n = err.candidates.length;
+          if (want === 'visible') return `${query} is visible (${n} things match it here — a presence check does not have to choose)`;
+          if (want === 'gone') throw new Error(`${query}: still here — ${n} things on this screen match it`);
+        }
         if (want === 'gone') return `${query} is gone`;
         throw new Error(`${query}: ${err.message}`);
       }
@@ -2743,4 +2769,27 @@ export function settleEvidence(w) {
   if (w.blackFrames > 0) parts.push(`${w.blackFrames} black frame(s) — see the capture wedge`);
   return (parts.length ? parts.join('; ') : 'nothing observed')
     + (m ? `\n${m.map}` : '');
+}
+
+/**
+ * The one-line flow summary, so `ok` and `FAIL` each mean exactly one thing.
+ *
+ * `FLOW FAILED — 3/3 steps` was reported from the field as reading like a
+ * success, and the reporter had it exactly: the denominator means *attempted*
+ * on failure and *succeeded* on success, so the same shape carries opposite
+ * meanings. `flow completed — 5/5 steps` and `FLOW FAILED — 3/3 steps` differ
+ * only in a word, and the numbers argue against the word.
+ *
+ * On failure it says how many worked and how many did not, which is the thing a
+ * caller has to know to decide whether to resume or re-plan.
+ */
+export function flowSummary(res, { withTime = true } = {}) {
+  const time = withTime && Number.isFinite(res.totalMs) ? ` in ${res.totalMs}ms` : '';
+  if (res.ok) return `flow completed — ${res.ranSteps}/${res.totalSteps} steps${time}`;
+  const failed = (res.results ?? []).filter((r) => r.ok === false).length || 1;
+  const worked = Math.max(0, res.ranSteps - failed);
+  const unattempted = Math.max(0, res.totalSteps - res.ranSteps);
+  return `FLOW FAILED — ${worked} ok, ${failed} failed`
+    + (unattempted ? `, ${unattempted} not attempted` : '')
+    + ` (of ${res.totalSteps})${time}`;
 }

@@ -15,7 +15,7 @@ import * as api from './index.js';
 import * as input from './input.js';
 import * as metrics from './metrics.js';
 import * as navigate from './navigate.js';
-import { bootedDevices, permissionServices } from './platform/index.js';
+import { bootedDevices, listDevices, permissionServices } from './platform/index.js';
 import * as store from './store.js';
 import * as view from './view.js';
 
@@ -388,8 +388,22 @@ const TOOLS = [
   },
   {
     name: 'sim_devices',
-    description: 'List the booted devices simframe can drive — iOS simulators and Android emulators.',
-    inputSchema: { type: 'object', properties: {} },
+    description: 'List the devices simframe can drive — iOS simulators and Android emulators.'
+      + ' Booted ones by default; pass all to see every device on the host and its state.'
+      + ' Also reports which simframe build is answering.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        all: {
+          type: 'boolean',
+          description: 'Also account for devices that are shut down, grouped by runtime.',
+        },
+        match: {
+          type: 'string',
+          description: 'With all, list shut-down devices whose name or runtime contains this, in full.',
+        },
+      },
+    },
   },
 ];
 
@@ -586,7 +600,7 @@ export async function serve({ device: defaultDevice, options: baseOptions = {} }
         case 'sim_capture':
           return await capture(target, args, options);
         case 'sim_devices':
-          return await devices();
+          return await devices(args);
         default:
           throw new Error(`unknown tool ${req.params.name}`);
       }
@@ -935,7 +949,7 @@ function verdictLineFor(results) {
 
 function stepLines(res) {
   const lines = [
-    `${res.ok ? 'flow completed' : 'FLOW FAILED'} — ${res.ranSteps}/${res.totalSteps} steps in ${res.totalMs}ms`,
+    actions.flowSummary(res),
   ];
   for (const r of res.results) {
     const settle = r.settled
@@ -1142,12 +1156,72 @@ function listStateDirs() {
   }
 }
 
-async function devices() {
+async function devices({ all = false, match: query } = {}) {
   const booted = await bootedDevices();
-  if (!booted.length) return { content: [text('no booted devices')] };
   // Noticing a name collision here is what lets every later header disambiguate
   // itself, and it costs nothing: this listing is already being made.
   const clash = noteBooted(booted);
-  const list = booted.map((d) => `${d.name} · ${d.runtime} · ${d.udid}`).join('\n');
-  return { content: [text(clash ? `${clash}\n\n${list}` : list)] };
+  // The build that is answering, on the one call every session starts with.
+  //
+  // Reported from the field: a session told to test 0.13.0 could not find out
+  // what it was running. The globally installed CLI said 0.12.2 while the MCP
+  // server ran from a checkout, and answering "am I on the build under test?"
+  // took three shell calls and a read of `~/.claude.json`. A tool being field
+  // tested should be able to state its own build, and this is the cheapest
+  // place to put it.
+  const head = `simframe ${packageVersion()}`;
+  if (!all) {
+    if (!booted.length) {
+      // Never a bare "no devices". The host almost always has some, they are
+      // just off, and the reporter who hit this fell out of the tool entirely
+      // and went to `xcrun simctl` — for a tool whose whole job is driving
+      // simulators, that is the conspicuous hole.
+      const every = await listDevices().catch(() => []);
+      return { content: [text(`${head}\n\nno booted devices`
+        + (every.length ? ` — the host has ${every.length}, all shut down. Pass all:true to see them.` : ''))] };
+    }
+    const list = booted.map((d) => `● ${d.name} · ${d.runtime} · ${d.udid}`).join('\n');
+    return { content: [text([head, clash, list].filter(Boolean).join('\n\n'))] };
+  }
+  const every = await listDevices();
+  if (!every.length) return { content: [text(`${head}\n\nno devices on this host`)] };
+
+  // Summarised, not dumped.
+  //
+  // The first version of this listed every device in full and produced **126
+  // rows** on this host — two thousand tokens to answer "what else is here",
+  // from a tool whose entire argument is that text beats a screenshot because
+  // it is cheaper. A listing that costs more than the screenshot it replaces has
+  // lost the plot.
+  //
+  // So: booted devices in full, because those are the ones a caller can act on,
+  // and the rest grouped by runtime with counts. `match` lists in full, because
+  // a caller who names what they are looking for has already narrowed it.
+  const wanted = String(query ?? '').trim().toLowerCase();
+  const off = every.filter((d) => d.state !== 'Booted');
+  const lines = [head, clash].filter(Boolean);
+  lines.push(booted.length
+    ? booted.map((d) => `● ${d.name} · ${d.runtime} · ${d.udid}`).join('\n')
+    : 'no booted devices');
+
+  const hits = wanted
+    ? off.filter((d) => `${d.name} ${d.runtime}`.toLowerCase().includes(wanted))
+    : [];
+  if (wanted) {
+    lines.push(hits.length
+      ? `shut down, matching "${query}":\n`
+        + hits.map((d) => `○ ${d.name} · ${d.runtime} · ${d.udid}`).join('\n')
+      : `no shut-down device matches "${query}" (${off.length} are shut down)`);
+  } else if (off.length) {
+    const byRuntime = new Map();
+    for (const d of off) byRuntime.set(d.runtime, (byRuntime.get(d.runtime) ?? 0) + 1);
+    const summary = [...byRuntime.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([runtime, n]) => `  ${runtime} — ${n}`)
+      .join('\n');
+    lines.push(`${off.length} device(s) shut down, by runtime:\n${summary}\n`
+      + 'pass match to list the ones you mean, e.g. match:"iPhone 17 Pro".');
+  }
+  lines.push('simframe cannot drive a device until it is booted.');
+  return { content: [text(lines.join('\n\n'))] };
 }
