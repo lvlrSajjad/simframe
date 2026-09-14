@@ -2033,6 +2033,45 @@ on."*
    reason is doing to its reader exactly what this file keeps recording items
    about.
 
+143. **Three fingerprint-eval failures were one cause, and counting them as
+   three is what hid it.** FIXED, 2026-09-14. The eval step had failed **3 of
+   the 4 times it ran**, each time with a different assertion:
+
+   | run | what it said |
+   | --- | --- |
+   | `cdc7fab` | a reading "does not resemble its own screen" |
+   | `356f190` | `settings` read 4 tokens — too sparse |
+   | `59cc2b2` | a reading "taken on the previous screen", frame **7168 ms old** |
+
+   Three assertions, one sentence: **the reading is not of the screen we think
+   it is, because capture on the runner is slow.** The daemon log of the last
+   one settles it — capture medians of **417, 503, 996, 1106 and 1132 ms**
+   against the **55.4 ms** p50 measured for a healthy runner. Up to 20x, and
+   with damage-driven capture a `fresh: true` read returns the newest frame that
+   *exists*, which on a runner that far behind can predate the navigation
+   entirely.
+
+   The harness already had the right rule and was applying it on one axis only:
+   *a reading too sparse to be a screen is not a reading*, so read again. The
+   same is true of freshness — a reading off a frame older than the navigation
+   is not a reading. It now requires `capturedAt >= navigatedAt`, re-reads up to
+   three times a second apart, and reports staleness as a NOTE naming the
+   machine rather than the tour. The arrival check stays a hard failure: if
+   capture genuinely cannot keep up, the eval cannot measure anything, and
+   scoring stale frames would measure the runner — the one thing this harness
+   says it is not doing.
+
+   Verified on a device: the guard **fired twice and recovered both times** in a
+   one-round run, and was not needed in a two-round run that passed every check
+   — gap 0.56, threshold inside it, worst same-screen 0.63, worst
+   different-screen 0.06.
+
+   **It was nearly blamed on item 138**, which had landed in the same push and
+   changes resolver scoring. It is not the cause, and the check is cheap enough
+   that it should have been the first move rather than a reasoned-through one:
+   none of the tour's eight selectors trigger a synonym group at all, so that
+   branch never executes on this tour.
+
 142. **CI's failures are latency, not the wedge — and we were asserting through
    the slowest paths available.** FIXED (two of the classes), 2026-09-14.
 

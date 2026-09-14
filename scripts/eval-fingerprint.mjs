@@ -135,6 +135,22 @@ const save = (extra = {}) => {
   }, null, 2));
 };
 
+/**
+ * How hard to try for a frame newer than the navigation before giving up.
+ *
+ * Three re-reads a second apart is ~3s of slack against capture medians that
+ * were measured above 1s on a bad runner. Generous enough to absorb the spikes
+ * that caused this, small enough that a genuinely stopped capture still fails
+ * rather than hanging the job.
+ */
+const STALE_READ_RETRIES = 3;
+const STALE_READ_WAIT_MS = 1000;
+
+/** When the steps that were supposed to change the screen finished. */
+let navigatedAt = 0;
+/** Readings that never got a frame newer than their own navigation. */
+const staleReadings = [];
+
 for (let round = 1; round <= rounds; round += 1) {
   for (const screen of tour) {
     if (screen.steps?.length) {
@@ -151,6 +167,7 @@ for (let round = 1; round <= rounds; round += 1) {
       // matters.
       try {
         await actions.runScript(device, { steps: screen.steps, verify: false });
+        navigatedAt = Date.now();
       } catch (err) {
         save({ abandonedAt: { screen: screen.name, round, error: err.message } });
         console.error(`\nFAIL round ${round}, "${screen.name}" never arrived: ${err.message}`);
@@ -160,6 +177,39 @@ for (let round = 1; round <= rounds; round += 1) {
       }
     }
     let id = await api.screenIdentity(device, { fresh: true, confirmNovel: false });
+    // A reading off a frame older than the navigation is not a reading either.
+    //
+    // Same rule as the sparseness guard below, on the other axis, and it took a
+    // third symptom to see they were one cause. Three CI runs failed this step
+    // three different ways — `settings` reading 4 tokens, a reading that "does
+    // not resemble its own screen", and a reading "taken on the previous
+    // screen" at similarity 1.00 off a frame **7168ms old**. All three are the
+    // same sentence: the reading is not of the screen we think it is, because
+    // capture on a hosted runner is slow. The daemon log for that run shows
+    // capture medians of 417ms, 503ms, 996ms, 1106ms and 1132ms against the
+    // 55.4ms p50 measured for a healthy runner — 20x, and with damage-driven
+    // capture a `fresh` read returns the newest frame that EXISTS, which on a
+    // runner that far behind can predate the navigation entirely.
+    //
+    // So the frame must have been captured after the steps that were supposed
+    // to change the screen. Re-read rather than fail, and fail only if it stays
+    // stale — an eval that scores a stale frame is measuring the runner, which
+    // is the one thing this harness says it is not doing.
+    if (navigatedAt) {
+      for (let attempt = 0; attempt < STALE_READ_RETRIES; attempt += 1) {
+        const capturedAt = id.state?.capturedAt ?? 0;
+        if (capturedAt >= navigatedAt) break;
+        const age = Date.now() - capturedAt;
+        console.log(`         ("${screen.name}" read a frame from ${age}ms ago, older than the navigation`
+          + ` — reading again ${attempt + 1}/${STALE_READ_RETRIES})`);
+        await new Promise((r) => setTimeout(r, STALE_READ_WAIT_MS));
+        id = await api.screenIdentity(device, { fresh: true, confirmNovel: false });
+      }
+      if ((id.state?.capturedAt ?? 0) < navigatedAt) {
+        staleReadings.push(`${screen.name} round ${round}: frame still predates the navigation`
+          + ` by ${navigatedAt - (id.state?.capturedAt ?? 0)}ms after ${STALE_READ_RETRIES} re-reads`);
+      }
+    }
     // A reading too sparse to be a screen is not a reading.
     //
     // On a runner measured at ~2.5x slower than a laptop (EXPERIMENTS §15),
@@ -256,7 +306,7 @@ for (let round = 1; round <= rounds; round += 1) {
   }
 }
 
-save();
+save({ staleReadings });
 if (outFile) console.log(`\nwrote ${readings.length} readings to ${outFile}`);
 
 if (sparseReadings.length) {
@@ -280,6 +330,19 @@ if (sparseReadings.length) {
   console.log('wrong — a plain screen really can be this bare — but two readings this sparse');
   console.log('cannot be told apart, which is the hazard TOKEN_RULES_VERSION 7 was written');
   console.log('for. If a same-screen score below disagrees with itself, start here.');
+}
+
+if (staleReadings.length) {
+  // A NOTE and not a failure, for the same reason the sparseness guard is one:
+  // this says the runner was too slow to give a fresh frame, which is a fact
+  // about the machine and not about the fingerprint. It is printed *above* the
+  // arrival check on purpose — when both fire, this is the explanation of that.
+  console.log(`\nNOTE ${staleReadings.length} reading(s) never got a frame newer than their navigation:`);
+  for (const f of staleReadings) console.log(`       ${f}`);
+  console.log(`\nCapture on this host is behind the tour. With damage-driven capture a "fresh"`);
+  console.log('read returns the newest frame that exists, so on a slow runner it can predate');
+  console.log('the navigation entirely. If an arrival failure follows, this is its cause and');
+  console.log('the tour is not what needs fixing.');
 }
 
 if (arrivalFailures.length) {
