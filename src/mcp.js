@@ -132,7 +132,7 @@ const TOOLS = [
         steps: {
           type: 'array',
           description:
-            'Ordered steps. Every selector below accepts "Save" | "#3" | "@120,400", in that order of preference. Act: {"tap":"Save"} (add "index" if a label is ambiguous), {"type":{"into":"Name","text":"Fryer 3"}}, {"paste":{"into":"Notes","text":"long text"}}, {"clear":"Notes"} to empty a field and "clear":true on a type/paste to replace rather than append (drop "into" to type into whatever already has focus, which is how you follow a browser next-field chevron — nothing can be read back then, and the step says so), {"scroll":"down"}, {"scrollTo":"Delete account"}, {"swipe":{"from":[x,y],"to":[x,y]}}, {"button":"HOME"}, {"key":"return"} (the keyboard return/enter key, which is how a mobile search field submits — also escape, tab, space, backspace, and the arrows), {"launch":{"value":"com.example.app","relaunch":true,"args":["-uiTest","1"]}}, {"openUrl":"myapp://x"}, {"permission":{"value":"photos","grant":"grant","bundleId":"com.example.app"}}. Check: {"assert":{"value":"Saved","is":"visible"}} (also gone | enabled | disabled | value with "equals"), {"waitFor":{"value":"Saved","timeoutMs":5000}}, {"settle":{"stableMs":600}}, {"pause":300}. Recover without a round trip: add "or" to any step for fallback selectors tried locally — {"tap":"Save","or":["Done","Confirm"]} — and {"seek":"change username","budget":6} explores for something not on this screen: it OPENS containers (a real action — state changes), checks, and returns to where it started, refusing to open anything that commits, abandons or answers. It does not tap the target; it leaves you on the screen where the target resolves so you tap it next. Do not point it into a flow whose progress you cannot afford to lose. A long screen is only knowable a viewport at a time, so {"sweep":"all","fill":{"Last Name":"Asadi","Email":"a@b.c"}} goes to the top, then reads and fills section by section to the bottom — filling each field while it is on screen, which beats finding one and scrolling back. Add "from":"here" to sweep down from where you are. It reports which section each element was in, what it filled, and what it never found at any scroll position. Prefer it to scrollTo on forms and long lists. Brief the supervisor from the plan: top-level "supervise" is standing guidance for the whole batch ("lists here render a count header before rows; REVIEW stays disabled until a provider is chosen") and per-step "expect" adds to it. When it stops a run the result names the steps it did not attempt — re-issue them with a corrected "supervise" note if the judgement was wrong.',
+            'Ordered steps. Every selector below accepts "Save" | "#3" | "@120,400", in that order of preference. Act: {"tap":"Save"} (add "index" if a label is ambiguous), {"type":{"into":"Name","text":"Fryer 3"}}, {"paste":{"into":"Notes","text":"long text"}}, {"clear":"Notes"} to empty a field and "clear":true on a type/paste to replace rather than append (drop "into" to type into whatever already has focus, which is how you follow a browser next-field chevron — nothing can be read back then, and the step says so), {"scroll":"down"}, {"scrollTo":"Delete account"}, {"swipe":{"from":[x,y],"to":[x,y]}}, {"button":"HOME"}, {"key":"return"} (the keyboard return/enter key, which is how a mobile search field submits — also escape, tab, space, backspace, and the arrows), {"launch":{"value":"com.example.app","relaunch":true,"args":["-uiTest","1"]}}, {"openUrl":"myapp://x"}, {"permission":{"value":"photos","grant":"grant","bundleId":"com.example.app"}}. Check: {"assert":{"value":"Saved","is":"visible"}} (also gone | enabled | disabled | value with "equals"), {"waitFor":{"value":"Saved","timeoutMs":5000}} (add "failIfStillFor":15000 to stop early once the screen has plainly stopped changing — a 180s wait once burned three minutes on an app that had logged itself out; without it a timeout still reports how long the screen had been still), {"settle":{"stableMs":600}}, {"pause":300}. Recover without a round trip: add "or" to any step for fallback selectors tried locally — {"tap":"Save","or":["Done","Confirm"]} — and {"seek":"change username","budget":6} explores for something not on this screen: it OPENS containers (a real action — state changes), checks, and returns to where it started, refusing to open anything that commits, abandons or answers. It does not tap the target; it leaves you on the screen where the target resolves so you tap it next. Do not point it into a flow whose progress you cannot afford to lose. A long screen is only knowable a viewport at a time, so {"sweep":"all","fill":{"Last Name":"Asadi","Email":"a@b.c"}} goes to the top, then reads and fills section by section to the bottom — filling each field while it is on screen, which beats finding one and scrolling back. Add "from":"here" to sweep down from where you are. It reports which section each element was in, what it filled, and what it never found at any scroll position. Prefer it to scrollTo on forms and long lists. Brief the supervisor from the plan: top-level "supervise" is standing guidance for the whole batch ("lists here render a count header before rows; REVIEW stays disabled until a provider is chosen") and per-step "expect" adds to it. When it stops a run the result names the steps it did not attempt — re-issue them with a corrected "supervise" note if the judgement was wrong.',
           items: { type: 'object' },
         },
         autoSettle: {
@@ -192,7 +192,19 @@ const TOOLS = [
     description: 'Block until something appears on screen, then return the screen map. Use this instead of pausing and re-reading.',
     inputSchema: {
       type: 'object',
-      properties: { ...deviceProp, ...modeProps, ...selectorProp('What to wait for'), timeoutMs: { type: 'number', description: 'Default 8000.' } },
+      properties: {
+        ...deviceProp,
+        ...modeProps,
+        ...selectorProp('What to wait for'),
+        timeoutMs: { type: 'number', description: 'Default 8000.' },
+        failIfStillFor: {
+          type: 'number',
+          description: 'Give up early once the screen has not moved for this long and the target is still absent.'
+            + ' Off by default, because a still screen is also what a pending network call looks like —'
+            + ' use it when the thing you await would arrive with a visible change or not at all.'
+            + ' A timeout reports the stillness either way.',
+        },
+      },
       required: ['sel'],
     },
   },
@@ -574,7 +586,7 @@ export async function serve({ device: defaultDevice, options: baseOptions = {} }
             options,
           );
         case 'sim_wait_for':
-          return await oneStep(target, { waitFor: args.sel, timeoutMs: args.timeoutMs }, args, options);
+          return await oneStep(target, { waitFor: args.sel, timeoutMs: args.timeoutMs, failIfStillFor: args.failIfStillFor }, args, options);
         case 'sim_assert':
           return await oneStep(target, { assert: args.sel, is: args.is, equals: args.equals }, args, options);
         case 'sim_launch':

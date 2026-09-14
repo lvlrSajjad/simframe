@@ -1870,7 +1870,29 @@ on."*
    rule that keeps simframe from retrying `openurl` — the distinction is that an
    `or` list is the caller's own stated fallback, not the driver's initiative.
 
-139. **`waitFor` burns its whole timeout on a provably idle screen.** OPEN. A
+139. **`waitFor` burns its whole timeout on a provably idle screen.** FIXED,
+   2026-09-14, both halves of the reporter's suggestion. A timeout now reports
+   the stillness it could already see — *"the screen has not moved for 18592ms —
+   pass failIfStillFor to stop early next time"* — and `failIfStillFor` ends the
+   wait once the screen has plainly stopped changing and the target is still
+   absent.
+
+   **Opt-in, not default, and the reason is the whole design.** A still screen is
+   exactly what a pending network call looks like; a wait that gave up on
+   stillness alone would break the case waits exist for. So the caller says when
+   stillness is decisive, and the timeout message tells them the option exists —
+   because nobody guesses at a flag they have never seen.
+
+   Verified on a device: `failIfStillFor: 3000` against a 20,000 ms timeout ended
+   in **4.3 s**; the same wait without it ran its full budget and named 18,592 ms
+   of stillness. Through the MCP surface, 149 ms on a screen still for 50 s.
+
+   **It leans on 134 and could not have shipped before it.** Until the animation
+   threshold was measured, a completely static screen claimed something was
+   animating on 54% of its frames, and "nothing has moved" was not a sentence
+   this tool could say honestly.
+
+   *Original report:* a
    180-second wait for a control that never appeared, on a screen static within
    about 12 seconds — the app had logged itself out. Cost ~3 minutes.
 

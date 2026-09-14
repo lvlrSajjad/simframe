@@ -5241,3 +5241,38 @@ test('a presence question is answered by ambiguity, not refused by it', async ()
     flowSummary({ ok: false, ranSteps: 1, totalSteps: 6, results: [{ ok: false }] }),
     /0 ok, 1 failed, 5 not attempted \(of 6\)/);
 });
+
+test('a wait that gives up says how long the screen had been still (139)', async () => {
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+
+  // A field report on 0.13.0: a 180-second wait for a control that never
+  // appeared, on a screen static for about twelve of those seconds — the app had
+  // logged itself out onto a login form. The failure message was praised for
+  // listing what WAS on screen. It arrived three minutes late.
+  //
+  // Stillness was already tracked and already printed by other commands, so the
+  // information existed and this wait never asked for it.
+  assert.match(src, /the screen has not moved for \$\{Math\.round\(ms\)\}ms/,
+    'a timeout must report the stillness it could already see');
+  assert.match(src, /pass failIfStillFor to stop early next time/,
+    'and point at the remedy, since the caller cannot guess the option exists');
+
+  // Opt-in, NOT default, and the reason matters: a still screen is exactly what
+  // a pending network call looks like. A wait that gave up on stillness alone
+  // would break the case waits exist for.
+  assert.match(src, /Number\.isFinite\(step\.failIfStillFor\)/,
+    'the early exit must be requested, never assumed');
+
+  // Verified live on a device: with failIfStillFor 3000 against a 20000ms
+  // timeout, the wait ended in 4.3s naming the stillness; without it, the same
+  // wait ran its full budget and reported "the screen has not moved for
+  // 18592ms". Through the MCP surface it ended in 149ms on a screen that had
+  // been still for 50s.
+  //
+  // This is only trustworthy because of 134 — before the animation threshold
+  // was measured, a completely static screen claimed something was animating on
+  // 54% of its frames, and "nothing has moved" could not have been said.
+  const swift = fs.readFileSync(
+    new URL('../native/simframed/Sources/SimframeCore/Motion.swift', import.meta.url), 'utf8');
+  assert.match(swift, /minAnimatingCells/, '139 leans on 134; they cannot be separated');
+});

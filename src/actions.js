@@ -2563,10 +2563,12 @@ async function runStep(deviceQuery, udid, step, ctx) {
             }
           }
           if (Date.now() >= limit) {
+            const stillAny = await stillnessNote(deviceQuery, ctx);
             throw new Error(
               `none of ${alternatives.length} awaited strings appeared`
               + ` (${alternatives.map((a) => JSON.stringify(a)).join(', ')}) in ${step.timeoutMs ?? 8000}ms.`
-              + ` Last: ${lastError}`,
+              + ` Last: ${lastError}`
+              + (stillAny ? ` (${stillAny.note})` : ''),
             );
           }
           await api.waitFor(deviceQuery, { mode: 'stable', stableMs: 200, timeoutMs: 700, options: ctx.options })
@@ -2609,9 +2611,23 @@ async function runStep(deviceQuery, udid, step, ctx) {
           }
         }
         if (Date.now() >= limit) break;
+        // Opt-in: stop early on a screen that has plainly stopped changing.
+        if (Number.isFinite(step.failIfStillFor)) {
+          const still = await stillnessNote(deviceQuery, ctx);
+          if (still && still.ms >= step.failIfStillFor) {
+            throw new Error(`gave up on ${query} after ${Date.now() - (limit - (step.timeoutMs ?? 8000))}ms:`
+              + ` ${still.note}, which is past the ${step.failIfStillFor}ms you said to stop at.`
+              + ` Last: ${lastError}`);
+          }
+        }
         await sleep(POLL_MS);
       }
-      throw new Error(`waited ${step.timeoutMs ?? 8000}ms for ${query}: ${lastError}`);
+      // Say how long it had been still. A wait that burned three minutes on a
+      // screen static for the last twelve seconds should not make the reader
+      // work that out from a second command.
+      const still = await stillnessNote(deviceQuery, ctx);
+      throw new Error(`waited ${step.timeoutMs ?? 8000}ms for ${query}: ${lastError}`
+        + (still ? ` (${still.note} — pass failIfStillFor to stop early next time)` : ''));
     }
 
     // One assert step for every condition, because `assertText` could only ask
@@ -2792,4 +2808,33 @@ export function flowSummary(res, { withTime = true } = {}) {
   return `FLOW FAILED — ${worked} ok, ${failed} failed`
     + (unattempted ? `, ${unattempted} not attempted` : '')
     + ` (of ${res.totalSteps})${time}`;
+}
+
+/**
+ * How long the screen has been still, for a wait that is about to give up.
+ *
+ * A field report: a 180-second wait for a control that never appeared, on a
+ * screen that had been static for about twelve of those seconds — the app had
+ * logged itself out and was sitting on a login form. The failure message was
+ * praised for listing what *was* on screen; it arrived three minutes late.
+ *
+ * Stillness is already tracked and already printed by other commands, so the
+ * information existed and this wait simply never asked for it. Reported on
+ * every timeout, and — only when the caller opts in — allowed to end the wait
+ * early. Opt-in and not default, because a still screen is exactly what a
+ * pending network call looks like: the target may yet arrive, and a wait that
+ * gave up on stillness alone would break the case waits exist for.
+ *
+ * This is only trustworthy because of 134. Before the animation threshold was
+ * measured, a completely static screen claimed something was animating on 54%
+ * of its frames, and "nothing has moved" could not be said with a straight face.
+ */
+async function stillnessNote(deviceQuery, ctx) {
+  try {
+    const { state } = await api.getState(deviceQuery, { options: ctx.options });
+    const ms = state?.stableForMs;
+    return Number.isFinite(ms) ? { ms, note: `the screen has not moved for ${Math.round(ms)}ms` } : null;
+  } catch {
+    return null;
+  }
 }
