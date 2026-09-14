@@ -89,11 +89,12 @@ const arrivalFailures = [];
 /** Readings too bare to be a screen — see the guard where this is used. */
 const sparseReadings = [];
 /**
- * Below this, a reading is not a screen, it is a screen that has not arrived.
+ * Below this, a reading cannot distinguish its screen from any other bare one.
  *
- * The sparsest legitimate reading across the tour is the Settings root at 4-8
- * tokens, so this cannot be set high without rejecting a real screen. 4 is the
- * floor at which two different screens were observed to collide on CI.
+ * Not a failure threshold — see where it is used. The Settings root legitimately
+ * reads 4 tokens on a hosted runner, so treating this as "the screen has not
+ * drawn" rejected a real screen and made CI deterministically red. It marks
+ * readings worth suspecting when a score disagrees with itself, nothing more.
  */
 const MIN_TOKENS_FOR_A_READING = 5;
 
@@ -259,14 +260,26 @@ save();
 if (outFile) console.log(`\nwrote ${readings.length} readings to ${outFile}`);
 
 if (sparseReadings.length) {
-  console.error(`\nFAIL ${sparseReadings.length} reading(s) were too sparse to be a screen:`);
-  for (const f of sparseReadings) console.error(`       ${f}`);
-  console.error(`\nFewer than ${MIN_TOKENS_FOR_A_READING} tokens after two reads a second and a half apart.`);
-  console.error('That is a screen that had not drawn, not a fingerprint result — two such');
-  console.error('readings collide with each other and with anything else this bare, which is');
-  console.error('the failure TOKEN_RULES_VERSION 7 was written for. Either the app is slower');
-  console.error('than the tour assumes, or perception is genuinely returning nothing here.');
-  process.exit(1);
+  // Reported, NOT failed — and that correction is worth more than the check.
+  //
+  // This exited 1 for four hours on 2026-09-14 and turned an intermittent CI
+  // failure into a deterministic one. The reasoning was that a 4-token reading
+  // is a screen that has not drawn. It is not: the Settings root legitimately
+  // reads 4 tokens on a hosted runner, twice in a row, three times in a row —
+  // which the comment on `MIN_TOKENS_FOR_A_READING` had itself said ("4-8
+  // tokens") one screen above the code that rejected it.
+  //
+  // What remains true is that a reading this bare cannot distinguish its screen
+  // from anything else equally bare, so it is worth saying out loud. What is not
+  // true is that saying so should stop the run. The arrival check below is the
+  // one that catches the real collision, and it does so on evidence rather than
+  // on a token count.
+  console.log(`\nNOTE ${sparseReadings.length} reading(s) were too bare to distinguish a screen:`);
+  for (const f of sparseReadings) console.log(`       ${f}`);
+  console.log(`\nFewer than ${MIN_TOKENS_FOR_A_READING} tokens after two reads. That is not automatically`);
+  console.log('wrong — a plain screen really can be this bare — but two readings this sparse');
+  console.log('cannot be told apart, which is the hazard TOKEN_RULES_VERSION 7 was written');
+  console.log('for. If a same-screen score below disagrees with itself, start here.');
 }
 
 if (arrivalFailures.length) {

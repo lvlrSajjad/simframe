@@ -1957,17 +1957,28 @@ on."*
    failure — which removes every simctl and network dependency from the
    assertion and exercises *more* of simframe than before.
 
-   **The token floor.** Two runs recorded `settings` and `settings-general`
-   **both at 4 tokens with the same hash**, and the eval reported that a reading
-   did not resemble its own screen. It resembled nothing: almost nothing had
-   been drawn. That is exactly the hazard `TOKEN_RULES_VERSION` 7 was written
-   for — *"two sparse nameless readings then matched exactly, one hash standing
-   for two different screens"* — arriving through the harness, where no guard
-   existed. A reading under 5 tokens is re-read after 1.5 s and fails only if it
-   stays that bare, which is the "untested is not passed" rule the memory
-   harness already learned. Verified at CI's own settings on a healthy device:
-   same-screen worst 0.77, different-screen worst 0.06, and the guard correctly
-   never fired.
+   **The token floor, and the mis-fix inside it.** Two runs recorded `settings`
+   and `settings-general` **both at 4 tokens with the same hash**, and the eval
+   reported that a reading did not resemble its own screen. I read that as a
+   screen that had not drawn and made a 5-token floor a **failure**.
+
+   It is not a failure. The Settings root legitimately reads **4 tokens** on a
+   hosted runner — twice in a row, three times in a row — which the comment I
+   wrote one screen above the check had itself said ("4-8 tokens"). The floor
+   rejected a real screen and converted an *intermittent* CI failure into a
+   *deterministic* one, which is strictly worse than what it replaced. Verified
+   green locally beforehand, because on this laptop that screen reads richer —
+   so the local mirror could not have caught it and only CI could.
+
+   What survives is the re-read and a **note**: a reading that bare cannot be
+   told apart from any other bare one, which is worth saying when a same-screen
+   score disagrees with itself. The arrival check remains the thing that fails,
+   because it decides on evidence rather than on a token count.
+
+   **The real defect is still open** and it is not sparseness: `settings-general`
+   producing the `settings` root's fingerprint means the navigation did not
+   happen, or `waitFor "About"` passed on the root. That is the next thing to
+   chase.
 
    **The wedge is deprioritised on this evidence**, with one lead kept because it
    is cheap and probably ours: 21 of 22 wedges are a display that reads fine and
