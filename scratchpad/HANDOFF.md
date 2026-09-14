@@ -1,8 +1,9 @@
 # Handoff — 2026-09-13 (evening)
 
-**0.13.0 is published.** npm `latest` is 0.13.0, the MCP registry has
-`io.github.lvlrSajjad/simframe` at 0.13.0, and CI was green on `aa405f5`
-before the tag went up. This project publishes tags + npm + MCP registry and
+**0.13.0 is published and CI is green.** npm `latest` is 0.13.0, the MCP
+registry has `io.github.lvlrSajjad/simframe` at 0.13.0, and `main` is green on
+`2ea27c2`. The tag went up on a green `aa405f5`; the two runs after it went red
+on the `openurl` path alone, which is **133** below and is now fixed. This project publishes tags + npm + MCP registry and
 has never created GitHub Release objects, so there is nothing missing there.
 
 ## What went into 0.13.0
@@ -51,6 +52,14 @@ distinguish from a different one. The article's own closing rule.
   screen produces none by design. Currency is time, not a counter.
 - **132** `ci-memory` exited 1 both for a real failure and for the device dying.
   75 now, and the job revives once on that code alone.
+- **133** The wedge arrives through `simctl openurl` too — code 60, three times
+  at ~10.4 s each, frame hash unchanged, Safari never launched, on a run whose
+  capture and tree were both fine. Same cure, same rule: revive once on the
+  named signature, then try once more. **If it recurs, change the vehicle
+  rather than widening the cure** — the step only asserts that a step runs and
+  capture notices it, and `openurl` drags in simctl, LaunchServices, a Safari
+  cold start and the network. A swipe through simframe's own HID path would
+  exercise more of simframe and none of that.
 
 ## The open decision, with its number attached
 
