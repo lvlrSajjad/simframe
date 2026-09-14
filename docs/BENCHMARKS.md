@@ -1076,8 +1076,25 @@ Orders" as both a nav title and a tab, 746 points apart — still ask.
 
 ### Cost of the tool surface
 
-20 MCP tools, 15,996 characters of schema, ~4,570 estimated tokens, paid once
-per session. Eight of the twenty are single-action tools the phase asked for
+**Re-measured 2026-09-14, and it had more than doubled without anyone
+noticing.** 21 MCP tools, **35,163 characters** of `tools/list` payload,
+**~10,047 estimated tokens**, paid once per session. The line this replaces said
+20 tools, 15,996 characters, ~4,570 tokens — and the gap is not a change of
+method: every way of counting was tried against the current surface
+(descriptions alone 5,048, schemas alone 28,964, pretty-printed 46,045) and none
+lands near the old figure. The surface really did grow.
+
+`sim_storage`, the tool added the day this was re-measured, accounts for **1,609
+characters of it**. So the growth is not the new tool; it is that nothing has
+been measuring this. "Measure before and after" is a working rule in CLAUDE.md
+and this number sat stale through several phases of it.
+
+**Where it goes: schemas are 28,964 of the 35,163.** `deviceProp` and
+`modeProps` are spread into nearly every tool, and each carries a long
+human-readable description that is then repeated 21 times. That is the thing to
+attack if this budget matters, and it is cheaper than removing a tool.
+
+Eight of the twenty-one are single-action tools the phase asked for
 (`sim_tap`, `sim_type_into`, `sim_scroll_to`, `sim_wait_for`, `sim_assert`,
 `sim_launch`, `sim_open_url`, `sim_permission`). Each is one `sim_do` step
 under the hood, so they verify identically, and every description points back
