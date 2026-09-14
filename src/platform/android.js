@@ -1018,6 +1018,37 @@ async function restartDevice(serial) {
   );
 }
 
+/**
+ * Reading an app's own storage is not implemented for Android, and says so.
+ *
+ * Not a stub and not a borrowed answer. The iOS version reads a CoreSimulator
+ * data container straight off the host filesystem, which an emulator has no
+ * equivalent of: an app's files live inside the emulator's own userdata image,
+ * and the way in is `adb shell run-as <package>` — which works only for a
+ * debuggable build, needs the emulator running, and would be a different
+ * feature with different guarantees rather than the same one.
+ *
+ * The standing rule is that a layer a platform does not have is declined with a
+ * reason, never described in the other platform's vocabulary. Claiming a data
+ * container here is how `doctor` once told an emulator its input driver was
+ * idb.
+ */
+const noStorage = (serial, what) => {
+  throw new Error(
+    `simframe cannot read ${what} on an emulator (${serial}) yet. The iOS version reads a`
+    + ' simulator data container off the host filesystem and an emulator has no such thing —'
+    + ' its app data lives inside the userdata image, reachable only through'
+    + ' `adb shell run-as <package>` on a debuggable build, with the emulator running.'
+    + ' That is a different feature and it has not been built.',
+  );
+};
+
+async function listApps(serial) { return noStorage(serial, 'the list of installed apps'); }
+async function appContainer(serial) { return noStorage(serial, "an app's data container"); }
+async function readPropertyList() {
+  throw new Error('property lists are an iOS format; Android has no equivalent to read');
+}
+
 /** @type {import('./index.js').Platform} */
 export const platform = {
   id: 'android',
@@ -1034,6 +1065,9 @@ export const platform = {
   terminateApp,
   openUrl,
   restartDevice,
+  listApps,
+  appContainer,
+  readPropertyList,
   setPermission,
   setPasteboard,
   getPasteboard,

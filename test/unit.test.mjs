@@ -1177,6 +1177,12 @@ test('the platform surface is satisfiable by something that is not a simulator',
       ax: { supported: false, note: 'nor an accessibility tree' },
     }),
     toolchain: () => [{ name: 'nothing', level: 'ok', detail: 'no tools needed' }],
+    // Reading what an app persisted. A fake device stores nothing, and the
+    // honest implementation of that is a refusal in its own vocabulary — the
+    // same shape Android uses, for the same reason.
+    listApps: async () => { throw new Error('a fake device installs nothing'); },
+    appContainer: async () => { throw new Error('a fake device has no containers'); },
+    readPropertyList: async () => { throw new Error('a fake device has no property lists'); },
   };
   for (const member of PLATFORM_SURFACE) assert.ok(member in fake, `a backend needs ${member}`);
   assert.deepEqual(Object.keys(fake).sort(), [...PLATFORM_SURFACE].sort(), 'and needs nothing more');
@@ -1427,6 +1433,122 @@ test('nothing above the boundary shells out to a platform tool', async () => {
     }
     assert.ok(!source.includes("'./simctl.js'"), `${file} imports the old pre-boundary module`);
   }
+});
+
+// --- what the app believes (item 140) ----------------------------------------
+
+test('a property list survives the types JSON cannot represent', async () => {
+  const plist = await import('../src/platform/plist.js');
+  // The reason this parser exists rather than `plutil -convert json`: measured
+  // on the bench device, six of the twenty real preference plists would not
+  // convert to JSON at all, because <data> and <date> have no JSON form. A
+  // reader that drops three files in ten is a sampler, not a parser.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>aString</key><string>localhost:8083</string>
+  <key>escaped</key><string>a &amp; b &lt;c&gt; &quot;d&quot;</string>
+  <key>empty</key><string/>
+  <key>aBool</key><true/>
+  <key>anInt</key><integer>42</integer>
+  <key>hugeInt</key><integer>9223372036854775807</integer>
+  <key>aReal</key><real>810994475.111</real>
+  <key>aDate</key><date>2026-09-13T12:09:11Z</date>
+  <key>aBlob</key><data>AAEC</data>
+  <key>nested</key><dict><key>on</key><false/></dict>
+  <key>list</key><array><integer>1</integer><string>two</string></array>
+  <key>emptyDict</key><dict/>
+</dict>
+</plist>`;
+  const v = plist.parse(xml);
+  assert.equal(v.aString, 'localhost:8083');
+  assert.equal(v.escaped, 'a & b <c> "d"', 'entities plutil writes must come back as the characters they stand for');
+  assert.equal(v.empty, '');
+  assert.equal(v.aBool, true);
+  assert.equal(v.anInt, 42);
+  assert.equal(v.aReal, 810994475.111);
+  assert.deepEqual(v.nested, { on: false });
+  assert.deepEqual(v.list, [1, 'two']);
+  assert.deepEqual(v.emptyDict, {});
+  assert.equal(plist.typeOf(v.aDate), 'date');
+  assert.equal(v.aDate.iso, '2026-09-13T12:09:11Z');
+  assert.equal(plist.typeOf(v.aBlob), 'data');
+  assert.equal(v.aBlob.bytes, 3, 'a blob reports its size, because "a 4KB blob" is often the whole answer');
+
+  // A plist integer is 64-bit and JavaScript's is not. Rounding it silently
+  // would be a wrong answer about a stored value, which is the one thing this
+  // feature cannot afford — so the exact digits survive and the shape says why.
+  assert.equal(plist.typeOf(v.hugeInt), 'integer');
+  assert.equal(v.hugeInt.exact, '9223372036854775807');
+
+  // Strict on purpose. A silently skipped element is a key the app has that the
+  // reader is told it does not, which is the class of wrong answer this exists
+  // to prevent.
+  assert.throws(() => plist.parse('<plist version="1.0"><dict><key>k</key><ufo/></dict></plist>'),
+    /unsupported property-list element <ufo>/);
+});
+
+test('AsyncStorage spills large values to their own file, and a reader that misses them lies', async () => {
+  const storage = await import('../src/storage.js');
+  const crypto = await import('node:crypto');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'simframe-store-'));
+  const inner = path.join(dir, 'Documents', 'RCTAsyncLocalStorage_V1');
+  fs.mkdirSync(inner, { recursive: true });
+  // React Native writes small values inline and stores a large one as `null`
+  // here, with the value beside it in a file named by the MD5 of the key. A
+  // manifest full of nulls is NOT an empty store, and reporting it as one is
+  // exactly the wrong answer this feature exists to stop.
+  fs.writeFileSync(path.join(inner, 'manifest.json'), JSON.stringify({
+    onboardingComplete: 'true',
+    spilled: null,
+    absent: null,
+  }));
+  const big = 'x'.repeat(5000);
+  fs.writeFileSync(path.join(inner, crypto.createHash('md5').update('spilled').digest('hex')), big);
+
+  const store_ = storage.readAsyncStorage(dir);
+  const byKey = Object.fromEntries(store_.entries.map((e) => [e.key, e]));
+  assert.equal(byKey.onboardingComplete.value, 'true');
+  assert.equal(byKey.spilled.value, big, 'a spilled value must be followed to its file');
+  assert.match(byKey.spilled.where, /spilled/);
+  // "Null" and "too big to inline, and the file is gone" are different facts
+  // about the app, and only one of them is the app's own doing.
+  assert.equal(byKey.absent.value, null);
+  assert.match(byKey.absent.where, /no spill file/);
+
+  assert.equal(storage.readAsyncStorage(path.join(dir, 'nope')), null, 'an app without the store gets null, not an error');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a value too long to print says so, and says how much it is not showing', async () => {
+  const storage = await import('../src/storage.js');
+  // Item 141 was a harness that truncated a failure report one character before
+  // the only content that mattered. The lesson is not "never truncate" — it is
+  // that a reader who is not told about a cut reads the fragment as the whole.
+  const long = 'y'.repeat(storage.VALUE_PREVIEW_BYTES + 250);
+  const shown = storage.renderValue(long);
+  assert.ok(shown.includes('250 more character(s) not shown'), 'the cut must be announced with its size');
+  assert.ok(/read the file/.test(shown), 'and must say how to get the rest');
+  assert.equal(storage.renderValue('short'), 'short', 'a value that fits is printed whole, with no note');
+});
+
+test('Android declines to read storage in its own vocabulary, never in iOS terms', async () => {
+  const { platform } = await import('../src/platform/android.js');
+  // The standing rule, and the reason it exists: `doctor` asked about an
+  // emulator once answered "input driver: idb" — a claim about a tool that has
+  // never spoken to an Android device. A layer a platform does not have is
+  // declined with a reason, not described in the other platform's words.
+  await assert.rejects(() => platform.listApps('emulator-5554'), (err) => {
+    assert.match(err.message, /emulator/, 'it must name what it is talking to');
+    assert.match(err.message, /run-as/, 'and say what the Android route would actually be');
+    // Contrasting with iOS is fine and useful; *claiming* iOS's answer is not.
+    // The rule is about what a backend asserts it has, not what it may mention.
+    assert.match(err.message, /has not been built/, 'it must decline, not promise');
+    assert.ok(!/simctl/.test(err.message), 'and must not reach for the other platform\'s tool');
+    return true;
+  });
+  await assert.rejects(() => platform.readPropertyList('/x'), /property lists are an iOS format/);
 });
 
 // --- a wedged device, told apart from a quiet one -----------------------------

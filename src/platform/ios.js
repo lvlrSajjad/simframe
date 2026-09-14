@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import * as plist from './plist.js';
 
 const run = promisify(execFile);
 
@@ -335,6 +336,100 @@ function ownsUdid(udid) {
 }
 
 /**
+ * Where CoreSimulator keeps a device's data.
+ *
+ * Read straight off disk, and that is the whole point of this family rather
+ * than an optimisation. Measured on this Xcode: `simctl get_app_container` and
+ * `simctl listapps` **both** fail on a device that is not running —
+ * `Unable to lookup in current state: Shutdown`. The field report that asked
+ * for this feature rated it highest-leverage precisely because it answered
+ * "what did the app save?" *before the device was booted*, and simctl cannot do
+ * that. The filesystem can, so this reads the filesystem.
+ */
+const deviceRoot = (udid) =>
+  path.join(os.homedir(), 'Library/Developer/CoreSimulator/Devices', String(udid));
+
+const containerRoot = (udid) => path.join(deviceRoot(udid), 'data/Containers/Data/Application');
+
+/** The per-container metadata file that says which app owns it. */
+const METADATA = '.com.apple.mobile_container_manager.metadata.plist';
+
+/**
+ * Every app with a data container on this device, booted or not.
+ *
+ * The bundle id lives in `MCMMetadataIdentifier` in each container's metadata
+ * plist. It is *not* recoverable by grepping the file — the binary plist
+ * encodes strings in a way that does not leave the id as a plain substring, and
+ * an early version of this that tried to pre-filter that way matched nothing.
+ * So each metadata file is asked properly. Measured at **0.52s for 150
+ * containers**, which is a listing cost rather than a per-read one.
+ */
+async function listApps(udid) {
+  const root = containerRoot(udid);
+  let entries;
+  try {
+    entries = await fs.promises.readdir(root, { withFileTypes: true });
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      const exists = fs.existsSync(deviceRoot(udid));
+      throw new Error(exists
+        ? `device ${udid} has no app data containers yet — nothing has been installed on it`
+        : `no simulator data directory for ${udid} (looked in ${root})`);
+    }
+    throw err;
+  }
+  const apps = [];
+  await Promise.all(entries.filter((e) => e.isDirectory()).map(async (e) => {
+    const dir = path.join(root, e.name);
+    try {
+      const { stdout } = await run('plutil',
+        ['-extract', 'MCMMetadataIdentifier', 'raw', '-o', '-', path.join(dir, METADATA)],
+        { timeout: 10_000 });
+      const bundleId = stdout.trim();
+      if (bundleId) apps.push({ bundleId, container: dir });
+    } catch {
+      // A container without readable metadata is not an app we can name, and
+      // naming it by its UUID would be offering an id nobody can use.
+    }
+  }));
+  return apps.sort((a, b) => a.bundleId.localeCompare(b.bundleId));
+}
+
+/** The data container for one app, or a listing of what is there instead. */
+async function appContainer(udid, bundleId) {
+  const apps = await listApps(udid);
+  const hit = apps.find((a) => a.bundleId === bundleId);
+  if (hit) return hit.container;
+  // Near misses first: the id is the thing people get wrong, and a bare "not
+  // installed" on a device with the app under a slightly different id is the
+  // least useful true sentence available.
+  const needle = String(bundleId).toLowerCase();
+  const near = apps.filter((a) => a.bundleId.toLowerCase().includes(needle)
+    || needle.includes(a.bundleId.toLowerCase())).slice(0, 5);
+  throw new Error(
+    `"${bundleId}" has no data container on ${udid}`
+    + (near.length ? ` — did you mean ${near.map((a) => a.bundleId).join(', ')}?` : '')
+    + ` (${apps.length} app(s) have one)`,
+  );
+}
+
+/**
+ * Read a property list, whatever it contains.
+ *
+ * `-convert xml1` and not `json`: six of the twenty real preference plists on
+ * the bench device cannot be represented as JSON at all, because `<data>` and
+ * `<date>` have no JSON form and plutil refuses rather than inventing one. See
+ * the note at the top of plist.js.
+ */
+async function readPropertyList(file) {
+  const { stdout } = await run('plutil', ['-convert', 'xml1', '-o', '-', file], {
+    timeout: 20_000,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return plist.parse(stdout);
+}
+
+/**
  * The prerequisites `simframe doctor` reports for this backend. Returned rather
  * than printed so doctor stays one renderer: a backend says what it needs, and
  * a machine missing it is told which tool, not which platform.
@@ -440,6 +535,9 @@ export const platform = {
   terminateApp,
   openUrl,
   restartDevice,
+  listApps,
+  appContainer,
+  readPropertyList,
   setPermission,
   setPasteboard,
   permissionServices: () => PERMISSION_SERVICES,

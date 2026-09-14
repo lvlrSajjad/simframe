@@ -1953,9 +1953,9 @@ on."*
    animation threshold was measured, a static screen claimed something was
    animating on 54% of its frames.
 
-140. **Feature idea: read the app's own storage.** OPEN, and the reporter rates
-   it the highest-leverage thing in the session — *which was not a simframe
-   call*. Reading the app's persisted state store straight out of the
+140. **Feature idea: read the app's own storage.** **BUILT, 2026-09-14** —
+   `simframe storage` / `sim_storage`. The reporter rated it the highest-leverage
+   thing in the session — *which was not a simframe call*. Reading the app's persisted state store straight out of the
    simulator's data container gave the exact wrong value the app had saved,
    proving the bug **without a live session, without logging in, and before the
    device was even booted**, and then confirmed the fix by re-reading it.
@@ -1969,6 +1969,60 @@ on."*
    That last sentence is the strongest argument for it and is worth keeping
    verbatim. It is also a read of arbitrary app data, so it needs a think about
    what it will print into a transcript.
+
+   **What was built, and the measurement that shaped it.** The obvious
+   implementation is `simctl get_app_container`, and it is wrong: measured on
+   this Xcode, both `get_app_container` and `listapps` fail on a device that is
+   not running — `Unable to lookup in current state: Shutdown`. The single
+   property that made the reporter rate this highest — it answered *before the
+   device was booted* — is therefore unreachable through simctl, and only the
+   filesystem has it. So the backend reads
+   `~/Library/Developer/CoreSimulator/Devices/<udid>/data/Containers/Data/Application`
+   directly, maps bundle id to container through `MCMMetadataIdentifier` in each
+   container's metadata plist, and never speaks to the device at all. Measured:
+   **190 ms to map 150 containers**, 174 ms to read one app, device shut down
+   throughout.
+
+   The bundle id is **not** recoverable by grepping the metadata file — the
+   binary plist does not leave it as a plain substring, and a first version that
+   pre-filtered that way matched nothing. Each file is asked properly.
+
+   **`plutil -convert json` is not usable and the number says why.** Across the
+   twenty real `Library/Preferences` plists on the bench device, **six failed to
+   convert** — 30% — because `<data>` and `<date>` have no JSON form and plutil
+   refuses rather than inventing one. `-convert xml1` succeeded on 20/20, so
+   `src/platform/plist.js` parses that instead: a reader for plutil's own output,
+   not a general XML parser, strict about unknown elements because a silently
+   skipped key is a key the app has that the reader is told it does not. 64-bit
+   integers keep their exact digits rather than being rounded into a float.
+
+   **AsyncStorage is not just the manifest.** React Native stores a small value
+   inline and a large one as `null` in `manifest.json`, writing the value to a
+   file beside it named by the MD5 of the key. A reader that stopped at the
+   manifest would report a store full of nulls — the exact class of wrong answer
+   this feature exists to prevent — so spills are followed, and a `null` with no
+   spill file says which of the two it is.
+
+   **Android declines with a reason.** An emulator has no host-side container;
+   its app data lives in the userdata image behind `adb shell run-as` on a
+   debuggable build, with the emulator running. That is a different feature with
+   different guarantees and it has not been built, so `listApps` says exactly
+   that rather than borrowing iOS's vocabulary.
+
+   **On what it prints.** The owner's decision, asked explicitly: values in full,
+   and listing every app. It is their machine and their data, and the tool is
+   read-only. The repo-hygiene rule is unchanged and separate — committed tests
+   and docs use `com.example.simframetestbed` only, and `check-private` still
+   guards the tracked side. Values are printed whole up to
+   `VALUE_PREVIEW_BYTES`; past it the text says how many characters it is not
+   showing and where the file is, because item 141 in this same file is a
+   harness that cut a report one character before the only content that
+   mattered.
+
+   **Still open:** SQLite, Realm and MMKV stores are located and listed with
+   their sizes, not decoded. Keychain is out of reach by design — Expo
+   SecureStore and anything else living there will not appear, and the tool does
+   not pretend otherwise.
 
 141. **The harness truncated away the reason a check failed.** FIXED,
    2026-09-14, found while running the above. `ci-memory` printed

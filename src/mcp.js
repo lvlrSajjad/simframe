@@ -15,7 +15,8 @@ import * as api from './index.js';
 import * as input from './input.js';
 import * as metrics from './metrics.js';
 import * as navigate from './navigate.js';
-import { bootedDevices, listDevices, permissionServices } from './platform/index.js';
+import { bootedDevices, listDevices, permissionServices, resolveDevice } from './platform/index.js';
+import * as storage from './storage.js';
 import * as store from './store.js';
 import * as view from './view.js';
 
@@ -399,6 +400,24 @@ const TOOLS = [
     },
   },
   {
+    name: 'sim_storage',
+    description:
+      'What the app saved, as text: its UserDefaults and (for React Native) its AsyncStorage, read straight out of'
+      + ' the data container. sim_ui says what is drawn; sim_storage says what the app believes — use it when the'
+      + ' screen and the behaviour disagree, or to check a value without driving the UI to it.'
+      + ' Works on a device that is NOT running, so it can answer before anything is booted.'
+      + ' Call with no bundleId to list the apps that have a container (match filters that list).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        bundleId: { type: 'string', description: 'The app to read, e.g. com.example.myapp. Omit to list apps instead.' },
+        match: { type: 'string', description: 'When listing, show only bundle ids containing this string.' },
+        ...deviceProp,
+        ...modeProps,
+      },
+    },
+  },
+  {
     name: 'sim_devices',
     description: 'List the devices simframe can drive — iOS simulators and Android emulators.'
       + ' Booted ones by default; pass all to see every device on the host and its state.'
@@ -611,6 +630,8 @@ export async function serve({ device: defaultDevice, options: baseOptions = {} }
           return await flowRun(target, args, options);
         case 'sim_capture':
           return await capture(target, args, options);
+        case 'sim_storage':
+          return await appStorage(args);
         case 'sim_devices':
           return await devices(args);
         default:
@@ -1166,6 +1187,28 @@ function listStateDirs() {
   } catch {
     return [];
   }
+}
+
+/**
+ * What an app has persisted.
+ *
+ * Deliberately not a daemon call and deliberately not a `simctl` call. Measured
+ * on this Xcode, `simctl get_app_container` and `simctl listapps` both refuse on
+ * a device that is not running — so the one property that made the field
+ * reporter rate this the highest-leverage thing in their session, answering
+ * *before the device is booted*, is only reachable by reading the container off
+ * the host filesystem. That is what the backend does.
+ */
+async function appStorage({ bundleId, match: query, device } = {}) {
+  const resolved = await resolveDevice(device);
+  if (!bundleId) {
+    const list = await storage.apps(resolved.udid);
+    const needle = query ? String(query).toLowerCase() : null;
+    const shown = needle ? list.filter((a) => a.bundleId.toLowerCase().includes(needle)) : list;
+    return { content: [text(storage.formatApps(shown))] };
+  }
+  const result = await storage.read(resolved.udid, bundleId);
+  return { content: [text(storage.format(result))] };
 }
 
 async function devices({ all = false, match: query } = {}) {

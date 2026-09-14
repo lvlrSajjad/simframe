@@ -63,6 +63,7 @@ export const PLATFORM_SURFACE = Object.freeze([
   'geometry', 'inputDriver',
   'screenshot', 'launchApp', 'terminateApp', 'openUrl', 'restartDevice',
   'setPermission', 'setPasteboard', 'permissionServices', 'capabilities', 'toolchain',
+  'listApps', 'appContainer', 'readPropertyList',
   'bootedAt',
 ]);
 
@@ -208,6 +209,12 @@ export const terminateApp = (udid, ...args) => platformFor(udid).terminateApp(ud
 export const openUrl = (udid, ...args) => platformFor(udid).openUrl(udid, ...args);
 export const setPermission = (udid, ...args) => platformFor(udid).setPermission(udid, ...args);
 export const setPasteboard = (udid, ...args) => platformFor(udid).setPasteboard(udid, ...args);
+
+// Reading what an app persisted. Routed like everything else, and declined by a
+// backend that has no equivalent rather than answered in the other's terms.
+export const listApps = (udid, ...args) => platformFor(udid).listApps(udid, ...args);
+export const appContainer = (udid, ...args) => platformFor(udid).appContainer(udid, ...args);
+export const readPropertyList = (udid, file) => platformFor(udid).readPropertyList(file);
 
 /**
  * The permission services a device understands, or every service any backend

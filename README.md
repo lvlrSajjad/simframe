@@ -406,6 +406,7 @@ steer the model is a tool surface the model uses wrong.
 | `sim_wait` | Waits for the screen to change *and then* settle. |
 | `sim_look` | **The only tool that returns an image**, capped at 1024 px. For layout, colour, spacing — questions text cannot answer. |
 | `sim_recall` · `sim_strip` | Look backwards: a text timeline of what happened, or recent frames tiled into one image. |
+| `sim_storage` | **What the app believes**, as opposed to what it drew: its `UserDefaults` and, for React Native, its `AsyncStorage`. Reads the data container off disk, so it answers on a device that is **not running**. |
 | `sim_capture` · `sim_devices` | Manage capture loops; list simulators. |
 
 ### What the screen looks like as text
@@ -584,6 +585,20 @@ model:
 simframe screens              # what this device has learned
 simframe goto invoices        # walk there, verifying every step
 ```
+
+And when the screen and the behaviour disagree, the question is usually not
+about the screen at all:
+
+```bash
+simframe storage                          # apps with a data container
+simframe storage com.example.myapp        # what that app saved
+```
+
+`sim_ui` says what is drawn; `sim_storage` says what the app believes. It reads
+the data container straight off the host filesystem, which means it works on a
+device that is **shut down** — `simctl` cannot do this at all, on any of its own
+paths, once a device stops running.
+
 
 Measured on a four-tab tour, `goto` plans and walks three-step routes with every
 step verified and no model call. It fails rather than guesses: an unknown

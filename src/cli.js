@@ -12,6 +12,7 @@ import * as baseline from './baseline.js';
 import * as metrics from './metrics.js';
 import * as navigate from './navigate.js';
 import { decodePng } from './png.js';
+import * as storage from './storage.js';
 import * as store from './store.js';
 import * as view from './view.js';
 
@@ -33,6 +34,7 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe tap     <selector>        tap #3, "Save", or @120,400
   simframe do      <script.json>     run a scripted flow (see below)
   simframe screens [device]          list screens this device has learned
+  simframe storage [bundle-id]       what the app saved (works on a shut-down device)
   simframe goto    <screen>          walk to a known screen through known steps
   simframe flow    save <name> <script.json>   run a flow and save it if every step verifies
   simframe flow    run  <name>       replay a saved flow
@@ -857,6 +859,25 @@ async function main() {
             ],
       );
       process.exitCode = res.ok ? 0 : 1;
+      return;
+    }
+
+    case 'storage': {
+      // A file read, like `screens`, and deliberately not a daemon call. The
+      // whole value of this command is that it answers on a device that is not
+      // running — measured: simctl itself cannot, on this Xcode. Routing it
+      // through the daemon would throw that away for no gain.
+      const device = await resolveDevice(flags.device);
+      const [bundleId] = positional;
+      if (!bundleId) {
+        const list = await storage.apps(device.udid);
+        const match = flags.match ? String(flags.match).toLowerCase() : null;
+        const shown = match ? list.filter((a) => a.bundleId.toLowerCase().includes(match)) : list;
+        emit(flags, shown, storage.formatApps(shown));
+        return;
+      }
+      const result = await storage.read(device.udid, bundleId);
+      emit(flags, result, storage.format(result));
       return;
     }
 
