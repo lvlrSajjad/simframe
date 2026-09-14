@@ -88,6 +88,8 @@ const readings = [];
 const arrivalFailures = [];
 /** Readings too bare to be a screen — see the guard where this is used. */
 const sparseReadings = [];
+/** `name|round` of every reading that stayed too sparse, so the report below can name the cause. */
+const sparseAt = new Set();
 /**
  * Below this, a reading cannot distinguish its screen from any other bare one.
  *
@@ -144,6 +146,14 @@ const save = (extra = {}) => {
  * rather than hanging the job.
  */
 const STALE_READ_RETRIES = 3;
+/**
+ * How hard to try for a reading rich enough to tell its screen apart.
+ *
+ * Backed off rather than fixed, because the thing being waited for is a screen
+ * finishing its draw, and the runner that needs this is the slow one.
+ */
+const SPARSE_READ_RETRIES = 3;
+const SPARSE_READ_WAIT_MS = 1500;
 const STALE_READ_WAIT_MS = 1000;
 
 /** When the steps that were supposed to change the screen finished. */
@@ -296,13 +306,36 @@ for (let round = 1; round <= rounds; round += 1) {
     // "untested is not passed" rule the memory harness learned. A screen that
     // is genuinely this bare after a second look is a real finding.
     if ((id.tokens ?? []).length < MIN_TOKENS_FOR_A_READING) {
+      // Read again, and keep the BEST reading rather than the last one.
+      //
+      // One retry was not enough and the failure it produced pointed at the
+      // wrong thing. On CI, `settings-general` read 4 tokens twice and then
+      // scored 1.00 against the *Settings root* — because the General screen's
+      // back button is labelled "Settings", so a General seen only down to its
+      // nav bar is structurally the same screen as the root. The harness
+      // reported it as a fingerprint that does not resemble its own screen. The
+      // fingerprint was fine; the look was too short. `settings-general` reads
+      // 5 tokens when it is read properly.
+      //
+      // Best-of, not last, because these reads are samples of a screen that is
+      // still drawing: a later read is usually richer but not reliably so, and
+      // throwing away a 5-token reading because the retry saw 4 would be the
+      // same bug with more steps.
       const before = (id.tokens ?? []).length;
-      await new Promise((r) => setTimeout(r, 1500));
-      id = await api.screenIdentity(device, { fresh: true, confirmNovel: false });
+      const seen = [before];
+      for (let attempt = 1; attempt <= SPARSE_READ_RETRIES; attempt += 1) {
+        await new Promise((r) => setTimeout(r, SPARSE_READ_WAIT_MS * attempt));
+        const again = await api.screenIdentity(device, { fresh: true, confirmNovel: false });
+        seen.push((again.tokens ?? []).length);
+        if ((again.tokens ?? []).length > (id.tokens ?? []).length) id = again;
+        if ((id.tokens ?? []).length >= MIN_TOKENS_FOR_A_READING) break;
+      }
       const after = (id.tokens ?? []).length;
-      console.log(`         ("${screen.name}" read ${before} token(s) — too sparse to compare; read again: ${after})`);
+      console.log(`         ("${screen.name}" read ${before} token(s) — too sparse to compare;`
+        + ` read again: ${seen.slice(1).join(', ')} — kept ${after})`);
       if (after < MIN_TOKENS_FOR_A_READING) {
-        sparseReadings.push(`${screen.name} round ${round}: ${after} token(s) after two reads`);
+        sparseReadings.push(`${screen.name} round ${round}: ${after} token(s) after ${seen.length} reads`);
+        sparseAt.add(`${screen.name}|${round}`);
       }
     }
     // Did we actually arrive? Two differently-named screens reading the same
@@ -488,6 +521,20 @@ if (strays.length) {
     const matchNamed = match ? namedTokens(match.tokens) : [];
     const collided = bestOther >= 0.99 && named.length === 0 && matchNamed.length === 0;
     if (collided) collisions += 1;
+    // The third cause, and the one that produced this report on 2026-09-15.
+    //
+    // A reading that stayed under the token floor did not fail to resemble its
+    // screen — it never saw enough of the screen to resemble anything. On CI
+    // `settings-general` read 4 tokens and scored 1.00 against the Settings
+    // root, because the General screen's back button is labelled "Settings", so
+    // a General seen only down to its nav bar IS the root structurally. The
+    // report called that a wrong turn and sent the reader to fix the tour.
+    //
+    // Not folded into `collided` above: that one means the fingerprint had
+    // nothing to work with, which is this harness's subject. This means we did
+    // not look long enough, which is the harness's own fault and a different
+    // remedy.
+    const underRead = sparseAt.has(`${reading.name}|${reading.round}`);
     console.error(`       ${reading.name} r${reading.round}: own screen ${bestSelf.toFixed(2)}, `
       + `${match ? `${match.name} r${match.round}` : 'another screen'} ${bestOther.toFixed(2)} `
       + `(${reading.count} tokens, ${named.length} named, sources ${reading.sources.join('+') || 'none'})`);
@@ -495,6 +542,10 @@ if (strays.length) {
       console.error('              ^ a COLLISION, not a wrong turn: neither reading carries a chrome');
       console.error('                label, so both are structure with no name and the fingerprint has');
       console.error('                nothing left to tell two list screens apart.');
+    } else if (underRead) {
+      console.error('              ^ UNDER-READ, not a wrong turn: this reading stayed below the token');
+      console.error('                floor after every retry, so it never saw enough of its screen to');
+      console.error('                resemble one. Two screens read this thinly are the same screen.');
     }
     if (named.length) console.error(`              names: ${named.map((t) => t.slice(t.indexOf('"'), t.lastIndexOf('"') + 1)).join(' ')}`);
   }
@@ -502,6 +553,10 @@ if (strays.length) {
     console.error(`\n${collisions} of ${strays.length} are fingerprint collisions. That is this harness's own subject,`);
     console.error('not a tour fault: a reading whose chrome label went missing cannot establish');
     console.error('identity, and comparing it as though it could is what produced the verdict above.');
+  } else if (strays.every((x) => sparseAt.has(`${x.reading.name}|${x.reading.round}`))) {
+    console.error('\nEvery stray above was UNDER-READ, so this says nothing about the tour or the');
+    console.error('fingerprint — the harness scored a look that was too short. The retries are in');
+    console.error('SPARSE_READ_RETRIES; a runner that needs more than they allow is the finding.');
   } else {
     console.error('\nThat is the tour going somewhere unintended, not the fingerprint drifting, and');
     console.error('measuring it as either distribution poisons both ends. Fix the tour — a tap that');
