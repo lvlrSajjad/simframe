@@ -1,15 +1,24 @@
 # Handoff — 2026-09-14 (evening)
 
 **0.13.0 is released.** npm `latest` and the MCP registry both carry it. Nothing
-is held locally; `origin/main` is at `2d5c0af`. All gates green: 190/190 tests,
-check-private, check-package, the article projection.
+is held locally. All gates green: 191/191 tests, check-private, check-package,
+the article projection.
 
-**CI status: a run is in flight on `1ca473c`** (the two before it were cancelled
-by successive pushes — `cancel-in-progress` is keyed on the ref). **Check the
-latest run first thing.** The most informative run so far is `356f190`: every
-integration step passed there except the fingerprint eval, including the two
-that had failed all week. The `waitFor` fix landed after it and has not yet had
-a clean run to prove itself — that is the single thing to confirm.
+**CI is GREEN.** Run `34882362300` on `cc8b597`: integration success in 20
+minutes, *every* step, plus unit tests on Node 18/20/22. The device guard never
+had to revive.
+
+**The `waitFor` fix is proven** — it was the one thing the previous handoff left
+unconfirmed. The evidence is in the fingerprint eval of that run: `settings`
+read `3800d34aaa` and `settings-general` read `3e158af060`, distinct and stable
+across all three rounds. **Rounds 2 and 3 are the ones that count**, because
+memory must be warm before it can lie, and that is exactly the collision that
+used to let `waitFor "About"` pass on the Settings root. Same-screen similarity
+1.00, different-screen max 0.08, gap 0.92 against a 0.36 threshold.
+
+The token-floor demotion was also right: `settings` read 4 tokens after two
+reads on all three rounds and the check fired as a **NOTE**. Under the old
+version that was a hard failure every single run.
 
 ## The day in one line
 
@@ -106,10 +115,17 @@ every run.
 
 ## Next, in the owner's agreed order
 
-1. **Item 138** — a step that resolves but yields `no-visible-change` while an
-   `or` list sits untried. Note it is the *opposite* of the rule that stops
-   simframe retrying `openurl`: an `or` list is the caller's own stated
-   fallback, not the driver's initiative.
+1. ~~**Item 138**~~ — **DONE** (`f8a68d0`), and it was not where the report
+   pointed. The `or` list was reachable all along: a resolution that clears
+   nothing throws `unknown_screen`/`ambiguous_intent` and the fallback path
+   accepts both. The real defect was upstream — `synonymGroup` fires when the
+   query merely *contains* a group word, and the override then set a flat 0.9
+   in a branch that runs only `if (base < 0.5)`, i.e. whose whole job is to
+   overrule coverage scaling. Third branch to need that lesson; the other two
+   carry comments saying they were taught it. Regression-checked on 181 verified
+   graph decisions: unchanged. The reporter's fallback half is **left open on
+   purpose** — acting on `or` after a no-visible-change takes a *second* action,
+   and no-visible-change is a known false negative there (item 4, and toggles).
 2. **Item 140 — `sim_storage`.** The field reporter rates it the highest-leverage
    thing in their whole session, and it was not a simframe call: reading the
    app's persisted state proved a bug before the device was even booted.
