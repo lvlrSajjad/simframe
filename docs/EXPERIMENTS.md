@@ -575,9 +575,48 @@ is one cause — just not the one named. A live surface that stops delivering
 frames is the shape most likely to be **ours**, because a damage callback that
 stops firing is exactly the defect entry 5 found and never verified the fix for.
 
+### Is the wedge worse on CI? No — and that matters
+
+The obvious next question, asked by the owner: hosted runners have a fraction of
+a laptop's capacity, so is the wedge a capacity problem? The premise turns out to
+be wrong in an interesting way.
+
+| | this laptop | hosted runner |
+| --- | --- | --- |
+| capture time, p50 | **21.8 ms** | **55.4 ms** |
+| capture time, p95 | 41.1 ms | 94.0 ms |
+| wedges | **22** in ~1.5 days of use | **1** run in 6 |
+
+**The runner is consistently ~2.5× slower at identical work**, so capacity is
+real and measurable. But it does not show up as wedging: of six recent CI runs,
+one carried a wedge signature at all. Locally, 22 wedges in a day and a half.
+
+So **the wedge is not primarily a CI phenomenon — it is primarily a local one**,
+and that is good news twice over. It is happening on the machine where it can
+actually be debugged, and the CI red we have been chasing is mostly *not* it.
+
+**What CI fails on instead is latency.** `simctl openurl` exceeding its own
+internal timeout, a settle not completing in budget, and a tap landing before a
+screen is ready — the fingerprint tour that never left the Settings root is that
+last one exactly. Every one of those is what a 2.5× slowdown produces, and none
+of them is a wedge.
+
+That splits the work cleanly, which is the whole value of having asked:
+
+- **CI** needs timing tolerance and fewer timing-fragile vehicles. `openurl`
+  drags in simctl, LaunchServices, a Safari cold start and a network fetch to
+  assert a thing a swipe would assert — see DEFERRED 133. Curing wedges harder
+  will not help, because wedges are not what is failing.
+- **The wedge** needs instrumentation and a soak, on this laptop, where it
+  reproduces roughly fifteen times a day.
+
+**Caveat, because the numbers will be quoted.** Six CI runs is a small sample for
+a rate, and a local "daemon session" is not the same unit as a CI run — the
+comparison is indicative of direction, not a measured ratio.
+
 **What to do next, and what not to.** Not another threshold and not another
-retry. The next step is to instrument the two populations separately — a wedge
-should say which of the two it is — and then reproduce the frame-starvation half
-under a long soak with the callback registration counted. Until that exists,
-`revive` stays the cure and the CI guard stays the mitigation, and neither is a
-diagnosis.
+retry. Instrument the frame-starvation case — the daemon should say whether the
+surface was readable when frames stopped — and soak it locally with damage
+callback registrations counted, which is the one mechanism this project has
+already caught wedging a device once. Until that exists, `revive` stays the cure
+and the CI guard stays the mitigation, and neither is a diagnosis.
