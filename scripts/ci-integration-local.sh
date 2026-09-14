@@ -67,11 +67,14 @@ read_state() {
 printf '[{"button":"home"},{"settle":true}]\n' > /tmp/reset-local.json
 node src/cli.js do /tmp/reset-local.json --device="$DEVICE" >/dev/null 2>&1
 BEFORE=$(read_state)
-# A tap through simframe, not `simctl openurl` — see the job's comment. The
-# assertion is that a step runs and capture notices it, and openurl asserted that
-# through simctl, LaunchServices, a Safari cold start and a network fetch.
-printf '[{"tap":"Settings","or":["@340,468"]},{"settle":true}]\n' > /tmp/flow-local.json
-node src/cli.js do /tmp/flow-local.json --device="$DEVICE" >/tmp/step-local.log 2>&1 || true
+# From inside an app, pressing home always changes the screen — see the job's
+# comment for the four vehicles that did not hold. Setup gets to a known screen;
+# the asserted action is simframe's own HID path with no simctl in it.
+printf '[{"launch":{"value":"com.apple.Preferences","relaunch":true}},{"settle":true}]\n' > /tmp/setup-local.json
+node src/cli.js do /tmp/setup-local.json --device="$DEVICE" >/tmp/step-local.log 2>&1 || true
+BEFORE=$(read_state)
+printf '[{"button":"home"},{"settle":true}]\n' > /tmp/flow-local.json
+node src/cli.js do /tmp/flow-local.json --device="$DEVICE" >>/tmp/step-local.log 2>&1 || true
 AFTER=$(read_state)
 if [ "${BEFORE%% *}" != "${AFTER%% *}" ]; then ok "frame hash changed: ${BEFORE%% *} -> ${AFTER%% *}"
 else bad "a step ran and capture saw no change"; tail -5 /tmp/step-local.log; fi

@@ -302,11 +302,30 @@ jobs:
         #      screen simply did not change on a bare springboard. That test was
         #      measuring iOS, not simframe.
         #
+        #   4. Tap an icon on the home screen. The label under a springboard
+        #      icon is OCR text, not a hit target, so `tapped "Settings" at
+        #      340,468 (via ocr) [no visible change]` — a clean tap on dead
+        #      space. That was mine, 2026-09-14, and it went red on CI.
+        #   5. Swipe down for Spotlight. Changes the screen once and then you
+        #      are already in Spotlight, so it does not change it again.
+        #
         # What this step needs to prove is narrow: a step runs without error,
         # and capture notices the resulting change. Whether the daemon owns the
         # input path is a stronger claim, and `doctor` already asserts it
-        # (input.driver == "simframed"). Opening a URL launches Safari, which
-        # every iOS simulator has, so the screen change is guaranteed.
+        # (input.driver == "simframed").
+        #
+        # The pairing that finally holds is structural rather than lucky:
+        # **from inside an app, pressing home always changes the screen.** The
+        # setup launches Settings — a known state that does not depend on a
+        # springboard animation having settled — and the asserted action is
+        # `button: home`, which goes through simframe's own HID path with no
+        # simctl, no network and no app cold start in the measured part.
+        #
+        # Measured before it was written this time, on a device checked healthy
+        # first: **3 of 3** changed, with the same two hashes every run
+        # (`10ff8f3eff` in Settings, `7070f7f777` on home). Earlier comparisons
+        # of a swipe and a launch were run on a device that turned out to be
+        # wedging, and were void — see the note in DEFERRED 142.
         #
         # The frame HASH is the assertion; `seq` resets when the daemon
         # restarts, so it is reported only.
@@ -316,74 +335,38 @@ jobs:
             simframe state --device="$DEVICE" --json \
               | node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(s.hash+" "+s.seq)'
           }
-          # Both settles in this step need the runner's budget, not one of them.
-          # The previous commit widened the (then) openUrl flow's and left this one at
-          # its default, and *this* is the one that then failed — "pressed home
-          # (never settled)", then the settle giving up at 9.3s, with the
-          # two-step flow taking 36s in total. Going to the home screen is a
-          # springboard animation, which is exactly the kind of thing a loaded
-          # build farm makes slow.
-          printf '[{"button":"home"},{"settle":{"timeoutMs":25000}}]\n' > /tmp/reset.json
-          # Retried, and NOT widened again.
-          #
-          # 8 s failed, so it went to 25 s, and then 25 s failed too — with the
-          # map printing `screen unidentified · STILL MOVING · no elements read
-          # on this screen` after 61 s. A screen that is moving, unreadable and
-          # unidentified for a minute is not a screen that needs thirty more
-          # seconds, and widening a budget twice for a screen that may never
-          # settle is answering the wrong question. Going up again would be the
-          # third guess in a row.
-          #
-          # So: retry, and say what was actually on screen when it failed. The
-          # reset is a *precondition* — the assertion this step exists for is
-          # the frame hash changing after the action below — and a precondition
-          # that fails on a cold, loaded runner deserves patience plus a
-          # diagnosis, so the next occurrence is read rather than inferred.
-          for reset in 1 2 3; do
-            if simframe do /tmp/reset.json --device="$DEVICE"; then
+          # Setup, not the assertion: get to a known screen that is not the home
+          # screen. Retried, because `simctl launch` is merely slow on a loaded
+          # runner rather than broken, and a launch that has not happened makes
+          # the step below meaningless rather than failing.
+          printf '[{"launch":{"value":"com.apple.Preferences","relaunch":true}},{"settle":{"timeoutMs":25000}}]\n' > /tmp/setup.json
+          for attempt in 1 2 3; do
+            if simframe do /tmp/setup.json --device="$DEVICE"; then
               break
             fi
-            echo "     (the reset did not settle on attempt $reset — what the device was showing:)"
-            simframe state --device="$DEVICE" --json || true
-            simframe ui --device="$DEVICE" || true
-            if [ "$reset" = 3 ]; then
-              echo "FAIL the device never reached a settled home screen in 3 attempts." >&2
-              echo "     That is not a slow runner; read the state above." >&2
+            if [ "$attempt" = 3 ]; then
+              echo "FAIL could not reach a known screen in 3 attempts — nothing below would mean anything" >&2
+              simframe state --device="$DEVICE" --json || true
+              simframe ui --device="$DEVICE" || true
               exit 1
             fi
+            echo "     (setup launch failed on attempt $attempt — retrying)"
             sleep 5
           done
           BEFORE=$(read_state)
-          # The vehicle is a tap through simframe, not `simctl openurl`.
-          #
-          # DEFERRED 133 said that if the openurl timeout recurred the answer was
-          # to change the vehicle rather than widen the cure. It recurred, four
-          # runs in three days, always the same way: `NSPOSIXErrorDomain code=60`
-          # at ~10.4s an attempt with the frame hash unchanged, because simctl
-          # stopped waiting. Measured, the runner is ~2.5x slower than a laptop
-          # at identical capture work (EXPERIMENTS §15), and `openurl` is the
-          # heaviest possible way to move a screen: it shells out to simctl,
-          # wakes LaunchServices, cold-starts Safari and fetches over the
-          # network. None of that is what this step asserts.
-          #
-          # What it asserts is that **a step runs and capture notices the
-          # change**. A tap does that with no simctl, no network and no app
-          # cold start — and it exercises *more* of simframe than openurl did,
-          # since it goes through intent resolution and the Indigo HID path
-          # rather than shelling out. Settings is on the home screen of every
-          # iOS simulator, and the coordinate fallback means a perception miss
-          # does not masquerade as an input failure.
-          printf '[{"tap":"Settings","or":["@340,468"]},{"settle":{"timeoutMs":25000}}]\n' > /tmp/flow.json
+          # The assertion. Pressing home from inside an app always changes the
+          # screen, and it is simframe's own HID path end to end.
+          printf '[{"button":"home"},{"settle":{"timeoutMs":25000}}]\n' > /tmp/flow.json
           for attempt in 1 2 3; do
             if simframe do /tmp/flow.json --device="$DEVICE"; then
               break
             fi
             if [ "$attempt" = 3 ]; then
-              echo "FAIL a tap through simframe failed $attempt times; this is not the runner" >&2
+              echo "FAIL home through simframe failed $attempt times; this is not the runner" >&2
               simframe ui --device="$DEVICE" || true
               exit 1
             fi
-            echo "     (the tap flow failed on attempt $attempt — retrying)"
+            echo "     (the home flow failed on attempt $attempt — retrying)"
             sleep 5
           done
           AFTER=$(read_state)
