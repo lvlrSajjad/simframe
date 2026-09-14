@@ -21,7 +21,7 @@
   },
   {
     "name": "browser",
-    "note": "A static page, so its structure should be identical on every visit.",
+    "note": "A static page, so its structure should be identical on every visit. Arrival is asserted on a CHROME control and not only on the page text: \"Example Domain\" is page content that OCR alone can satisfy, so the tour used to proceed while Safari's accessibility tree was still empty on a cold first launch. Measured — sharding CI removed the memory-layer step that had been warming Safari, and round 1 then read e00725fce7 with 0 named elements where rounds 2 and 3 read 9589eb2471 with 5. Waiting for \"Address\", which only the tree can name, makes arrival mean addressable rather than merely drawn.",
     "steps": [
       {
         "openUrl": "https://example.com"
@@ -29,6 +29,12 @@
       {
         "waitFor": {
           "value": "Example Domain",
+          "timeoutMs": 20000
+        }
+      },
+      {
+        "waitFor": {
+          "value": "Address",
           "timeoutMs": 20000
         }
       },

@@ -176,7 +176,30 @@ for (let round = 1; round <= rounds; round += 1) {
         process.exit(1);
       }
     }
-    let id = await api.screenIdentity(device, { fresh: true, confirmNovel: false });
+    // A read can throw, and when it does the readings so far are the evidence.
+    //
+    // This file already says so — *"Everything read so far is written out
+    // first, because a failing run is the one whose evidence matters"* — and
+    // then left this call unguarded, so a runner whose OCR overran its budget
+    // produced a raw stack trace, no `--out` file, and nothing for
+    // `analyse-fingerprint.mjs` to read. Exactly the failure the `save()` above
+    // was written to prevent, one line away from it.
+    //
+    // Not retried here. The read budget is already the client's own give-up
+    // point, so a read that overran it is a statement about the machine, and
+    // the honest thing is to say which screen and how far the tour got.
+    let id;
+    try {
+      id = await api.screenIdentity(device, { fresh: true, confirmNovel: false });
+    } catch (err) {
+      save({ abandonedAt: { screen: screen.name, round, error: err.message, phase: 'reading' } });
+      console.error(`\nFAIL round ${round}, "${screen.name}" could not be read: ${err.message}`);
+      console.error(`${readings.length} reading(s) taken before this were written out.`);
+      console.error('A read that overran its budget is a fact about the host, not about the');
+      console.error('fingerprint — the budget is already the client\'s own give-up point, so');
+      console.error('raising it would only move where the wait ends.');
+      process.exit(1);
+    }
     // A reading off a frame older than the navigation is not a reading either.
     //
     // Same rule as the sparseness guard below, on the other axis, and it took a
