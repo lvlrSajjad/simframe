@@ -1911,6 +1911,49 @@ on."*
    reason is doing to its reader exactly what this file keeps recording items
    about.
 
+142. **CI's failures are latency, not the wedge — and we were asserting through
+   the slowest paths available.** FIXED (two of the classes), 2026-09-14.
+
+   Measured rather than assumed: the hosted runner is **~2.5x slower** than this
+   laptop at identical capture work — p50 **21.8 ms** against **55.4 ms**, p95
+   41 against 94 (EXPERIMENTS §15). Every catalogued CI failure is what that
+   slowdown produces, and the wedge — which we spent two days chasing — appeared
+   in **one of six** recent runs.
+
+   | failure class | runs | status |
+   | --- | --- | --- |
+   | `simctl openurl` timing out | 4 | fixed — vehicle changed |
+   | a tour reading a half-drawn screen | 2 | fixed — token floor |
+   | `simframe start` readiness | 1 | fixed (127) |
+   | settle unsatisfiable on a still screen | 1 | fixed (131) |
+   | the wedge | 1 in 6 | guard + `revive` (132) |
+
+   **The vehicle.** `openurl` asserted *a step runs and capture notices the
+   change* through simctl, LaunchServices, a Safari cold start and a network
+   fetch. None of that is the subject. It is a tap through simframe now, with a
+   coordinate fallback so a perception miss cannot masquerade as an input
+   failure — which removes every simctl and network dependency from the
+   assertion and exercises *more* of simframe than before.
+
+   **The token floor.** Two runs recorded `settings` and `settings-general`
+   **both at 4 tokens with the same hash**, and the eval reported that a reading
+   did not resemble its own screen. It resembled nothing: almost nothing had
+   been drawn. That is exactly the hazard `TOKEN_RULES_VERSION` 7 was written
+   for — *"two sparse nameless readings then matched exactly, one hash standing
+   for two different screens"* — arriving through the harness, where no guard
+   existed. A reading under 5 tokens is re-read after 1.5 s and fails only if it
+   stays that bare, which is the "untested is not passed" rule the memory
+   harness already learned. Verified at CI's own settings on a healthy device:
+   same-screen worst 0.77, different-screen worst 0.06, and the guard correctly
+   never fired.
+
+   **The wedge is deprioritised on this evidence**, with one lead kept because it
+   is cheap and probably ours: 21 of 22 wedges are a display that reads fine and
+   delivers no frames, which is a damage callback that stopped firing — the
+   defect EXPERIMENTS entry 5 caught once and never verified a fix for. That is a
+   soak with registrations counted, on this laptop where it reproduces ~15 times
+   a day. Worth doing; not worth doing next.
+
 123. **`settle` cannot cope with a permanently animated screen**, and aborts the
    rest of the batch when it gives up — expensive when step 1 of 6 was the
    settle. A streaming AI-summary panel, a Lottie and the Intercom widget never

@@ -86,6 +86,16 @@ console.log(`tour: ${tour.length} screens x ${rounds} rounds, every reading cold
 const readings = [];
 /** Navigations that did not land before the reading was taken. */
 const arrivalFailures = [];
+/** Readings too bare to be a screen — see the guard where this is used. */
+const sparseReadings = [];
+/**
+ * Below this, a reading is not a screen, it is a screen that has not arrived.
+ *
+ * The sparsest legitimate reading across the tour is the Settings root at 4-8
+ * tokens, so this cannot be set high without rejecting a real screen. 4 is the
+ * floor at which two different screens were observed to collide on CI.
+ */
+const MIN_TOKENS_FOR_A_READING = 5;
 
 /**
  * The tokens that carry a name, as opposed to a shape.
@@ -148,7 +158,33 @@ for (let round = 1; round <= rounds; round += 1) {
         process.exit(1);
       }
     }
-    const id = await api.screenIdentity(device, { fresh: true, confirmNovel: false });
+    let id = await api.screenIdentity(device, { fresh: true, confirmNovel: false });
+    // A reading too sparse to be a screen is not a reading.
+    //
+    // On a runner measured at ~2.5x slower than a laptop (EXPERIMENTS §15),
+    // perception can land on a half-rendered screen: two CI runs recorded
+    // `settings` and `settings-general` **both at 4 tokens**, identical hash,
+    // and the eval duly reported that a reading did not resemble its own
+    // screen. It resembled nothing, because almost nothing had been drawn yet.
+    //
+    // This is the hazard `TOKEN_RULES_VERSION` 7 was written for, arriving
+    // through the harness instead of the rules: *"two sparse nameless readings
+    // then matched exactly, one hash standing for two different screens"*. A
+    // guard exists for identity and there was none here.
+    //
+    // Read again rather than fail, and fail only if it stays sparse — the same
+    // "untested is not passed" rule the memory harness learned. A screen that
+    // is genuinely this bare after a second look is a real finding.
+    if ((id.tokens ?? []).length < MIN_TOKENS_FOR_A_READING) {
+      const before = (id.tokens ?? []).length;
+      await new Promise((r) => setTimeout(r, 1500));
+      id = await api.screenIdentity(device, { fresh: true, confirmNovel: false });
+      const after = (id.tokens ?? []).length;
+      console.log(`         ("${screen.name}" read ${before} token(s) — too sparse to compare; read again: ${after})`);
+      if (after < MIN_TOKENS_FOR_A_READING) {
+        sparseReadings.push(`${screen.name} round ${round}: ${after} token(s) after two reads`);
+      }
+    }
     // Did we actually arrive? Two differently-named screens reading the same
     // fingerprint means the navigation did not land before the reading was
     // taken, and every distribution below it is then measuring the tour rather
@@ -221,6 +257,17 @@ for (let round = 1; round <= rounds; round += 1) {
 
 save();
 if (outFile) console.log(`\nwrote ${readings.length} readings to ${outFile}`);
+
+if (sparseReadings.length) {
+  console.error(`\nFAIL ${sparseReadings.length} reading(s) were too sparse to be a screen:`);
+  for (const f of sparseReadings) console.error(`       ${f}`);
+  console.error(`\nFewer than ${MIN_TOKENS_FOR_A_READING} tokens after two reads a second and a half apart.`);
+  console.error('That is a screen that had not drawn, not a fingerprint result — two such');
+  console.error('readings collide with each other and with anything else this bare, which is');
+  console.error('the failure TOKEN_RULES_VERSION 7 was written for. Either the app is slower');
+  console.error('than the tour assumes, or perception is genuinely returning nothing here.');
+  process.exit(1);
+}
 
 if (arrivalFailures.length) {
   console.error(`\nFAIL ${arrivalFailures.length} reading(s) were taken on the previous screen:`);
