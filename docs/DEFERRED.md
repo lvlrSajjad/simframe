@@ -1677,13 +1677,26 @@ round yet, and its P0 is the worst finding this project has had.
    runs again on that code alone. Once — a display that wedges again immediately
    is not a blink, and a step that retries until it passes tests nothing.
 
-   **The wedge has a trigger, found while chasing this.** Reproduced locally on
-   the integration mirror: it lands on an **app switch** — launching a second app
-   with Safari in the foreground — and hit roughly **every other run**, five
-   times in one session. `frame --fresh` named it correctly every time and
-   `revive` cured it every time. That is the first reproducible trigger anyone
-   has had for 126, and it is a better starting point than the five symptoms
-   were.
+   **A trigger was claimed here on 2026-09-13 and is WITHDRAWN, 2026-09-14.** It
+   said the wedge lands on an app switch, from noticing that the integration
+   mirror died at its app-switching step roughly every other run. A controlled
+   run says otherwise: forty rounds of launch-screenshot-launch-screenshot-
+   terminate, twice — once with no daemon attached and once with it capturing —
+   produced **zero** failures in 240 screenshots. App switching at that rate is
+   not sufficient. The original claim was an inference from *where the symptom
+   was noticed* inside a long script, which is not the same as a trigger, and it
+   is the kind of claim this file exists to stop us making.
+
+   **And on the same evidence, 126 is probably two conditions rather than one.**
+   Of 43 real wedges in one daemon log, classified by the failure immediately
+   before `capture is wedged and both recoveries are spent`: **21** were `the
+   display surface could not be read`, **21** were `no frame was available from
+   the display for 600ms`, one was a dead port. The second message's own text
+   says *"this is usually transient; a display that has stopped rendering says
+   'the display surface could not be read' instead"* — so half of all wedges are
+   the case our code explicitly describes as **not** the dead-surface one. See
+   EXPERIMENTS §15. The next step is to instrument the two separately, not to
+   add another retry.
 
 133. **The wedge arrives through `simctl openurl` too, and that path had no
    cure either.** FIXED, 2026-09-13/14. `xcrun simctl openurl` answered

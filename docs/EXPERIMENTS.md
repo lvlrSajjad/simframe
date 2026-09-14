@@ -508,3 +508,69 @@ the safety property, not a confidence threshold.
 Two field rounds agreed with each other and with us for a day, and neither could
 have told us we were crediting the wrong half. The isolating run cost one peer
 session; the belief it corrected had already shaped a phase plan.
+
+## 15. The wedge is two conditions, and the obvious culprit is not yet convicted
+
+**What we believed:** that the wedged display is a CoreSimulator condition we
+suffer rather than cause, and — since 2026-09-13 — that it is triggered by
+switching apps. Both beliefs were load bearing: the first decided that detection
+plus `revive` is the whole answer, and the second was written into DEFERRED as
+"the first reproducible trigger anyone has had".
+
+**Why the first belief deserved a test.** Entry 5 in this file records believing
+it once before, and then measuring **670 damage-callback registrations and zero
+unregistrations** — our own daemon wedging the device. That was fixed, and entry
+5 says plainly that the fix was never verified against the symptom. It still has
+not been. An error raised *by* CoreSimulator is not evidence that the cause is
+CoreSimulator, which is the same inference that once reported a failed
+accessibility read as "idb is not installed".
+
+**The experiment:** the same workload — launch Settings, screenshot, launch
+Safari, screenshot, terminate, screenshot — forty rounds on a spare device, run
+twice. Once with no simframe daemon attached, once with the daemon capturing.
+Our daemon holds three private-framework connections the workload otherwise
+would not: an IOSurface damage callback, an Indigo HID session, an AXPTranslator
+bridge.
+
+| arm | rounds | screenshots | failures | median | max |
+| --- | --- | --- | --- | --- | --- |
+| no daemon | 40 | 120 | **0** | 299 ms | 892 ms |
+| daemon attached | 40 | 120 | **0** | ~280 ms | — |
+
+**The result is negative in both arms, so it does not discriminate**, and saying
+so is the point of writing it down. Forty rounds of app-switching did not
+reproduce a wedge that hits the bench device several times a day under real
+flows. What it does establish is narrower and still useful: **app switching plus
+screenshots, at this rate, is not sufficient to cause it.** The trigger claimed
+on 2026-09-13 is therefore withdrawn — it was an inference from *where the
+symptom was noticed* in a long script, not from a controlled run.
+
+**What the same afternoon did establish, from the daemon's own log of 43 real
+wedges.** Each one ends with `capture is wedged and both recoveries are spent`.
+Classifying every one by the failure immediately before it:
+
+| what preceded the wedge | count |
+| --- | --- |
+| `the display surface could not be read` | **21** |
+| `no frame was available from the display for 600ms` | **21** |
+| `the device exposes no active display port` | 1 |
+
+**Two populations of equal size, and they are different failures.** The first is
+a display that has stopped rendering. The second is a display that reads fine
+and delivers no frames — and the daemon's own message for it says *"this is
+usually transient; a display that has stopped rendering says 'the display
+surface could not be read' instead"*. So half of all wedges are the case our
+code explicitly describes as **not** the dead-surface one.
+
+DEFERRED 126 called this one cause wearing five symptoms. On this evidence it is
+**two** causes, and the half that is not a dead surface — a live surface that
+stops delivering frames — is the half most likely to be ours, because a damage
+callback that stops firing is exactly the shape of the defect entry 5 found and
+never verified the fix for.
+
+**What to do next, and what not to.** Not another threshold and not another
+retry. The next step is to instrument the two populations separately — a wedge
+should say which of the two it is — and then reproduce the frame-starvation half
+under a long soak with the callback registration counted. Until that exists,
+`revive` stays the cure and the CI guard stays the mitigation, and neither is a
+diagnosis.
