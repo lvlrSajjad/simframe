@@ -317,7 +317,7 @@ jobs:
               | node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(s.hash+" "+s.seq)'
           }
           # Both settles in this step need the runner's budget, not one of them.
-          # The previous commit widened the openUrl flow's and left this one at
+          # The previous commit widened the (then) openUrl flow's and left this one at
           # its default, and *this* is the one that then failed — "pressed home
           # (never settled)", then the settle giving up at 9.3s, with the
           # two-step flow taking 36s in total. Going to the home screen is a
@@ -336,10 +336,9 @@ jobs:
           #
           # So: retry, and say what was actually on screen when it failed. The
           # reset is a *precondition* — the assertion this step exists for is
-          # the frame hash changing after `openUrl`, below — and a precondition
-          # that fails on a cold, loaded runner deserves the same patience the
-          # `openurl` timeout already gets, plus a diagnosis so the next
-          # occurrence is read rather than inferred.
+          # the frame hash changing after the action below — and a precondition
+          # that fails on a cold, loaded runner deserves patience plus a
+          # diagnosis, so the next occurrence is read rather than inferred.
           for reset in 1 2 3; do
             if simframe do /tmp/reset.json --device="$DEVICE"; then
               break
@@ -355,82 +354,38 @@ jobs:
             sleep 5
           done
           BEFORE=$(read_state)
-          # A settle budget, stated rather than defaulted. The default is a cold
-          # p95 plus margin measured on a developer's machine; this runner has
-          # taken 45s for a two-step flow, and step 11 has failed with
-          # `settle: screen did not settle within 8056ms` more than once. What
-          # this step asserts is that **capture notices a change** — the speed
-          # at which Safari launches on a loaded build farm is not the subject,
-          # so the budget is widened rather than the assertion weakened.
-          printf '[{"openUrl":"https://example.com"},{"settle":{"timeoutMs":25000}}]\n' > /tmp/flow.json
-          # Retried, and only here. `xcrun simctl openurl` returns
-          # NSPOSIXErrorDomain code 60 — "Operation timed out" — on a loaded
-          # hosted runner: three consecutive runs failed on it while the same
-          # commit passed on a quieter one, and the flow immediately before it
-          # took 33 s against 21 s on the passing run. simctl times out
-          # internally, so simframe never gets to see it, and the timeout does
-          # not mean the URL failed to open — it means simctl stopped waiting.
+          # The vehicle is a tap through simframe, not `simctl openurl`.
           #
-          # Deliberately NOT retried inside simframe. `openurl` may well have
-          # succeeded before it stopped answering, so a product-level retry can
-          # open the URL twice, and an action that fires twice is exactly what
-          # the verify barrier in CLAUDE.md exists to prevent. A timeout stays a
-          # hard failure for a real user, who can see their own screen. This
-          # loop buys the runner patience, not simframe dishonesty.
+          # DEFERRED 133 said that if the openurl timeout recurred the answer was
+          # to change the vehicle rather than widen the cure. It recurred, four
+          # runs in three days, always the same way: `NSPOSIXErrorDomain code=60`
+          # at ~10.4s an attempt with the frame hash unchanged, because simctl
+          # stopped waiting. Measured, the runner is ~2.5x slower than a laptop
+          # at identical capture work (EXPERIMENTS §15), and `openurl` is the
+          # heaviest possible way to move a screen: it shells out to simctl,
+          # wakes LaunchServices, cold-starts Safari and fetches over the
+          # network. None of that is what this step asserts.
           #
-          # And on a timeout, ask the screen before retrying. Three attempts is
-          # already patience; a fourth run failed through all three, so more
-          # attempts would be the third guess in a row at the same number. The
-          # diagnosis instead: `openurl` timing out is a statement about how long
-          # simctl waits, and this step's assertion is that **capture notices a
-          # change**. Those are different claims, and the screen can answer the
-          # second one directly. If the frame hash has moved, the URL opened and
-          # capture saw it — which is the whole of what this step exists to
-          # prove — so retrying would only risk opening it twice.
-          #
-          # And when it has failed every attempt *and* nothing moved, that is no
-          # longer patience's problem. `NSPOSIXErrorDomain code 60` from simctl
-          # is the same signal the display wedge produces: CoreSimulator has
-          # stopped answering. A healthy simulator opens a URL. Observed three
-          # times in a row at ~10.4s each with the frame hash unchanged — Safari
-          # never launched — on a run where capture, the tree and OCR were all
-          # fine, which is exactly the shape of DEFERRED 126 arriving through a
-          # different door.
-          #
-          # So the same cure applies here as in the memory-layer step, under the
-          # same rule: revive **once**, on a named condition, then try once more.
-          # Not a blanket retry — a `do` that fails for any other reason still
-          # fails the job on the spot.
-          before_hash="${BEFORE%% *}"
-          try_open() {
-            for attempt in 1 2 3; do
-              if simframe do /tmp/flow.json --device="$DEVICE" 2>&1 | tee /tmp/openurl.log; then
-                return 0
-              fi
-              sleep 3
-              if [ "$(read_state | cut -d' ' -f1)" != "$before_hash" ]; then
-                echo "     (openurl stopped waiting on attempt $attempt, and the screen moved anyway —"
-                echo "      which is what this step asserts; not retrying, that would open it twice)"
-                return 0
-              fi
-              echo "     (openUrl failed on attempt $attempt and nothing moved — retrying; see the comment above)"
-              sleep 5
-            done
-            return 1
-          }
-          if ! try_open; then
-            if grep -qE 'NSPOSIXErrorDomain.*code=60|Operation timed out' /tmp/openurl.log; then
-              echo "     (simctl answered NSPOSIXErrorDomain 60 three times and the screen never moved."
-              echo "      That is CoreSimulator not answering — DEFERRED 126. Reviving once.)"
-              simframe revive --device="$DEVICE" || true
-              BEFORE=$(read_state)
-              before_hash="${BEFORE%% *}"
-              try_open || { echo "FAIL openUrl still fails after a revive; this is not the runner" >&2; exit 1; }
-            else
-              echo "FAIL openUrl failed 3 times and the screen never moved, and not with a simctl timeout" >&2
+          # What it asserts is that **a step runs and capture notices the
+          # change**. A tap does that with no simctl, no network and no app
+          # cold start — and it exercises *more* of simframe than openurl did,
+          # since it goes through intent resolution and the Indigo HID path
+          # rather than shelling out. Settings is on the home screen of every
+          # iOS simulator, and the coordinate fallback means a perception miss
+          # does not masquerade as an input failure.
+          printf '[{"tap":"Settings","or":["@340,468"]},{"settle":{"timeoutMs":25000}}]\n' > /tmp/flow.json
+          for attempt in 1 2 3; do
+            if simframe do /tmp/flow.json --device="$DEVICE"; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "FAIL a tap through simframe failed $attempt times; this is not the runner" >&2
+              simframe ui --device="$DEVICE" || true
               exit 1
             fi
-          fi
+            echo "     (the tap flow failed on attempt $attempt — retrying)"
+            sleep 5
+          done
           AFTER=$(read_state)
           node -e '
             const [bh, bs] = process.argv[1].split(" ");
