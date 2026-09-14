@@ -151,6 +151,52 @@ let navigatedAt = 0;
 /** Readings that never got a frame newer than their own navigation. */
 const staleReadings = [];
 
+/**
+ * Visit every screen once before measuring, taking no readings.
+ *
+ * **The rounds are supposed to be repeat measurements of one thing.** They were
+ * not: round 1 systematically differed from rounds 2 and 3 whenever an app was
+ * cold, because an app that has just launched has not finished publishing its
+ * accessibility tree. Measured on CI — round 1 of `browser` read `e00725fce7`
+ * with **0 named** elements where rounds 2 and 3 read `9589eb2471` with **5**,
+ * while every other screen matched across all three. That is the eval measuring
+ * app cold-start, which it never set out to measure and does not report.
+ *
+ * It was invisible for a long time because something else was paying for it:
+ * the memory-layer step runs first on CI and drives the same apps for 504s,
+ * Safari included, so the eval always met a warm device. Sharding the job
+ * removed that neighbour and the dependency surfaced immediately. The defect
+ * was always here; the neighbour was hiding it.
+ *
+ * This is **not** the same as making the readings warm. Every reading is still
+ * taken with `fresh: true` against cold screen memory, which is what "cold"
+ * means in this harness — the graph must not have seen the screen before. What
+ * the warm-up removes is a variable about the *operating system* that the
+ * fingerprint has nothing to do with.
+ *
+ * Skippable with `--no-warmup`, because the comparison is the evidence: run it
+ * both ways to see whether round 1 still disagrees with its own repeats.
+ */
+async function warmUp() {
+  const started = Date.now();
+  console.log('warming: visiting each screen once, taking no readings');
+  for (const screen of tour) {
+    if (!screen.steps?.length) continue;
+    try {
+      await actions.runScript(device, { steps: screen.steps, verify: false });
+    } catch (err) {
+      // A warm-up failure is not a result. The measured rounds below will meet
+      // the same screen and fail there with the harness's own reporting, which
+      // says which screen and writes the readings out. Failing here would cost
+      // that and report a screen that was never measured.
+      console.log(`         (warm-up could not reach "${screen.name}": ${err.message})`);
+    }
+  }
+  console.log(`warming: done in ${Math.round((Date.now() - started) / 1000)}s\n`);
+}
+
+if (!process.argv.includes('--no-warmup')) await warmUp();
+
 for (let round = 1; round <= rounds; round += 1) {
   for (const screen of tour) {
     if (screen.steps?.length) {

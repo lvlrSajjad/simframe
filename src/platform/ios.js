@@ -13,6 +13,46 @@ import * as plist from './plist.js';
 
 const run = promisify(execFile);
 
+/**
+ * How long a `simctl` verb may take before we stop waiting.
+ *
+ * **It was 20s, and that was below what a loaded runner actually needs.** Item
+ * 142 recorded `simctl launch` "taking 47-55s" on a hosted runner and filed it
+ * under a boot that had not finished; the launches were real and the budget was
+ * simply shorter than they were. The same 20s sat on `openurl`, which is the
+ * failure class that item listed four runs of, and on `terminate`. One number,
+ * three symptoms, and every one of them read as the command refusing rather
+ * than as us leaving.
+ *
+ * 90s is chosen against that measurement — comfortably past the observed 55s
+ * worst case — and not for feel. A `simctl` verb that has not returned in
+ * ninety seconds is genuinely wrong, and says so below instead of being
+ * indistinguishable from a rejection.
+ */
+const SIMCTL_TIMEOUT_MS = 90_000;
+
+/** A local file decode, which owes nothing to device latency. */
+const PLUTIL_TIMEOUT_MS = 20_000;
+
+/**
+ * What actually went wrong, including the case that has been invisible.
+ *
+ * On a timeout `execFile` kills the child, so `stderr` is EMPTY and `message`
+ * is the bare "Command failed: xcrun simctl ..." — which reads exactly like
+ * simctl rejecting the request. Three separate investigations have started from
+ * that sentence and gone looking for a broken device. The timeout has to name
+ * itself, or the next one starts in the same wrong place.
+ */
+function simctlFailure(err, what) {
+  const detail = (err.stderr || '').trim().split('\n').filter(Boolean).pop();
+  if (detail) return `${what}: ${detail}`;
+  if (err.killed || err.signal === 'SIGTERM') {
+    return `${what}: simctl did not return within ${Math.round(SIMCTL_TIMEOUT_MS / 1000)}s`
+      + ' (killed by simframe, not refused by simctl — the host is loaded or the device is not answering)';
+  }
+  return `${what}: ${err.message}`;
+}
+
 // `simctl list` costs ~130ms, which would otherwise dominate every warm read,
 // so the parsed list is cached for a few seconds.
 const DEVICE_CACHE_MS = 4000;
@@ -240,24 +280,33 @@ async function launchApp(udid, bundleId, { args = [], env = {}, terminateFirst =
   for (const [k, v] of Object.entries(env)) childEnv[`SIMCTL_CHILD_${k}`] = String(v);
   try {
     await run('xcrun', ['simctl', 'launch', udid, bundleId, ...args.map(String)], {
-      timeout: 20_000,
+      timeout: SIMCTL_TIMEOUT_MS,
       env: childEnv,
     });
   } catch (err) {
     // execFile's message is just "Command failed: ..." with simctl's actual
     // complaint left in stderr. A CI run failed here and said nothing about
     // why, which is the same sin as a silent fallback.
-    const detail = (err.stderr || '').trim().split('\n').filter(Boolean).pop();
-    throw new Error(detail ? `could not launch ${bundleId}: ${detail}` : `could not launch ${bundleId}: ${err.message}`);
+    throw new Error(simctlFailure(err, `could not launch ${bundleId}`));
   }
 }
 
 async function terminateApp(udid, bundleId) {
-  await run('xcrun', ['simctl', 'terminate', udid, bundleId], { timeout: 20_000 });
+  try {
+    await run('xcrun', ['simctl', 'terminate', udid, bundleId], { timeout: SIMCTL_TIMEOUT_MS });
+  } catch (err) {
+    throw new Error(simctlFailure(err, `could not terminate ${bundleId}`));
+  }
 }
 
 async function openUrl(udid, url) {
-  await run('xcrun', ['simctl', 'openurl', udid, url], { timeout: 20_000 });
+  // The same budget and the same reporting as `launch`, because it was the same
+  // 20s and it is the failure class item 142 counted four runs of.
+  try {
+    await run('xcrun', ['simctl', 'openurl', udid, url], { timeout: SIMCTL_TIMEOUT_MS });
+  } catch (err) {
+    throw new Error(simctlFailure(err, 'could not open the url'));
+  }
 }
 
 /**
@@ -305,10 +354,9 @@ async function setPermission(udid, action, service, bundleId) {
   const args = ['simctl', 'privacy', udid, verb, service];
   if (bundleId) args.push(bundleId);
   try {
-    await run('xcrun', args, { timeout: 20_000 });
+    await run('xcrun', args, { timeout: SIMCTL_TIMEOUT_MS });
   } catch (err) {
-    const detail = (err.stderr || '').trim().split('\n').filter(Boolean).pop();
-    throw new Error(`could not ${verb} ${service}: ${detail || err.message}`);
+    throw new Error(simctlFailure(err, `could not ${verb} ${service}`));
   }
   return `${verb === 'reset' ? 'reset' : verb + 'ed'} ${service}${bundleId ? ` for ${bundleId}` : ''}`;
 }
@@ -422,8 +470,12 @@ async function appContainer(udid, bundleId) {
  * the note at the top of plist.js.
  */
 async function readPropertyList(file) {
+  // Its own budget, deliberately not the simctl one. This reads a local file
+  // and never speaks to a device, so it has none of the latency the simctl
+  // budget exists to absorb — and a plist that takes twenty seconds to decode
+  // is a problem worth hearing about promptly.
   const { stdout } = await run('plutil', ['-convert', 'xml1', '-o', '-', file], {
-    timeout: 20_000,
+    timeout: PLUTIL_TIMEOUT_MS,
     maxBuffer: 64 * 1024 * 1024,
   });
   return plist.parse(stdout);

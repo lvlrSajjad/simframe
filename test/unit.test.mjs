@@ -1435,6 +1435,38 @@ test('nothing above the boundary shells out to a platform tool', async () => {
   }
 });
 
+test('a simctl timeout says it timed out, and the budget clears what was measured', async () => {
+  const src = fs.readFileSync(new URL('../src/platform/ios.js', import.meta.url), 'utf8');
+
+  // The number, pinned to the measurement rather than to taste. Item 142
+  // recorded `simctl launch` taking 47-55s on a hosted runner and filed it
+  // under an unfinished boot; the launches were real and the 20s budget was
+  // simply shorter than they were. Asserted as a relationship to that
+  // observation so the next person to "tidy" it has to argue with the evidence.
+  const budget = Number(/const SIMCTL_TIMEOUT_MS = ([0-9_]+)/.exec(src)?.[1].replace(/_/g, ''));
+  const OBSERVED_WORST_LAUNCH_MS = 55_000;
+  assert.ok(budget > OBSERVED_WORST_LAUNCH_MS,
+    `the simctl budget (${budget}ms) must clear the slowest launch actually measured (${OBSERVED_WORST_LAUNCH_MS}ms)`);
+
+  // The half that matters more. On a timeout execFile kills the child, so
+  // stderr is empty and the message is the bare "Command failed: xcrun simctl
+  // ..." — indistinguishable from simctl refusing. Three investigations have
+  // started from that sentence and gone looking for a broken device.
+  assert.match(src, /err\.killed \|\| err\.signal === 'SIGTERM'/,
+    'a killed child must be recognised as a timeout');
+  assert.match(src, /killed by simframe, not refused by simctl/,
+    'and must say which of the two it was');
+
+  // One budget, not three drifting ones: launch, terminate and openurl were all
+  // 20s, and openurl is the class item 142 counted four failed runs of.
+  assert.equal((src.match(/timeout: 20_000/g) ?? []).length, 0,
+    'no simctl verb should still carry the old 20s budget');
+  for (const verb of ['launch', 'terminate', 'openurl']) {
+    assert.ok(new RegExp(`'${verb}'[^)]*\\][^)]*SIMCTL_TIMEOUT_MS|SIMCTL_TIMEOUT_MS`).test(src),
+      `${verb} uses the shared budget`);
+  }
+});
+
 // --- what the app believes (item 140) ----------------------------------------
 
 test('a property list survives the types JSON cannot represent', async () => {

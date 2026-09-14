@@ -2072,6 +2072,67 @@ on."*
    none of the tour's eight selectors trigger a synonym group at all, so that
    branch never executes on this tour.
 
+147. **The fingerprint eval's rounds were not repeat measurements when an app
+   was cold.** FIXED (unproven locally — see below), 2026-09-15. Rounds 1-3 are
+   meant to be repeats of one thing. They were not: an app that has just
+   launched has not finished publishing its accessibility tree, so round 1 of
+   `browser` read `e00725fce7` with **0 named** elements on CI where rounds 2
+   and 3 read `9589eb2471` with **5**, every other screen matching across all
+   three. That is the eval measuring app cold-start, which it never set out to
+   measure and does not report.
+
+   It was paid for by a neighbour: the memory-layer step drives the same apps
+   for 504s first, Safari included, so the eval always met a warm device.
+   Sharding (144) removed that neighbour and the dependency surfaced at once.
+   **The defect was always there.**
+
+   The eval now visits every screen once before measuring, taking no readings.
+   Cost **34s**, measured — not the ~150s feared. It is not the same as making
+   the readings warm: every reading is still `fresh: true` against cold screen
+   memory, which is what "cold" means here. What it removes is an OS variable
+   the fingerprint has nothing to do with.
+
+   **It is not proven.** Run on this laptop with all four tour apps terminated,
+   the failure does not reproduce at all — `--no-warmup` passed too, round 1
+   reading 5 named. The A/B is weakly favourable (gap 0.71 vs 0.56, worst
+   same-screen 0.77 vs 0.63) and both passed, which is n=1 each on a machine
+   that cannot produce the condition. This is the mirror problem again: only a
+   hosted runner is slow enough. `--no-warmup` exists so the comparison stays
+   runnable where it can actually be made.
+
+146. **The `simctl` budget was 20s against launches this project had already
+   measured at 47-55s — and a timeout did not say it was one.** FIXED,
+   2026-09-15. This is the cause behind 142's `openurl` class, 145's graph-loop
+   halts, and the `A step runs` failures of 2026-09-14/15. One number.
+
+   `launch`, `terminate`, `openurl` and `privacy` all ran with `timeout: 20_000`.
+   Item 142's own text records `simctl launch` "taking 47-55s and failing three
+   times in a row" and files it under a boot that had not finished. The launches
+   were real; the budget was shorter than they were.
+
+   **Why it survived three investigations.** On a timeout `execFile` kills the
+   child, so `stderr` is empty and the message is the bare
+   `Command failed: xcrun simctl launch <udid> com.apple.Preferences` — which
+   reads exactly like simctl *refusing the request*. 142 read it as a device
+   that had not booted. 145 read it as `openurl` being fragile. This session
+   read it first as sharding and then as Safari. Every one of those started from
+   the same sentence, and the sentence was hiding the only fact that mattered.
+
+   Both halves, because the budget alone would have been the mistake this
+   project already has a note about — *a widened budget is not a diagnosis*:
+
+   - a killed child now reports `simctl did not return within 90s (killed by
+     simframe, not refused by simctl — the host is loaded or the device is not
+     answering)`;
+   - one shared `SIMCTL_TIMEOUT_MS` of 90s, chosen against the measured 55s
+     worst case. `plutil` keeps its own 20s and says why: it reads a local file
+     and owes nothing to device latency.
+
+   The unit test pins the **relationship**, not the number — the budget must
+   clear the slowest launch actually measured — so tidying it means arguing with
+   the evidence. It immediately caught two more verbs still on 20s that the
+   hand-written change had missed.
+
 145. **`simctl openurl` was catalogued, declared fixed, and left in place in
    three of the four checks that used it.** FIXED, 2026-09-15. Item 142 lists
    "`simctl openurl` timing out | 4 runs | fixed — vehicle changed" and the
