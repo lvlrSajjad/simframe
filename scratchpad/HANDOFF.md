@@ -4,9 +4,12 @@
 is held locally; `origin/main` is at `2d5c0af`. All gates green: 190/190 tests,
 check-private, check-package, the article projection.
 
-**CI status: one run in flight on `2d5c0af`.** The run before it was cancelled by
-this push, and the one before *that* (`356f190`) is the informative one — see
-below. Check it first thing.
+**CI status: a run is in flight on `1ca473c`** (the two before it were cancelled
+by successive pushes — `cancel-in-progress` is keyed on the ref). **Check the
+latest run first thing.** The most informative run so far is `356f190`: every
+integration step passed there except the fingerprint eval, including the two
+that had failed all week. The `waitFor` fix landed after it and has not yet had
+a clean run to prove itself — that is the single thing to confirm.
 
 ## The day in one line
 
