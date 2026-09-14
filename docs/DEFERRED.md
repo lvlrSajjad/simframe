@@ -2072,6 +2072,67 @@ on."*
    none of the tour's eight selectors trigger a synonym group at all, so that
    branch never executes on this tour.
 
+144. **Sharding the integration job made CI 51% faster and 0-for-3 reliable.**
+   REVERTED, 2026-09-14. Kept here because the measurements are good and the
+   next attempt should start from them rather than re-derive them.
+
+   **The prize is real.** Integration is the whole critical path — the three
+   unit-test jobs finish in 47-136s alongside it. Measured on run 34892826791:
+   memory layer **504s**, fingerprint eval **458s**, boot **162s**, everything
+   else ~222s, total **1346s**. The two big steps ran sequentially for no reason
+   but that they were written that way. Split into two shards the run came in at
+   **660s — 51% faster**, better than the ~870s predicted.
+
+   **And it does not work.** Unsharded: three runs, three green. Sharded: three
+   runs, zero green, across two commits and a targeted re-run.
+
+   | run | shard | what failed |
+   | --- | --- | --- |
+   | 873e86c | fingerprint | `text recognition did not finish within 25s` |
+   | 873e86c re-run | fingerprint | browser r1 `e00725fce7`, **0 named** |
+   | a0a765f | fingerprint | browser r1 `e00725fce7`, **0 named** |
+   | a0a765f | memory | `simctl launch` failed 3x, 41-45s each |
+
+   **One cause behind all of it: the fingerprint eval was living off a warm-up
+   it never asked for.** Unsharded, the memory layer drove the device for 504s
+   first — launching apps, reading screens, visiting Safari (`9589eb24` is in
+   its own log). By the time the eval ran, every app was warm. Sharded, the eval
+   meets a cold device, and round 1 of `browser` reads Safari before its
+   accessibility tree has populated: 0 named elements against 5 in rounds 2 and
+   3. **Every other screen matched the unsharded values exactly**, which is what
+   makes the diagnosis specific rather than a guess.
+
+   **A fix that worked locally and not on CI**, worth recording because the
+   reason is interesting. The tour asserted arrival with `waitFor "Example
+   Domain"` — page *content*, which OCR alone satisfies — so it proceeded while
+   the tree was still empty. Waiting additionally for `"Address"`, a chrome
+   control only the tree can name, fixed it against a deliberately terminated
+   Safari here (round 1: 5 named, same hash as round 2, gap 0.77). On CI the
+   wait *passed* and the reading a moment later still came back ax-less: the
+   tree answers intermittently on a cold app on a loaded runner, so arrival and
+   reading are two separate samples of a flickering sensor. That change is
+   **kept** — arrival meaning "addressable" rather than "drawn" is correct
+   regardless — but it is not sufficient.
+
+   **One of the four failures was mine and unrelated to sharding.** Moving
+   `simctl boot` to before `npm ci` so the boot overlapped the npm work looked
+   free and was not: the boot then competed with heavy IO, and `simctl launch`
+   failed three times at 41-45s each — the exact symptom this workflow's own
+   comments attribute to a device that is not fully booted. It bought ~17s.
+
+   **What the next attempt needs, before sharding is viable:** the eval must be
+   cold-start-robust, because rounds 1-3 are supposed to be repeat measurements
+   of one thing, and today round 1 systematically differs when the apps are
+   cold. That is the eval measuring app cold-start rather than fingerprint
+   stability, and it is a defect that exists unsharded too — it is simply hidden
+   by the neighbour that runs first. An explicit warm-up pass (launch each tour
+   app once, take no readings) is the obvious candidate and is **not** tuning to
+   pass: it removes a variable the eval never intended to measure.
+
+   **The rule this run bought:** an unreliable gate is worse than a slow one.
+   The revert restores a CI that is 22 minutes and green, over one that is 11
+   minutes and cannot be trusted to mean anything.
+
 142. **CI's failures are latency, not the wedge — and we were asserting through
    the slowest paths available.** FIXED (two of the classes), 2026-09-14.
 
