@@ -170,7 +170,23 @@ export function rank(targets, intent, { screen } = {}) {
     // An icon-only control has no readable name, so a synonym is the only way
     // to reach it — this is how "back" finds a bare chevron.
     if (group && base < 0.5 && !t.label && t.rawLabel) base = 0.55;
-    if (group && base < 0.5 && names.some((n) => group.words.includes(norm(n)))) base = 0.9;
+    // Genuine synonymy only: the name must be a *different* word in the group.
+    //
+    // This branch fires only when `base < 0.5`, which means its whole job is to
+    // overrule the coverage scaling the two branches in `nameScore` were taught
+    // — and when the query already contains the name literally, that scaling was
+    // the right answer and this flat 0.9 throws it away. Reported (138): a long
+    // descriptive phrase ending "…under Settings" scored a *heading* labelled
+    // "Settings" at 0.9 and the row the caller meant at 0.265, tapped the
+    // heading, and returned `ok [no visible change]` with an `or` list untried.
+    //
+    // A name the query spells out has already been scored on how much of the
+    // query it covers. What this branch is for is the case that scoring cannot
+    // see at all: "back" reaching a control labelled "Previous", "settings"
+    // reaching "Preferences". That is synonymy, and it is unaffected.
+    const spelledOut = (n) => bare.includes(norm(n)) || norm(intent).includes(norm(n));
+    if (group && base < 0.5
+      && names.some((n) => group.words.includes(norm(n)) && !spelledOut(n))) base = 0.9;
     if (base <= 0) continue;
 
     const reasons = [matched ? `label "${matched}"` : 'icon-only'];

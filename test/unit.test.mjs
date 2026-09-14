@@ -2379,6 +2379,54 @@ test('a prefix match is worth the share it covers, in both directions', async ()
   assert.ok(m.nameScore('Accessibility', 'Accessibilit') > m.nameScore('Accessibility', 'Ac'));
 });
 
+test('a synonym group may not overrule coverage on a name the query spells out', async () => {
+  const m = await import('../src/matching.js');
+  const screen = { width: 402, height: 874 };
+  const heading = {
+    label: 'Settings', type: 'StaticText', x: 40, y: 120,
+    frame: { x: 20, y: 110, width: 200, height: 24 }, region: 'body', source: 'ax',
+  };
+  const row = {
+    label: 'General', type: 'Cell', x: 200, y: 372,
+    frame: { x: 0, y: 356, width: 402, height: 44 }, region: 'body', source: 'ax',
+  };
+
+  // Item 138. The reported shape: a long descriptive phrase whose *context*
+  // happens to contain a synonym word. `synonymGroup` fires on the query merely
+  // containing "settings" anywhere, and the override then scored the heading at
+  // a flat 0.9 against the row's honest 0.265 — so simframe tapped a caption,
+  // returned `ok [no visible change]`, and never tried the caller's own `or`.
+  //
+  // The guard is that this branch only ever runs when `base < 0.5`, i.e. its
+  // job is to overrule the coverage scaling. When the query spells the name out
+  // that scaling was already the right answer.
+  const ranked = m.rank([heading, row], 'the General row under Settings', { screen });
+  const scoreOf = (label) => ranked.find((c) => c.target.label === label)?.score ?? 0;
+  assert.ok(scoreOf('General') > scoreOf('Settings'),
+    'a caption whose word appears in the query must not outrank the row the caller named');
+  assert.equal(m.resolve([heading, row], 'the General row under Settings', { screen }).status, 'none',
+    'and when nothing clears the bar the answer is "none", so an `or` list gets its turn');
+
+  // Not found is the one status the `or` path acts on, so the two must agree:
+  // downgrading the score is only a fix because it lands in that set.
+  const actions = await import('../src/actions.js');
+  const metrics = await import('../src/metrics.js');
+  assert.equal(actions.mayRetryAfter(metrics.tag(new Error('x'), 'unknown_screen')), true);
+  assert.equal(actions.mayRetryAfter(metrics.tag(new Error('x'), 'ambiguous_intent')), true);
+
+  // What the branch is actually for — a name that is a *different* word in the
+  // group — is untouched. Coverage scaling cannot see synonymy, which is the
+  // whole reason this override exists.
+  const synonym = (label, query) => m.resolve([{ ...heading, label, type: 'Button' }], query, { screen });
+  assert.equal(synonym('Preferences', 'settings').status, 'ok', '"settings" must still reach "Preferences"');
+  assert.equal(synonym('Close', 'dismiss this dialog').status, 'ok', '"dismiss" must still reach "Close"');
+  assert.equal(synonym('Previous', 'back').status, 'ok', '"back" must still reach "Previous"');
+
+  // And the ordinary literal lookups keep scoring exactly as before.
+  assert.equal(synonym('Settings', 'open settings').status, 'ok');
+  assert.equal(synonym('Settings', 'tap the settings button').status, 'ok');
+});
+
 test('a control\'s value, selection and focus survive to the screen map', async () => {
   const { elementToNode } = await import('../src/input.js');
   // The daemon has asked the tree for AXValue, AXSelected and AXFocused since

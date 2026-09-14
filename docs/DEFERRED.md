@@ -1853,22 +1853,68 @@ on."*
    decline with a reason, as it already does for `restartDevice`.
 
 138. **A long descriptive selector partial-matches, and `or` never gets a
-   chance.** OPEN. `{"tap": "<long phrase containing a heading's text>", "or":
-   ["#14", "@203,372"]}` matched the *heading* rather than the row, returned
-   `ok … [no visible change]`, and the flow failed two steps later. Re-issuing
-   as `{"tap": "#14"}` worked first try.
+   chance.** FIXED, 2026-09-14 — but not where the report pointed, and the
+   difference is the whole entry. `{"tap": "<long phrase containing a heading's
+   text>", "or": ["#14", "@203,372"]}` matched the *heading* rather than the
+   row, returned `ok … [no visible change]`, and the flow failed two steps
+   later. Re-issuing as `{"tap": "#14"}` worked first try.
 
-   The resolver did what it was told — the phrase did contain that heading's
-   text. The reporter's framing is the useful part: *prefix-matched a long
-   phrase* + *no visible change* + *an untried `or` list* is exactly the case
-   where trying the fallback would have been right.
+   **Half of the proposed fix was already working.** A resolution that clears
+   nothing throws tagged `unknown_screen` or `ambiguous_intent`, and both are in
+   `RESOLVE_FAILURES` — so an `or` list *does* get its turn whenever the step
+   fails to resolve. The bug was never that the fallback was unreachable. It was
+   that the step **resolved at all**, confidently, onto a caption.
 
-   Their suggestion, and it is the right shape: when a step resolves but yields
-   `no-visible-change` **and** an `or` list is present, try the next candidate
-   before returning `ok`. At minimum, downgrade that step's verdict from `ok` to
-   something the caller is forced to inspect. Note this is the *opposite* of the
-   rule that keeps simframe from retrying `openurl` — the distinction is that an
-   `or` list is the caller's own stated fallback, not the driver's initiative.
+   **The mechanism.** `synonymGroup` fires when the query merely *contains* a
+   group word anywhere — "…under Settings" is enough to select the `settings`
+   group — and the override then set a flat `base = 0.9`. That branch runs only
+   `if (base < 0.5)`, which means its entire job is to overrule the coverage
+   scaling. `nameScore` had to be taught that lesson twice, in two sibling
+   branches, and a comment there says so. This was the third branch, and it had
+   never learned it. Measured on the reported shape: the heading scored
+   **0.900** and the row the caller meant scored **0.265**.
+
+   The guard is one condition: a synonym group may not re-score a name the query
+   **spells out**. Such a name has already been scored on how much of the query
+   it covers, and that was the right answer. What the branch exists for is the
+   case coverage cannot see at all — "back" reaching a control labelled
+   "Previous", "settings" reaching "Preferences", "dismiss this dialog" reaching
+   "Close". All of those still resolve, unchanged.
+
+   After: heading **0.215**, row **0.265**, nothing clears `MINIMUM_SCORE`, and
+   `resolve` returns `none` — which is what hands the caller's `or` list its
+   turn, through the path that already existed.
+
+   **Regression check, because a scoring change is exactly the kind that pays
+   for itself somewhere else.** `scripts/phase17-corpus.mjs` joins every
+   *verified* graph edge to the element list of the screen it was taken on: 181
+   real element decisions across six devices, where the ground truth is that the
+   tap worked. 150 resolved / 6 ambiguous / 25 not found — **identical before
+   and after**.
+
+   **Why not the reporter's literal suggestion.** Trying the `or` list after a
+   `no-visible-change` means taking a *second real action*, and
+   `no-visible-change` is a known false negative in exactly that direction: item
+   4 measured small-delta taps as invisible to the change detector, and the
+   graph-recording code above says in its own comment that a toggle returning to
+   the same screen reads this way. So the literal version would tap a second
+   control on a screen whose state had already changed. Fixing the score means
+   the wrong element never resolves, and the fallback fires with nobody having
+   acted twice.
+
+   **A design that was tried and rejected**: scaling the synonym score by
+   coverage, symmetric with its sibling branches. It separates the reported case
+   (coverage 0.31) from short deliberate queries, but not from "dismiss this
+   dialog" (0.368) — which would have stopped resolving. The two are too close
+   for coverage to tell apart. The spelled-out guard has no such cost.
+
+   **Still open, and deliberately not done here:** the reporter's minimum
+   version — downgrading the verdict when a step genuinely yields
+   `no-visible-change` with an untried `or`. The reported case no longer reaches
+   it, and note this is the *opposite* of the rule that keeps simframe from
+   retrying `openurl`: an `or` list is the caller's own stated fallback, not the
+   driver's initiative. Worth revisiting only with a case the scoring fix does
+   not already cover.
 
 139. **`waitFor` burns its whole timeout on a provably idle screen.** FIXED,
    2026-09-14, both halves of the reporter's suggestion. A timeout now reports
