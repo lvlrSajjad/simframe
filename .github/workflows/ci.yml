@@ -453,34 +453,11 @@ jobs:
         #
         # Both perception layers are live here now that the tree is read
         # in-process, so this covers the merged map rather than OCR alone.
-        run: |
-          # Revive once on a wedged display, and only on a wedged display.
-          #
-          # `ci-memory` exits **75** when the simulator died under the checks, as
-          # distinct from **1** when a check about the memory layer actually
-          # failed. Those are different conditions and for two CI rounds they
-          # shared an exit code, so this step could only retry everything or
-          # retry nothing.
-          #
-          # DEFERRED 126 has said for weeks that a device restart is the only
-          # known cure for the wedge, and `simframe revive` has shipped as that
-          # restart — CI just had no way to reach for it. Reproduced locally the
-          # same day this was written: the wedge lands on an app switch, roughly
-          # every other run of the local mirror, and `frame --fresh` names it
-          # correctly every time.
-          #
-          # Once. A display that wedges again immediately is not a blink, and a
-          # step that retries until it passes is a step that tests nothing.
-          set -o pipefail
-          node scripts/ci-memory.mjs --device="$DEVICE" && exit 0
-          status=$?
-          if [ "$status" != 75 ]; then
-            echo "     (a memory-layer check failed on its merits — not retrying)" >&2
-            exit "$status"
-          fi
-          echo "     (the display wedged — DEFERRED 126. Reviving once and running again.)"
-          simframe revive --device="$DEVICE" || true
-          node scripts/ci-memory.mjs --device="$DEVICE"
+        # Behind the shared device guard. This step had the first bespoke
+        # revive-once block, written when the wedge looked like one step's
+        # problem; it is now every device-driving step's problem and the logic
+        # lives in one place. `ci-memory` still exits 75 for its own callers.
+        run: node scripts/ci-device-guard.mjs "$DEVICE" -- node scripts/ci-memory.mjs --device="$DEVICE"
 
       - name: The fingerprint distributions, measured and bounded
         # The threshold that decides whether two readings are the same screen is
@@ -506,7 +483,14 @@ jobs:
         # Deliberately not piped. An earlier local run of this sent its output
         # through `tail` and got tail's exit code, so a run whose distributions
         # had overlapped completely reported success.
-        run: node scripts/eval-fingerprint.mjs --tour=test/tours/device-native.json --rounds=3 --device="$DEVICE" --out=/tmp/fingerprint-distributions.json --label="ci-${{ github.sha }}"
+        #
+        # Behind the device guard, like every other step that drives the device.
+        # This one failed twice in three days on a tour that never left the
+        # Settings root — `settings-general r3: own screen 0.00, settings r1
+        # 1.00` — which is a tap that missed on a loaded runner, and the script
+        # says so itself: *"that is the tour going somewhere unintended, not the
+        # fingerprint drifting"*.
+        run: node scripts/ci-device-guard.mjs "$DEVICE" -- node scripts/eval-fingerprint.mjs --tour=test/tours/device-native.json --rounds=3 --device="$DEVICE" --out=/tmp/fingerprint-distributions.json --label="ci-${{ github.sha }}"
 
       - name: Keep the distributions
         # Recorded every run, so the two distributions can be read as a series
