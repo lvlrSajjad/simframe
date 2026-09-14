@@ -1687,16 +1687,23 @@ round yet, and its P0 is the worst finding this project has had.
    was noticed* inside a long script, which is not the same as a trigger, and it
    is the kind of claim this file exists to stop us making.
 
-   **And on the same evidence, 126 is probably two conditions rather than one.**
-   Of 43 real wedges in one daemon log, classified by the failure immediately
-   before `capture is wedged and both recoveries are spent`: **21** were `the
-   display surface could not be read`, **21** were `no frame was available from
-   the display for 600ms`, one was a dead port. The second message's own text
-   says *"this is usually transient; a display that has stopped rendering says
-   'the display surface could not be read' instead"* — so half of all wedges are
-   the case our code explicitly describes as **not** the dead-surface one. See
-   EXPERIMENTS §15. The next step is to instrument the two separately, not to
-   add another retry.
+   **And on the same evidence, the condition 126 is named after preceded none of
+   them.** Of 22 real wedges in one daemon log, classified by the failure
+   immediately before `capture is wedged and both recoveries are spent`: **21**
+   were `no frame was available from the display for 600ms`, one was a dead
+   port, and **zero** were `the display surface could not be read` — the mode
+   this item, its error strings and its CI comments are all written around.
+
+   That message's own text says *"this is usually transient; a display that has
+   stopped rendering says 'the display surface could not be read' instead"*. So
+   the wedge is a display that reads fine and delivers no frames, which is the
+   shape most likely to be **ours**: a damage callback that stops firing is the
+   defect EXPERIMENTS entry 5 found and never verified the fix for.
+
+   (An earlier version of this note claimed two equal populations of 21 and 21.
+   That was a grep artifact — the frame-starvation message quotes the
+   dead-surface message inside its own text, so every wedge was counted twice.
+   See EXPERIMENTS §15.) The next step is instrumentation, not another retry.
 
 133. **The wedge arrives through `simctl openurl` too, and that path had no
    cure either.** FIXED, 2026-09-13/14. `xcrun simctl openurl` answered

@@ -545,28 +545,35 @@ screenshots, at this rate, is not sufficient to cause it.** The trigger claimed
 on 2026-09-13 is therefore withdrawn — it was an inference from *where the
 symptom was noticed* in a long script, not from a controlled run.
 
-**What the same afternoon did establish, from the daemon's own log of 43 real
+**What the same afternoon did establish, from the daemon's own log of 22 real
 wedges.** Each one ends with `capture is wedged and both recoveries are spent`.
 Classifying every one by the failure immediately before it:
 
 | what preceded the wedge | count |
 | --- | --- |
-| `the display surface could not be read` | **21** |
-| `no frame was available from the display for 600ms` | **21** |
+| **`no frame was available from the display for 600ms`** | **21** |
 | `the device exposes no active display port` | 1 |
+| `the display surface could not be read` | **0** |
 
-**Two populations of equal size, and they are different failures.** The first is
-a display that has stopped rendering. The second is a display that reads fine
-and delivers no frames — and the daemon's own message for it says *"this is
-usually transient; a display that has stopped rendering says 'the display
-surface could not be read' instead"*. So half of all wedges are the case our
-code explicitly describes as **not** the dead-surface one.
+**Almost every wedge is a display that reads fine and delivers no frames** — and
+the daemon's own message for that case says *"this is usually transient; a
+display that has stopped rendering says 'the display surface could not be read'
+instead"*. The mode we have been naming in every error string, every DEFERRED
+entry and every CI comment — the dead surface — **preceded none of them**.
 
-DEFERRED 126 called this one cause wearing five symptoms. On this evidence it is
-**two** causes, and the half that is not a dead surface — a live surface that
-stops delivering frames — is the half most likely to be ours, because a damage
-callback that stops firing is exactly the shape of the defect entry 5 found and
-never verified the fix for.
+**A correction, because the first version of this entry got it wrong and the
+mistake is instructive.** It reported two equal populations of 21 and 21. That
+came from grepping each preceding line for *either* phrase, and the
+frame-starvation message **quotes the dead-surface message inside its own
+explanatory text** — so one line matched both patterns and every wedge was
+counted twice. 22 wedges classified as 43. The fix is to classify a line by what
+it *is* rather than by what it *mentions*, which is the same distinction this
+file keeps rediscovering one level up.
+
+DEFERRED 126 called this one cause wearing five symptoms, and on this evidence it
+is one cause — just not the one named. A live surface that stops delivering
+frames is the shape most likely to be **ours**, because a damage callback that
+stops firing is exactly the defect entry 5 found and never verified the fix for.
 
 **What to do next, and what not to.** Not another threshold and not another
 retry. The next step is to instrument the two populations separately — a wedge
