@@ -1975,10 +1975,30 @@ on."*
    score disagrees with itself. The arrival check remains the thing that fails,
    because it decides on evidence rather than on a token count.
 
-   **The real defect is still open** and it is not sparseness: `settings-general`
-   producing the `settings` root's fingerprint means the navigation did not
-   happen, or `waitFor "About"` passed on the root. That is the next thing to
-   chase.
+   **The real defect, found 2026-09-14: a wait can be satisfied by memory.**
+   `waitFor` resolved its *first* look with `refresh: attempt > 0` — false on
+   attempt 0 — so the opening attempt asked the **recalled map**, not the screen.
+   A wait that memory can satisfy is not a wait. When recall hands back the
+   wrong screen's map — which is what two screens colliding on a layout hash
+   produces — the target "appears" instantly without ever having been on screen,
+   and the caller proceeds against a screen it is not on.
+
+   That is how `settings-general` came to read the Settings **root** with its
+   `waitFor "About"` already passed. The signature is in the round numbers:
+   **r2 and r3, never r1**, because memory has to be warm before it can lie and
+   round 1 is always cold. Every observed failure fits — `settings-general` r3,
+   `settings-general` r2, `settings-accessibility` r2.
+
+   Fixed by making the read fresh by default, exactly as `assert` already was.
+   **And that is the part worth keeping:** `assert` was corrected after this same
+   defect cost a reported field session, and `waitFor` was left behind. The fix
+   went to the symptom that had been reported rather than to the class, so the
+   same bug sat one function away for weeks. The test now pins every
+   verification read at once rather than the one that bit us.
+
+   Only CI could have caught it: it needs warm memory *and* a screen pair that
+   collides, and locally those two screens never collide — their token sets share
+   nothing.
 
    **The wedge is deprioritised on this evidence**, with one lead kept because it
    is cheap and probably ours: 21 of 22 wedges are a display that reads fine and

@@ -5276,3 +5276,35 @@ test('a wait that gives up says how long the screen had been still (139)', async
     new URL('../native/simframed/Sources/SimframeCore/Motion.swift', import.meta.url), 'utf8');
   assert.match(swift, /minAnimatingCells/, '139 leans on 134; they cannot be separated');
 });
+
+test('a wait resolves against the live screen, not against memory', async () => {
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+
+  // `waitFor` read `refresh: attempt > 0`, so its FIRST look resolved against
+  // the remembered map. A wait that can be satisfied by memory is not a wait:
+  // when recall hands back the wrong screen's map — which happens when two
+  // screens collide on a layout hash — the target "appears" without ever having
+  // been on screen, instantly, and the caller proceeds against a screen it is
+  // not on.
+  //
+  // Found by the fingerprint eval on CI, the only place it could show:
+  // `settings-general` read the Settings ROOT and its `waitFor "About"` had
+  // passed. The signature is in the round numbers — r2 and r3, never r1 —
+  // because memory has to be warm before it can lie, and round 1 is cold.
+  //
+  // `assert` was made fresh by default after this same defect cost a reported
+  // session. `waitFor` was left behind, which is the part worth remembering:
+  // the fix was applied to the symptom that had been reported rather than to
+  // the class.
+  assert.doesNotMatch(src, /refresh: attempt > 0/,
+    'no wait may resolve its first look against the recalled map');
+
+  // Both branches — a single target and {"any": [...]} — and both opt out the
+  // same way `assert` does, so the contract is one contract.
+  const waits = [...src.matchAll(/api\.locate\([^)]*refresh:[^,)]*/g)].map((m) => m[0]);
+  assert.ok(waits.length >= 3, 'expected the wait and assert call sites');
+  for (const call of waits) {
+    assert.match(call, /refresh: step\.refresh !== false/,
+      `every verification read must be fresh by default: ${call}`);
+  }
+});

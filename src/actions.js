@@ -2555,7 +2555,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
         for (let attempt = 0; ; attempt += 1) {
           for (const one of alternatives) {
             try {
-              const found = await api.locate(deviceQuery, one, { refresh: attempt > 0 });
+              const found = await api.locate(deviceQuery, one, { refresh: step.refresh !== false, options: ctx.options });
               return `${JSON.stringify(one)} appeared at ${found.target.x},${found.target.y}`
                 + ` (first of ${alternatives.length} awaited)`;
             } catch (err) {
@@ -2577,7 +2577,26 @@ async function runStep(deviceQuery, udid, step, ctx) {
       }
       for (let attempt = 0; ; attempt += 1) {
         try {
-          const found = await api.locate(deviceQuery, query, { index: step.index, refresh: attempt > 0 });
+          // Fresh, like `assert` — and for the same reason, found the same way.
+          //
+          // This read `refresh: attempt > 0`, so the FIRST look resolved against
+          // the remembered map. A wait that can be satisfied by memory is not a
+          // wait: if recall hands back the wrong screen's map — which it does
+          // when two screens collide on a layout hash — the target "appears"
+          // without ever having been on screen, instantly, and the caller
+          // proceeds against a screen it is not on.
+          //
+          // Caught by the fingerprint eval on CI, which is the only place it
+          // could show: `settings-general` read the **Settings root** and its
+          // `waitFor "About"` had passed. The signature is in the round numbers
+          // — r2 and r3, never r1 — because memory has to be warm before it can
+          // lie, and round 1 is always cold.
+          //
+          // `assert` was made fresh by default after this exact defect cost a
+          // reported session; `waitFor` was left as it was. One perception pass
+          // is the price, and it is the same trade: a read is cheaper than the
+          // round trip a wrong verdict causes.
+          const found = await api.locate(deviceQuery, query, { index: step.index, refresh: step.refresh !== false, options: ctx.options });
           return `"${found.target.label}" appeared at ${found.target.x},${found.target.y}`;
         } catch (err) {
           lastError = err.message;
