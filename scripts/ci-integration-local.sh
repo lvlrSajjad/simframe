@@ -68,13 +68,20 @@ printf '[{"button":"home"},{"settle":true}]\n' > /tmp/reset-local.json
 node src/cli.js do /tmp/reset-local.json --device="$DEVICE" >/dev/null 2>&1
 BEFORE=$(read_state)
 printf '[{"openUrl":"https://example.com"},{"settle":true}]\n' > /tmp/flow-local.json
-if node src/cli.js do /tmp/flow-local.json --device="$DEVICE" >/dev/null 2>&1; then
-  AFTER=$(read_state)
-  if [ "${BEFORE%% *}" != "${AFTER%% *}" ]; then ok "frame hash changed: ${BEFORE%% *} -> ${AFTER%% *}"
-  else bad "a step ran cleanly but capture saw no change"; fi
-else
-  bad "openUrl flow failed"
+# Mirrors the job: `NSPOSIXErrorDomain code 60` from simctl is the wedge arriving
+# through a different door — a healthy simulator opens a URL — so revive once on
+# that named condition and try again. Any other failure is a failure.
+if ! node src/cli.js do /tmp/flow-local.json --device="$DEVICE" >/tmp/openurl-local.log 2>&1; then
+  if grep -qE 'NSPOSIXErrorDomain.*code=60|Operation timed out' /tmp/openurl-local.log; then
+    printf '     (simctl answered NSPOSIXErrorDomain 60 — DEFERRED 126. Reviving once.)\n'
+    node src/cli.js revive --device="$DEVICE" >/dev/null 2>&1 || true
+    BEFORE=$(read_state)
+    node src/cli.js do /tmp/flow-local.json --device="$DEVICE" >/tmp/openurl-local.log 2>&1 || true
+  fi
 fi
+AFTER=$(read_state)
+if [ "${BEFORE%% *}" != "${AFTER%% *}" ]; then ok "frame hash changed: ${BEFORE%% *} -> ${AFTER%% *}"
+else bad "openUrl ran and capture saw no change"; tail -5 /tmp/openurl-local.log; fi
 
 step "The memory layer — screen map, refs, graph, verdicts, flows"
 # Mirrors the job: exit 75 means the display wedged and nothing was tested, so

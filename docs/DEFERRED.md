@@ -1685,6 +1685,34 @@ round yet, and its P0 is the worst finding this project has had.
    has had for 126, and it is a better starting point than the five symptoms
    were.
 
+133. **The wedge arrives through `simctl openurl` too, and that path had no
+   cure either.** FIXED, 2026-09-13/14. `xcrun simctl openurl` answered
+   `NSPOSIXErrorDomain code=60 — Operation timed out` three times in a row, at
+   ~10.4 s each, with the frame hash unchanged between them: Safari never
+   launched. On the same run capture, the accessibility tree and OCR were all
+   healthy and the screen map read the home screen perfectly.
+
+   That is 126 arriving through a different door. A healthy simulator opens a
+   URL; three consecutive timeouts with no screen movement is CoreSimulator
+   declining to answer, not a slow build farm, and the retry loop written for
+   the slow-build-farm reading had already been exhausted.
+
+   So the same cure applies as in the memory-layer step, under the same rule:
+   revive **once**, on a **named** condition — the code-60 signature in
+   simframe's own output — and try once more. A `do` that fails for any other
+   reason still fails the job on the spot, because a blanket retry is how a real
+   defect gets papered over.
+
+   **If this recurs, change the vehicle rather than widening the cure.** The step
+   asserts only that *a step runs and capture notices the change*, and
+   `openurl` is the heaviest possible way to produce one: it shells out to
+   simctl, wakes LaunchServices, cold-starts Safari and fetches over the
+   network, none of which this step is about. A swipe through simframe's own
+   HID path would exercise more of simframe and none of that. It is not the
+   change made today because a swipe vehicle was tried once before and rejected
+   — a top-edge gesture that did not move a bare springboard — and re-treading
+   that without evidence would be a guess.
+
 123. **`settle` cannot cope with a permanently animated screen**, and aborts the
    rest of the batch when it gives up — expensive when step 1 of 6 was the
    settle. A streaming AI-summary panel, a Lottie and the Intercom widget never

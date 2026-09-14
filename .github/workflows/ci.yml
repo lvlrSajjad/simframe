@@ -387,24 +387,50 @@ jobs:
           # second one directly. If the frame hash has moved, the URL opened and
           # capture saw it — which is the whole of what this step exists to
           # prove — so retrying would only risk opening it twice.
+          #
+          # And when it has failed every attempt *and* nothing moved, that is no
+          # longer patience's problem. `NSPOSIXErrorDomain code 60` from simctl
+          # is the same signal the display wedge produces: CoreSimulator has
+          # stopped answering. A healthy simulator opens a URL. Observed three
+          # times in a row at ~10.4s each with the frame hash unchanged — Safari
+          # never launched — on a run where capture, the tree and OCR were all
+          # fine, which is exactly the shape of DEFERRED 126 arriving through a
+          # different door.
+          #
+          # So the same cure applies here as in the memory-layer step, under the
+          # same rule: revive **once**, on a named condition, then try once more.
+          # Not a blanket retry — a `do` that fails for any other reason still
+          # fails the job on the spot.
           before_hash="${BEFORE%% *}"
-          for attempt in 1 2 3; do
-            if simframe do /tmp/flow.json --device="$DEVICE"; then
-              break
-            fi
-            sleep 3
-            if [ "$(read_state | cut -d' ' -f1)" != "$before_hash" ]; then
-              echo "     (openurl stopped waiting on attempt $attempt, and the screen moved anyway —"
-              echo "      which is what this step asserts; not retrying, that would open it twice)"
-              break
-            fi
-            if [ "$attempt" = 3 ]; then
-              echo "FAIL openUrl failed $attempt times and the screen never moved; this is no longer the runner" >&2
+          try_open() {
+            for attempt in 1 2 3; do
+              if simframe do /tmp/flow.json --device="$DEVICE" 2>&1 | tee /tmp/openurl.log; then
+                return 0
+              fi
+              sleep 3
+              if [ "$(read_state | cut -d' ' -f1)" != "$before_hash" ]; then
+                echo "     (openurl stopped waiting on attempt $attempt, and the screen moved anyway —"
+                echo "      which is what this step asserts; not retrying, that would open it twice)"
+                return 0
+              fi
+              echo "     (openUrl failed on attempt $attempt and nothing moved — retrying; see the comment above)"
+              sleep 5
+            done
+            return 1
+          }
+          if ! try_open; then
+            if grep -qE 'NSPOSIXErrorDomain.*code=60|Operation timed out' /tmp/openurl.log; then
+              echo "     (simctl answered NSPOSIXErrorDomain 60 three times and the screen never moved."
+              echo "      That is CoreSimulator not answering — DEFERRED 126. Reviving once.)"
+              simframe revive --device="$DEVICE" || true
+              BEFORE=$(read_state)
+              before_hash="${BEFORE%% *}"
+              try_open || { echo "FAIL openUrl still fails after a revive; this is not the runner" >&2; exit 1; }
+            else
+              echo "FAIL openUrl failed 3 times and the screen never moved, and not with a simctl timeout" >&2
               exit 1
             fi
-            echo "     (openUrl failed on attempt $attempt and nothing moved — retrying; see the comment above)"
-            sleep 5
-          done
+          fi
           AFTER=$(read_state)
           node -e '
             const [bh, bs] = process.argv[1].split(" ");
