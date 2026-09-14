@@ -13,6 +13,10 @@ public enum Motion {
 
     /// Below this mean absolute difference, two frames are the same picture.
     public static let stillThreshold = 0.004
+
+    /// How many moving cells make an animation rather than sensor noise.
+    /// Set from the measurements in `state(history:now:)` below.
+    public static let minAnimatingCells = 12
     /// Frames that must agree before the screen counts as settled.
     ///
     /// Paired with a duration, because frame count alone is not a measure of
@@ -170,8 +174,35 @@ public enum Motion {
             let cellThreshold = 0.06
             let moving = union.filter { $0 > cellThreshold }.count
             let fraction = Double(moving) / Double(union.count)
-            // Small and persistent, rather than a screen changing.
-            if fraction > 0 && fraction < 0.06 {
+            // Small and persistent, rather than a screen changing — and big
+            // enough to be something.
+            //
+            // `fraction > 0` meant one cell of 4,608 counted as an animation,
+            // and measured on a device that fires constantly on screens where
+            // nothing is happening. A field report put it exactly right: a
+            // warning that is usually wrong trains the reader to ignore the one
+            // that matters.
+            //
+            // Measured on this device, 2026-09-14, which is what
+            // `minAnimatingCells` is set from:
+            //
+            //   static home screen, nothing moving   1-4 cells, on 54% of frames
+            //   a blinking text caret                **2 cells** (1x2), on 100%
+            //   the testbed's spinner                169 cells (13x13)
+            //   Maps launching, median               656 cells (41x16)
+            //   a real spinner, from the field       1,364 cells (44x31)
+            //
+            // Caret and noise sit at 1-4; the smallest real animation seen is
+            // 169. A 42x gap with nothing in it, so the threshold is not
+            // delicate — 12 is three times the worst noise and an order of
+            // magnitude below the weakest signal.
+            //
+            // The caret is the case this is really for, and it is why the
+            // question could not be settled by reasoning: a caret must never
+            // stop a screen from settling, and before this it did — 72 frames
+            // out of 72 with `settled: false` on a screen holding nothing but a
+            // text cursor.
+            if moving >= Self.minAnimatingCells && fraction < 0.06 {
                 animating = boundingBox(of: union, threshold: cellThreshold)
             }
         }

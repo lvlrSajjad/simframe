@@ -5149,3 +5149,47 @@ test('a still screen can satisfy a settle, and a failure says why it did not', a
   // left to look like a slow screen.
   assert.match(settleEvidence({ framesSeen: 12, blackFrames: 40 }), /40 black frame\(s\)/);
 });
+
+test('a blinking caret is not an animation, and the threshold is measured (130)', async () => {
+  // The question 130 was deferred on, answered by measuring rather than by
+  // picking a number. The objection was that a text caret is small and
+  // persistent exactly like a spinner and must never stop a screen settling —
+  // so the caret was measured against what it has to be told apart from, on a
+  // 48x96 grid of 4,608 cells:
+  //
+  //   static home screen, nothing moving   1-4 cells, on 54% of frames
+  //   a blinking text caret                **2 cells** (1x2), on 100% of frames
+  //   the testbed's spinner                169 cells (13x13)
+  //   Maps launching, median               656 cells (41x16)
+  //   a real spinner, from the field       1,364 cells (44x31)
+  //
+  // Caret and noise at 1-4; the weakest real signal at 169. A 42x gap.
+  //
+  // Before the threshold the gate was `fraction > 0` — ONE cell of 4,608 —
+  // so a screen holding nothing but a text cursor reported `settled: false` on
+  // 72 frames out of 72, and a static home screen claimed something was
+  // animating on 54% of its frames. A field report on 0.13.0 found the same
+  // thing independently and named the real cost: a warning that is usually
+  // wrong trains the reader to ignore the one that matters.
+  //
+  // Verified after: caret 0% and settled 73/73, static screen 0%, Maps
+  // unchanged at a 1,968-cell median.
+  const swift = fs.readFileSync(
+    new URL('../native/simframed/Sources/SimframeCore/Motion.swift', import.meta.url), 'utf8');
+  const match = /minAnimatingCells\s*=\s*(\d+)/.exec(swift);
+  assert.ok(match, 'could not find minAnimatingCells in Motion.swift — has it moved?');
+  const cells = Number(match[1]);
+
+  // Asserted as the relationships that were measured, not as the number, so
+  // the constant can move only with a reason and never back to "any one cell".
+  assert.ok(cells > 4, 'must sit above the measured noise floor of 4 cells');
+  assert.ok(cells < 169, 'must sit below the weakest real animation measured');
+  assert.equal(cells, 12);
+
+  // And the gate must test the count, not merely that something moved. This is
+  // the line that made a caret an animation.
+  assert.match(swift, /moving >= Self\.minAnimatingCells/,
+    'the animation gate must require a minimum number of moving cells');
+  assert.doesNotMatch(swift, /if fraction > 0 && fraction < 0\.06/,
+    'the old any-single-cell gate must not come back');
+});

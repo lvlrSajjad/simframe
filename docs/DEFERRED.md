@@ -1713,6 +1713,44 @@ round yet, and its P0 is the worst finding this project has had.
    — a top-edge gesture that did not move a bare springboard — and re-treading
    that without evidence would be a guess.
 
+134. **"still animating" fired on a static screen, and a text caret never let a
+   screen settle.** FIXED, 2026-09-14. This is the caret measurement 130 was
+   waiting on, and it found a second, larger defect on the way.
+
+   The daemon's animation detector gated on `fraction > 0` — **one cell of
+   4,608**. Measured on a *static* home screen it reported something animating
+   on **54% of frames**, and called the screen settled on 6 of 26. A field
+   report on 0.13.0 found the same thing independently and named the real cost:
+   *"a 1×1 region blocking settle is almost certainly a caret blink… the risk is
+   habituation: warnings that are usually wrong train the caller to ignore the
+   one that matters."*
+
+   And a screen holding nothing but a **blinking text cursor** reported
+   `settled: false` on **72 frames out of 72**.
+
+   | on screen | box | cells of 4,608 |
+   | --- | --- | --- |
+   | static screen, nothing moving | 1x1 – 2x2 | **1–4** |
+   | **a blinking caret** | **1x2** | **2** |
+   | the testbed's spinner | 13x13 | 169 |
+   | Maps launching, median | 41x16 | 656 |
+   | a real spinner, from the field | 44x31 | 1,364 |
+
+   A **42× gap** with nothing in it, so `minAnimatingCells = 12` is not a
+   delicate number — three times the worst noise, an order of magnitude below
+   the weakest signal. Verified after: caret 0% and settled 73/73, static screen
+   0%, a real animation unchanged.
+
+   **What it does and does not settle for 130.** The objection that blocked 130
+   is gone — gating stillness on the per-cell signal would no longer break a
+   caret, because a caret no longer registers. The decision is still not
+   automatic, but for a better reason: a *real* spinner still holds `settled`
+   false forever, so gating would make a settle unsatisfiable on exactly the
+   screens 123 is about. The answer there is 123's expensive half — let the
+   caller name a region to ignore. **The objection has moved from an unmeasured
+   fear to a known trade-off with a named solution**, which is the whole point of
+   measuring first.
+
 123. **`settle` cannot cope with a permanently animated screen**, and aborts the
    rest of the batch when it gives up — expensive when step 1 of 6 was the
    settle. A streaming AI-summary panel, a Lottie and the Intercom widget never

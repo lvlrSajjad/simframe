@@ -4014,3 +4014,56 @@ half a second. Capture is damage-driven with a slow idle floor: on a quiet
 screen eight frames spanned **sixteen seconds** and the window still held the
 transition that had brought us to the screen, so a home screen with one animated
 widget reported movement in all thirty-two regions. `MOTION_WINDOW_MS` is 1,000.
+
+## 2026-09-14 — the caret measurement, and what "still animating" was really reporting
+
+The open question from 130 was whether stillness could use the per-cell signal
+instead of the mean. It could not be answered by reasoning: the objection was
+that a blinking text caret is small and persistent exactly like a spinner, and
+must never stop a screen from settling. So the caret was measured, on this
+device, against the signals it has to be told apart from.
+
+The daemon's animation detector works on a **48 × 96 grid — 4,608 cells** — and
+publishes the bounding box of what is moving.
+
+| what is on screen | box | cells | share of screen |
+| --- | --- | --- | --- |
+| static home screen, nothing moving | 1x1 – 2x2 | **1–4** | 0.02–0.09% |
+| **a blinking text caret** | **1x2** | **2** | **0.04%** |
+| the testbed's spinner | 13x13 | 169 | 3.7% |
+| Maps launching, median | 41x16 | 656 | 14% |
+| a real spinner, from the field | 44x31 | 1,364 | 30% |
+
+**Caret and sensor noise occupy 1–4 cells. The smallest real animation is 169.
+A 42× gap with nothing in it.**
+
+Two things follow, and the second is the one that mattered.
+
+**The detector was firing on nothing.** Its gate was `fraction > 0` — one cell of
+4,608 counted as an animation. On a *static* home screen it reported something
+animating on **54% of frames**, and the daemon called the screen settled on only
+6 of 26. A field report on 0.13.0 named it independently and put the cost
+better than we would have: *"a 1×1 region blocking settle is almost certainly a
+caret blink… the risk is habituation: warnings that are usually wrong train the
+caller to ignore the one that matters."*
+
+**A screen holding nothing but a text cursor never settled.** 72 frames out of
+72 with `settled: false`, on a screen where the only moving thing was a caret.
+
+`minAnimatingCells = 12` — three times the worst noise, an order of magnitude
+below the weakest signal. Verified after the change, same device, same screens:
+
+| case | before | after |
+| --- | --- | --- |
+| static screen | box on **54%** of frames | **0%** |
+| blinking caret | box on **100%**, settled 0/72 | **0%**, settled **73/73** |
+| Maps launching | box on 23%, median 656 cells | box on 38%, median 1,968, min 16 |
+
+**What this does and does not settle for 130.** The objection that blocked it is
+gone: gating stillness on the per-cell signal would no longer break a caret,
+because a caret no longer registers. The decision is still not automatic, but
+for a better reason — a *real* spinner still holds `settled` false forever, so
+gating would make a settle unsatisfiable on the screens 123 is about. The answer
+there is 123's expensive half, letting the caller name a region to ignore. The
+objection has moved from an unmeasured fear to a known trade-off with a named
+solution.
