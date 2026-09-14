@@ -1,146 +1,148 @@
-# Handoff — 2026-09-13 (evening)
+# Handoff — 2026-09-14 (evening)
 
-**0.13.0 is published and CI is green.** npm `latest` is 0.13.0, the MCP
-registry has `io.github.lvlrSajjad/simframe` at 0.13.0, and `main` is green on
-`2ea27c2`. The tag went up on a green `aa405f5`; the two runs after it went red
-on the `openurl` path alone, which is **133** below and is now fixed. This project publishes tags + npm + MCP registry and
-has never created GitHub Release objects, so there is nothing missing there.
+**0.13.0 is released.** npm `latest` and the MCP registry both carry it. Nothing
+is held locally; `origin/main` is at `2d5c0af`. All gates green: 190/190 tests,
+check-private, check-package, the article projection.
 
-## What went into 0.13.0
+**CI status: one run in flight on `2d5c0af`.** The run before it was cancelled by
+this push, and the one before *that* (`356f190`) is the informative one — see
+below. Check it first thing.
 
-**122 — controls with no name.** Three field reports called icon-only menus and
-back chevrons "absent from the tree". They were not; `screenmap.build` dropped
-them one line before printing. Measured first: of 39 ax nodes on the testbed's
-list screen exactly one is nameless, and it was the one control no caller could
-reach. Settings and Safari gain nothing. `testID` reaches the map too. The
-second half — a view the app never declared accessible — is still open and the
-new line says so instead of reporting zero.
+## The day in one line
 
-**The numbers are written up.** Three-pass table and the graph's ~27% in
-BENCHMARKS, EXPERIMENTS §14, the article, the site and the README, which now
-opens with a study-case block.
+0.13.0 went out; then two days of red CI turned out to be **three separate
+things wearing one costume**, and only one of them was the wedge everyone
+assumed.
 
-**123's cheap half.** A settle that times out names where the movement is and
-draws the region map.
+## What CI was actually failing on
 
-**126 has a trigger.** The wedge lands on an **app switch** — launching a second
-app with Safari in front — and hit roughly every other run of the local mirror,
-five times in one session. `frame --fresh` named it every time, `revive` cured
-it every time. First reproducible trigger anyone has had for it.
+Measured, not assumed: the hosted runner is **~2.5x slower** than this laptop at
+identical capture work — capture p50 **21.8 ms** vs **55.4 ms**, p95 41 vs 94.
+Everything below follows from that.
 
-## Six defects, and five of them were one disease
+| class | runs | status |
+| --- | --- | --- |
+| `simctl openurl` timing out | 4 | fixed — vehicle changed |
+| a wait satisfied by **memory** | 2 | **fixed — the real defect, see below** |
+| `simframe start` readiness lie | 1 | fixed (127) |
+| settle unsatisfiable on a still screen | 1 | fixed (131) |
+| the wedge | **1 in 6** | guard + `revive` (132) |
 
-Every CI failure today was a component reporting a condition it could not
-distinguish from a different one. The article's own closing rule.
+`356f190` is the proof the first one worked: every integration step passed
+except the fingerprint eval, including the two that had failed all week.
 
-- **127** `simframe start` said "no daemon process came up" about a daemon that
-  was up and capturing. Circular: aliveness was read from `meta.json`, which the
-  daemon writes *after* its slowest startup step, so the 60s live cap could
-  never be reached in the case it exists for. The previous fix in this family
-  **created** this one.
-- **128** `simctl openurl` timing out is a statement about simctl's patience,
-  not about whether the URL opened. The step asks the screen now.
-- **129** A bad ax read reported "idb is not installed" — a tool we deliberately
-  do not use on CI. The daemon had sent `axError` all along and nothing read it,
-  while the OCR branch eight lines below reads `ocrError`.
-- **130** `stableForMs` reported **79,207 ms** of stillness on a screen
-  animating at 85 ms a frame, in the same file carrying `motion.animating` and
-  `settled: false`. The premature settle, isolated. **Reported, not fixed** —
-  see below.
-- **131** A settle could not be satisfied on a screen still for 3,548 ms of a
-  required 1,400, because it demanded a frame newer than the call and a still
-  screen produces none by design. Currency is time, not a counter.
-- **132** `ci-memory` exited 1 both for a real failure and for the device dying.
-  75 now, and the job revives once on that code alone.
-- **133** The wedge arrives through `simctl openurl` too — code 60, three times
-  at ~10.4 s each, frame hash unchanged, Safari never launched, on a run whose
-  capture and tree were both fine. Same cure, same rule: revive once on the
-  named signature, then try once more. **If it recurs, change the vehicle
-  rather than widening the cure** — the step only asserts that a step runs and
-  capture notices it, and `openurl` drags in simctl, LaunchServices, a Safari
-  cold start and the network. A swipe through simframe's own HID path would
-  exercise more of simframe and none of that.
+## The real defect, and why it hid
 
-## The open decision, with its number attached
+`waitFor` resolved its **first** look with `refresh: attempt > 0` — false on
+attempt 0 — so the opening attempt asked the *recalled map*, not the screen. A
+wait memory can satisfy is not a wait: when recall returns the wrong screen's
+map, the target "appears" instantly without ever having been on screen.
 
-**130 is deliberately unfixed.** Requiring the daemon's `settled` flag would be
-right for a spinner and wrong for a text caret — also small, also persistent,
-and it must never stop a screen settling. **The next step is a measurement, not
-a fix**: a blinking caret's per-cell delta and duty cycle against a spinner's,
-on this device. If they separate, stillness can use the per-cell signal and the
-premature settle goes away. If they do not, the answer is 123's expensive half —
-let the caller name a region to ignore.
+That is how `settings-general` read the Settings **root** with its
+`waitFor "About"` already passed. **The signature is the round numbers — r2 and
+r3, never r1** — because memory must be warm before it can lie.
 
-## Next, in order
+`assert` was fixed for this exact defect after it cost a reported field session.
+`waitFor` was left behind: the fix went to the *symptom that had been reported*
+rather than to the class, and the twin sat one function away for weeks.
 
-1. **The caret measurement above.** It unblocks 130 and probably 123.
-2. `--session` binding to the MCP server's id, then 117, 114, 118.
-3. **graphify prototype** on the in-tree testbed, aimed at *control inventory*
-   rather than route memory — per peer 2's reframing and the owner's two cases:
-   static-ish repeated screens, versus one screen whose state change entirely
-   changes its shape.
+**Only CI could catch it.** It needs warm memory *and* a colliding screen pair,
+and locally those two screens share no tokens at all.
 
-## Mistakes worth keeping from today
+## The wedge: deprioritised, with one lead kept
 
-- **I made the same mistake twice in one day in one file.** The motion window
-  was in frames when it had to be in time, and two hours later the settle's
-  freshness check was in frames when it had to be in time. Frames are not a
-  clock: capture is damage-driven with a 2 s idle floor.
-- **I shipped a motion report that did not fire on the real failure path.** CI
-  showed the bare message before I did. The fix was to make the message carry
-  its own evidence, which then answered the question in one run.
-- **I read a null field and nearly concluded the tracking was broken.** It was
-  the reporting: `cli.js wait` builds a hand-written payload and dropped it.
-- **`pgrep -fl "react-native start"` found nothing while Metro was running**,
-  because `npx` execs a node process whose command line does not carry that
-  string. The owner's task chip was the reliable signal; my process check was
-  not. Second time this shape has cost something.
+Of 22 real wedges in one daemon log, classified by the failure immediately
+before `both recoveries are spent`:
 
-## The measurement results, for anyone picking this up
+| | |
+| --- | --- |
+| `no frame was available from the display` | **21** |
+| `the device exposes no active display port` | 1 |
+| `the display surface could not be read` | **0** |
 
-- **Capacity does not help.** qwen3:14b scored *lower* than qwen3:8b (82% vs
-  91%) on identical inputs, both deterministic, while being 79% larger and 62%
-  slower. Do not reach for a bigger model.
-- **The accuracy ranking inverts the safety ranking.** Every arm errs in one
-  direction only and the directions differ: Apple always `wait` where `stop` was
-  right, both Qwen arms always `stop` where `wait` was right. A wrong `stop`
-  abandons a working plan.
-- **Apple is not deterministic** — 77 / 82 / 86% on identical inputs.
-- **The cascade does not work** at any abstention band tried (95% for the free
-  rule alone; 91 / 86 / 82 as more is handed to the model).
-- **The fourth word made Apple ~32 points worse** and it never used it once.
-- **The supervisor went 0-for-18 in the field**, two independent sessions, at
-  ~1.3 s a ruling. Third population saying the same thing.
+**The condition 126 is named after preceded none of them.** The wedge is a
+display that reads fine and delivers no frames — a damage callback that stopped
+firing, which is the defect EXPERIMENTS entry 5 caught once and never verified a
+fix for. That is the lead worth keeping: a soak on *this laptop*, with callback
+registrations counted. It reproduces ~15 times a day here and once in six CI
+runs, so it is a local problem and not a CI one.
 
-## Where we are against the phases
+Two claims about the wedge were **withdrawn** today: the "app switch trigger"
+(40 controlled rounds, two arms, zero failures) and a "two equal populations"
+split that was a grep artifact. Both are recorded in EXPERIMENTS §15.
 
-Done: 10, 11, 11.5, 18. Cancelled by their own measurement: 17 (NO-GO), 11.5's
-original premise. Never started: 12, 13, 14, 15, **16**, 19.
+## My mistakes today, because they were expensive
 
-The escalation breakdown is supposed to pick the next faculty and has been
-pointing at **16** for a while — partly unread because `verification_failed` was
-mislabelling most of the log as Phase 11 until today.
+- **`npm test | tail -3` hid a failing suite.** The last three lines are
+  cancelled/skipped/todo/duration; `# fail` sits just above them. I shipped red
+  while reading a green-shaped tail. Use `grep -E '^# (tests|pass|fail)'`.
+- **I measured three CI vehicles on a wedging device** and drew conclusions from
+  all three. `frame --fresh` would have told me in one call. Check device health
+  *before* every comparison, not after it fails.
+- **A token floor built on a misreading.** I read "4 tokens" as a half-drawn
+  screen; the Settings root legitimately reads 4 tokens on a runner — which my
+  own comment said one screen above the check. It turned an intermittent failure
+  into a deterministic one. Demoted to a note.
+- **A tap vehicle that tapped dead space** — `via ocr` on an icon's *label*,
+  which is not a hit target.
+- Two of those verified green locally first. **The local mirror cannot catch
+  what depends on the runner being slower or having warmer memory.**
+
+## The CI vehicle, so nobody tries a sixth
+
+The step asserts only: *a step runs, and capture notices the change.* Rejected:
+a frame counter (cannot advance on an idle screen), launching an app already in
+front, a top-edge swipe (does not move a bare springboard), a tap on an icon
+label (OCR text, not a hit target), a swipe to Spotlight (works once, then you
+are in Spotlight).
+
+**What holds is structural: from inside an app, pressing home always changes the
+screen.** Setup launches Settings; the asserted action is `button: home` through
+simframe's own HID path, no simctl in the measured part. 3 of 3, same two hashes
+every run.
+
+## Next, in the owner's agreed order
+
+1. **Item 138** — a step that resolves but yields `no-visible-change` while an
+   `or` list sits untried. Note it is the *opposite* of the rule that stops
+   simframe retrying `openurl`: an `or` list is the caller's own stated
+   fallback, not the driver's initiative.
+2. **Item 140 — `sim_storage`.** The field reporter rates it the highest-leverage
+   thing in their whole session, and it was not a simframe call: reading the
+   app's persisted state proved a bug before the device was even booted.
+   *"`sim_ui` says what is drawn, `sim_storage` says what the app believes."*
+3. **The operator-knowledge layer** — the three-pass experiment says it is worth
+   roughly twice the graph, and it has no phase number.
+
+## Open decisions that are the owner's
+
+- **Should a device-state failure fail the build** after one revive and retry?
+  It does now. It matters less than it did, since device state is no longer the
+  main cause of red.
+- **130** — gating stillness on the daemon's `settled` flag. The caret objection
+  is gone (134 measured it: a caret is 2 cells of 4,608, and no longer
+  registers). What remains is that a *real* spinner would make settle
+  unsatisfiable, which is 123's expensive half.
 
 ## State of the machine
 
-- **Our bench device `326464A4` is booted** with a daemon running; shut it down
-  if you are done. It wedged five times today — see 126's trigger above.
-- **`B55AB0AE` is booted and is NOT ours** — it is the device the field rounds
-  ran on. Leave it alone; always pass `--device` explicitly, because both
-  simulators are named "iPhone 17 Pro".
-- Metro is not running. The testbed app is installed on the bench device, and
-  the testbed now carries two deliberate shapes: an unlabelled overflow menu
-  (122) and a spinner that never settles (123/130). The spinner is 120pt on
-  purpose — at 28pt it settles in 247ms and reproduces the premature settle
-  instead.
-- Ollama has `qwen3:8b` and `qwen3:14b`.
+- **Our bench device `326464A4` is shut down**; no daemons running.
+- **`7B8F8963-98F7-49AC-AA6E-EC1ABF82F351` is booted and is NOT ours** — it
+  belongs to one of the owner's other projects. Leave it alone, and always pass
+  `--device` explicitly.
+- **Port 8081 is held by another Metro** that is not ours. Do not kill it; start
+  ours on another port or not at all.
+- The testbed carries two deliberate shapes: an unlabelled overflow menu (122)
+  and a 120pt spinner that never settles (123/130). At 28pt that spinner settles
+  in 247 ms and reproduces the premature settle instead.
+- Ollama has `qwen3:8b`, `qwen3:14b`, and a `mistral-small3.1` nobody in this
+  project asked for.
 
 ## Standing rules
 
 - **No client or third-party project name in this repo, ever** — not the app,
-  not the company, not any of the owner's other projects. `scripts/check-private.mjs`
-  enforces the bundle-id half; the rest is discipline. Verified clean today:
-  zero tracked files mention it.
+  not the company, not any of the owner's other projects. Verified clean today:
+  `git grep -il` returns nothing.
 - Do not rewrite git history without an explicit, specific instruction.
 - Never `git add -A` without looking first. Verify checks separately, never
   chained with `&&`.
@@ -149,19 +151,18 @@ mislabelling most of the log as Phase 11 until today.
   `npm version` is the only way to bump.
 - Docs, article and README current **before** a push and release, numbers
   included.
-- `cancel-in-progress` is keyed on the ref: a push to main cancels the in-flight
-  main run.
+- `cancel-in-progress` is keyed on the ref: **a push to main cancels the
+  in-flight main run**, so never push while waiting on a run you need to read.
 
 ## Things to distrust
 
-- An MCP server holds its code **and its tool schema** at spawn. A schema change
-  needs a restart.
-- `doctor` runs in its own process and can report a tier healthy while the
-  long-lived server's copy is dead. It now proves the ax tree *answers*; the
-  same correction has not been made everywhere.
-- A background command piped through `tail` buffers everything until it exits —
-  an empty output file is not an idle job.
-- `ps -p $(pgrep …)` prints nothing when pgrep finds nothing, which reads
-  identically to "nothing is running". It hid a stuck background task for hours.
-- A process that is idle is not a process that is stuck. Three "orphaned"
-  scripts had finished their work and could not exit.
+- `npm test | tail -3`. See above.
+- A local green. Two defects this week were invisible to the local mirror by
+  construction.
+- An error raised *by* CoreSimulator is not evidence the cause *is*
+  CoreSimulator. That inference has been wrong here twice.
+- A message that quotes another message. Classifying log lines by what they
+  *mention* rather than what they *are* turned 22 wedges into 43.
+- `pgrep -fl "<name>"` finds nothing when a process runs under `npx`/node with a
+  different argv. The task chip is the reliable signal.
+- A process that is idle is not a process that is stuck.
