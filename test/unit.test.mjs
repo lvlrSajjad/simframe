@@ -1435,6 +1435,41 @@ test('nothing above the boundary shells out to a platform tool', async () => {
   }
 });
 
+test('an element is aimed at where it actuates, not at the middle of its frame', async () => {
+  const { centerOf } = await import('../src/input.js');
+  // Item 148, measured on Settings → Accessibility → Hover Text. An iOS switch
+  // publishes a row-wide accessibility frame, so the geometric centre is the
+  // LABEL and iOS does not actuate a switch from there. The frame centre
+  // flipped it 0 of 3 times; the activation point 3 of 3.
+  const row = { frame: { x: 36, y: 147, width: 330, height: 28 } };
+  assert.deepEqual(centerOf(row), { x: 201, y: 161 }, 'with no answer from the app, the centre as before');
+  assert.deepEqual(centerOf({ ...row, activationPoint: { x: 337, y: 161 } }), { x: 337, y: 161 },
+    "the app's own activation point wins");
+
+  // Outside the frame is not trusted. This runs on the tap path, where a wrong
+  // guess is the one thing that does damage, and a point that is not on the
+  // element is not a better answer than the middle of one.
+  assert.deepEqual(centerOf({ ...row, activationPoint: { x: 900, y: 161 } }), { x: 201, y: 161 });
+  assert.deepEqual(centerOf({ ...row, activationPoint: { x: 337, y: 900 } }), { x: 201, y: 161 });
+  // And nothing here may throw on a shape the bridge did not fill in.
+  for (const bad of [null, undefined, {}, { x: NaN, y: 1 }, { x: 1 }]) {
+    assert.deepEqual(centerOf({ ...row, activationPoint: bad }), { x: 201, y: 161 });
+  }
+
+  // The field has to survive the converter that actually runs. `normalizeNode`
+  // is the idb fallback; `elementToNode` is the daemon path, and AXSelected and
+  // AXFocused were batched by the daemon for four versions while being dropped
+  // here — which is exactly how this field was nearly lost too.
+  const { elementToNode } = await import('../src/input.js');
+  const node = elementToNode({
+    label: 'Hover Text', role: 'Switch', value: '0',
+    frame: { x: 36, y: 147, width: 330, height: 28 },
+    activationPoint: { x: 337, y: 161 },
+  });
+  assert.deepEqual(node.activationPoint, { x: 337, y: 161 }, 'the daemon path must carry it');
+  assert.deepEqual(centerOf(node), { x: 337, y: 161 });
+});
+
 test('a simctl timeout says it timed out, and the budget clears what was measured', async () => {
   const src = fs.readFileSync(new URL('../src/platform/ios.js', import.meta.url), 'utf8');
 

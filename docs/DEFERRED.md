@@ -2073,7 +2073,7 @@ on."*
    branch never executes on this tour.
 
 148. **`{"tap": "<a switch>"}` never flips the switch, and the verdict that says
-   so is correct.** OPEN, measured 2026-09-15. Two separate defects wearing one
+   so is correct.** Defect one **FIXED**, defect two OPEN. Measured 2026-09-15. Two separate defects wearing one
    symptom, and that symptom is the single most common one in the field logs:
    `no-visible-change` is **36 of 58** and **28 of 42** verification escalations
    on the two real-app devices (EXPERIMENTS §17).
@@ -2117,6 +2117,28 @@ on."*
    *motion grid*. It is not true of the element list: a control whose value
    changed did something, whatever the pixels say, and that comparison costs a
    map read simframe has usually just done.
+
+   **Fixed, with the platform's answer rather than ours.** The daemon now asks
+   for `AXActivationPoint` as a ninth batched attribute and carries it to
+   `centerOf()`, which prefers it over the geometric centre **when it lands
+   inside the frame** — outside it is not trusted, because this is the tap path
+   and a point that is not on the element is not a better guess than the middle
+   of one. Verified on the same switch: the aim moved from 201 to **337** and it
+   flipped **3 of 3**.
+
+   Two things the implementation is worth remembering for. `Element.center` was
+   deliberately left alone: it is the element's *place*, and two readings of one
+   control are merged by being within `SAME_CONTROL_POINTS` (12pt) of each
+   other, so redefining it as "where to tap" would move a switch's tree reading
+   ~145pt from its OCR reading and stop them collapsing. Aiming and identity are
+   different questions. And the field was first added only to `normalizeNode`,
+   which is the **idb fallback** — the live path is `elementToNode`, and a
+   comment four lines above it already records AXSelected and AXFocused being
+   batched by the daemon for four versions while being dropped exactly there.
+
+   `tap "Hover Text"` still refuses on that screen, correctly: three elements
+   carry that label — the nav heading, the switch and a link — so it reports the
+   ambiguity and names both points. That is the resolver working.
 
    **Why this matters beyond switches.** If the dominant escalation verdict is
    frequently *correct about a tap that did nothing*, then the model is being

@@ -16,11 +16,20 @@ public struct AXNode: Sendable {
     public var selected: Bool?
     public var focused: Bool?
     public var frame: CGRect
+    /// Where the control actuates, when the app says so.
+    ///
+    /// Not the same as the centre of `frame`, and a switch is the proof: UIKit
+    /// publishes a row-wide frame for it, so the geometric centre is the label
+    /// and iOS does not actuate a switch from there. Measured — tapping the
+    /// centre flipped it 0 of 3 times and the control itself 3 of 3. UIKit has
+    /// `accessibilityActivationPoint` for exactly this question, and nil means
+    /// the app did not answer it, never a guess of ours.
+    public var activationPoint: CGPoint?
     public var depth: Int
 
     public init(role: String, subrole: String? = nil, label: String? = nil, value: String? = nil,
                 identifier: String? = nil, enabled: Bool? = nil, selected: Bool? = nil,
-                focused: Bool? = nil, frame: CGRect, depth: Int) {
+                focused: Bool? = nil, frame: CGRect, activationPoint: CGPoint? = nil, depth: Int) {
         self.role = role
         self.subrole = subrole
         self.label = label
@@ -30,6 +39,7 @@ public struct AXNode: Sendable {
         self.selected = selected
         self.focused = focused
         self.frame = frame
+        self.activationPoint = activationPoint
         self.depth = depth
     }
 }
@@ -251,7 +261,8 @@ public final class AccessibilityBridge {
 
     /// Everything scalar about a node, asked for in one go.
     private static let batched = ["AXRole", "AXSubrole", "AXDescription", "AXValue",
-                                  "AXIdentifier", "AXEnabled", "AXSelected", "AXFocused"]
+                                  "AXIdentifier", "AXEnabled", "AXSelected", "AXFocused",
+                                  "AXActivationPoint"]
 
     private func node(from element: NSObject, depth: Int) -> AXNode {
         // One bridge round trip for eight attributes, not eight.
@@ -283,6 +294,7 @@ public final class AccessibilityBridge {
             selected: (value("AXSelected") as? NSNumber)?.boolValue,
             focused: (value("AXFocused") as? NSNumber)?.boolValue,
             frame: frame(of: element),
+            activationPoint: point(value("AXActivationPoint")) ?? activationPoint(of: element),
             depth: depth)
     }
 
@@ -308,6 +320,41 @@ public final class AccessibilityBridge {
         guard element.responds(to: sel), let imp = element.method(for: sel) else { return .zero }
         typealias RectFn = @convention(c) (AnyObject, Selector) -> CGRect
         return unsafeBitCast(imp, to: RectFn.self)(element, sel)
+    }
+
+    /// The activation point as the attribute bag reports it.
+    ///
+    /// Defensive about the shape because this is a private bridge and the
+    /// answer arrives as whatever the translator chose: an NSValue wrapping a
+    /// CGPoint on one path, a stringified `{x, y}` on another. Anything it does
+    /// not recognise is nil, which costs nothing — the caller falls back to the
+    /// frame centre, which is what it did before this attribute was asked for.
+    private func point(_ value: Any?) -> CGPoint? {
+        switch value {
+        case let v as NSValue:
+            // `pointValue`, not `cgPointValue`: this daemon is a macOS binary
+            // driving a guest, and the iOS-only accessor does not exist here.
+            // NSPoint and CGPoint are the same type on 64-bit.
+            let p = v.pointValue
+            return p.x.isFinite && p.y.isFinite ? p : nil
+        case let s as String:
+            let parts = s.trimmingCharacters(in: CharacterSet(charactersIn: "{} "))
+                .split(separator: ",")
+                .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            guard parts.count == 2 else { return nil }
+            return CGPoint(x: parts[0], y: parts[1])
+        default:
+            return nil
+        }
+    }
+
+    /// The direct selector, for elements that answer it but do not batch it.
+    private func activationPoint(of element: NSObject) -> CGPoint? {
+        let sel = NSSelectorFromString("accessibilityActivationPoint")
+        guard element.responds(to: sel), let imp = element.method(for: sel) else { return nil }
+        typealias PointFn = @convention(c) (AnyObject, Selector) -> CGPoint
+        let p = unsafeBitCast(imp, to: PointFn.self)(element, sel)
+        return p.x.isFinite && p.y.isFinite ? p : nil
     }
 
     /// A value may be a string, a number, or something with no useful text.

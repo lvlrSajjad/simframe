@@ -254,6 +254,14 @@ export function elementToNode(e) {
     selected: e.state?.selected ?? null,
     focused: e.state?.focused ?? null,
     frame: e.frame ?? null,
+    // Where the control actuates, when the app publishes it. See `centerOf`.
+    //
+    // Added here as well as in `normalizeNode`, and the comment four lines up
+    // is the reason: this is the converter that actually runs, and a field set
+    // only in the idb fallback is a field that is never set. That is exactly
+    // how AXSelected and AXFocused came to be batched by the daemon for four
+    // versions and dropped on the way in.
+    activationPoint: e.activationPoint ?? null,
     raw: e,
   };
 }
@@ -292,6 +300,8 @@ function normalizeNode(node) {
           height: frame.height ?? frame.Height ?? 0,
         }
       : null,
+    // Where the control actuates, when the app says so. See `centerOf`.
+    activationPoint: node.activationPoint ?? node.AXActivationPoint ?? null,
     raw: node,
   };
 }
@@ -329,11 +339,33 @@ export function matchElement(nodes, query, { index } = {}) {
   throw new Error(`no element matching "${query}" is on screen`);
 }
 
+/**
+ * Where to aim at this element.
+ *
+ * The geometric centre, unless the app has published somewhere better. UIKit
+ * exposes `accessibilityActivationPoint` for controls whose hit target is not
+ * the middle of what they publish as their frame, and a switch is the case that
+ * forced this: it reports a row-wide frame, so the centre is the *label*, and
+ * iOS does not actuate a switch from there. Measured on Settings →
+ * Accessibility → Hover Text — the frame centre flipped it **0 of 3** times and
+ * the control itself **3 of 3**, while the step reported `[no visible change]`
+ * and was telling the truth.
+ *
+ * The app's answer is preferred whenever it lands inside the frame. Outside it
+ * is not trusted: a point that is not on the element is not a better guess than
+ * the middle of one, and this runs on the tap path, where a wrong guess is the
+ * one thing that does damage.
+ */
 export function centerOf(node) {
-  return {
+  const middle = {
     x: Math.round(node.frame.x + node.frame.width / 2),
     y: Math.round(node.frame.y + node.frame.height / 2),
   };
+  const p = node.activationPoint;
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return middle;
+  const f = node.frame;
+  const inside = p.x >= f.x && p.x <= f.x + f.width && p.y >= f.y && p.y <= f.y + f.height;
+  return inside ? { x: Math.round(p.x), y: Math.round(p.y) } : middle;
 }
 
 export async function tapPoint(udid, x, y, { durationMs } = {}) {

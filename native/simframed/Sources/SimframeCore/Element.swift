@@ -60,10 +60,20 @@ public struct Element: Sendable {
     public var state: ElementState
     public var source: ElementSource
     public var confidence: Double
+    /// Where the control actuates, when the app publishes it.
+    ///
+    /// Deliberately NOT folded into `center`. `center` is the element's place,
+    /// and two readings of one control are matched by how close their places
+    /// are — 12pt apart, per `SAME_CONTROL_POINTS` above the boundary. A switch
+    /// actuates at the far end of a row-wide frame, so making `center` mean
+    /// "where to tap" would move the tree's reading ~145pt away from OCR's and
+    /// stop the two collapsing into one control. Aiming and identity are
+    /// different questions; this is the answer to the first one only.
+    public var activationPoint: CGPoint?
 
     public init(id: Int, frame: CGRect, role: String, label: String? = nil, value: String? = nil,
                 identifier: String? = nil, state: ElementState = ElementState(),
-                source: ElementSource, confidence: Double = 1) {
+                source: ElementSource, confidence: Double = 1, activationPoint: CGPoint? = nil) {
         self.id = id
         self.frame = frame
         self.role = role
@@ -73,6 +83,7 @@ public struct Element: Sendable {
         self.state = state
         self.source = source
         self.confidence = confidence
+        self.activationPoint = activationPoint
     }
 
     public var center: CGPoint { CGPoint(x: frame.midX, y: frame.midY) }
@@ -89,6 +100,11 @@ public struct Element: Sendable {
         if let label { out["label"] = label }
         if let value { out["value"] = value }
         if let identifier { out["identifier"] = identifier }
+        // Only when the app answered. Absent means "no opinion", and the layer
+        // above then aims at the centre exactly as it always has.
+        if let activationPoint {
+            out["activationPoint"] = ["x": Int(activationPoint.x.rounded()), "y": Int(activationPoint.y.rounded())]
+        }
         let state = state.json
         if !state.isEmpty { out["state"] = state }
         return out
@@ -112,7 +128,8 @@ public extension Element {
             state: ElementState(enabled: node.enabled, selected: node.selected,
                                 checked: nil, focused: node.focused),
             source: .accessibility,
-            confidence: 1)
+            confidence: 1,
+            activationPoint: node.activationPoint)
     }
 }
 
