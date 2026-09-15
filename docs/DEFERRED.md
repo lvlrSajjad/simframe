@@ -2511,6 +2511,26 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+164. **"Newer than the navigation" is not the same as "recent", and a
+   38-second-old frame passed for both.** FIXED, 2026-09-15. Item 143's guard
+   required `capturedAt >= navigatedAt`, which a frame captured just after a
+   navigation satisfies forever. Measured on a runner: a reading came off a
+   frame **38,266 ms old**, passed the guard because the navigation had also
+   been more than 38 s earlier, and showed a screen two steps back — reported as
+   `settled: true`, because a starved capture looks exactly like a still one.
+
+   Now bounded absolutely as well, at 5 s — double `FRAME_IS_CURRENT_MS` on the
+   settle path, because this harness reads cold and a hosted runner's capture
+   p50 is 2.5x this laptop's, but bounded, because half a minute is a different
+   screen and not a slow one. And the two failures are reported separately: *the
+   frame predates the navigation* and *capture is starved, not the screen still*
+   point at completely different things, and no number of re-reads invents a
+   frame the daemon is not producing.
+
+   **This is the third distinct cause behind one CI symptom**, after 143
+   (stale frames) and the wrong-turn/under-read confusion. Each was correctly
+   diagnosed and each revealed the next one underneath.
+
 144. **Sharding the integration job made CI 51% faster and 0-for-3 reliable.**
    REVERTED 2026-09-14, **re-applied 2026-09-15** once the causes were fixed. Kept here because the measurements are good and the
    next attempt should start from them rather than re-derive them.

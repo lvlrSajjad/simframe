@@ -153,6 +153,16 @@ const STALE_READ_RETRIES = 3;
  * Backed off rather than fixed, because the thing being waited for is a screen
  * finishing its draw, and the runner that needs this is the slow one.
  */
+/**
+ * How old a frame may be and still be a reading of NOW.
+ *
+ * `FRAME_IS_CURRENT_MS` in src/index.js is 2500 for the same question on the
+ * settle path. Doubled here because this harness deliberately reads cold and a
+ * hosted runner's capture p50 is 2.5x this laptop's — but bounded, because a
+ * 38-second-old frame is a different screen, not a slow one.
+ */
+const FRAME_TOO_OLD_MS = 5000;
+
 const SPARSE_READ_RETRIES = 3;
 const SPARSE_READ_WAIT_MS = 1500;
 const STALE_READ_WAIT_MS = 1000;
@@ -276,18 +286,38 @@ for (let round = 1; round <= rounds; round += 1) {
     // stale — an eval that scores a stale frame is measuring the runner, which
     // is the one thing this harness says it is not doing.
     if (navigatedAt) {
+      // TWO conditions, and the second was missing.
+      //
+      // Newer than the navigation is not the same as recent. Measured on a
+      // runner: a reading came off a frame **38,266 ms old** and passed this
+      // guard, because the navigation had also been more than 38 s earlier — so
+      // `capturedAt >= navigatedAt` held while the frame was half a minute
+      // stale and showed a screen two steps back. `settled: true` alongside it,
+      // because a starved capture looks exactly like a still one.
+      //
+      // A frame this old is capture starvation, not a slow screen, and no
+      // number of re-reads invents a frame the daemon is not producing. So it
+      // retries and then says which of the two it is, because "the frame
+      // predates the navigation" and "capture stopped producing frames" point
+      // at completely different things.
+      const tooOld = (r) => Date.now() - (r.state?.capturedAt ?? 0) > FRAME_TOO_OLD_MS;
+      const predatesNav = (r) => (r.state?.capturedAt ?? 0) < navigatedAt;
       for (let attempt = 0; attempt < STALE_READ_RETRIES; attempt += 1) {
-        const capturedAt = id.state?.capturedAt ?? 0;
-        if (capturedAt >= navigatedAt) break;
-        const age = Date.now() - capturedAt;
-        console.log(`         ("${screen.name}" read a frame from ${age}ms ago, older than the navigation`
+        if (!predatesNav(id) && !tooOld(id)) break;
+        const age = Date.now() - (id.state?.capturedAt ?? 0);
+        console.log(`         ("${screen.name}" read a frame from ${age}ms ago`
+          + `${predatesNav(id) ? ', older than the navigation' : `, over the ${FRAME_TOO_OLD_MS}ms freshness bound`}`
           + ` — reading again ${attempt + 1}/${STALE_READ_RETRIES})`);
         await new Promise((r) => setTimeout(r, STALE_READ_WAIT_MS));
         id = await api.screenIdentity(device, { fresh: true, confirmNovel: false });
       }
-      if ((id.state?.capturedAt ?? 0) < navigatedAt) {
+      if (predatesNav(id)) {
         staleReadings.push(`${screen.name} round ${round}: frame still predates the navigation`
           + ` by ${navigatedAt - (id.state?.capturedAt ?? 0)}ms after ${STALE_READ_RETRIES} re-reads`);
+      } else if (tooOld(id)) {
+        staleReadings.push(`${screen.name} round ${round}: newest frame is`
+          + ` ${Date.now() - (id.state?.capturedAt ?? 0)}ms old after ${STALE_READ_RETRIES} re-reads`
+          + ' — capture is starved, not the screen still');
       }
     }
     // A reading too sparse to be a screen is not a reading.
