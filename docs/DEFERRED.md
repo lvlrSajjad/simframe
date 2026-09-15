@@ -2072,6 +2072,58 @@ on."*
    none of the tour's eight selectors trigger a synonym group at all, so that
    branch never executes on this tour.
 
+148. **`{"tap": "<a switch>"}` never flips the switch, and the verdict that says
+   so is correct.** OPEN, measured 2026-09-15. Two separate defects wearing one
+   symptom, and that symptom is the single most common one in the field logs:
+   `no-visible-change` is **36 of 58** and **28 of 42** verification escalations
+   on the two real-app devices (EXPERIMENTS §17).
+
+   **Defect one: the tap lands on dead space.** An iOS switch publishes an
+   accessibility frame covering the whole row — measured here `x:36 width:330`
+   on a 402pt screen — and `input.centerOf()` returns the geometric centre of
+   that frame for every element type. The centre of a switch row is the label,
+   and iOS does not actuate a switch from there. Measured on Settings →
+   Accessibility → Hover Text:
+
+   | tap point | flipped |
+   | --- | --- |
+   | frame centre, x=201 — what simframe uses | **0 of 3** |
+   | the control itself, x=345 | **3 of 3** |
+
+   So toggling a switch by label is not unreliable, it is **broken**, and it has
+   been reporting the truth about itself the whole time: the action really did
+   nothing.
+
+   **Defect two: when it does flip, the pixel detector cannot see it.** The
+   working tap reported `settled 124ms` and `[no-visible-change]` while the
+   element's value went `0` → `1`. That is item 4's measurement (a switch flip
+   peaks at 0.00049 against a 0.004 threshold, eight times below) confirmed on a
+   second control — and the tree saw it perfectly. `settle()` decides
+   `noVisibleChange` from frame hashes alone and never consults the element
+   values it already has.
+
+   **The clean fix for one is an attribute we do not ask for.** UIKit publishes
+   `accessibilityActivationPoint` precisely for this — where a control actuates,
+   as opposed to where it is drawn. The daemon requests eight attributes
+   (`AXDescription`, `AXEnabled`, `AXFocused`, `AXIdentifier`, `AXRole`,
+   `AXSelected`, `AXSubrole`, `AXValue`) and this is not among them. Asking for
+   it replaces a geometric guess with the platform's own answer, and would fix
+   every trailing-control row rather than switches alone. A JS-side heuristic —
+   aim at the trailing edge for a wide `Switch` frame — needs no daemon rebuild
+   but is a guess about layout, and would be wrong under RTL.
+
+   **The fix for two is wiring, not calibration.** Item 4 concluded "a
+   calibration question rather than a wiring one", and that was true of the
+   *motion grid*. It is not true of the element list: a control whose value
+   changed did something, whatever the pixels say, and that comparison costs a
+   map read simframe has usually just done.
+
+   **Why this matters beyond switches.** If the dominant escalation verdict is
+   frequently *correct about a tap that did nothing*, then the model is being
+   asked to explain a failure simframe caused. That is worse than a blind
+   detector, and it is invisible in aggregate because the verdict looks like a
+   perception problem.
+
 147. **The fingerprint eval's rounds were not repeat measurements when an app
    was cold.** FIXED (unproven locally — see below), 2026-09-15. Rounds 1-3 are
    meant to be repeats of one thing. They were not: an app that has just
