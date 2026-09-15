@@ -489,6 +489,68 @@ but a round trip on a slow screen and one on a fast screen count the same.
 
 ---
 
+## 16. The operator's twelve calls are not about routes, and one third of the layer is already built
+
+**What we believed**, from entry 14's own closing paragraph: that what an
+operator carries between sessions is *"which route through a screen is the fast
+one, which control is a trap, what this app calls the thing you are looking
+for."* Entry 14 measured that this knowledge is worth **12 of 24** round trips.
+It did not measure *which* of those three things it was, and the list was
+written as prose rather than as a finding.
+
+**Counting before building, on two real-app graphs.**
+
+The first item is fully recorded already. Every node that offers a route choice
+has **both exits timed** — 34 of 34 on one app, 17 of 17 on the other — because
+`record()` has been storing `settles` per edge all along (97% and 85% of edges
+carry samples). The median gap between the fastest and slowest exit at a choice
+point is **1287 ms** and **773 ms**. Nothing reads it: `route()` is a plain BFS
+over hop count.
+
+So the obvious first increment is to route by measured time. **It is not worth
+building for this reason**, and that is the result:
+
+| | reachable pairs | fastest route differs from fewest-hops | saved when it differs |
+| --- | --- | --- | --- |
+| app A | 65 | **6 (9%)** | median 1853 ms |
+| app B | 27 | **0 (0%)** | — |
+| bench | 408 | 29 (7%) | median 615 ms, max 6406 ms |
+
+Fewer than one route in ten changes, it saves about a second when it does, and
+**it saves seconds rather than round trips**. Route choice does not cause an
+escalation, so it cannot be any part of the twelve calls entry 14 measured. A
+real and unused signal, pointed at the wrong prize.
+
+**Where the calls actually are.** On the two real-app devices the escalation log
+is dominated by one reason:
+
+| device | `verification_failed` | `ambiguous_intent` | `unknown_screen` |
+| --- | --- | --- | --- |
+| app A | **58 of 67** | 8 | 1 |
+| app B | **42 of 46** | 4 | 0 |
+
+Not naming, and not planning. The model is being consulted because simframe
+could not confirm that a step did what it was supposed to. And the addressable
+share is large: **37% (app A) and 66% (app B) of those escalations happened on a
+screen the graph already knew**. Memory had the screen and still had to ask.
+
+Nondeterminism is recorded and is the plausible mechanism — **19%** and **7%**
+of edges have `changedOutcomes > 0`, meaning the same action has reached more
+than one screen from the same place.
+
+**What this changes.** The next faculty is not route knowledge. It is what an
+operator knows about *outcomes*: which unexpected-looking result on a known
+screen is in fact correct. Entry 14's prose named three things and the countable
+one turned out to be the least valuable of them.
+
+**Caveats.** The logs span nine sessions per device over several days and cannot
+be narrowed to entry 14's three passes, which ran as peer sessions elsewhere —
+so this locates the escalations, it does not prove these particular ones are the
+twelve. Edge cost is the median of recorded settles, which is a proxy for wall
+time and ignores everything between steps. n=2 apps.
+
+---
+
 ## What the whole file adds up to
 
 Three habits, each bought with a reversal above.
