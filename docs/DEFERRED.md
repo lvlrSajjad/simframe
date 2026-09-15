@@ -2121,13 +2121,37 @@ identifier, and the `Visible:` list no longer filters to `t.label`.
    `FAIL tap: "30,91" is not on this screen`. The hint now says `#ref`, or point
    via `tapAt`, which is what actually works.
 
-161. **`sim_type` into an unfocused field reports `ok` and does nothing.** OPEN.
+161. **`sim_type` into an unfocused field reports `ok` and does nothing.**
+   PARTLY FIXED, 2026-09-15, and the obvious remedy does not work.
    `ok [1] type: typed text [unconfirmed — no field named, so nothing was read
    back]` — the text went nowhere and a chained `sim_do` continued on it. The
    note is honest and it is attached to a green step, which is the part that
    costs. Same family as 154: a truthful caveat on a false verdict is still a
-   false verdict. Their fix is right — when `sel` names a field, focus it first
-   and fail if it cannot be focused.
+   false verdict.
+
+   **The proposed gate was implemented and reverted.** "Nothing focused" looked
+   knowable before typing — the tree publishes `AXFocused` — so a blind type
+   with nothing focused should fail rather than report `ok`. On a device it
+   produced a **false refusal on the legitimate case**: after tapping Settings'
+   own search field, every element in the tree read `focused: false`, so a real
+   tap-then-type flow was blocked. iOS does not reliably publish focus here, and
+   `focusHint` in the same file already said so — *"with a hardware keyboard
+   attached to the simulator no software keyboard appears, so there is often
+   nothing to see"*. A gate on an unpublished signal blocks real work, which is
+   worse than the verdict it was fixing.
+
+   So the focus reading is advisory and goes into the note, which is now
+   unmissable — `[NOT CONFIRMED: … and nothing on this screen reports keyboard
+   focus — the text may have gone nowhere. Name the field … to have it tapped
+   first and read back]` — and the step still reports `unverified` rather than a
+   clean pass. What remains unfixed is the reporter's actual ask, and it needs a
+   focus signal worth trusting: either a keyboard-presence check, or typing a
+   probe character and reading it back, which costs a round trip on every blind
+   type. Neither is free and both are better than guessing.
+
+   What made this reversible cheaply was testing **both** directions — the bug
+   case and the working case — on a device before committing. The gate passed
+   the bug case perfectly.
 
 162. **The AX list intermittently drops a visible element.** OPEN. An element
    appeared in `content:` at `215,315` on one read, was absent from the next read

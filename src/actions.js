@@ -1693,6 +1693,37 @@ async function focusHint(deviceQuery, target, ctx) {
 }
 
 /**
+ * Is anything focused? Asked before typing blind.
+ *
+ * `{"type": "text"}` with no `into` types into whatever has focus, and reported
+ * `ok … [unconfirmed — no field named, so nothing was read back]`. The note was
+ * honest and it was attached to a **green step**, so a chained `sim_do`
+ * continued on a premise that had never been checked — a field report lost text
+ * that went nowhere exactly this way.
+ *
+ * If nothing has focus, the keystrokes are lost and there is no version of that
+ * which is an `ok`. The tree already answers it: one accessibility read, no
+ * OCR, which is the same cost `focusHint` pays on the `into` path.
+ *
+ * Advisory in one direction only. A tree that cannot answer — no targets, a
+ * read that threw — returns `unknown`, and the step proceeds with its
+ * unconfirmed note rather than failing on our inability to look. Refusing to
+ * type because we could not read the screen would be a worse trade than the
+ * bug.
+ */
+async function focusedSomewhere(deviceQuery, ctx) {
+  try {
+    const { entry } = await api.readScreenWith(deviceQuery, { useOcr: false, options: ctx.options });
+    const targets = entry?.targets ?? [];
+    if (!targets.length) return { known: false };
+    const hit = targets.find((t) => t.focused === true);
+    return { known: true, focused: Boolean(hit), where: hit?.label ?? hit?.identifier ?? null };
+  } catch {
+    return { known: false };
+  }
+}
+
+/**
  * How long to wait for the tap to become focus before inserting text.
  *
  * Paid only when the tree has not yet said the field is focused, so a field
@@ -2370,11 +2401,29 @@ async function runStep(deviceQuery, udid, step, ctx) {
         journalWrite(udid, step, sent, back, ctx);
         return `typed into ${field.where}${back.note}${back.landed ? '' : field.quiet}`;
       }
+      // **Refusing here was tried and reverted — see DEFERRED 161.** The idea
+      // was that "nothing focused" is knowable before typing, so typing into
+      // nothing should fail rather than report `ok`. On a device it produced a
+      // FALSE REFUSAL on the legitimate case: after tapping Settings' own
+      // search field, every element in the tree read `focused: false`. iOS does
+      // not reliably publish AXFocused here, which `focusHint` above already
+      // says in its own comment — *"with a hardware keyboard attached to the
+      // simulator no software keyboard appears, so there is often nothing to
+      // see"*. A gate on an unpublished signal blocks real work, which is worse
+      // than the verdict it was fixing.
+      //
+      // So the focus reading stays advisory and goes into the note. What the
+      // field report actually objected to was an honest caveat attached to a
+      // GREEN step, and the note is where that has to be fixed until there is a
+      // signal worth gating on.
+      const focus = await focusedSomewhere(deviceQuery, ctx);
       await input.typeText(udid, step.text ?? step.value);
-      // No selector, so there is nothing to read back — which is a fine trade
-      // for typing into whatever Safari's own form chevrons focused, but it
-      // must not be reported as though the text was seen to land.
-      return 'typed text [unconfirmed — no field named, so nothing was read back]';
+      return 'typed text [NOT CONFIRMED: no field named, so nothing was read back'
+        + (focus.known && !focus.focused
+          ? ' and nothing on this screen reports keyboard focus — the text may have gone nowhere'
+          : '')
+        + '. Name the field — {"type": {"into": "<field>", "text": "..."}} — to have it tapped'
+        + ' first and read back]';
     }
     case 'paste': {
       // Long strings are much faster on the pasteboard than through the
