@@ -2511,6 +2511,45 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+169. **`launch` reports success without bringing the app to the front.** OPEN,
+   and it is shipped-code rather than harness. The sixth distinct cause behind
+   one CI symptom, and the first that is about simframe rather than about the
+   instrument measuring it.
+
+   ```
+   round 3, "settings-general" never arrived: waited 8000ms for General:
+     "General" is not on this screen.
+     Visible: Back, Contacts, a, Section index, John Appleseed, Kate Bell, …
+   ```
+
+   The device is still on **Contacts**, the previous tour entry. `launch
+   com.apple.Preferences` with `relaunch: true` returned ok and Settings never
+   fronted. Item 167's signature correctly declined to revive this one: the
+   screen is full of labels, so it is not the clock-screen shape, and a guard
+   that revived it would be reviving a real defect into a pass.
+
+   **`actions.js` already describes this exact ambiguity and cannot resolve it**
+   — its own comment says `[no visible change]` after a launch means either *"the
+   app was already in front, so nothing needed to move"* or *"the app did not
+   come forward"*, and that the first is the likely reading on this Xcode. This
+   is the unlikely one, happening repeatedly on a loaded runner.
+
+   The workflow's own "A step runs" vehicle already retries `simctl launch`
+   three times for this reason — *"merely slow on a loaded runner rather than
+   broken"* — so the behaviour is known at the CI layer and unhandled at the
+   library layer, where every user meets it.
+
+   **What a fix needs.** A launch must be able to say whether the app actually
+   fronted, which today nothing asks. Candidates, none free: check the
+   accessibility tree's root against the launched bundle id after settling;
+   have the daemon report the frontmost app; or retry the launch when the settle
+   reports no visible change and the tree does not show the app. The third is
+   closest to what CI already does by hand, and the first is the only one that
+   answers the question rather than papering over it.
+
+   Not fixed here on purpose. Six causes deep into one symptom is the point to
+   stop patching reactively and let this be worked on deliberately.
+
 168. **The tour waited for a label below the fold.** FIXED, 2026-09-15, and
    this is where the chain bottoms out in a real tour fault rather than another
    instrument bug.
