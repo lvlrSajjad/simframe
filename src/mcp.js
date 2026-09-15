@@ -773,6 +773,23 @@ async function look(target, args, options) {
       lines.push(`could not crop that region (${cropped.note}) — this is the whole screen`);
     }
   }
+  // Say what space the image is in, and the factor.
+  //
+  // A field report lost time to this and had to derive the number from
+  // landmarks: `sim_ui` and `sim_tap` speak 402x874 POINTS, the returned image
+  // is 322x700 PIXELS, and `simctl io screenshot` is a third space again at 3x.
+  // Reading a coordinate off this image and feeding it to a tap is silently
+  // wrong by 1.248x — silently, because nothing in the reply relates the two.
+  // The header already prints the frame size; it just never said what it was
+  // relative to.
+  const geometry = await api.screenIdentity(target, { options, confirmNovel: false }).catch(() => null);
+  const pts = geometry?.points;
+  if (pts?.width && res.state?.width) {
+    const factor = res.state.width / pts.width;
+    lines.push(`this image is ${res.state.width}x${res.state.height} px = `
+      + `${Math.round(pts.width)}x${Math.round(pts.height)}pt — divide image coordinates by `
+      + `${factor.toFixed(3)} before tapping (sim_tap and sim_ui speak points)`);
+  }
   return { content: [text(lines.filter(Boolean).join('\n')), image(png)] };
 }
 

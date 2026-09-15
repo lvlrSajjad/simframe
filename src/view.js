@@ -579,7 +579,7 @@ export async function screenMap(deviceQuery, {
   const anonymous = rows.filter(unaddressable).length;
   const unnamed = anonymous
     ? `${anonymous} on-screen control(s) have no accessibility label — they are listed with their`
-      + ' coordinates and can be tapped by point or by #ref, but not by name. If what you are'
+      + ' coordinates and can be tapped by #ref, or by point with tapAt. If what you are'
       + ' looking for is not in the list either, the app has views that were never declared'
       + ' accessible and only a screenshot will find those.'
     : null;

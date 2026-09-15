@@ -2072,6 +2072,79 @@ on."*
    none of the tour's eight selectors trigger a synonym group at all, so that
    branch never executes on this tour.
 
+## Two independent field rounds agreed on the same #1
+
+A second tester, a different real RN app (native-base, RN 0.86), 90 minutes.
+They had no contact with the first, and their top finding is the same one:
+
+> *"the weak link is name→element resolution falling back to OCR when the AX
+> label is a testID, which is the dominant pattern in React Native apps and
+> made `sel`-by-name unusable here."*
+
+Report 1 called it *"the single biggest friction in the session"*; report 2
+called it *"the single largest time sink"*. That is item 152, and their sharper
+diagnosis is worth keeping: the `Visible:` list is OCR-derived while the
+`content:` list is AX-derived, so the reply prints the union and the resolver
+matched only one half of it. Both halves are fixed — `matching.rank` scores the
+identifier, and the `Visible:` list no longer filters to `t.label`.
+
+157. **`sim_do`'s step vocabulary diverged from the tool names.** FIXED,
+   2026-09-15. There is a `sim_wait` tool and a `sim_type_into` tool, so `wait`
+   and `type_into` are what a caller reaches for inside `sim_do` — and both
+   answered `unknown step` without saying what the words are. Each wrong guess
+   cost a round trip and aborted the remaining steps. The tool names are now
+   aliases (`wait`→`settle`, `type_into`→`type`, plus the snake_case forms of
+   the rest), and the error names the whole vocabulary and the nearest match. A
+   surface that calls an action one thing and accepts another is charging the
+   caller for our inconsistency.
+
+158. **`sim_look` returned an image in a third coordinate space and never said
+   so.** FIXED, 2026-09-15. `sim_ui` and `sim_tap` speak 402x874 **points**, the
+   returned image is 322x700 **pixels**, and `simctl io screenshot` is 3x again.
+   Reading a coordinate off the image and tapping it is wrong by **1.248x**,
+   silently, and the tester had to derive the factor from landmarks. The header
+   already printed the frame size; it never said what it was relative to. It now
+   prints both and the divisor.
+
+159. **`sim_scroll_to` called an off-screen element "in view".** FIXED,
+   2026-09-15. Reported: `"Hot Water Heater…" is in view at 201,-35 after 1
+   scroll down` — 35pt above the viewport, and the tap that followed missed.
+   Resolving is not being in view: the tree carries scrolled-away rows with
+   out-of-bounds coordinates, which is the exact case `scrollTo` exists to fix,
+   so claiming success on one is the one answer it must never give. It now
+   requires viewport overlap before reporting success, and reports the direction
+   it **actually** scrolled — the message named the request, which is why a
+   request for "up" came back as "after 1 scroll down".
+
+160. **A hint advertised tapping by point, which the resolver rejects.** FIXED,
+   2026-09-15. `"…can be tapped by point or by #ref"` followed by
+   `FAIL tap: "30,91" is not on this screen`. The hint now says `#ref`, or point
+   via `tapAt`, which is what actually works.
+
+161. **`sim_type` into an unfocused field reports `ok` and does nothing.** OPEN.
+   `ok [1] type: typed text [unconfirmed — no field named, so nothing was read
+   back]` — the text went nowhere and a chained `sim_do` continued on it. The
+   note is honest and it is attached to a green step, which is the part that
+   costs. Same family as 154: a truthful caveat on a false verdict is still a
+   false verdict. Their fix is right — when `sel` names a field, focus it first
+   and fail if it cannot be focused.
+
+162. **The AX list intermittently drops a visible element.** OPEN. An element
+   appeared in `content:` at `215,315` on one read, was absent from the next read
+   of the same sheet with every neighbour still at unchanged coordinates, and was
+   plainly visible in `sim_look` both times. Only a coordinate tap worked. No
+   mechanism yet; recorded with the shape because a tree that drops one row
+   without saying so undermines every `#ref` numbered from it.
+
+163. **Screen-hash collisions on lists that differ only in row text.** OPEN, and
+   simframe self-diagnosed it: *"memory disagrees with this screen: 2 remembered
+   controls not present — this screen has probably been confused with another."*
+   Recurred across customer switches on an asset list. The fingerprint keys on
+   layout skeleton, which is deliberate, and two lists of different rows in the
+   same skeleton are the case that breaks it. Related to the `settings` /
+   `settings-general` pair in CI, from the opposite direction: there the title
+   was the only distinguishing token and it dropped out.
+
 ## What the 0.14.1 field round found
 
 An external tester drove a real React Native production app for ~40 minutes,

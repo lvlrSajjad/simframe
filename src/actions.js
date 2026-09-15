@@ -90,16 +90,49 @@ const ACTION_STEPS = new Set([
   'launch', 'terminate', 'openUrl', 'confirm', 'chooseAny', 'permission',
 ]);
 
+/**
+ * Step keys that are really the MCP tool names, accepted as aliases.
+ *
+ * Two field reports guessed these independently and each wrong guess cost a
+ * round trip and aborted the rest of the batch. There is a `sim_wait` tool and
+ * a `sim_type_into` tool, so `wait` and `type_into` are what a caller reaches
+ * for inside `sim_do` — and the vocabulary answered "unknown step" without
+ * saying what the words are. A tool surface that names an action one way and
+ * accepts it another is charging the caller for our inconsistency.
+ */
+const STEP_ALIASES = Object.freeze({
+  wait: 'settle',
+  type_into: 'type',
+  typeInto: 'type',
+  scroll_to: 'scrollTo',
+  wait_for: 'waitFor',
+  waitfor: 'waitFor',
+  tap_at: 'tapAt',
+  open_url: 'openUrl',
+  assert_gone: 'assertGone',
+  assert_text: 'assertText',
+});
+
+/** Every step key `runStep` understands, for an error that can be acted on. */
+export const STEP_KEYS = Object.freeze([
+  'tap', 'tapAt', 'type', 'paste', 'clear', 'swipe', 'scroll', 'scrollTo',
+  'button', 'key', 'launch', 'terminate', 'openUrl', 'confirm', 'chooseAny',
+  'permission', 'settle', 'waitFor', 'waitText', 'assert', 'assertGone',
+  'assertText', 'visible', 'gone', 'enabled', 'disabled', 'value', 'look',
+  'seek', 'sweep', 'pause',
+]);
+
 /** Accept both `{tap: "Save"}` shorthand and `{action: "tap", target: "Save"}`. */
 export function normalizeStep(raw) {
-  if (typeof raw === 'string') return { action: raw };
-  if (raw.action) return { ...raw };
+  const canonical = (a) => STEP_ALIASES[a] ?? a;
+  if (typeof raw === 'string') return { action: canonical(raw) };
+  if (raw.action) return { ...raw, action: canonical(raw.action) };
   const [key] = Object.keys(raw);
   if (!key) throw new Error('empty step');
   // Siblings like timeoutMs sit alongside the shorthand key and must survive.
   const { [key]: value, ...rest } = raw;
   const inline = value && typeof value === 'object' && !Array.isArray(value) ? value : { value };
-  const step = { ...rest, ...inline, action: key };
+  const step = { ...rest, ...inline, action: canonical(key) };
   // Drop keys that are present but undefined. `simframe tap X` used to pass
   // `index: undefined`, which survived here and then crashed the signature
   // builder before the tap was ever sent.
@@ -2486,11 +2519,47 @@ async function runStep(deviceQuery, udid, step, ctx) {
           return null;
         }
       };
+      /**
+       * Is this target actually on the screen?
+       *
+       * Resolving is not the same as being in view, and this returned `"X" is
+       * in view at 201,-35 after 1 scroll down` — 35pt ABOVE the viewport, so
+       * the tap that followed missed. Reported from the field. The tree carries
+       * scrolled-away rows with out-of-bounds coordinates, which is exactly the
+       * case `scrollTo` exists to resolve, so claiming success on one is the
+       * one answer it must never give.
+       *
+       * Generous rather than strict: any overlap with the viewport counts, so a
+       * row half over an edge is still reachable and still reported. Only a
+       * target entirely outside keeps the search going.
+       */
+      const inViewport = (t) => {
+        const w = points?.width;
+        const h = points?.height;
+        if (!Number.isFinite(w) || !Number.isFinite(h)) return true;
+        const f = t?.frame;
+        if (f && Number.isFinite(f.y) && Number.isFinite(f.height)) {
+          return f.y + f.height > 0 && f.y < h && f.x + (f.width ?? 0) > 0 && f.x < w;
+        }
+        return Number.isFinite(t?.y) && t.y >= 0 && t.y <= h
+          && Number.isFinite(t?.x) && t.x >= 0 && t.x <= w;
+      };
+      // The direction actually scrolled, which is not always the one asked for:
+      // `offsetSays()` may reverse it, and the message used to name the request
+      // rather than the act — reported as "after 1 scroll down" on a request
+      // for "up".
+      const scrolled = [];
       for (let i = 0; i <= max; i += 1) {
         try {
           const found = await api.locate(deviceQuery, query, { index: step.index, refresh: i > 0 });
-          return `"${found.target.label}" is in view at ${found.target.x},${found.target.y}` +
-            (i ? ` after ${i} scroll${i === 1 ? '' : 's'} ${dir}` : ' already');
+          if (!inViewport(found.target)) throw new Error(
+            `"${query}" is in the tree but not in view (at ${found.target.x},${found.target.y}`
+            + ` on a ${Math.round(points?.width ?? 0)}x${Math.round(points?.height ?? 0)}pt screen)`);
+          const how = scrolled.length
+            ? ` after ${scrolled.length} scroll${scrolled.length === 1 ? '' : 's'} `
+              + (new Set(scrolled).size === 1 ? scrolled[0] : scrolled.join(' then '))
+            : ' already';
+          return `"${found.target.label ?? query}" is in view at ${found.target.x},${found.target.y}${how}`;
         } catch (err) {
           if (i === max) {
             throw new Error(`scrolled ${dir} ${max}x without finding ${query}: ${err.message}`);
@@ -2499,6 +2568,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
         const evidence = await offsetSays();
         if (evidence) dir = evidence;
         const wasAt = await hashNow(deviceQuery, ctx.options);
+        scrolled.push(dir);
         await runStep(deviceQuery, udid, { action: 'scroll', value: dir }, ctx);
         // A scroll either moves immediately or not at all, so it does not need a
         // transition's budget. Six iterations at 2,500ms was most of why this
@@ -2763,8 +2833,20 @@ async function runStep(deviceQuery, udid, step, ctx) {
       await sleep(ms);
       return `paused ${ms}ms`;
     }
-    default:
-      throw new Error(`unknown step "${step.action}"`);
+    default: {
+      // Say what the words are. "unknown step" on its own sent two testers
+      // guessing, and a guess costs a round trip and the rest of the batch.
+      const near = STEP_KEYS.filter((k) => {
+        const a = String(step.action ?? '').toLowerCase().replace(/[_-]/g, '');
+        const b = k.toLowerCase();
+        return a && (b.startsWith(a) || a.startsWith(b) || b.includes(a));
+      }).slice(0, 3);
+      throw new Error(
+        `unknown step "${step.action}"`
+        + (near.length ? ` — did you mean ${near.map((k) => `"${k}"`).join(' or ')}?` : '')
+        + ` Valid steps: ${STEP_KEYS.join(', ')}.`,
+      );
+    }
   }
 }
 
