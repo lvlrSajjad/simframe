@@ -323,6 +323,7 @@ boundary hands it frames and nothing above it knows what a simulator is.
 | Clipboard, and `paste` into a field | yes | the emulator's gRPC `setClipboard`, over `node:http2`, no dependency, then `KEYCODE_PASTE` to deliver it |
 | List/resolve devices, launch, terminate, open a URL, permissions | yes | `adb`, with the permission state read back off the device |
 | Accessibility tree | **not available (OCR + CV only)** | `uiautomator dump` costs **2,012 ms** a read, against 45 ms for the iOS tree. See [`docs/DEFERRED.md`](docs/DEFERRED.md) |
+| A launch confirmed to have reached the front | **not available (the launch is not checked)** | iOS compares the pid `simctl launch` printed against the pid the device reports as frontmost, in **2–5 ms**. Nothing here reports either; `am start` fronts synchronously, which is why it has not bitten — but that is not a check. See [`docs/DEFERRED.md`](docs/DEFERRED.md) |
 
 ```bash
 # an emulator is found the same way a simulator is
