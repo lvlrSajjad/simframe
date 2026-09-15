@@ -2511,6 +2511,40 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+166. **`runScript` does not throw on a failed step, and the fingerprint eval
+   only caught throws.** FIXED, 2026-09-15 — and this is the cause behind every
+   "reading taken on the previous screen" failure of the last two days.
+
+   `runScript` returns `ok: !failed`. The eval wrapped it in `try/catch`, which
+   catches a step that *threw* and not a step that *failed* — so a tour whose
+   `waitFor` timed out was treated as having arrived: `navigatedAt` was set, the
+   previous screen was read, and the arrival check reported it as a fingerprint
+   result. Every diagnosis downstream of that was reasoning about the wrong
+   thing, mine included.
+
+   **The diagnostic from 165 found it on its first run**, which is the argument
+   for having added it rather than guessing once more:
+
+   ```
+   settings-general -> settings-accessibility: similarity 1.00
+     the tour's own steps: ok launch — launched com.apple.Preferences (relaunched)
+                           FAIL waitFor
+   ```
+
+   A failed step sitting directly under a reading the harness had accepted. The
+   second stray in the same report shows the knock-on: `settings`'s own steps
+   both passed and its reading was *correct* — it looked wrong only because the
+   entry before it had silently failed.
+
+   A tour that did not arrive is a precondition, not a measurement, so it now
+   throws into the same handler as a step that threw: same report, same
+   readings written out first.
+
+   **Underneath it is still capture starvation** — frames **19,738 ms**,
+   **19,463 ms** and **26,913 ms** old in that run, which is why the waits timed
+   out at all. That is the wedge, on a runner, and it is 164's bound doing its
+   job by refusing to score those frames rather than a thing 166 fixes.
+
 165. **The CI wrong turn does not reproduce locally, and the harness was
    discarding the one line that would settle it.** Diagnostic added,
    2026-09-15; cause still OPEN.

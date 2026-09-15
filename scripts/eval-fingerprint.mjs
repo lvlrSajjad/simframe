@@ -248,6 +248,24 @@ for (let round = 1; round <= rounds; round += 1) {
           ms: r.ms,
           detail: typeof r.detail === 'string' ? r.detail.slice(0, 200) : null,
         }));
+        // **`runScript` does not throw on a failed step** — it returns
+        // `ok: !failed` — and this only ever caught throws. So a tour whose
+        // `waitFor` timed out was treated as having arrived: `navigatedAt` was
+        // set, the previous screen was read, and the arrival check then reported
+        // it as a fingerprint result. Three CI failures were that, and the
+        // diagnostic added one commit earlier is what showed it —
+        // `ok launch … / FAIL waitFor` sitting under a reading the harness had
+        // accepted.
+        //
+        // A tour that did not arrive is a precondition, not a measurement. It
+        // throws into the same handler as a step that threw, so the report is
+        // identical and the readings so far are still written out.
+        if (run && run.ok === false) {
+          const bad = (run.results ?? []).find((r) => r.ok === false);
+          throw new Error(
+            `step ${bad?.action ?? '?'} did not succeed: ${bad?.error ?? 'no reason given'}`,
+          );
+        }
         navigatedAt = Date.now();
       } catch (err) {
         save({ abandonedAt: { screen: screen.name, round, error: err.message } });
