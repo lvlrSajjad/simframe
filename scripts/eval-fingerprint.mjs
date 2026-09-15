@@ -20,6 +20,7 @@
 import fs from 'node:fs';
 import * as actions from '../src/actions.js';
 import * as fingerprint from '../src/fingerprint.js';
+import { classifyStray } from './classify-stray.mjs';
 import * as graph from '../src/graph.js';
 import * as api from '../src/index.js';
 
@@ -506,6 +507,17 @@ function findStrays(all) {
 }
 
 const strays = findStrays(readings);
+// Readings grouped by screen, for the classification below.
+//
+// `findStrays` builds this too and it is LOCAL to that function — so reaching
+// for it here threw `byName is not defined` on a runner, in the middle of the
+// report, after the strays had already been printed. I had validated the
+// classification against a saved artifact in a standalone script, where I had
+// declared it myself, and never once in place. The logic was right and the
+// integration was never run: the unit tests do not reach this file at all.
+const readingsByName = new Map();
+for (const r of readings) readingsByName.set(r.name, [...(readingsByName.get(r.name) ?? []), r]);
+
 if (strays.length) {
   console.error(`\nFAIL ${strays.length} reading(s) do not resemble their own screen:`);
   // Two causes wear the same symptom, and until now the report asserted the
@@ -519,7 +531,14 @@ if (strays.length) {
   for (const { reading, bestSelf, bestOther, match } of strays) {
     const named = namedTokens(reading.tokens);
     const matchNamed = match ? namedTokens(match.tokens) : [];
-    const collided = bestOther >= 0.99 && named.length === 0 && matchNamed.length === 0;
+    // One classifier, one source of truth. `collided` was computed here as well
+    // and the two could drift — which is how this block came to have a third
+    // cause landing in the wrong bucket in the first place.
+    const { collided, underRead, wrongScreen } = classifyStray({
+      reading, match, bestOther, named, matchNamed,
+      siblings: readingsByName.get(reading.name) ?? [],
+      wasSparse: sparseAt.has(`${reading.name}|${reading.round}`),
+    });
     if (collided) collisions += 1;
     // The third cause, and the one that produced this report on 2026-09-15.
     //
@@ -549,10 +568,6 @@ if (strays.length) {
     // distinguishable and a round matching another screen exactly went
     // somewhere else. Only when no round of this screen can tell itself apart
     // is "we did not look long enough" the honest reading.
-    const distinguishable = (byName.get(reading.name) ?? [])
-      .some((o) => o !== reading && fingerprint.similarity(o.tokens, match?.tokens ?? []) < 0.99);
-    const underRead = sparseAt.has(`${reading.name}|${reading.round}`) && !distinguishable;
-    const wrongScreen = bestOther >= 0.99 && distinguishable;
     console.error(`       ${reading.name} r${reading.round}: own screen ${bestSelf.toFixed(2)}, `
       + `${match ? `${match.name} r${match.round}` : 'another screen'} ${bestOther.toFixed(2)} `
       + `(${reading.count} tokens, ${named.length} named, sources ${reading.sources.join('+') || 'none'})`);

@@ -1462,6 +1462,80 @@ test('an accessibility identifier is a name the resolver will accept', async () 
   assert.equal(m.resolve([field, other], 'Email', { screen }).target.label, 'Email');
 });
 
+test('a stray reading is classified by cause, because the causes have different fixes', async () => {
+  const { classifyStray } = await import('../scripts/classify-stray.mjs');
+  // This logic crashed on a runner TWICE while being correct — once reaching
+  // for a variable local to another function, once on declaration order — and
+  // nothing could test it because eval-fingerprint.mjs runs the whole eval on
+  // import. Hence its own module, and hence this test.
+  //
+  // The data is the real CI failure of 2026-09-15: `settings-general` r3 came
+  // back byte-identical to the Settings root, while r1 and r2 read richly and
+  // differently. The root legitimately reads 4 tokens on a runner, so the stray
+  // was flagged sparse too — and sparseness alone used to claim "under-read",
+  // which blamed our instrument for a tour that had gone somewhere else.
+  const rootTokens = [
+    'button:content:w15:h2:x1:y12#many',
+    'button:content:w15:h4:x1:y7#1',
+    'heading:nav-bar:@leading:w6:h2:"settings":x1:y5#1',
+    'text:content:w3:h1:x2:y34#1',
+  ];
+  const generalTokens = [
+    'button:content:w15:h2:x1:y16#many',
+    'button:nav-bar:@leading:w2:h2:"settings":x1:y3#1',
+    'heading:content:w14:h4:x2:y11#1',
+    'heading:content:w3:h1:x2:y9#1',
+    'text:content:w1:h1:x2:y17#many',
+  ];
+  const r3 = { name: 'settings-general', round: 3, tokens: rootTokens };
+  const siblings = [
+    { name: 'settings-general', round: 1, tokens: generalTokens },
+    { name: 'settings-general', round: 2, tokens: generalTokens },
+    r3,
+  ];
+  const match = { name: 'settings', round: 1, tokens: rootTokens };
+
+  const wrong = classifyStray({
+    reading: r3, match, bestOther: 1, siblings, wasSparse: true,
+    named: ['heading:nav-bar:"settings"'], matchNamed: ['heading:nav-bar:"settings"'],
+  });
+  assert.equal(wrong.wrongScreen, true, 'identical tokens + a screen that reads differently elsewhere = a wrong turn');
+  assert.equal(wrong.underRead, false, 'and it must NOT be blamed on a short look');
+  assert.equal(wrong.collided, false);
+
+  // A screen that cannot tell itself apart in ANY round is the honest
+  // under-read: there is no evidence it is distinguishable at all.
+  const allSparse = [
+    { name: 'thin', round: 1, tokens: rootTokens },
+    { name: 'thin', round: 2, tokens: rootTokens },
+  ];
+  const under = classifyStray({
+    reading: allSparse[0], match, bestOther: 1, siblings: allSparse, wasSparse: true,
+    named: ['x'], matchNamed: ['y'],
+  });
+  assert.equal(under.underRead, true);
+  assert.equal(under.wrongScreen, false);
+
+  // A genuine fingerprint collision — neither side carries a chrome label, so
+  // nothing in either reading could have named a destination. That is this
+  // harness's own subject and outranks the other two.
+  const collision = classifyStray({
+    reading: r3, match, bestOther: 1, siblings, wasSparse: true, named: [], matchNamed: [],
+  });
+  assert.equal(collision.collided, true);
+  assert.equal(collision.wrongScreen, false, 'a collision is not a wrong turn');
+  assert.equal(collision.underRead, false);
+
+  // And a stray that resembles nothing in particular is none of the three.
+  const weak = classifyStray({
+    reading: { name: 'browser', round: 1, tokens: ['a'] }, match: null, bestOther: 0,
+    siblings: [{ name: 'browser', round: 2, tokens: ['b'] }], wasSparse: false,
+  });
+  assert.equal(weak.collided, false);
+  assert.equal(weak.wrongScreen, false);
+  assert.equal(weak.underRead, false);
+});
+
 test('a control whose value changed did something, whatever the pixels say', async () => {
   const actions = await import('../src/actions.js');
   // Item 154. A switch flip is eight times below the frame-change threshold
