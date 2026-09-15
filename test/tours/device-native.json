@@ -120,7 +120,7 @@
   },
   {
     "name": "settings-accessibility",
-    "note": "The other half of that pair.",
+    "note": "The other half of that pair. Arrival waits for EITHER \"VoiceOver\" or \"Display & Text Size\", because VoiceOver is not reliably above the fold: on a runner's iOS the Accessibility screen read Settings, Accessibility, Vision, Hover Text, Display & Text Size, Motion, Spoken Content … Hearing, with no VoiceOver on it at all, and the tour waited 8000ms for something below the scroll. The two landmarks in this entry's own `intents` were in that list the whole time — the arrival test was asking for a label the entry itself did not rely on.",
     "steps": [
       {
         "launch": {
@@ -135,7 +135,13 @@
         "tap": "Accessibility"
       },
       {
-        "waitFor": "VoiceOver"
+        "waitFor": {
+          "any": [
+            "VoiceOver",
+            "Display & Text Size"
+          ],
+          "timeoutMs": 15000
+        }
       }
     ],
     "intents": [

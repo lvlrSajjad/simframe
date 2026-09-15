@@ -2511,6 +2511,34 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+168. **The tour waited for a label below the fold.** FIXED, 2026-09-15, and
+   this is where the chain bottoms out in a real tour fault rather than another
+   instrument bug.
+
+   With 166 reporting honestly and 167 classifying correctly, the guard revived
+   the device once — *"a launched app never came to the front … Reviving once and
+   running again"* — and the rerun then failed on something the guard **rightly
+   refused** to revive, because the screen was full of labels:
+
+   ```
+   "settings-accessibility" never arrived: waited 8000ms for VoiceOver:
+     "VoiceOver" is not on this screen.
+     Visible: Settings, Accessibility, Vision, Hover Text, Display & Text Size,
+              Motion, Spoken Content, … Hearing
+   ```
+
+   That is unmistakably the Accessibility screen, and VoiceOver is not on it: on
+   this runner's iOS it sits below the fold. The entry's own `intents` are
+   `Display & Text Size` and `Spoken Content` — **both in that list** — so the
+   tour already knew which landmarks were reliable there and was asserting
+   arrival on one it did not rely on.
+
+   Arrival now accepts either, so it holds whether or not VoiceOver is above the
+   scroll. Note the shape of the mistake, because it is the same one as the
+   `browser` entry two items earlier: **arrival was tested against something the
+   screen might not show, and that is a different question from "are we
+   there".**
+
 167. **A launched app that never comes to the front was classified as a check
    failing on its merits.** FIXED, 2026-09-15. With 166 in place the harness
    finally told the truth about the run, and the truth was about the device:
