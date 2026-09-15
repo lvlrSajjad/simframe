@@ -119,11 +119,42 @@ jobs:
   # The job that would have caught what the unit tests could not: install the
   # tarball the way a user does, on a real simulator, and refuse to pass if any
   # layer has quietly degraded.
-  integration:
+  # Two shards, because the two device-bound steps are most of a 22-minute job
+  # and ran one after the other for no reason but that they were written that
+  # way. Measured on run 34909960523: fingerprint **588s**, memory layer
+  # **362s**, everything else ~360s. Sequential that is 1334s; in parallel the
+  # critical path is the longer shard plus its own setup, ~867s.
+  #
+  # Two runners rather than one, which is free here and only here: this repo is
+  # public, so Actions minutes are not billed, and macOS queue time measured
+  # 6-8s across several runs. On a private repo macOS bills at 10x and this
+  # trade would be the wrong way round, so the reason is written down rather
+  # than left as an obvious-looking default.
+  #
+  # They cannot share a device: one writer per device is a design invariant, not
+  # a convenience. So each shard boots its own, which also means a wedge takes
+  # out half a run instead of all of it.
+  #
+  # **This is the second attempt.** The first (873e86c) was reverted after going
+  # 0-for-3, and the reason was not the sharding: the fingerprint eval was
+  # living off a warm-up it never asked for — the memory layer drives the same
+  # apps for hundreds of seconds and left Safari warm — while `simctl`'s own
+  # budget was 20s against launches this repo had measured at 47-55s. Items 146
+  # and 147 fixed both causes, and the run that proved it read all 18 readings
+  # identical across three rounds with a worst same-screen revisit of 1.00. The
+  # order matters and it is the lesson: fix the causes, then add the
+  # parallelism. Doing it the other way round is what cost the first attempt.
+  integration-shard:
+    name: integration (${{ matrix.shard }})
     runs-on: macos-15
     # 25 was the bound before the fingerprint distributions were measured here;
     # eighteen cold perception passes on a runner with no GPU need the rest.
+    # Still 40: a shard is shorter, but a shard that hangs hangs the same way.
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [memory, fingerprint]
     env:
       SIMFRAME_STRICT: '1'
     steps:
@@ -290,6 +321,7 @@ jobs:
           '
 
       - name: A step runs, and capture notices the screen change
+        if: matrix.shard == 'memory'
         # This step has been wrong three times, and every wrong version failed
         # for a reason outside the thing being tested:
         #
@@ -381,6 +413,7 @@ jobs:
           ' "$BEFORE" "$AFTER"
 
       - name: The memory layer — screen map, refs, graph, verdicts, flows
+        if: matrix.shard == 'memory'
         # Everything the integration job asserted until now was capture, input
         # and OCR. The layer above them had no coverage at all, and it is where
         # every expensive bug in this project has lived: a state version that
@@ -398,6 +431,7 @@ jobs:
         run: node scripts/ci-device-guard.mjs "$DEVICE" -- node scripts/ci-memory.mjs --device="$DEVICE"
 
       - name: The fingerprint distributions, measured and bounded
+        if: matrix.shard == 'fingerprint'
         # The threshold that decides whether two readings are the same screen is
         # a measured artifact, and it was being re-measured by a person noticing
         # that a number had moved. It moved from 0.65 to 0.42 in one afternoon
@@ -435,7 +469,9 @@ jobs:
         # rather than as today's number. The file carries every reading's tokens
         # and elements, which is what makes a narrowing diagnosable after the
         # fact instead of only while it is happening.
-        if: always()
+        # `always()` so a FAILING run still uploads its readings — that is the
+        # run whose evidence matters — but only on the shard that produces them.
+        if: always() && matrix.shard == 'fingerprint'
         uses: actions/upload-artifact@v4
         with:
           name: fingerprint-distributions
@@ -476,6 +512,33 @@ jobs:
   # what research §1 says it is for: a trend on a known device, not a per-commit
   # gate. When one of the three ways out in DEFERRED lands (a self-hosted box is
   # the real one), this can go back on the push path and mean something.
+  # The name the branch ruleset requires, and the only reason this job exists.
+  #
+  # `main` has an active ruleset requiring a status check called exactly
+  # `integration`. Sharding renames the jobs that do the work to
+  # `integration (memory)` and `integration (fingerprint)`, which that rule does
+  # not match — so without this the required check would never report and the
+  # gate would be silently gone. That is the same failure mode as a green tick
+  # on a job that ran nothing.
+  #
+  # `always()` plus an explicit result test, NOT `needs` alone: a needed job that
+  # is skipped or cancelled counts as satisfied, so a gate that only depended on
+  # the shards would pass when they never ran. It caught a real shard failure on
+  # its first outing.
+  integration:
+    needs: [integration-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every integration shard passed
+        run: |
+          result='${{ needs.integration-shard.result }}'
+          echo "integration shards: $result"
+          if [ "$result" != "success" ]; then
+            echo "::error::integration shards did not pass (result: $result)"
+            exit 1
+          fi
+
   bench:
     if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-15

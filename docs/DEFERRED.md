@@ -2169,7 +2169,7 @@ on."*
    Safari problem is worth fixing rather than routing around.
 
 144. **Sharding the integration job made CI 51% faster and 0-for-3 reliable.**
-   REVERTED, 2026-09-14. Kept here because the measurements are good and the
+   REVERTED 2026-09-14, **re-applied 2026-09-15** once the causes were fixed. Kept here because the measurements are good and the
    next attempt should start from them rather than re-derive them.
 
    **The prize is real.** Integration is the whole critical path — the three
@@ -2224,6 +2224,21 @@ on."*
    by the neighbour that runs first. An explicit warm-up pass (launch each tour
    app once, take no readings) is the obvious candidate and is **not** tuning to
    pass: it removes a variable the eval never intended to measure.
+
+   **Second attempt, 2026-09-15.** Not a retry of the same thing: 146 (simctl's
+   20s budget against 47-55s launches, and a timeout that did not say it was
+   one) and 147 (the warm-up) landed first, and the run that proved them read
+   **all 18 readings identical across three rounds**, worst same-screen revisit
+   **1.00**, zero simctl timeouts. Only then was the parallelism re-applied, and
+   only the parallelism — the boot-overlap "optimisation" from the first attempt
+   was left out, because item 146 explains those launch failures entirely and it
+   only ever bought 17s. Re-measured on the green run: fingerprint 588s, memory
+   362s (down from 504s once `openurl` left the graph loop), everything else
+   ~360s, so the projected critical path is ~867s against 1334s.
+
+   **The lesson is the ordering, and it is the whole entry.** Adding parallelism
+   first *exposed* two real defects and then got blamed for them. Fixing the
+   causes first made the same change unremarkable.
 
    **The rule this run bought:** an unreliable gate is worse than a slow one.
    The revert restores a CI that is 22 minutes and green, over one that is 11
