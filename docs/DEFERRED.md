@@ -2511,6 +2511,31 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+170. **A CLI that dies with empty stdout is not classified as a device
+   failure.** OPEN. `simframe do <flow> --save=… --force --json` returned
+   **nothing at all** on a runner:
+
+   ```
+   Error: simframe do … --json did not return JSON:
+   ```
+
+   Empty stdout means the process died before it printed, so the stack trace
+   went to stderr and the harness saw an empty string. `ci-device-guard.mjs`
+   then said *"failed on its merits, not on the device — not retrying"*, because
+   none of its signatures match *silence*.
+
+   **Not a regression from 145.** The exact command was run locally against the
+   same flow — `launch com.apple.Preferences (relaunch)` + `button home`, saved
+   with `--force` — and returned valid JSON, `ok: true`, 2/2 steps. So the flow
+   shape is fine and this is the device or the daemon dying under load, which is
+   the 169 family again.
+
+   Two things worth doing, neither done here: the guard should treat *no output
+   at all* as a device-state candidate rather than a check failure, since a
+   check that fails has something to say; and `jsonRetry` should surface the
+   **stderr** it is currently discarding, because the stack trace that would
+   name the cause was written and thrown away.
+
 169. **`launch` reports success without bringing the app to the front.** OPEN,
    and it is shipped-code rather than harness. The sixth distinct cause behind
    one CI symptom, and the first that is about simframe rather than about the
