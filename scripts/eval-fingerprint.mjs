@@ -558,17 +558,25 @@ if (strays.length) {
   // label while matching one particular other screen almost exactly, and a
   // wrong turn is one whose tokens name a screen the tour did not ask for.
   let collisions = 0;
+  // Kept so the SUMMARY agrees with the lines above it. It did not: the summary
+  // tested `sparseAt` directly while each line used the classifier, so a stray
+  // correctly labelled WRONG SCREEN was followed by "every stray above was
+  // UNDER-READ". A report that contradicts itself in consecutive paragraphs is
+  // worse than either sentence alone.
+  const verdicts = [];
   for (const { reading, bestSelf, bestOther, match } of strays) {
     const named = namedTokens(reading.tokens);
     const matchNamed = match ? namedTokens(match.tokens) : [];
     // One classifier, one source of truth. `collided` was computed here as well
     // and the two could drift — which is how this block came to have a third
     // cause landing in the wrong bucket in the first place.
-    const { collided, underRead, wrongScreen } = classifyStray({
+    const verdict = classifyStray({
       reading, match, bestOther, named, matchNamed,
       siblings: readingsByName.get(reading.name) ?? [],
       wasSparse: sparseAt.has(`${reading.name}|${reading.round}`),
     });
+    const { collided, underRead, wrongScreen } = verdict;
+    verdicts.push(verdict);
     if (collided) collisions += 1;
     // The third cause, and the one that produced this report on 2026-09-15.
     //
@@ -621,10 +629,16 @@ if (strays.length) {
     console.error(`\n${collisions} of ${strays.length} are fingerprint collisions. That is this harness's own subject,`);
     console.error('not a tour fault: a reading whose chrome label went missing cannot establish');
     console.error('identity, and comparing it as though it could is what produced the verdict above.');
-  } else if (strays.every((x) => sparseAt.has(`${x.reading.name}|${x.reading.round}`))) {
+  } else if (verdicts.length && verdicts.every((v) => v.underRead)) {
     console.error('\nEvery stray above was UNDER-READ, so this says nothing about the tour or the');
     console.error('fingerprint — the harness scored a look that was too short. The retries are in');
     console.error('SPARSE_READ_RETRIES; a runner that needs more than they allow is the finding.');
+  } else if (verdicts.some((v) => v.wrongScreen)) {
+    const n = verdicts.filter((v) => v.wrongScreen).length;
+    console.error(`\n${n} stray(s) were read on the WRONG SCREEN — the tokens match another screen`);
+    console.error('exactly while this one reads differently in its other rounds, so it is');
+    console.error('distinguishable and the tour was somewhere else. Not a fingerprint result:');
+    console.error('a tap that missed, or a screen that went back before it was read.');
   } else {
     console.error('\nThat is the tour going somewhere unintended, not the fingerprint drifting, and');
     console.error('measuring it as either distribution poisons both ends. Fix the tour — a tap that');
