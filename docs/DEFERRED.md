@@ -2183,8 +2183,19 @@ worth more than the verdict.
    it: *"I came within one command of filing this report against the wrong
    binary."* A release cut before a change is not a release of that change, and
    nothing in the pipeline compares what is tagged against what is being asked
-   for. Cheap guard, not yet built: when handing someone a version to test,
-   diff the tarball against the commit first.
+   for, and the release workflow cannot: it checks that the tag, `package.json`
+   and `server.json` agree, which they did. The gap is between the tag and
+   whatever lands after it.
+
+   **Guard built, 2026-09-15: `scripts/check-published.mjs`.** It fetches the
+   published tarball and compares every shipped source file against the working
+   tree — deliberately the tree and not a tag, because the question is "is what
+   I am about to ask someone to install the code I am looking at", which a tag
+   cannot answer. Verified against the incident: `0.14.1` reports **8 shipped
+   files differing** and exits 1. An unpublished version exits **2**, because
+   "nothing was compared" is a different answer from "it differs" and must never
+   read as a match. `package.json` is excluded — npm rewrites it on publish, so
+   byte equality there would be a permanent false alarm.
 
 150. **`sim_storage` silently missed AsyncStorage on every modern RN app.**
    FIXED, 2026-09-15. The reader looked only in `Documents/RCTAsyncLocalStorage_V1`
