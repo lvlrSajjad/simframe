@@ -2230,7 +2230,8 @@ worth more than the verdict.
    tester singled out as a genuinely good signal.
 
 154. **`no-visible-change` is now actively dangerous on the controls 148
-   fixed.** OPEN, and the field round sharpens it beyond what DEFERRED 4 said.
+   fixed.** FIXED, 2026-09-15. The field round sharpened it beyond what
+   DEFERRED 4 said.
    Measured: a UIKit switch flip by label reported `no-visible-change` at 185 ms
    while the response itself printed the value changing `0` → `1`; by ref, 245 ms,
    `1` → `0`; a radio selection move, 615 ms. A link tap in the same session
@@ -2242,6 +2243,44 @@ worth more than the verdict.
    reads to decide whether to retry, and **a retry silently un-flips the
    toggle.** While the tap missed, the verdict was true and harmless. Now that
    the tap lands, it is false and destructive.
+
+   **Fixed as wiring, not calibration.** DEFERRED 4 concluded "a calibration
+   question rather than a wiring one" and that was true of the *motion grid*. It
+   is not true of the element list: the values are already read on both sides of
+   the action for verification, so `stateDelta()` compares them for nothing on
+   the device. A control whose `value` or `selected` changed did something,
+   whatever the frame hash says.
+
+   Three things the implementation had to get right, and two of them bit first.
+
+   - **Both routes, not one.** `no-visible-change` arrives from the pixel
+     detector *and* from the fingerprint agreeing we are on the same screen. The
+     first version guarded only the pixel side, and the reported case came
+     through the other: the radio move settled in 2714 ms with `sawChange` true,
+     so `settled.noVisibleChange` was false and the verdict came from the
+     fingerprint.
+   - **Declaration order.** `changedState` sat below the `wentNowhere` that
+     reads it — a `const` in the temporal dead zone, which throws on first use.
+     The unit tests were green because nothing without a device reaches that
+     line, which is the same trap the `afterReading` comment three lines above
+     already records.
+   - **It is `unverified`, not `ok`.** The screen genuinely did not become a
+     different screen, and claiming a transition that did not happen would be
+     the opposite error.
+
+   Verified on a device, on the reporter's own case: a radio moving `Top` →
+   `Inline` went from `(settled 2714ms) [no-visible-change]` to
+   `[the screen did not move, but "Bottom" changed from "false" to "true" — the
+   action worked; do not retry it, or you will undo it] (settled 616ms)
+   [unverified]`. The 616 ms matches the 615 ms they measured. Identity across
+   the two readings goes by identifier, then label, then type-and-place, so a
+   row that *moved* is not a control that *changed*; and the message names the
+   control that turned **on**, because a radio changes two rows and "Inline
+   changed from true to false" reads like a loss.
+
+   The switch case did not reproduce on this laptop — four flips all settled
+   with the change detected — so the fix is proven on the radio and reasoned on
+   the switch. Same mirror problem as always.
 
 155. **RN text nodes report `origin + 1pt` as their activation point.** OPEN,
    not reproduced as a failure. Measured across every RN `StaticText`: iOS

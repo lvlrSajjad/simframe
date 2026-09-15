@@ -732,7 +732,10 @@ export async function runScript(
         // eight times below its threshold, so it reads as no-visible-change and
         // its edge is no longer recorded. That is the right trade while the
         // detector cannot see it, and it comes back on its own once it can.
-        const noEvidence = Boolean(settled?.noVisibleChange);
+        // A changed control IS evidence, whatever the frame hash says. Without
+        // this the edge is not recorded either, so a toggle that worked teaches
+        // the graph nothing and stays unpredictable forever.
+        const noEvidence = Boolean(settled?.noVisibleChange) && !stateDelta(beforeScreen?.entry, afterReading?.entry);
         if (afterScreen.confirmed && afterScreen.hash && !noEvidence) {
           // The observed cost of this transition, which is what makes the next
           // one adaptive. Only from a settle that was actually satisfied: a
@@ -788,7 +791,22 @@ export async function runScript(
       // first — and six swipes reporting "no visible change" is what item 120
       // was reported against. Keying on one of them would have shipped a fix
       // that did not fire on its own bug report.
-      const wentNowhere = Boolean(settled?.noVisibleChange) || verification?.verdict === 'no-visible-change';
+      // Declared BEFORE `wentNowhere`, which reads it. It sat below and the
+      // unit tests were green because nothing without a device reaches this
+      // line — a `const` in the temporal dead zone throws on first use, which
+      // is the same trap the `afterReading` comment above records.
+      //
+      // Computed on EITHER signal, because they are two different sensors and
+      // the reported case came through the one this first version missed: the
+      // radio move settled in 2714ms with `sawChange` true, so
+      // `settled.noVisibleChange` was false and the verdict came from the
+      // fingerprint instead.
+      const changedState = (settled?.noVisibleChange || verification?.verdict === 'no-visible-change')
+        ? stateDelta(beforeScreen?.entry, afterReading?.entry)
+        : null;
+      if (changedState) verification = stateChanged(verification, changedState);
+      const wentNowhere = !changedState
+        && (Boolean(settled?.noVisibleChange) || verification?.verdict === 'no-visible-change');
       const aimNote = wentNowhere && aim.at
         ? screenmap.describePoint(
           // `beforeScreen` is null with verification off, and that is exactly
@@ -802,7 +820,9 @@ export async function runScript(
       const note = launchNote
         + (filling ? ` [settled, but ${filling} — waitFor content, do not act on this yet]` : '')
         + (settled?.smallChange ? ' [a small change, in one region only]' : '')
-        + (settled?.noVisibleChange ? ' [no visible change]' : '')
+        + (changedState
+          ? ` [the screen did not move, but ${changedState.detail} — this worked, do not retry]`
+          : (settled?.noVisibleChange ? ' [no visible change]' : ''))
         // After the symptom, because it is the explanation of it.
         + (aimNote ? ` [${aimNote}]` : '')
         + (settled?.staleBaseline ? ' [baseline had already settled; re-taken from the live screen]' : '')
@@ -1591,6 +1611,37 @@ async function confirmNoChange(deviceQuery, verification, { beforeScreen, option
       + ` (${beforeScreen.hash.slice(0, 8)} → ${again.hash.slice(0, 8)})`
       + ' — a web view or a slow list can render after a settle has reported it still',
     lateArrival: again,
+  };
+}
+
+/**
+ * A control that changed state is not a step that did nothing.
+ *
+ * The sibling of `belowThreshold` on the same verdict, for the other kind of
+ * evidence. `no-visible-change` arrives by two routes — the pixel detector and
+ * the fingerprint agreeing we are on the same screen — and a switch or a radio
+ * satisfies both while having plainly worked. Measured on a device: a radio
+ * moving from "Top" to "Inline" reported `(settled 2714ms)
+ * [no-visible-change]` with `selected` moving between the two rows in the
+ * element list either side of it.
+ *
+ * This is the verdict an agent reads to decide whether to retry, and after item
+ * 148 made the tap actually land, a retry undoes the thing that worked. So the
+ * verdict carries the evidence rather than contradicting it.
+ *
+ * Still not `ok`: the screen genuinely did not become a different screen, and
+ * claiming a transition that did not happen would be the opposite error. It
+ * becomes `unverified` — the verdict this project uses for "something happened
+ * and nobody can vouch for what" — with the change named.
+ */
+export function stateChanged(verification, delta) {
+  if (verification?.verdict !== 'no-visible-change' || !delta) return verification;
+  return {
+    ...verification,
+    verdict: 'unverified',
+    detail: `the screen did not change, but ${delta.detail}`
+      + ' — the action worked; do not retry it, or you will undo it',
+    stateDelta: delta,
   };
 }
 
@@ -2848,6 +2899,66 @@ async function runStep(deviceQuery, udid, step, ctx) {
       );
     }
   }
+}
+
+/**
+ * What changed in the controls, when the pixels say nothing did.
+ *
+ * `settle()` decides `noVisibleChange` from frame hashes alone, and a control
+ * that flips is eight times below the change threshold (DEFERRED 4, measured on
+ * a switch: 0.00049 peak against 0.004). So a switch that genuinely flipped is
+ * reported as an action that did nothing — with the changed value printed in the
+ * same response.
+ *
+ * **That verdict became dangerous the moment item 148 made the tap land.** While
+ * the tap missed the frame centre, `no-visible-change` was true and harmless.
+ * Now the tap actuates, and `no-visible-change` is what an agent reads to decide
+ * whether to retry — so a retry silently un-flips the toggle. An external
+ * tester made exactly that point about my own commit message, which had claimed
+ * the verdict "was telling the truth".
+ *
+ * This is wiring, not calibration. The element values are already in hand on
+ * both sides of the action — `beforeScreen.entry` and the after-reading are read
+ * for verification anyway — so the comparison costs nothing on the device. A
+ * control whose value or selected state changed did something, whatever the
+ * frame hash says.
+ *
+ * Identity across the two readings goes by identifier, then label, then
+ * type-and-place: a row that moved is not the same reading of the same control,
+ * and pretending otherwise would invent changes.
+ */
+export function stateDelta(beforeEntry, afterEntry) {
+  const keyOf = (t) => t.identifier || t.label || `${t.type ?? '?'}@${Math.round(t.x ?? 0)},${Math.round(t.y ?? 0)}`;
+  const stateOf = (t) => `${t.value ?? ''}|${t.selected ?? ''}`;
+  const before = new Map();
+  for (const t of beforeEntry?.targets ?? []) {
+    if (t.value == null && t.selected == null) continue;
+    before.set(keyOf(t), { state: stateOf(t), target: t });
+  }
+  if (!before.size) return null;
+  const changes = [];
+  for (const t of afterEntry?.targets ?? []) {
+    if (t.value == null && t.selected == null) continue;
+    const was = before.get(keyOf(t));
+    if (!was || was.state === stateOf(t)) continue;
+    changes.push({
+      name: t.label || t.identifier || keyOf(t),
+      from: was.target.value ?? was.target.selected,
+      to: t.value ?? t.selected,
+    });
+  }
+  if (!changes.length) return null;
+  // Name the control that turned ON, not the one that turned off. A radio move
+  // changes two rows and reporting "Inline changed from true to false" is
+  // accurate and reads like a loss — the useful half is what is selected now.
+  const on = (v) => v === true || v === 'true' || v === '1';
+  const first = changes.find((c) => on(c.to) && !on(c.from)) ?? changes[0];
+  return {
+    count: changes.length,
+    detail: `${JSON.stringify(String(first.name).slice(0, 32))} changed from `
+      + `${JSON.stringify(String(first.from))} to ${JSON.stringify(String(first.to))}`
+      + (changes.length > 1 ? ` (and ${changes.length - 1} other control(s))` : ''),
+  };
 }
 
 /**

@@ -1462,6 +1462,53 @@ test('an accessibility identifier is a name the resolver will accept', async () 
   assert.equal(m.resolve([field, other], 'Email', { screen }).target.label, 'Email');
 });
 
+test('a control whose value changed did something, whatever the pixels say', async () => {
+  const actions = await import('../src/actions.js');
+  // Item 154. A switch flip is eight times below the frame-change threshold
+  // (item 4, measured: 0.00049 against 0.004), so settle() reports
+  // no-visible-change over a control that flipped — and prints the changed
+  // value in the same response. That was harmless while the tap missed the
+  // frame centre. Item 148 made the tap land, so the verdict is now false AND
+  // it is what an agent reads to decide whether to retry: a retry un-flips it.
+  const before = { targets: [{ identifier: 'toggle-a', label: 'Hover Text', type: 'Switch', value: '0', x: 337, y: 161 }] };
+  const after = { targets: [{ identifier: 'toggle-a', label: 'Hover Text', type: 'Switch', value: '1', x: 337, y: 161 }] };
+
+  const d = actions.stateDelta(before, after);
+  assert.ok(d, 'a flipped switch must register as a change');
+  assert.equal(d.count, 1);
+  assert.match(d.detail, /"Hover Text" changed from "0" to "1"/);
+
+  // Unchanged is unchanged — this must not invent evidence, or every
+  // no-visible-change becomes a false pass.
+  assert.equal(actions.stateDelta(before, before), null);
+  assert.equal(actions.stateDelta(before, { targets: [] }), null);
+  assert.equal(actions.stateDelta(null, after), null, 'with nothing to compare against, no claim');
+
+  // A control with no state at all contributes nothing either way.
+  const plain = { targets: [{ label: 'Save', type: 'Button', x: 10, y: 10 }] };
+  assert.equal(actions.stateDelta(plain, plain), null);
+
+  // Identity is by identifier, then label, then type-and-place. A row that
+  // MOVED is a different reading, not a changed control — otherwise a scrolled
+  // list would report every row as having changed.
+  const moved = { targets: [{ label: 'Hover Text', type: 'Switch', value: '1', x: 337, y: 400 }] };
+  const unnamed = { targets: [{ type: 'Switch', value: '0', x: 337, y: 161 }] };
+  assert.equal(actions.stateDelta(unnamed, moved), null, 'a control that moved is not a control that changed');
+
+  // Several changes are summarised rather than listed in full.
+  const many = { targets: [
+    { identifier: 'a', label: 'A', value: '1', x: 1, y: 1 },
+    { identifier: 'b', label: 'B', value: '1', x: 1, y: 2 },
+  ] };
+  const manyBefore = { targets: [
+    { identifier: 'a', label: 'A', value: '0', x: 1, y: 1 },
+    { identifier: 'b', label: 'B', value: '0', x: 1, y: 2 },
+  ] };
+  const dm = actions.stateDelta(manyBefore, many);
+  assert.equal(dm.count, 2);
+  assert.match(dm.detail, /1 other control/);
+});
+
 test('an element is aimed at where it actuates, not at the middle of its frame', async () => {
   const { centerOf } = await import('../src/input.js');
   // Item 148, measured on Settings → Accessibility → Hover Text. An iOS switch
