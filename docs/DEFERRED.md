@@ -2511,6 +2511,34 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+167. **A launched app that never comes to the front was classified as a check
+   failing on its merits.** FIXED, 2026-09-15. With 166 in place the harness
+   finally told the truth about the run, and the truth was about the device:
+
+   ```
+   FAIL round 1, "settings" never arrived: waited 8000ms for General:
+     "General" is not on this screen. Visible: 10:50, .?o
+     (the screen has not moved for 6181ms)
+   ```
+
+   Two readable things, one of them a **clock**, on a screen that had not moved
+   for six seconds — after `launch com.apple.Preferences (relaunched)` reported
+   `ok`. The device was not presenting the app. `ci-device-guard.mjs` looked at
+   that and said *"this step failed on its merits, not on the device — not
+   retrying"*, because none of its five signatures covered it.
+
+   Added, and deliberately narrow: it requires the wait to have failed **and**
+   the screen to have been still **and** almost nothing to have been readable. A
+   tour that genuinely asks for a label that is not there has a screen full of
+   *other* labels, and must keep failing rather than being revived into a pass.
+   Tested both ways before committing — the real line matches, a synthetic
+   wrong-label failure with a full `Visible:` list does not.
+
+   This is the fourth layer of one CI symptom: 143 (stale frames), the
+   wrong-turn/under-read split, 164 (recency), 166 (a failed step nobody
+   checked), and now the classification of what 166 exposed. Each was real and
+   each hid the next.
+
 166. **`runScript` does not throw on a failed step, and the fingerprint eval
    only caught throws.** FIXED, 2026-09-15 — and this is the cause behind every
    "reading taken on the previous screen" failure of the last two days.
