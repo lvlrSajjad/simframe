@@ -534,7 +534,25 @@ if (strays.length) {
     // nothing to work with, which is this harness's subject. This means we did
     // not look long enough, which is the harness's own fault and a different
     // remedy.
-    const underRead = sparseAt.has(`${reading.name}|${reading.round}`);
+    //
+    // **And sparseness alone is not enough to claim it**, which this
+    // misdiagnosed once. A wrong turn that lands on a screen which legitimately
+    // reads sparse gets flagged sparse too, and was then reported as our
+    // instrument's fault rather than the tour's. Measured: `settings-general`
+    // r3 came back with tokens byte-identical to the Settings root, including
+    // `heading:nav-bar:"settings"` — a *heading*, which is the root's title,
+    // where General publishes a *button* with the same word. It was read on the
+    // wrong screen, and this called it an under-read.
+    //
+    // The discriminator is the screen's own other rounds: if `settings-general`
+    // read differently and richly in rounds 1 and 2, then the screen IS
+    // distinguishable and a round matching another screen exactly went
+    // somewhere else. Only when no round of this screen can tell itself apart
+    // is "we did not look long enough" the honest reading.
+    const distinguishable = (byName.get(reading.name) ?? [])
+      .some((o) => o !== reading && fingerprint.similarity(o.tokens, match?.tokens ?? []) < 0.99);
+    const underRead = sparseAt.has(`${reading.name}|${reading.round}`) && !distinguishable;
+    const wrongScreen = bestOther >= 0.99 && distinguishable;
     console.error(`       ${reading.name} r${reading.round}: own screen ${bestSelf.toFixed(2)}, `
       + `${match ? `${match.name} r${match.round}` : 'another screen'} ${bestOther.toFixed(2)} `
       + `(${reading.count} tokens, ${named.length} named, sources ${reading.sources.join('+') || 'none'})`);
@@ -542,6 +560,11 @@ if (strays.length) {
       console.error('              ^ a COLLISION, not a wrong turn: neither reading carries a chrome');
       console.error('                label, so both are structure with no name and the fingerprint has');
       console.error('                nothing left to tell two list screens apart.');
+    } else if (wrongScreen) {
+      console.error(`              ^ WRONG SCREEN: these tokens are ${match ? `identical to ${match.name}` : 'another screen'},`);
+      console.error('                and this screen reads differently in its other rounds — so it is');
+      console.error('                distinguishable and the tour was simply somewhere else. A tap that');
+      console.error('                missed, or a screen that went back before it was read.');
     } else if (underRead) {
       console.error('              ^ UNDER-READ, not a wrong turn: this reading stayed below the token');
       console.error('                floor after every retry, so it never saw enough of its screen to');
