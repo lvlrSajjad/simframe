@@ -169,6 +169,8 @@ const STALE_READ_WAIT_MS = 1000;
 
 /** When the steps that were supposed to change the screen finished. */
 let navigatedAt = 0;
+/** What the tour's own steps said, kept for the arrival report. */
+let lastSteps = [];
 /** Readings that never got a frame newer than their own navigation. */
 const staleReadings = [];
 
@@ -233,7 +235,19 @@ for (let round = 1; round <= rounds; round += 1) {
       // written out first, because a failing run is the one whose evidence
       // matters.
       try {
-        await actions.runScript(device, { steps: screen.steps, verify: false });
+        // Keep what the tour's own steps reported. On an arrival failure the
+        // decisive question is whether the last wait PASSED and on what — and
+        // that answer was being thrown away, so three CI failures in a row
+        // could only be reasoned about rather than read. A local reproduction
+        // ran the same sequence 14 times and landed correctly every time, so
+        // the runner is the only place this can be observed.
+        const run = await actions.runScript(device, { steps: screen.steps, verify: false });
+        lastSteps = (run?.results ?? []).map((r) => ({
+          action: r.action,
+          ok: r.ok !== false,
+          ms: r.ms,
+          detail: typeof r.detail === 'string' ? r.detail.slice(0, 200) : null,
+        }));
         navigatedAt = Date.now();
       } catch (err) {
         save({ abandonedAt: { screen: screen.name, round, error: err.message } });
@@ -374,6 +388,7 @@ for (let round = 1; round <= rounds; round += 1) {
     // taken, and every distribution below it is then measuring the tour rather
     // than the fingerprint. The first version of this harness did exactly that
     // and reported that the distributions overlapped completely.
+    id.steps = lastSteps;
     const previous = readings[readings.length - 1];
     if (previous && previous.name !== screen.name) {
       // Not just an identical hash. Two readings of the same screen can differ
@@ -398,10 +413,20 @@ for (let round = 1; round <= rounds; round += 1) {
           `${previous.name} -> ${screen.name}: similarity ${s.toFixed(2)} — the screen did not change`
           + `\n         sensors: ${(id.entry?.sources ?? []).join('+') || 'none'}`
           + `, settled: ${id.settled}, frame ${Math.round(Date.now() - (id.state?.capturedAt ?? Date.now()))}ms old`
-          + `\n         on screen: ${labels.length ? labels.join(' · ') : '(nothing readable)'}`);
+          + `\n         on screen: ${labels.length ? labels.join(' · ') : '(nothing readable)'}`
+          // The decisive line, and it was missing. Whether the tour's last wait
+          // PASSED, and what it said, separates "the wait matched something it
+          // should not have" from "the screen changed after the wait was
+          // satisfied" — the two causes this message has always named as having
+          // opposite fixes, while giving the reader nothing to tell them apart.
+          + `\n         the tour's own steps: ${
+            (lastSteps ?? []).length
+              ? lastSteps.map((st) => `${st.ok ? 'ok' : 'FAIL'} ${st.action}${st.detail ? ` — ${st.detail}` : ''}`).join('\n                               ')
+              : '(not recorded)'}`);
       }
     }
     readings.push({
+      steps: lastSteps,
       name: screen.name,
       round,
       hash: id.hash,

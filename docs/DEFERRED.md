@@ -2511,6 +2511,40 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+165. **The CI wrong turn does not reproduce locally, and the harness was
+   discarding the one line that would settle it.** Diagnostic added,
+   2026-09-15; cause still OPEN.
+
+   Chased properly before shipping anything else, because "waitFor passed on a
+   screen with no About" would be worse than anything waiting in the release.
+   Three things now ruled out by direct check rather than by reasoning:
+
+   - the `waitFor` refresh fix **is** in place, on both the single-target and
+     `any` branches;
+   - `"About"` **cannot** resolve on the Settings root — fed the root's real
+     label set to the resolver: `none`, and not one label scores above zero;
+   - the sequence ran **14 times locally and landed on General every time**,
+     with `About` present on all 14.
+
+   So the wait was not matching wrongly, and the device was on the root *at
+   reading time* — something went back between the wait and the read, and it is
+   runner-specific. What the harness could not say is whether the tour's last
+   wait passed at all, because `runScript`'s results were thrown away. That is
+   the line separating the two causes the arrival message has always described
+   as having opposite fixes, and it now prints them, and saves them into the
+   readings artifact.
+
+   **A separate finding from the same loop, and it is 163 from the other side:**
+   the General screen produced **six different structural identities across six
+   visits** on this laptop — `ba00532f`, `ba00532f`, `4efff34d`, `fe3dc5ca`,
+   `dc3f25da`, `726f524b` — each *stable within its visit* (11 elements,
+   unchanged across three reads a second apart) and different between them, with
+   `memory disagrees with this screen: 2 remembered controls not present`. Not
+   mid-load, then: the screen genuinely differs per visit. CI reads it as
+   `3e158af060` consistently, so this is a device or iOS difference and not the
+   same fault — but a screen whose identity changes every visit is worth its own
+   entry and is the local half of 163.
+
 164. **"Newer than the navigation" is not the same as "recent", and a
    38-second-old frame passed for both.** FIXED, 2026-09-15. Item 143's guard
    required `capturedAt >= navigatedAt`, which a frame captured just after a
