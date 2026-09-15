@@ -993,6 +993,16 @@ function capabilities() {
       supported: false,
       note: 'not built for Android yet — `uiautomator dump` costs ~2s a read; see docs/DEFERRED.md',
     },
+    // Not borrowed from iOS, and not claimed. iOS reads the frontmost pid off
+    // AXPTranslator and compares it with the pid `simctl launch` printed;
+    // neither half exists here — the emulator console launches by intent and
+    // reports no pid. `am start` does front the activity synchronously, which
+    // is why this has not been the same problem, but "has not been" is not a
+    // check and must not report as one.
+    frontmost: {
+      supported: false,
+      note: 'no frontmost-app read on Android yet, so a launch is not confirmed to have fronted; `am start` fronts synchronously, which is why this has not bitten — see docs/DEFERRED.md',
+    },
   };
 }
 

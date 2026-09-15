@@ -257,6 +257,11 @@ AXPTranslator                                   (/System/Library/PrivateFramewor
   +sharedInstance                               -> AXPTranslator (the macOS one, on a Mac)
   .bridgeTokenDelegate = <your delegate>        ← held WEAKLY; retain it yourself
   -frontmostApplicationWithDisplayId:bridgeDelegateToken:   -> AXPTranslationObject (.pid)
+      `.pid` is the GUEST pid, and it is the same number `simctl launch` prints
+      — measured 10695/10695 and 10762/10762 on iOS 26.5. That equality is what
+      lets `launch` say whether the app it started actually came to the front
+      (item 169), by comparing two integers instead of matching a display name
+      against a bundle id. This object answers nothing that names a bundle.
 
 AXPMacPlatformElement
   +platformElementWithTranslationObject:        -> an element answering NSAccessibility

@@ -264,6 +264,13 @@ async function screenshot(udid, outFile, { mask = 'ignored' } = {}) {
  * simctl passes launch arguments after the bundle id and environment through
  * `SIMCTL_CHILD_`-prefixed variables of its own process — which is why env has
  * to be set on the child rather than passed as flags.
+ *
+ * Returns the pid simctl started, because starting an app and *fronting* an app
+ * are different events and only the pid connects them: the layer above compares
+ * it against the pid the device says is in front (item 169). simctl prints
+ * `com.apple.Preferences: 10695` and has always printed it; nobody had read it.
+ * A shape we do not recognise gives null, which reads as "cannot say" upstairs
+ * and never as a failed launch.
  */
 async function launchApp(udid, bundleId, { args = [], env = {}, terminateFirst = false } = {}) {
   if (terminateFirst) {
@@ -279,16 +286,23 @@ async function launchApp(udid, bundleId, { args = [], env = {}, terminateFirst =
   const childEnv = { ...process.env };
   for (const [k, v] of Object.entries(env)) childEnv[`SIMCTL_CHILD_${k}`] = String(v);
   try {
-    await run('xcrun', ['simctl', 'launch', udid, bundleId, ...args.map(String)], {
+    const { stdout } = await run('xcrun', ['simctl', 'launch', udid, bundleId, ...args.map(String)], {
       timeout: SIMCTL_TIMEOUT_MS,
       env: childEnv,
     });
+    return { pid: launchedPid(stdout) };
   } catch (err) {
     // execFile's message is just "Command failed: ..." with simctl's actual
     // complaint left in stderr. A CI run failed here and said nothing about
     // why, which is the same sin as a silent fallback.
     throw new Error(simctlFailure(err, `could not launch ${bundleId}`));
   }
+}
+
+/** The pid out of simctl's `<bundle-id>: <pid>`, or null if it said otherwise. */
+export function launchedPid(stdout) {
+  const m = /:\s*(\d+)\s*$/.exec(String(stdout ?? '').trim());
+  return m ? Number(m[1]) : null;
 }
 
 async function terminateApp(udid, bundleId) {
@@ -567,6 +581,11 @@ function capabilities() {
     captureEngines: ['simframed', 'screenshot'],
     input: { supported: true, via: 'daemon' },
     ax: { supported: true },
+    // Whether a launch can be confirmed to have reached the front. Declared
+    // separately from `ax` even though the same bridge answers both, because
+    // the user-visible consequence is different: without it `launch` reports
+    // that a process started and calls that success (item 169).
+    frontmost: { supported: true, via: 'AXPTranslator, compared by pid' },
   };
 }
 

@@ -275,6 +275,10 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
         try bridge().tree()
     }
 
+    public func frontmostApp() throws -> FrontmostApp {
+        try bridge().frontmostApp()
+    }
+
     /// Serialised, because building a bridge installs a delegate on a
     /// **process-global** translator that holds it weakly.
     ///

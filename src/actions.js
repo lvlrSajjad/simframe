@@ -3,6 +3,7 @@
 // Waiting uses a baseline captured BEFORE each action, which is the whole
 // reason these scripts are reliable rather than racy.
 import * as api from './index.js';
+import * as frontmost from './frontmost.js';
 import * as graph from './graph.js';
 import * as input from './input.js';
 import * as intent from './intent.js';
@@ -396,12 +397,15 @@ export async function runScript(
       // its coordinates from the screen size. Reading them back off the step
       // would diagnose a point nothing was ever aimed at.
       const aim = { at: null };
+      // Carried out of the dispatch the way `aim` is, because the note that
+      // reads it is built after the step has returned a string.
+      const landing = { verdict: null };
       let detail;
       // A selector that did not resolve gets the step's own alternatives before
       // the batch is abandoned. Anything else propagates: retrying from a screen
       // we did not expect to be on is not a retry, it is a second guess.
       try {
-        detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus, aim });
+        detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus, aim, landing });
       } catch (thrown) {
         let err = thrown;
         // Ask the supervisor before anything is abandoned. It sits behind the
@@ -435,7 +439,7 @@ export async function runScript(
             options,
           }).catch(() => null);
           try {
-            detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus, aim });
+            detail = await runStep(deviceQuery, udid, step, { screen, options, frames, focus, aim, landing });
             detail += ` [the local supervisor said ${ruling.decision}; it worked on the second attempt]`;
             ruled('recovered');
             continue;
@@ -475,7 +479,7 @@ export async function runScript(
         let last = err;
         for (const label of allowed) {
           try {
-            detail = await runStep(deviceQuery, udid, stepWithTarget(step, label), { screen, options, frames, focus, aim });
+            detail = await runStep(deviceQuery, udid, stepWithTarget(step, label), { screen, options, frames, focus, aim, landing });
             detail += ` [after ${tried.map((t) => JSON.stringify(String(t))).join(', ')} did not resolve]`;
             last = null;
             break;
@@ -770,8 +774,14 @@ export async function runScript(
       // front an already-running app, so the first reading is the likely one —
       // but likely is not the same as said, and the step is the only place that
       // can say it.
+      // Item 169 closed the ambiguity this comment describes, so the note no
+      // longer has to hedge when the pid answered. `fronted` with an unmoved
+      // screen is now a *fact* about which reading was right, not a guess:
+      // the app is confirmed in front, so it was already there.
       const launchNote = step.action === 'launch' && settled?.noVisibleChange
-        ? ' [the screen did not change, so this app was already in front — or it did not come forward]'
+        ? (landing.verdict === 'fronted'
+          ? ' [the screen did not change and this app is confirmed frontmost — it was already in front]'
+          : ' [the screen did not change, so this app was already in front — or it did not come forward]')
         : '';
       const filling = stillFillingIn(afterReading?.entry);
       // Item 120: when a gesture aimed at a coordinate does nothing, say what
@@ -2483,12 +2493,28 @@ async function runStep(deviceQuery, udid, step, ctx) {
       return `pressed key ${step.value ?? step.code}`;
     case 'launch': {
       const bundleId = step.value ?? step.bundleId;
-      await launchApp(udid, bundleId, {
+      const started = await launchApp(udid, bundleId, {
         args: step.args ?? [],
         env: step.env ?? {},
         terminateFirst: step.relaunch === true,
       });
-      return `launched ${bundleId}${step.relaunch ? ' (relaunched)' : ''}`;
+      // Item 169: simctl returning ok means the process started, not that the
+      // app came forward, and the two came apart repeatedly on a loaded
+      // runner — leaving the device on the previous app under a step that
+      // reported success. The pid settles it; the screen cannot.
+      const landed = await frontmost.check(udid, started?.pid ?? null);
+      if (landed.verdict === 'did-not-front') {
+        throw new Error(
+          `launched ${bundleId} (pid ${started.pid}) but it never came to the front`
+          + ` within ${landed.ms}ms — ${landed.frontmost === null
+            ? 'nothing is frontmost'
+            : `pid ${landed.frontmost} still is`}`
+          + '. The process started; the screen did not change hands.',
+        );
+      }
+      if (ctx.landing) ctx.landing.verdict = landed.verdict;
+      return `launched ${bundleId}${step.relaunch ? ' (relaunched)' : ''}`
+        + (landed.verdict === 'fronted' ? ` (frontmost after ${landed.ms}ms)` : '');
     }
     case 'terminate':
       await terminateApp(udid, step.value ?? step.bundleId);

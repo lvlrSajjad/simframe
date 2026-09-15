@@ -23,33 +23,8 @@
 // becomes visible instead of arguable.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import { deviceCause } from './device-state.mjs';
 
-/** Conditions that are the simulator, not the code. Each seen in a real run. */
-const DEVICE_STATE = [
-  [/NSPOSIXErrorDomain.*code=?\s*60|Operation timed out/i, 'simctl stopped answering (NSPOSIXErrorDomain 60)'],
-  [/did not produce a frame|produced no frame in \d+s/i, 'the daemon is up and the display renders nothing'],
-  [/Timeout waiting for screen surfaces|display surface is not answering|display surface could not be read/i, 'the display surface is wedged'],
-  [/no frames buffered|capture is wedged/i, 'capture stopped'],
-  [/the second app never launched|could not be dispatched/i, 'an app would not launch'],
-  // A launched app that never comes to the front, seen as the tour waiting for
-  // one of its landmarks on a screen that is showing a clock and nothing else.
-  //
-  // Measured on a runner: `ok launch — launched com.apple.Preferences
-  // (relaunched)` followed by `waited 8000ms for General: "General" is not on
-  // this screen. Visible: 10:50, .?o (the screen has not moved for 6181ms)`.
-  // Two labels, one of them a clock, on a still screen — the device is not
-  // presenting the app, and the guard called that a check failing on its
-  // merits and declined to revive.
-  //
-  // Deliberately narrow. It requires the wait to have failed AND the screen to
-  // have been still AND almost nothing readable: a tour that genuinely asks for
-  // the wrong label has a screen full of other labels, and must keep failing
-  // rather than being retried into a pass.
-  [
-    /never arrived[\s\S]*?Visible:[^\n]{0,24}\(the screen has not moved for \d+ms/i,
-    'a launched app never came to the front (the screen shows a clock and nothing else)',
-  ],
-];
 
 const udid = process.argv[2];
 const sep = process.argv.indexOf('--');
@@ -73,8 +48,6 @@ const summary = (line) => {
   const f = process.env.GITHUB_STEP_SUMMARY;
   if (f) { try { fs.appendFileSync(f, `${line}\n`); } catch { /* summaries are a nicety */ } }
 };
-
-const deviceCause = (text) => DEVICE_STATE.find(([re]) => re.test(text))?.[1] ?? null;
 
 const first = await run(cmd);
 if (first.code === 0) process.exit(0);

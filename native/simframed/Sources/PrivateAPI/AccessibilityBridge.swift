@@ -62,6 +62,24 @@ public struct AXTree: Sendable {
     }
 }
 
+/// The application the device is showing right now.
+///
+/// Deliberately not a bundle id: nothing on this path publishes one, and a
+/// display name that merely *looks* like an identifier would invite exactly the
+/// string comparison this type exists to avoid.
+public struct FrontmostApp: Sendable {
+    /// The guest pid, or nil when the frontmost application object would not
+    /// answer for it. Nil is "cannot say", never "not that app".
+    public let pid: Int32?
+    /// The application element's own title, for reporting.
+    public let title: String?
+
+    public init(pid: Int32?, title: String?) {
+        self.pid = pid
+        self.title = title
+    }
+}
+
 public enum AccessibilityError: Error, CustomStringConvertible {
     case unavailable(String)
     case noFrontmostApplication
@@ -219,11 +237,30 @@ public final class AccessibilityBridge {
         }
     }
 
-    /// The pid of the app currently frontmost, or nil when the bridge cannot say.
-    public func frontmostPid() -> Int32? {
-        guard let app = frontmostApplication() else { return nil }
-        guard app.responds(to: NSSelectorFromString("pid")) else { return nil }
-        return (app.value(forKey: "pid") as? NSNumber)?.int32Value
+    /// Who is in front, as the device itself reports it.
+    ///
+    /// This exists because `launch` could not tell "the app was already in
+    /// front" from "the app never came forward": both return ok and both leave
+    /// the screen unchanged. Screen change cannot settle it either way —
+    /// relaunching an app that is already frontmost legitimately lands on the
+    /// same screen — so the discriminator has to be identity.
+    ///
+    /// `pid` is the number to compare against, because it is the same one
+    /// `simctl launch` prints, so the caller tests equality rather than
+    /// matching a display name against a bundle id. `title` is for the human
+    /// reading the verdict and is a display name, not an identifier.
+    public func frontmostApp() throws -> FrontmostApp {
+        guard let app = frontmostApplication() else { throw AccessibilityError.noFrontmostApplication }
+        let pid = app.responds(to: NSSelectorFromString("pid"))
+            ? (app.value(forKey: "pid") as? NSNumber)?.int32Value
+            : nil
+        var title: String?
+        if let root = elementClass
+            .perform(NSSelectorFromString("platformElementWithTranslationObject:"), with: app)?
+            .takeUnretainedValue() as? NSObject {
+            title = string(attribute(root, "AXTitle"))
+        }
+        return FrontmostApp(pid: pid, title: title)
     }
 
     private func frontmostApplication() -> NSObject? {

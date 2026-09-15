@@ -14,6 +14,8 @@ public final class StubPlatform: SimulatorPlatform {
     /// What `accessibilityTree()` should answer. Empty by default, which is
     /// what a device with no app in the foreground genuinely looks like.
     public var stubTree: AXTree = AXTree(nodes: [])
+    /// What `frontmostApp()` should answer.
+    public var stubFrontmost = FrontmostApp(pid: 1234, title: "Stub")
 
     public init(width: Int = 1206, height: Int = 2622, tint: UInt8 = 0) {
         self.width = width
@@ -129,5 +131,10 @@ extension StubPlatform {
     public func accessibilityTree() throws -> AXTree {
         recorded.append("accessibilityTree()")
         return stubTree
+    }
+
+    public func frontmostApp() throws -> FrontmostApp {
+        recorded.append("frontmostApp()")
+        return stubFrontmost
     }
 }

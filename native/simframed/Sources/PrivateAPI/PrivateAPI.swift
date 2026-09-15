@@ -171,6 +171,13 @@ public protocol SimulatorPlatform: AnyObject {
     /// An app still launching has no tree yet, and this reports that as it is —
     /// one node, no children — rather than retrying until it looks populated.
     func accessibilityTree() throws -> AXTree
+    /// Which application the device is showing, when the platform can say.
+    ///
+    /// Separate from `accessibilityTree()` even though the same bridge answers
+    /// both, because the caller that needs it — "did the app I launched come
+    /// forward?" — must not pay for a whole tree walk to ask a one-field
+    /// question, and must be able to ask it repeatedly while waiting.
+    func frontmostApp() throws -> FrontmostApp
 
     // MARK: App lifecycle. These are simctl, not private API — no HID needed.
 

@@ -72,6 +72,8 @@ export const longPress = (udid, x, y, opts = {}) => request(udid, { action: 'lon
 export const drag = (udid, from, to, opts = {}) =>
   request(udid, { action: 'drag', x1: from.x, y1: from.y, x2: to.x, y2: to.y, ...opts });
 export const launch = (udid, bundleId, opts = {}) => request(udid, { action: 'launch', bundleId, ...opts });
+/** Which app the device is showing, by pid — see src/frontmost.js. */
+export const frontmost = (udid) => request(udid, { action: 'frontmost' });
 export const terminate = (udid, bundleId) => request(udid, { action: 'terminate', bundleId });
 export const openUrl = (udid, url) => request(udid, { action: 'openUrl', url });
 export const permission = (udid, permissionAction, service, bundleId) =>

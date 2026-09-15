@@ -5746,3 +5746,130 @@ test('a wait resolves against the live screen, not against memory', async () => 
   assert.match(src, /api\.locate\(deviceQuery, step\.into, \{ index: step\.index, refresh: step\.refresh \}/,
     'an action still resolves from the map; this test is about checks');
 });
+
+// ---------------------------------------------------------------------------
+// Item 169: a launch that starts a process and never fronts it.
+// ---------------------------------------------------------------------------
+
+test('simctl launch prints a pid, and that is the number the verdict turns on', async () => {
+  const { launchedPid } = await import('../src/platform/ios.js');
+  // Verbatim from the device this was measured on.
+  assert.equal(launchedPid('com.apple.Preferences: 10695\n'), 10695);
+  assert.equal(launchedPid('com.apple.MobileAddressBook: 10762'), 10762);
+  // Anything else is "cannot say", never a failed launch — the distinction
+  // item 161 was reverted for.
+  assert.equal(launchedPid(''), null);
+  assert.equal(launchedPid('com.apple.Preferences: unknown'), null);
+  assert.equal(launchedPid(undefined), null);
+});
+
+test('a launch is confirmed by pid identity, not by the screen changing', async () => {
+  const frontmost = await import('../src/frontmost.js');
+  const noWait = { wait: async () => {}, pollMs: 0 };
+
+  // The case the old note called "likely": relaunching an app already in
+  // front. The screen does not move and the launch is nevertheless fine.
+  // Measured at 237ms on a real device, one poll.
+  const already = await frontmost.landed({ pid: 10695, read: async () => 10695, ...noWait });
+  assert.equal(already.verdict, 'fronted');
+  assert.equal(already.polls, 1, 'an app already in front answers on the first read');
+
+  // A cold switch does not answer on the first read. Measured at 1552ms over
+  // 8 polls, so a verdict taken from one look would have been wrong.
+  let asked = 0;
+  const slow = await frontmost.landed({
+    pid: 10762, read: async () => (++asked < 8 ? 10695 : 10762), ...noWait,
+  });
+  assert.equal(slow.verdict, 'fronted');
+  assert.equal(slow.polls, 8);
+
+  // Item 169 itself. Forced on a real device with `simctl launch
+  // --wait-for-debugger`: pid 16332 started and pid 15830 stayed in front.
+  // This is the run that used to return ok.
+  let clock = 0;
+  const failed = await frontmost.landed({
+    pid: 16332, read: async () => 15830, budgetMs: 3000, pollMs: 0,
+    wait: async () => {}, now: () => (clock += 100),
+  });
+  assert.equal(failed.verdict, 'did-not-front');
+  assert.equal(failed.frontmost, 15830);
+
+  // No sensor is not a failure. A backend that cannot say who is frontmost
+  // must leave the launch exactly as unjudged as it was before this existed,
+  // and must decide that on the first read rather than spending the budget.
+  let polls = 0;
+  const mute = await frontmost.landed({
+    pid: 16332, read: async () => { polls += 1; return null; }, ...noWait,
+  });
+  assert.equal(mute.verdict, 'cannot-say');
+  assert.equal(polls, 1, 'one read is enough to learn nothing answers');
+
+  // And a launch that reported no pid is the same kind of silence.
+  assert.equal(
+    (await frontmost.landed({ pid: null, read: async () => 1, ...noWait })).verdict,
+    'cannot-say',
+  );
+});
+
+test('the launch step refuses a launch that never fronted, and says so definitely when it did', async () => {
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /landed\.verdict === 'did-not-front'/,
+    'a launch that never fronted must not return success');
+  assert.match(src, /but it never came to the front/,
+    'and the message must name what actually happened');
+  // The other half, and the easier one to drop: the note that used to hedge
+  // between "already in front" and "did not come forward" now resolves, because
+  // the pid answered the question the screen could not.
+  assert.match(src, /confirmed frontmost — it was already in front/,
+    'a confirmed front turns the ambiguous note into a definite one');
+});
+
+test('a backend that cannot confirm a launch says so in its own terms', async () => {
+  const ios = await import('../src/platform/ios.js');
+  const android = await import('../src/platform/android.js');
+  assert.equal(ios.platform.capabilities().frontmost.supported, true);
+  const front = android.platform.capabilities().frontmost;
+  assert.equal(front.supported, false);
+  assert.ok(front.note, 'a declined layer carries a reason');
+  // The rule this project keeps relearning: a layer a platform does not have
+  // is optional with a reason, never the other platform's vocabulary.
+  assert.doesNotMatch(front.note, /simctl|AXPTranslator|idb/,
+    'and the reason may not be written in iOS vocabulary');
+});
+
+test('the CI guard tells a wedged device from a check that failed on its merits', async () => {
+  // Real output, verbatim from the runs each signature was added for. The table
+  // lives in its own module for exactly this: the guard itself exits at import.
+  const { deviceCause, DEVICE_STATE } = await import('../scripts/device-state.mjs');
+
+  // Item 169's own sentence — a launch that started a process and never fronted
+  // it. This replaced a signature that had to infer the same condition from
+  // "two labels on a still screen, one of them a clock".
+  assert.ok(deviceCause(
+    'launched com.apple.Preferences (pid 16332) but it never came to the front'
+    + ' within 3032ms — pid 15830 still is. The process started; the screen did not change hands.',
+  ), 'a launch that says it never fronted is the device');
+
+  // Seen on the v0.14.3 bench run, and matched by nothing until now.
+  assert.ok(deviceCause(
+    'could not launch com.apple.Preferences: \tThe system shell (SpringBoard:36454) probably crashed.',
+  ), "a crashed SpringBoard is the device");
+
+  // The half that matters more, and the one an over-eager signature destroys:
+  // a tour asking for a label that is genuinely not there must keep failing.
+  // This is the exact text item 168 was about — a real tour fault.
+  assert.equal(deviceCause(
+    '"VoiceOver" is not on this screen. Visible: Settings, Accessibility, Vision,'
+    + ' Hover Text, Display & Text Size, Motion, Spoken Content, Hearing',
+  ), null, 'a wrong landmark is the check failing on its merits');
+  assert.equal(deviceCause('AssertionError: expected 3 elements, found 2'), null);
+  assert.equal(deviceCause(''), null);
+  assert.equal(deviceCause(undefined), null);
+
+  // Every entry is [RegExp, string]; a bare string here would match nothing and
+  // fail silently, which is the worst shape a guard can take.
+  for (const [re, why] of DEVICE_STATE) {
+    assert.ok(re instanceof RegExp, `${why} needs a RegExp`);
+    assert.equal(typeof why, 'string');
+  }
+});

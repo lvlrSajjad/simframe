@@ -1704,6 +1704,15 @@ async function doctor({ json = false, strict = false, device, options = {} } = {
       }
       add(`text recognition (${d.name})`, 'ok',
         daemon ? 'simframed (in-process, off the framebuffer)' : 'sips + helper binary');
+      // Before the `ax` early-out, so a backend without a tree still reports
+      // this one: "is a launch checked?" is a question the user needs answered
+      // on every platform, and item 169 is what an unanswered launch cost.
+      const front = caps.frontmost ?? { supported: false, note: 'this backend does not say' };
+      add(`launch verification (${d.name})`, front.supported ? 'ok' : 'optional',
+        front.supported
+          ? `${front.via} — a launch that never fronts is reported, not called success`
+          : front.note,
+        { key: 'launch.frontmost', value: front.supported ? front.via ?? 'yes' : null });
       if (!caps.ax.supported) {
         add(`accessibility tree (${d.name})`, 'optional', caps.ax.note, { key: 'ax.driver', value: null });
         continue;

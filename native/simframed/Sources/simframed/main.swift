@@ -235,6 +235,16 @@ case "run":
                                    "scale": device.scale],
                         "engine": "simframed",
                     ])
+                case "frontmost":
+                    // The one-field question, on its own action, because the
+                    // caller asks it in a loop while waiting for a launch to
+                    // land. Routing it through "ui" would pay for a tree walk
+                    // and an OCR pass per poll.
+                    let front = try platform.frontmostApp()
+                    var out: [String: Any] = [:]
+                    if let pid = front.pid { out["pid"] = Int(pid) }
+                    if let title = front.title { out["title"] = title }
+                    return done(out)
                 case "ui":
                     // The accessibility tree and OCR read the same instant of
                     // the screen and neither needs the other, so they run

@@ -2536,10 +2536,10 @@ worth more than the verdict.
    **stderr** it is currently discarding, because the stack trace that would
    name the cause was written and thrown away.
 
-169. **`launch` reports success without bringing the app to the front.** OPEN,
-   and it is shipped-code rather than harness. The sixth distinct cause behind
-   one CI symptom, and the first that is about simframe rather than about the
-   instrument measuring it.
+169. **`launch` reports success without bringing the app to the front.** FIXED,
+   2026-09-15. Shipped-code rather than harness — the sixth distinct cause
+   behind one CI symptom, and the first that is about simframe rather than about
+   the instrument measuring it.
 
    ```
    round 3, "settings-general" never arrived: waited 8000ms for General:
@@ -2572,8 +2572,61 @@ worth more than the verdict.
    closest to what CI already does by hand, and the first is the only one that
    answers the question rather than papering over it.
 
-   Not fixed here on purpose. Six causes deep into one symptom is the point to
-   stop patching reactively and let this be worked on deliberately.
+   **The fix: pid identity, because the screen cannot answer.** The first
+   candidate above — "a relaunch must change the screen, so no visible change
+   means failure" — is *wrong*, and it was checked before anything was built.
+   Relaunching an app that is already frontmost legitimately lands on the same
+   screen, so success and failure share that signal. The discriminator has to
+   be identity.
+
+   The identity was already in the repo and nothing exposed it:
+   `AccessibilityBridge` has a private `frontmostApplication()` over
+   `frontmostApplicationWithDisplayId:bridgeDelegateToken:`, and `tree()` has
+   called it since 0.6.0 to decide whose tree to read. It is now
+   `frontmostApp()` on the platform protocol, a `frontmost` control action of
+   its own — not folded into `ui`, because the caller polls it and a tree walk
+   plus an OCR pass per poll is not a one-field question — and
+   `src/frontmost.js` above the boundary.
+
+   What makes it cheap is that the comparison is a **pid**, not a name.
+   `simctl launch` has always printed `com.apple.Preferences: 10695`; nobody
+   read it. `launchApp` now returns it, and the daemon reports the pid of the
+   frontmost application, so the check is two integers rather than a display
+   name matched against a bundle id — and nothing has to invent a bundle id
+   from an `AXTitle`.
+
+   **Measured on 326464A4, iPhone 17 Pro / iOS 26.5:**
+
+   | | |
+   | --- | --- |
+   | the `frontmost` read, warm | **2–5 ms** |
+   | launch pid vs. frontmost pid | 10695/10695, 10762/10762 — equal, both apps |
+   | an app already running, time to front | **237 ms**, 1 poll |
+   | a cold switch to Contacts | **1552 ms**, 8 polls |
+   | budget | 5 s, which clears both with room for a loaded runner |
+
+   The failure case was **forced rather than waited for**: `simctl launch
+   --wait-for-debugger` starts a process that never fronts, which is item 169
+   on demand. pid 16332 started, pid 15830 stayed in front, and the step now
+   refuses after 3032 ms instead of returning ok. The cold-switch row is why a
+   single read would not do — a verdict taken from one look would have called
+   Contacts a failure seven times out of eight.
+
+   Three verdicts, and the third is not a failure: `fronted`, `did-not-front`,
+   and `cannot-say` when nothing reports a pid. `cannot-say` leaves the launch
+   exactly as unjudged as it was before this existed, which is the lesson from
+   161 — a gate built on a signal the platform may not publish produces false
+   refusals on the legitimate case. It is decided on the **first** read, so a
+   backend that cannot answer says so immediately rather than spending the
+   budget learning it.
+
+   Two smaller things fall out. The ambiguous note in `actions.js` now resolves:
+   an unmoved screen with a confirmed front reads *"confirmed frontmost — it was
+   already in front"* instead of hedging between the two readings. And `doctor`
+   gained a `launch verification` line, reported **before** the accessibility
+   early-out so a backend without a tree still answers "is a launch checked?".
+   Android declines it in its own vocabulary: `am start` fronts synchronously,
+   which is why this has not bitten there, but "has not been" is not a check.
 
 168. **The tour waited for a label below the fold.** FIXED, 2026-09-15, and
    this is where the chain bottoms out in a real tour fault rather than another
