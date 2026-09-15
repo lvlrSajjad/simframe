@@ -1435,6 +1435,33 @@ test('nothing above the boundary shells out to a platform tool', async () => {
   }
 });
 
+test('an accessibility identifier is a name the resolver will accept', async () => {
+  const m = await import('../src/matching.js');
+  const screen = { width: 402, height: 874 };
+  // `sim_ui` prints elements by identifier — in React Native a `testID` becomes
+  // one, so it is most interactive controls in an RN app — and the resolver
+  // rejected that exact string in the same response that printed it. An
+  // external tester reproduced it three times and called it the single biggest
+  // friction of their session. `screenmap.rank` already matched identifiers;
+  // this ranker, the one `resolve()` uses, did not.
+  const field = {
+    label: null, identifier: 'login-email-input', type: 'TextField',
+    x: 201, y: 407, frame: { x: 20, y: 393, width: 362, height: 28 },
+    region: 'body', source: 'ax',
+  };
+  const other = {
+    label: 'Email', type: 'StaticText', x: 66, y: 398,
+    frame: { x: 50, y: 390, width: 33, height: 16 }, region: 'body', source: 'ax',
+  };
+  const hit = m.resolve([field, other], 'login-email-input', { screen });
+  assert.equal(hit.status, 'ok', 'an identifier must resolve');
+  assert.equal(hit.target.identifier, 'login-email-input');
+
+  // And a label still wins for a label, so this adds a name rather than
+  // changing what the existing ones mean.
+  assert.equal(m.resolve([field, other], 'Email', { screen }).target.label, 'Email');
+});
+
 test('an element is aimed at where it actuates, not at the middle of its frame', async () => {
   const { centerOf } = await import('../src/input.js');
   // Item 148, measured on Settings → Accessibility → Hover Text. An iOS switch
@@ -1574,7 +1601,7 @@ test('AsyncStorage spills large values to their own file, and a reader that miss
   const big = 'x'.repeat(5000);
   fs.writeFileSync(path.join(inner, crypto.createHash('md5').update('spilled').digest('hex')), big);
 
-  const store_ = storage.readAsyncStorage(dir);
+  const store_ = storage.readAsyncStorage(dir, 'com.example.simframetestbed');
   const byKey = Object.fromEntries(store_.entries.map((e) => [e.key, e]));
   assert.equal(byKey.onboardingComplete.value, 'true');
   assert.equal(byKey.spilled.value, big, 'a spilled value must be followed to its file');
@@ -1584,8 +1611,49 @@ test('AsyncStorage spills large values to their own file, and a reader that miss
   assert.equal(byKey.absent.value, null);
   assert.match(byKey.absent.where, /no spill file/);
 
-  assert.equal(storage.readAsyncStorage(path.join(dir, 'nope')), null, 'an app without the store gets null, not an error');
+  // A miss reports where it looked. "Found nothing" and "did not look there"
+  // are different facts and only one is about the app — an external tester lost
+  // 25 keys and a 1.5MB store to the second one being reported as the first.
+  const miss = storage.readAsyncStorage(path.join(dir, 'nope'), 'com.example.simframetestbed');
+  assert.equal(miss.missing, true, 'an app without the store is a miss, not an error');
+  assert.ok(miss.looked.length >= 2, 'and the miss names the paths it tried');
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('AsyncStorage is found where modern React Native actually writes it', async () => {
+  const storage = await import('../src/storage.js');
+  // `Documents/` alone was the LEGACY location. Every current RN app uses
+  // `@react-native-async-storage/async-storage`, which writes to
+  // `Library/Application Support/<bundle-id>/` — and on a real app measured by
+  // an external tester the Documents path did not exist at all, so the tool
+  // reported "no AsyncStorage" over 25 keys including a 1.5MB root store.
+  // Their words: "The decoder is correct; only the path is wrong."
+  const bundleId = 'com.example.simframetestbed';
+  for (const [where, rel] of [
+    ['modern', ['Library', 'Application Support', bundleId, 'RCTAsyncLocalStorage_V1']],
+    ['legacy', ['Documents', 'RCTAsyncLocalStorage_V1']],
+  ]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `simframe-as-${where}-`));
+    const inner = path.join(dir, ...rel);
+    fs.mkdirSync(inner, { recursive: true });
+    fs.writeFileSync(path.join(inner, 'manifest.json'), JSON.stringify({ root: '{"a":1}' }));
+    const got = storage.readAsyncStorage(dir, bundleId);
+    assert.ok(got && !got.missing, `${where} layout must be found`);
+    assert.equal(got.entries.length, 1, `${where} layout must be read`);
+    assert.equal(got.entries[0].key, 'root');
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // Newest first: an app carrying both must be read from the one it writes to.
+  const both = fs.mkdtempSync(path.join(os.tmpdir(), 'simframe-as-both-'));
+  const modern = path.join(both, 'Library', 'Application Support', bundleId, 'RCTAsyncLocalStorage_V1');
+  const legacy = path.join(both, 'Documents', 'RCTAsyncLocalStorage_V1');
+  fs.mkdirSync(modern, { recursive: true });
+  fs.mkdirSync(legacy, { recursive: true });
+  fs.writeFileSync(path.join(modern, 'manifest.json'), JSON.stringify({ live: 'yes' }));
+  fs.writeFileSync(path.join(legacy, 'manifest.json'), JSON.stringify({ stale: 'yes' }));
+  assert.equal(storage.readAsyncStorage(both, bundleId).entries[0].key, 'live');
+  fs.rmSync(both, { recursive: true, force: true });
 });
 
 test('a value too long to print says so, and says how much it is not showing', async () => {

@@ -1489,6 +1489,17 @@ export function sensorMode(options) {
   return raw === 'ax-first' || raw === 'axfirst' ? 'ax-first' : 'full';
 }
 
+/**
+ * What to call an element in a "Visible:" list.
+ *
+ * The label, or the accessibility identifier when there is no label. Both are
+ * now matchable, and the list had been filtered to `t.label` alone — so an
+ * element `sim_ui` had just printed by identifier was missing from the list of
+ * what is on screen, in the same reply that refused to resolve it. Reported
+ * from the field, three times in one session.
+ */
+const nameFor = (t) => t.label || t.identifier || null;
+
 export async function locate(deviceQuery, query, opts = {}) {
   if (sensorMode(opts.options) !== 'ax-first' || opts.useOcr === false || opts.escalated) {
     return locateWith(deviceQuery, query, opts);
@@ -1701,8 +1712,8 @@ async function locateWith(
     // here undoes every guard above — it has no off-screen filter and no
     // coverage weighting, and it is what returned a scrolled-away list row for
     // "back". "Not found" is the correct answer.
-    const visible = entry.targets.filter((t) => t.label && !regions.offViewport(t, points));
-    const sample = visible.slice(0, 12).map((t) => t.label.slice(0, 24)).join(', ');
+    const visible = entry.targets.filter((t) => nameFor(t) && !regions.offViewport(t, points));
+    const sample = visible.slice(0, 12).map((t) => nameFor(t).slice(0, 24)).join(', ');
     // "Not on this screen" and "not in view" are different answers, and giving
     // the first for the second cost a reported 15 seconds: a `waitFor REVIEW`
     // burned its whole timeout while REVIEW sat one scroll below the fold, and
@@ -1734,8 +1745,8 @@ async function locateWith(
   const candidates = screenmap.rank(entry, query);
   const target = index != null ? candidates[index] : candidates[0];
   if (!target) {
-    const visible = entry.targets.filter((t) => t.label);
-    const shown = visible.slice(0, 12).map((t) => t.label);
+    const visible = entry.targets.filter((t) => nameFor(t));
+    const shown = visible.slice(0, 12).map((t) => nameFor(t));
     // Say when the list is cut. A field report found `"Work Orders" is not on
     // this screen. Visible: …` on a screen whose own element map, three lines
     // below in the same reply, listed `#25 text 200,836 Work Orders` — it was

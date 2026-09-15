@@ -157,7 +157,17 @@ export function rank(targets, intent, { screen } = {}) {
 
   const scored = [];
   for (const t of visible) {
-    const names = [t.label, ...(t.aliases ?? [])].filter(Boolean);
+    // The accessibility identifier is a name a caller can legitimately write,
+    // and this list did not contain it.
+    //
+    // `sim_ui` prints elements BY identifier — in React Native a `testID`
+    // becomes one, so it is most interactive controls in an RN app — and the
+    // resolver then rejected that exact string, in the same response that had
+    // just printed it, with the identifier also absent from the "Visible:"
+    // list. An external tester reproduced it three times and called it the
+    // single biggest friction of their session. `screenmap.rank` had learned
+    // this; this ranker, which is the one `resolve()` uses, had not.
+    const names = [t.label, t.identifier, ...(t.aliases ?? [])].filter(Boolean);
     let base = 0;
     let matched = null;
     for (const name of names) {

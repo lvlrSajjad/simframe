@@ -2072,6 +2072,128 @@ on."*
    none of the tour's eight selectors trigger a synonym group at all, so that
    branch never executes on this tour.
 
+## What the 0.14.1 field round found
+
+An external tester drove a real React Native production app for ~40 minutes,
+measuring `frame`, `activationPoint` and `centerOf()` side by side before each
+tap. Their verdict on the change under test — *"ship it"* — and four defects
+worth more than the verdict.
+
+149. **The published tarball did not contain the change being tested.** FIXED by
+   release, 2026-09-15. `0.14.1` was tagged at `e4b8585` and item 148 landed at
+   `0d20e83` **after** it, so `npm install simframe@0.14.1` ships the old
+   `centerOf()`. The tester diffed the package against the checkout and caught
+   it: *"I came within one command of filing this report against the wrong
+   binary."* A release cut before a change is not a release of that change, and
+   nothing in the pipeline compares what is tagged against what is being asked
+   for. Cheap guard, not yet built: when handing someone a version to test,
+   diff the tarball against the commit first.
+
+150. **`sim_storage` silently missed AsyncStorage on every modern RN app.**
+   FIXED, 2026-09-15. The reader looked only in `Documents/RCTAsyncLocalStorage_V1`
+   — the **legacy** location. `@react-native-async-storage/async-storage`, which
+   is what current RN apps use, writes to
+   `Library/Application Support/<bundle-id>/RCTAsyncLocalStorage_V1`. On the app
+   under test the `Documents/` path did not exist at all, so `readAsyncStorage`
+   returned null and `format()` omitted the section — output that reads as *"this
+   app has no AsyncStorage"* over **25 keys**, including a 1.5 MB MobX-State-Tree
+   root store, `locations`, `inventories`, `workorders` and the auth flags.
+
+   The tester pointed our own decoder at the right directory and it read
+   everything, spill files included: *"The decoder is correct; only the path is
+   wrong."* Which makes this the exact class of confident wrong answer the
+   feature exists to prevent, shipped inside it — and it was invisible here
+   because the testbed app has no AsyncStorage at all, so there was nothing to
+   read on the bench.
+
+   Both locations are now tried, newest first, and a miss **reports every path
+   it looked in** — "found nothing" and "did not look there" are different
+   facts and only one of them is about the app. A Keychain footer was added for
+   the same reason: mid-session the app restored a session from the Keychain and
+   walked past its own login screen, so "logged out" as read from storage was
+   not the whole truth.
+
+151. **`simframe storage <bundle-id>` failed at the feature's headline use
+   case.** FIXED, 2026-09-15. Resolving an unnamed device went through
+   `resolveDevice(undefined)`, which resolves against *booted* devices — so the
+   documented form died with "no booted simulator" on the one thing the command
+   exists to do, answer before a boot. It worked only with `--device`, which the
+   help line did not mention. Now: a named device resolves booted or not; an
+   unnamed one prefers a booted device, falls back to the only device that has
+   app containers, and otherwise names the candidates instead of complaining
+   about a boot nobody needs. `--udid` is accepted too, because that is what the
+   tester reached for. Help line corrected.
+
+152. **An accessibility identifier was printed and then refused.** FIXED,
+   2026-09-15. `sim_ui` renders elements by identifier — in React Native a
+   `testID` becomes one, so it is most interactive controls in an RN app — and
+   `matching.rank` scored only `label` and aliases. So the resolver rejected the
+   exact string it had just printed, *in the same response*, with the identifier
+   also missing from the `Visible:` list because that list was filtered to
+   `t.label`. Reproduced three times on different element types and called *"the
+   single biggest friction in the session"*. `screenmap.rank` had already
+   learned this; the ranker `resolve()` actually uses had not — the same
+   two-rankers split that item 138 turned up from the other side.
+
+153. **A tap can actuate a different control and report `ok`.** OPEN, and the
+   most serious thing in the round. On a horizontally-scrolling filter row, the
+   chip `Pending` has frame `x 350–421` on a 402pt screen — half off-screen —
+   and a scroll affordance at `x 362–394` is drawn **on top of it**. The aim,
+   `385,229`, is geometrically inside `Pending` and visually inside the arrow.
+   The row scrolled, the filter was never applied, and the step returned **`ok`**
+   in 183 ms. Screenshots confirm nothing was selected.
+
+   Neither the frame centre nor the activation point would have avoided it: the
+   element is simply covered. `centerOf()` has no visibility or hit test. The
+   tester's fix is the right shape — after choosing an aim point, confirm the
+   frontmost element there is the target or a descendant, try other points
+   inside the frame otherwise, and fail loudly rather than returning `ok`.
+
+   simframe did print *"1 element(s) on this screen overlap and disagree about
+   what is there"*, which is the right instinct and the wrong diagnosis: it
+   blames "a sheet or overlay", names no elements, and does not touch the
+   verdict. Its own memory caught the inconsistency on the retry —
+   *"seen here once before and went somewhere else that time"* — which the
+   tester singled out as a genuinely good signal.
+
+154. **`no-visible-change` is now actively dangerous on the controls 148
+   fixed.** OPEN, and the field round sharpens it beyond what DEFERRED 4 said.
+   Measured: a UIKit switch flip by label reported `no-visible-change` at 185 ms
+   while the response itself printed the value changing `0` → `1`; by ref, 245 ms,
+   `1` → `0`; a radio selection move, 615 ms. A link tap in the same session
+   correctly reported *"a small change, in one region only"*, so the detector
+   **can** resolve small regions — which points at timing rather than
+   sensitivity.
+
+   The part that makes it urgent is the tester's: this verdict is what an agent
+   reads to decide whether to retry, and **a retry silently un-flips the
+   toggle.** While the tap missed, the verdict was true and harmless. Now that
+   the tap lands, it is false and destructive.
+
+155. **RN text nodes report `origin + 1pt` as their activation point.** OPEN,
+   not reproduced as a failure. Measured across every RN `StaticText`: iOS
+   returns the frame's top-left plus 1pt rather than a real actuation point.
+   Usually harmless or better — left-aligned text in a wide frame means the
+   centre is blank and origin+1 is on the first glyph. The structural risk is
+   that **origin+1 is inside the frame by construction, so the inside-frame
+   guard can never reject it**: if a wide text node's corner is overlapped by a
+   sibling drawn on top, this aims into the sibling and nothing catches it. The
+   tester did not produce that failure and named it as where they would expect
+   the next one — which makes it 153's problem, not a separate remedy.
+
+   The guard did earn its keep elsewhere, and this is the evidence the bench
+   could not produce: mid-animation on a real screen they captured an activation
+   point **13pt below the frame it belonged to**, frame and point evidently read
+   at different moments. The guard rejected it and fell back to the centre.
+   Without it that tap would have landed on whatever sat below the label.
+
+156. **`sim_ui` can print a coordinate the tap will not use.** OPEN, small. On a
+   mid-settle read `sim_ui` listed the **raw** activation point while the tap
+   correctly used the guarded value. The printed coordinate is what a human
+   reads to sanity-check a tap, so it should be the aim point. Suspected cause
+   is a recalled map holding a point computed when the frame was larger, which
+   would make it a staleness artifact rather than a guard bypass — unverified.
+
 148. **`{"tap": "<a switch>"}` never flips the switch, and the verdict that says
    so is correct.** Defect one **FIXED**, defect two OPEN. Measured 2026-09-15. Two separate defects wearing one
    symptom, and that symptom is the single most common one in the field logs:

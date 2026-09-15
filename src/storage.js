@@ -39,6 +39,33 @@ export const VALUE_PREVIEW_BYTES = 4096;
 const ASYNC_STORAGE_DIR = 'RCTAsyncLocalStorage_V1';
 const ASYNC_STORAGE_MANIFEST = 'manifest.json';
 
+/**
+ * Where AsyncStorage actually lives, newest layout first.
+ *
+ * **`Documents/` alone was wrong, and wrong in the worst available way.** That
+ * is the *legacy* React Native location. The community package every current RN
+ * app uses — `@react-native-async-storage/async-storage` — writes to
+ * `Library/Application Support/<bundle-id>/`, and on a real app measured by an
+ * external tester the `Documents/` path **did not exist at all**. So
+ * `readAsyncStorage` returned null, `format()` omitted the section, and the
+ * output read as "this app has no AsyncStorage" while 25 keys sat on disk,
+ * including a 1.5 MB MobX-State-Tree root store.
+ *
+ * Their diagnosis was exact: *"The decoder is correct; only the path is wrong."*
+ * Which makes this the precise class of confident wrong answer the whole feature
+ * exists to prevent, shipped inside it.
+ *
+ * Both are tried because both are real — an older app still writes to
+ * `Documents/` — and every path looked in is reported, because "found nothing"
+ * and "did not look there" are different facts and only one of them is about
+ * the app.
+ */
+const asyncStorageDirs = (container, bundleId) => [
+  path.join(container, 'Library', 'Application Support', String(bundleId ?? ''), ASYNC_STORAGE_DIR),
+  path.join(container, 'Library', 'Application Support', ASYNC_STORAGE_DIR),
+  path.join(container, 'Documents', ASYNC_STORAGE_DIR),
+];
+
 /** Files that are plainly a store but that nothing here can decode yet. */
 const OPAQUE_STORES = /\.(sqlite3?|db|realm|leveldb|mmkv)$/i;
 
@@ -59,10 +86,13 @@ export async function apps(udid) {
  * reporting it as one would be the exact class of wrong answer this feature
  * exists to stop.
  */
-export function readAsyncStorage(container) {
-  const dir = path.join(container, 'Documents', ASYNC_STORAGE_DIR);
+export function readAsyncStorage(container, bundleId) {
+  const looked = asyncStorageDirs(container, bundleId);
+  const dir = looked.find((d) => fs.existsSync(path.join(d, ASYNC_STORAGE_MANIFEST)));
+  // The paths travel with the miss. A reader told only "no AsyncStorage" cannot
+  // tell a bare app from a store we failed to find, and the second is ours.
+  if (!dir) return { missing: true, looked: looked.map((d) => path.relative(container, d)) };
   const manifestPath = path.join(dir, ASYNC_STORAGE_MANIFEST);
-  if (!fs.existsSync(manifestPath)) return null;
   const manifest = readJson(manifestPath);
   const entries = [];
   for (const [key, inline] of Object.entries(manifest)) {
@@ -151,9 +181,15 @@ export function typeOf(value) {
 export async function read(udid, bundleId) {
   const container = await platform.appContainer(udid, bundleId);
   const stores = await readPreferences(udid, container, bundleId);
-  const async_ = readAsyncStorage(container);
-  if (async_) stores.push(async_);
-  return { bundleId, container, stores, opaque: opaqueStores(container) };
+  const async_ = readAsyncStorage(container, bundleId);
+  if (async_ && !async_.missing) stores.push(async_);
+  return {
+    bundleId,
+    container,
+    stores,
+    opaque: opaqueStores(container),
+    asyncStorageMissing: async_?.missing ? async_.looked : null,
+  };
 }
 
 /** One value, rendered for reading, saying so whenever it is not the whole thing. */
@@ -186,11 +222,24 @@ export function format(result) {
       lines.push(`      ${renderValue(e.value).split('\n').join('\n      ')}`);
     }
   }
+  // Say where we looked and did not find it. See `asyncStorageDirs`.
+  if (result.asyncStorageMissing) {
+    lines.push('');
+    lines.push('  no AsyncStorage found. Looked in:');
+    for (const d of result.asyncStorageMissing) lines.push(`    ${d}`);
+    lines.push('  (an app that does not use AsyncStorage will have none of these)');
+  }
   if (result.opaque?.length) {
     lines.push('');
     lines.push(`  ${result.opaque.length} store(s) present that this cannot decode yet:`);
     for (const o of result.opaque) lines.push(`    ${o.file}  ${o.bytes} bytes`);
   }
+  // Asked for by the external tester, and they were right to: mid-session the
+  // app restored a session from the Keychain and walked past its own login
+  // screen, so "logged out" as read from storage was not the whole truth.
+  // Saying what is NOT readable sets expectations that silence does not.
+  lines.push('');
+  lines.push('  Keychain is not readable from here — auth state may differ from what is above.');
   return lines.join('\n');
 }
 

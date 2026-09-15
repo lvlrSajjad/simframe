@@ -405,7 +405,8 @@ const TOOLS = [
       'What the app saved, as text: its UserDefaults and (for React Native) its AsyncStorage, read straight out of'
       + ' the data container. sim_ui says what is drawn; sim_storage says what the app believes — use it when the'
       + ' screen and the behaviour disagree, or to check a value without driving the UI to it.'
-      + ' Works on a device that is NOT running, so it can answer before anything is booted.'
+      + ' Works on a device that is NOT running, so it can answer before anything is booted —'
+      + ' pass device when nothing is booted and the host has more than one simulator with data.'
       + ' Call with no bundleId to list the apps that have a container (match filters that list).',
     inputSchema: {
       type: 'object',
@@ -1200,7 +1201,30 @@ function listStateDirs() {
  * the host filesystem. That is what the backend does.
  */
 async function appStorage({ bundleId, match: query, device } = {}) {
-  const resolved = await resolveDevice(device);
+  // Same correction as the CLI: this must not require a booted device, because
+  // answering before a boot is the point of the tool. A bare call used to fail
+  // with "no booted simulator" — reported from the field — so an unnamed device
+  // falls back to the only one that has app data before it gives up.
+  let resolved = device
+    ? await resolveDevice(String(device))
+    : await resolveDevice(undefined).catch(() => null);
+  if (!resolved) {
+    const all = await listDevices({ all: true });
+    const withApps = [];
+    for (const d of all) {
+      const apps = await storage.apps(d.udid).catch(() => []);
+      if (apps.length) withApps.push({ device: d, apps: apps.length });
+    }
+    if (withApps.length === 1) resolved = withApps[0].device;
+    else {
+      throw new Error(
+        withApps.length
+          ? 'storage reads a device that does not have to be running, so say which one: '
+            + withApps.map((w) => `${w.device.name} (${w.device.udid}, ${w.apps} app(s))`).join('; ')
+          : 'no device on this host has any app data to read',
+      );
+    }
+  }
   if (!bundleId) {
     const list = await storage.apps(resolved.udid);
     const needle = query ? String(query).toLowerCase() : null;

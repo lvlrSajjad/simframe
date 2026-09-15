@@ -34,7 +34,7 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe tap     <selector>        tap #3, "Save", or @120,400
   simframe do      <script.json>     run a scripted flow (see below)
   simframe screens [device]          list screens this device has learned
-  simframe storage [bundle-id]       what the app saved (works on a shut-down device)
+  simframe storage [bundle-id] [--device=<name|udid>]   what the app saved (no boot needed)
   simframe goto    <screen>          walk to a known screen through known steps
   simframe flow    save <name> <script.json>   run a flow and save it if every step verifies
   simframe flow    run  <name>       replay a saved flow
@@ -867,7 +867,44 @@ async function main() {
       // whole value of this command is that it answers on a device that is not
       // running — measured: simctl itself cannot, on this Xcode. Routing it
       // through the daemon would throw that away for no gain.
-      const device = await resolveDevice(flags.device);
+      // Resolving a device here must NOT require one to be running, and it did.
+      //
+      // The whole claim of this command is that it answers before a boot, and
+      // `resolveDevice(undefined)` resolves against *booted* devices — so the
+      // documented form, `simframe storage <bundle-id>`, failed with "no booted
+      // simulator" at exactly the feature's headline use case. Reported by an
+      // external tester, who found it worked only when a device was named,
+      // which the help line did not mention either.
+      //
+      // Named: resolve as usual, booted or not. Unnamed: prefer a booted device
+      // when there is one, otherwise the only device that has app containers —
+      // and when that is ambiguous, say so and name the candidates rather than
+      // complaining about a boot nobody needs.
+      const named = flags.device ?? flags.udid ?? process.env.SIMFRAME_DEVICE;
+      let device;
+      if (named) {
+        device = await resolveDevice(String(named));
+      } else {
+        device = await resolveDevice(undefined).catch(() => null);
+        if (!device) {
+          const all = await listDevices({ all: true });
+          const withApps = [];
+          for (const d of all) {
+            const apps = await storage.apps(d.udid).catch(() => []);
+            if (apps.length) withApps.push({ device: d, apps: apps.length });
+          }
+          if (withApps.length === 1) {
+            device = withApps[0].device;
+          } else {
+            throw new Error(
+              withApps.length
+                ? 'storage reads a device that does not have to be running, so name which one:\n'
+                  + withApps.map((w) => `  --device=${w.device.udid}   ${w.device.name} (${w.apps} app(s))`).join('\n')
+                : 'no device on this host has any app data to read',
+            );
+          }
+        }
+      }
       const [bundleId] = positional;
       if (!bundleId) {
         const list = await storage.apps(device.udid);
