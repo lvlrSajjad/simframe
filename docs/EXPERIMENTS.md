@@ -551,6 +551,71 @@ time and ignores everything between steps. n=2 apps.
 
 ---
 
+## 17. The verification calls are not recoverable from memory — they are `no-visible-change` in novel territory
+
+**The question §16 left**, and the obvious next build: of the
+`verification_failed` escalations that dominate the real-app logs, how many
+happened on a `(screen, action)` the graph had already seen behave consistently?
+If most, then remembering what an edge did last time removes them.
+
+**Almost none.** Joining every `verification_failed` escalation to the graph by
+`screen_fingerprint` and matching the intent against the edge signature:
+
+| | app A (n=58) | app B (n=42) |
+| --- | --- | --- |
+| screen not in the graph at all | **36 (62%)** | 14 (33%) |
+| screen known, this action never seen | 12 (21%) | **28 (67%)** |
+| edge seen exactly once | 4 (7%) | 0 |
+| edge known to be nondeterministic — rightly asked | 3 (5%) | 0 |
+| **edge repeated and consistent — addressable** | **3 (5%)** | **0 (0%)** |
+
+Three calls out of a hundred. Remembering an edge's prior outcome is not the
+lever, and building that store would have been a phase spent on 3%.
+
+**What they actually are.** Classified against a closed verdict vocabulary:
+
+| verdict | app A | app B |
+| --- | --- | --- |
+| **`no-visible-change`** | **36 (62%)** | **28 (67%)** |
+| wait-timeout | 7 | 5 |
+| settle-timeout | 4 | — |
+| unexpected-screen | 3 | — |
+| ambiguous | 3 | 1 |
+
+Two thirds of every verification escalation is *the step ran and nothing
+visibly changed* — and 83% and 100% of them are on a screen or an action the
+graph has never seen. Memory of any kind cannot answer a question about a place
+it has never been.
+
+**What this does NOT refute**, and the distinction is the whole value of the
+entry. It does not say operator knowledge is worthless — §14 measured that at 12
+calls and the measurement stands. It says the mechanism is not *recall of what
+an edge does*. The novel-territory dominance is in fact consistent with §14: an
+operator who knows the app goes straight to the screen they want, while a fresh
+one explores, lands somewhere unrecorded, and escalates. The value is in **not
+being there at all**, not in knowing what happens once you are.
+
+So the candidate faculty is task-level: *what this app calls the thing you want,
+and which screen it lives on* — the third item in §14's prose list, not the
+first two. And the sharpest lever on the remaining calls is not memory at all:
+it is the accuracy of `no-visible-change`, which DEFERRED item 4 already
+measured as blind to small-delta taps and which the graph-recording code's own
+comment says a toggle reads as.
+
+**Caveats.** The graph is read as it is now, so an edge matched here may have
+been learned *after* the escalation — which makes the 5%/0% an **upper bound**
+on what memory could have answered, and it is already near zero. The logs span
+nine sessions per device and are not §14's three passes. n=2 apps.
+
+**A hygiene note, because it happened here.** The first version of this analysis
+printed the `detail` prefix of each escalation to classify verdicts, which put a
+client's screen labels and a customer email address into a terminal. `detail` is
+app content. The script now classifies against a closed vocabulary and never
+emits the raw string — the same rule `phase17-corpus.mjs` states and this
+analysis briefly forgot.
+
+---
+
 ## What the whole file adds up to
 
 Three habits, each bought with a reversal above.
