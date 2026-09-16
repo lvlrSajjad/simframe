@@ -672,6 +672,22 @@ export function hpi({ flows, baselines = {} }) {
       wrong_action: runs.filter((r) => r.wrong_action_taken).length,
       escalations: runs.reduce((acc, r) => acc + (r.escalation_count ?? 0), 0),
       model_turns: median(runs.map((r) => r.model_turns)),
+      // **The latency lever, and it was already in the log unsurfaced.**
+      //
+      // Wall-clock per step is dominated by the model round trip, not by
+      // simframe: measured in the field, ~20 s of agent latency against ~1.7 s
+      // of simframe work per step. So per-step time is
+      // `(20s + 1.7s x n) / n` for n steps in one call — 21.7 s at n=1, 11.7 s
+      // at n=2, 6.7 s at n=4. Nothing about making simframe faster moves that;
+      // only n does.
+      //
+      // Which makes this the number to watch, and every hard-fail that drops a
+      // caller back to single-stepping a latency regression. Over 186 recorded
+      // runs on the author's device the median was 2.0 and the 25th percentile
+      // 1.0 — the p25 tail is recovery, and it is where the time goes.
+      steps_per_call: median(runs
+        .filter((r) => Number.isFinite(r.steps_taken) && r.model_turns > 0)
+        .map((r) => r.steps_taken / r.model_turns)),
     };
   }).sort((a, b) => a.flow.localeCompare(b.flow));
 
@@ -689,6 +705,9 @@ export function hpi({ flows, baselines = {} }) {
       hpi_accuracy: accuracy,
       hpi_time: hpiTime == null ? null : Number(hpiTime.toFixed(3)),
       hpi: hpiTime == null || accuracy == null ? null : Number((accuracy * hpiTime).toFixed(3)),
+      steps_per_call: median(flows
+        .filter((f) => Number.isFinite(f.steps_taken) && f.model_turns > 0)
+        .map((f) => f.steps_taken / f.model_turns)),
       step_ratio: median(perFlow.map((f) => f.step_ratio)),
       model_turns_median: median(perFlow.map((f) => f.model_turns)),
     },

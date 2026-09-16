@@ -1242,6 +1242,14 @@ async function main() {
           ? `HPI_time and HPI need a human baseline — none of ${report.overall.flows_measured} measured flow(s) has one yet.`
           : `HPI_time ${report.overall.hpi_time} (harmonic mean over ${report.overall.flows_with_human_baseline} flow(s)), HPI ${report.overall.hpi}`,
         `step_ratio ${report.overall.step_ratio ?? '—'} (target ≤1.5), model turns per flow ${report.overall.model_turns_median ?? '—'}`,
+        // Printed with what it costs, because the number alone means nothing
+        // to a reader and the whole point is that it is the dominant term in
+        // wall clock — far larger than anything inside simframe.
+        `steps per model call ${report.overall.steps_per_call ?? '—'}`
+          + (report.overall.steps_per_call
+            ? ` — about ${(((20000 + 1700 * report.overall.steps_per_call) / report.overall.steps_per_call) / 1000).toFixed(1)}s`
+              + ' per step end to end, of which simframe is ~1.7s. Raise this, not the engine.'
+            : ''),
         flags.out ? `wrote ${flags.out}` : null,
       ]);
       return;

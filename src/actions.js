@@ -2374,6 +2374,31 @@ async function sweep(deviceQuery, udid, step, ctx) {
     + (listed.length ? `: ${listed.join(', ')}` : '');
 }
 
+/**
+ * A `waitFor` is satisfied, but the screen is still arriving — hold or go?
+ *
+ * The largest single loss in the 0.15.1 field report: `waitFor "Records"` was
+ * satisfied by a count header reading `78 Records`, the next `tap` fired before
+ * any row had rendered, and the batch aborted with **13 steps unattempted**.
+ * The reporter had even warned us in their own `supervise` text that lists
+ * there render a count header before rows — and the supervisor never got asked,
+ * because from `waitFor`'s point of view the wait had succeeded.
+ *
+ * `stillFillingIn` already recognises exactly this ("a header promises 78
+ * records and only 2 rows are here yet"), and it was wired only to a note on a
+ * step result — advice for the model, costing a round trip to act on. Holding
+ * locally costs milliseconds.
+ *
+ * **It can only ever delay, never fail.** When the budget runs out the wait
+ * still succeeds, carrying what it saw. A `waitFor` that turned a present
+ * target into an error would be the false negative this release just fixed
+ * elsewhere, and a worse trade than the race it is guarding.
+ */
+function holdForContent(found, limit) {
+  if (Date.now() >= limit) return null;
+  return stillFillingIn(found?.entry) ?? null;
+}
+
 async function runStep(deviceQuery, udid, step, ctx) {
   switch (step.action) {
     case 'tap': {
@@ -2818,8 +2843,12 @@ async function runStep(deviceQuery, udid, step, ctx) {
           for (const one of alternatives) {
             try {
               const found = await api.locate(deviceQuery, one, { refresh: step.refresh !== false, options: ctx.options });
+              const arriving = holdForContent(found, limit);
+              if (arriving) { lastError = arriving; continue; }
+              const late = stillFillingIn(found?.entry);
               return `${JSON.stringify(one)} appeared at ${found.target.x},${found.target.y}`
-                + ` (first of ${alternatives.length} awaited)`;
+                + ` (first of ${alternatives.length} awaited)`
+                + (late ? ` [but ${late} — waited out the timeout]` : '');
             } catch (err) {
               lastError = err.message;
             }
@@ -2859,7 +2888,17 @@ async function runStep(deviceQuery, udid, step, ctx) {
           // is the price, and it is the same trade: a read is cheaper than the
           // round trip a wrong verdict causes.
           const found = await api.locate(deviceQuery, query, { index: step.index, refresh: step.refresh !== false, options: ctx.options });
-          return `"${found.target.label}" appeared at ${found.target.x},${found.target.y}`;
+          const arriving = holdForContent(found, limit);
+          if (arriving) {
+            // Still coming. Sleep a beat and look again — the loop re-resolves
+            // fresh, so this cannot lock onto a stale reading.
+            await api.waitFor(deviceQuery, { mode: 'stable', stableMs: 200, timeoutMs: 700, options: ctx.options })
+              .catch(() => null);
+            continue;
+          }
+          const late = stillFillingIn(found?.entry);
+          return `"${found.target.label}" appeared at ${found.target.x},${found.target.y}`
+            + (late ? ` [but ${late} — waited out the timeout; the screen may still be arriving]` : '');
         } catch (err) {
           lastError = err.message;
           // Waiting cannot make a thing unique.
