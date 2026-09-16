@@ -31,6 +31,18 @@
 > 173. `bench` on the tag was **cancelled**, so it produced nothing: not an
 > abstention, not a gate, nothing. HPI still has no hosted-runner reading.
 >
+> **One claim in this repo is weaker than it reads, including where I wrote it.**
+> The peer who measured 1.82 s/step ran on **`326464A4`, this laptop's own bench
+> device**, from this working tree, with `CLAUDE.md` and this file in context.
+> Their report says *"on a machine that is not yours"*; it is false, and it went
+> into BENCHMARKS and the article before anyone compared it to the UDID four
+> lines above it. Corrected. What the reading is worth: a different app and an
+> external stopwatch. What it is not: off-host. **The parity number has been
+> measured three times, on one laptop, never by a stranger** — and same-host is
+> the objection that bites, since identical code spans 0.406–0.558 across device
+> conditions on this machine alone. One replay on hardware this project has
+> never touched would settle it. Five minutes. Not run.
+>
 > **The one idea worth carrying forward.** That CI line is the same fault the
 > peer hit on a laptop, where `sim_look` served them a frame from a *previous
 > session* while the element map correctly described the app in front of them.

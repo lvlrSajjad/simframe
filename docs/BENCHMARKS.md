@@ -4214,11 +4214,21 @@ simframe**.
 So **simframe is already at human speed per step** (1.7 s against 1.95 s) and
 there is nothing left to win inside the engine. The only variable is `n`.
 
-### Independently replicated — 2026-09-17
+### A second reading — same machine, different app — 2026-09-17
 
-The number above was produced on one machine, on Settings, by the person who
-wanted it to be true. It has now been reproduced by a third party on a different
-machine and a different app.
+**Read the caveat before the table.** This is *not* independent replication, and
+an earlier version of this section claimed it was. The figures below were taken
+by a peer Claude Code session on **`326464A4` — the same bench device, on the
+same laptop** as every other number in this file. The session also ran inside
+this repository, so `CLAUDE.md` and the handoff were in its context; it said so
+itself, and then also wrote *"on a machine that is not yours"*, which is false.
+That line was repeated here and in the article without being checked against the
+UDID printed four lines above it in the same report.
+
+What is genuinely new: a **different app** (Reminders, not Settings), a
+different flow, and an **external stopwatch** rather than simframe's own clock.
+What is not new: the host, the device, and the absence of anyone outside this
+project.
 
 | | per step | how |
 | --- | --- | --- |
@@ -4227,10 +4237,17 @@ machine and a different app.
 | a second flow | 1.31 s | 6.55 s / 5 steps |
 | a human tester | 1.95 s | committed baseline, unchanged |
 
-Measured with a stopwatch outside the tool, which is the point: the claim does
-not depend on simframe's own clock. **The parity result holds off this machine**
-— two earlier rounds skipped this measurement, and it was the one number that
-could have falsified the central claim of the rebuild.
+Measured with a stopwatch outside the tool, which is worth something: the timing
+does not depend on simframe's own clock, and it holds on an app the flow numbers
+were never tuned against. **It does not establish that the result holds off this
+machine**, and that is the objection with teeth — this file already records
+identical code spanning `HPI_time` **0.406–0.558 across device conditions on one
+host**, a 37% spread. A same-host second reading cannot speak to that.
+
+**What would.** The parity claim needs one replay, by someone with no stake, on
+hardware this project has never touched, reporting wall clock over step count.
+It is a five-minute test and it has not been run. Until it is, "a replayed flow
+is at human latency" is a claim measured three times on one laptop.
 
 The same session reproduced the split, too: **68% model round trips, 32%
 simframe** on a more exploratory run, against the 60/34 measured here. The
