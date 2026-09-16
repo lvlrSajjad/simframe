@@ -37,19 +37,48 @@ export const POLL_MS = 100;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** The pid of the app on screen, or null when nothing can say. */
-export async function frontmostPid(udid) {
-  if (!udid || !control.available(udid)) return null;
+/**
+ * Words the translator hands back when it has no name to give.
+ *
+ * Measured on a device: the application element's title is "Settings" while
+ * Settings is on screen, and after a press of home the **same pid** is still
+ * frontmost with the title degraded to the bare word "application". That is
+ * not a name, and printing it as one would be a confident wrong answer in
+ * precisely the state worth noticing — an app frontmost by pid that has
+ * stopped naming itself. So the word is kept (the daemon reports raw) and
+ * phrased honestly here, where it can be tested without a device.
+ */
+const GENERIC_NAMES = new Set(['application', 'window', 'unknown', 'group', 'element']);
+
+/** How to refer to whoever holds the front. */
+export function nameHolder(pid, title) {
+  if (pid === null || pid === undefined) return 'nothing';
+  // Blank counts as absent, not as a degraded answer: whitespace is the
+  // translator saying nothing, and "no longer names itself" is a claim about
+  // an app that answered.
+  const said = typeof title === 'string' ? title.trim() : '';
+  if (!said) return `pid ${pid}`;
+  return GENERIC_NAMES.has(said.toLowerCase())
+    ? `pid ${pid} (an app that no longer names itself)`
+    : `pid ${pid} (${said})`;
+}
+
+/** Who is on screen — pid to compare, title to report. Nulls mean "cannot say". */
+export async function read(udid) {
+  if (!udid || !control.available(udid)) return { pid: null, title: null };
   try {
     const r = await control.request(udid, { action: 'frontmost' });
-    return typeof r?.pid === 'number' ? r.pid : null;
+    return { pid: typeof r?.pid === 'number' ? r.pid : null, title: r?.title ?? null };
   } catch {
     // A daemon that cannot answer is "cannot say". Reporting it as "not that
     // app" would turn a missing sensor into a failed launch, which is the
     // false refusal item 161 was reverted for.
-    return null;
+    return { pid: null, title: null };
   }
 }
+
+/** The pid alone, for callers that only compare. */
+export const frontmostPid = async (udid) => (await read(udid)).pid;
 
 /**
  * Wait for `pid` to be the app in front.
@@ -64,8 +93,8 @@ export async function frontmostPid(udid) {
  *   who is frontmost. The caller keeps whatever it said before this existed.
  *
  * @param {object} o
- * @param {number|null} o.pid                 what the launch reported
- * @param {() => Promise<number|null>} o.read who is in front now
+ * @param {number|null} o.pid   what the launch reported
+ * @param {() => Promise<{pid: number|null, title: string|null}>} o.read who is in front now
  */
 export async function landed({
   pid, read, budgetMs = FRONT_BUDGET_MS, pollMs = POLL_MS,
@@ -84,10 +113,13 @@ export async function landed({
   // budget is a launch that did not happen. Widening a budget without this is the
   // mistake item 146 was, twice.
   const held = [];
+  let holder = null;
   for (;;) {
-    seen = await read();
+    const look = await read();
+    seen = look?.pid ?? null;
     asked += 1;
     if (held[held.length - 1] !== seen) held.push(seen);
+    if (seen !== null) holder = look;
     if (seen === pid) return { verdict: 'fronted', ms: now() - started, polls: asked, held };
     // Checked after at least one read, so a platform that cannot answer says so
     // rather than spending the whole budget finding that out.
@@ -96,7 +128,15 @@ export async function landed({
     }
     if (now() - started >= budgetMs) {
       return {
-        verdict: 'did-not-front', ms: now() - started, polls: asked, frontmost: seen, held,
+        verdict: 'did-not-front',
+        ms: now() - started,
+        polls: asked,
+        frontmost: seen,
+        held,
+        // Named, not just numbered. A runner held the front at pid 7797 through
+        // nine consecutive failed launches and the only question that mattered
+        // — *what* is 7797 — was the one a number could not answer.
+        holder: nameHolder(seen, holder?.pid === seen ? holder.title : null),
       };
     }
     await wait(pollMs);
@@ -128,4 +168,4 @@ export function describeHeld(held = [], pid = null) {
 
 /** `landed`, reading from the daemon. */
 export const check = (udid, pid, opts = {}) =>
-  landed({ pid, read: () => frontmostPid(udid), ...opts });
+  landed({ pid, read: () => read(udid), ...opts });

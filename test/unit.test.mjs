@@ -5770,7 +5770,7 @@ test('a launch is confirmed by pid identity, not by the screen changing', async 
   // The case the old note called "likely": relaunching an app already in
   // front. The screen does not move and the launch is nevertheless fine.
   // Measured at 237ms on a real device, one poll.
-  const already = await frontmost.landed({ pid: 10695, read: async () => 10695, ...noWait });
+  const already = await frontmost.landed({ pid: 10695, read: async () => ({ pid: 10695 }), ...noWait });
   assert.equal(already.verdict, 'fronted');
   assert.equal(already.polls, 1, 'an app already in front answers on the first read');
 
@@ -5778,7 +5778,7 @@ test('a launch is confirmed by pid identity, not by the screen changing', async 
   // 8 polls, so a verdict taken from one look would have been wrong.
   let asked = 0;
   const slow = await frontmost.landed({
-    pid: 10762, read: async () => (++asked < 8 ? 10695 : 10762), ...noWait,
+    pid: 10762, read: async () => ({ pid: ++asked < 8 ? 10695 : 10762 }), ...noWait,
   });
   assert.equal(slow.verdict, 'fronted');
   assert.equal(slow.polls, 8);
@@ -5788,7 +5788,7 @@ test('a launch is confirmed by pid identity, not by the screen changing', async 
   // This is the run that used to return ok.
   let clock = 0;
   const failed = await frontmost.landed({
-    pid: 16332, read: async () => 15830, budgetMs: 3000, pollMs: 0,
+    pid: 16332, read: async () => ({ pid: 15830 }), budgetMs: 3000, pollMs: 0,
     wait: async () => {}, now: () => (clock += 100),
   });
   assert.equal(failed.verdict, 'did-not-front');
@@ -5799,14 +5799,14 @@ test('a launch is confirmed by pid identity, not by the screen changing', async 
   // and must decide that on the first read rather than spending the budget.
   let polls = 0;
   const mute = await frontmost.landed({
-    pid: 16332, read: async () => { polls += 1; return null; }, ...noWait,
+    pid: 16332, read: async () => { polls += 1; return { pid: null }; }, ...noWait,
   });
   assert.equal(mute.verdict, 'cannot-say');
   assert.equal(polls, 1, 'one read is enough to learn nothing answers');
 
   // And a launch that reported no pid is the same kind of silence.
   assert.equal(
-    (await frontmost.landed({ pid: null, read: async () => 1, ...noWait })).verdict,
+    (await frontmost.landed({ pid: null, read: async () => ({ pid: 1 }), ...noWait })).verdict,
     'cannot-say',
   );
 });
@@ -5820,7 +5820,7 @@ test('a launch that did not front says which of the two reasons it was', async (
   // a launch that did not take effect — and the remedy is another launch.
   let clock = 0;
   const stuck = await landed({
-    pid: 39452, read: async () => 38661, budgetMs: 3000, pollMs: 0,
+    pid: 39452, read: async () => ({ pid: 38661 }), budgetMs: 3000, pollMs: 0,
     wait: async () => {}, now: () => (clock += 200),
   });
   assert.deepEqual(stuck.held, [38661]);
@@ -5834,7 +5834,7 @@ test('a launch that did not front says which of the two reasons it was', async (
   const pids = [100, 100, 200, 200, 300];
   let i = 0;
   const moving = await landed({
-    pid: 999, read: async () => pids[Math.min(i++, pids.length - 1)],
+    pid: 999, read: async () => ({ pid: pids[Math.min(i++, pids.length - 1)] }),
     budgetMs: 900, pollMs: 0, wait: async () => {}, now: () => (clock += 200),
   });
   assert.equal(moving.verdict, 'did-not-front');
@@ -5850,6 +5850,33 @@ test('a launch that did not front says which of the two reasons it was', async (
   assert.match(describeHeld([48011], 48011), /did reach the front/);
   assert.match(describeHeld([100, 200], 200), /did reach the front/);
   assert.match(describeHeld([100, 200], 999), /changed hands/);
+});
+
+test('whoever holds the front is named, and a generic answer is not passed off as a name', async () => {
+  const { nameHolder, landed } = await import('../src/frontmost.js');
+
+  // A real name is used as one.
+  assert.equal(nameHolder(7797, 'Settings'), 'pid 7797 (Settings)');
+
+  // **The measured trap.** After a press of home the same pid stays frontmost
+  // and the title degrades to the bare word "application". Printing that as a
+  // name would be a confident wrong answer in exactly the state worth
+  // noticing, so it is phrased for what it is. The daemon still reports the
+  // word raw — the judgement lives here, where it can be tested at all.
+  assert.equal(nameHolder(7797, 'application'), 'pid 7797 (an app that no longer names itself)');
+  assert.equal(nameHolder(7797, 'Window'), 'pid 7797 (an app that no longer names itself)');
+  // Nothing answered at all: just the number, no invented parenthesis.
+  assert.equal(nameHolder(7797, null), 'pid 7797');
+  assert.equal(nameHolder(7797, '   '), 'pid 7797');
+  assert.equal(nameHolder(null, 'Settings'), 'nothing');
+
+  // And the verdict carries it, so the next runner occurrence says who.
+  let clock = 0;
+  const failed = await landed({
+    pid: 9304, read: async () => ({ pid: 7797, title: 'Settings' }),
+    budgetMs: 400, pollMs: 0, wait: async () => {}, now: () => (clock += 100),
+  });
+  assert.equal(failed.holder, 'pid 7797 (Settings)');
 });
 
 test('a launch that did not front is retried once, without a terminate, and the retry is reported', async () => {

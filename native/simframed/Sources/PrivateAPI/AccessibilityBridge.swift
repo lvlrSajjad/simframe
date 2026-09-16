@@ -254,11 +254,35 @@ public final class AccessibilityBridge {
         let pid = app.responds(to: NSSelectorFromString("pid"))
             ? (app.value(forKey: "pid") as? NSNumber)?.int32Value
             : nil
+        // Probing several names rather than trusting one, because a bare pid is
+        // not a diagnosis. A runner held the front at pid 7797 through nine
+        // consecutive failed launches and the whole question was whether that
+        // was SpringBoard or a lock screen — unanswerable from a number.
         var title: String?
         if let root = elementClass
             .perform(NSSelectorFromString("platformElementWithTranslationObject:"), with: app)?
             .takeUnretainedValue() as? NSObject {
-            title = string(attribute(root, "AXTitle"))
+            // Reported RAW, generic answers included, and the judgement about
+            // them is made a layer up. Measured: in Settings this reads
+            // "Settings"; press home and the SAME pid is still frontmost while
+            // the answer degrades to the bare word "application". That
+            // degradation is a signal — an app frontmost by pid that has
+            // stopped naming itself is the shape item 171 is about — so
+            // swallowing it here would throw away the interesting half. This
+            // file's job is to say what the translator said.
+            for name in ["AXTitle", "AXDescription"] {
+                if let found = string(attribute(root, name)) { title = found; break }
+            }
+        }
+        // The translation object itself, if the element would not say. Keys, not
+        // selectors, because these are properties on a private class and a key
+        // that is absent is caught by `responds(to:)` rather than by an
+        // Objective-C exception Swift cannot catch.
+        if title == nil {
+            for key in ["bundleId", "bundleIdentifier", "displayName", "processName"]
+            where app.responds(to: NSSelectorFromString(key)) {
+                if let found = string(app.value(forKey: key)) { title = found; break }
+            }
         }
         return FrontmostApp(pid: pid, title: title)
     }

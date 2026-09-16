@@ -2530,7 +2530,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
           `launched ${bundleId} (pid ${started.pid}) but it never came to the front`
           + ` within ${landed.ms}ms${retried ? ', on either of two attempts' : ''} — ${landed.frontmost === null
             ? 'nothing is frontmost'
-            : `pid ${landed.frontmost} still is`}`
+            : `${landed.holder} still is`}`
           + `. ${frontmost.describeHeld(landed.held, started.pid)}.`,
         );
       }
