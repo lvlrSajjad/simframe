@@ -601,6 +601,30 @@ export function harmonicMean(xs) {
  * a human baseline. A flow with no human baseline gets no HPI_time — reported
  * as null, never as 1.0, because a missing denominator is not parity.
  */
+/**
+ * One flow's row in the HPI table, shared by `simframe hpi` and the bench
+ * script because they had the same row duplicated byte for byte.
+ *
+ * It lives here, next to the report it renders, for a reason the v0.15.0 tag
+ * paid for: making `agent_ms` null for a flow that timed nothing was correct,
+ * and both printers dereferenced `.p50` on it. `bench` died with exit 1 and no
+ * hpi.json, and `simframe hpi` would have done the same for any user whose
+ * flow never completed. The metric had a test; nothing rendered it. A format
+ * duplicated in two files is a format that gets fixed in one.
+ *
+ * `—` means "not measured", never zero.
+ */
+export function flowRow(f, { wide = false } = {}) {
+  const cell = (v, unit = '') => (v === null || v === undefined ? '—' : `${v}${unit}`);
+  const row = `${f.flow.padEnd(24)} ${String(f.runs).padStart(5)}  `
+    + `${cell(f.agent_ms?.p50, 'ms').padStart(9)}   `
+    + `${cell(f.human_median_ms, 'ms').padStart(9)}   `
+    + `${cell(f.hpi_time).padStart(8)}  ${cell(f.step_ratio).padStart(10)}`;
+  return wide
+    ? `${row}  ${cell(f.model_turns).padStart(5)}  ${String(f.escalations).padStart(3)}`
+    : row;
+}
+
 export function hpi({ flows, baselines = {} }) {
   const byName = new Map();
   for (const f of flows) {

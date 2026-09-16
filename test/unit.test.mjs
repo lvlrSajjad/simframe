@@ -2051,6 +2051,26 @@ test('HPI is null without a human, and accuracy punishes a wrong action', async 
   assert.equal(broke.flows[0].hpi_time, null, 'failing fast is not going fast');
   assert.equal(broke.overall.hpi_time, null);
   assert.equal(broke.overall.hpi_accuracy, 0, 'and accuracy is where it shows');
+
+  // **And it has to RENDER.** `agent_ms` is null for a flow that timed nothing,
+  // and both places that printed the table dereferenced `.p50` on it — so the
+  // change above crashed `bench` on the v0.15.0 tag with exit 1 and no
+  // hpi.json, and would have crashed `simframe hpi` for any user whose flow
+  // never completed. I tested the metric's data and nothing that displayed it.
+  //
+  // The row is one function now, shared by both, so this exercises the real
+  // renderer rather than pattern-matching two copies of a template string.
+  const row = metrics.flowRow(broke.flows[0]);
+  assert.match(row, /settings-larger-text/);
+  assert.match(row, /—/, 'a flow that timed nothing shows a dash, not a crash and not a zero');
+  assert.doesNotMatch(row, /null|undefined|NaN/);
+  // Every field absent at once — the shape a brand-new log produces.
+  assert.doesNotMatch(
+    metrics.flowRow({ flow: 'x', runs: 0, escalations: 0 }, { wide: true }),
+    /null|undefined|NaN/,
+  );
+  // And a fully populated row still reads as it did.
+  assert.match(metrics.flowRow(a), /^a +2 +2000ms +4000ms +2 +1$/);
   // Flows with no name are ad-hoc runs; they are timed but have no counterpart.
   assert.equal(metrics.hpi({ flows: [{ wall_time_ms: 10, completed: true }] }).flows.length, 0);
 });

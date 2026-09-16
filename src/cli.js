@@ -1234,11 +1234,7 @@ async function main() {
       emit(flags, report, [
         flags.last ? `the last ${num(flags.last)} run(s) of each flow, of ${all.filter((f) => f.flow_name).length} named runs in the log` : null,
         'flow                      runs  agent p50   human p50   HPI_time  step_ratio  turns  esc',
-        ...report.flows.map((f) =>
-          `${f.flow.padEnd(24)} ${String(f.runs).padStart(5)}  ${`${f.agent_ms.p50}ms`.padStart(9)}   ` +
-          `${(f.human_median_ms ? `${f.human_median_ms}ms` : '—').padStart(9)}   ` +
-          `${(f.hpi_time ?? '—').toString().padStart(8)}  ${(f.step_ratio ?? '—').toString().padStart(10)}  ` +
-          `${(f.model_turns ?? '—').toString().padStart(5)}  ${String(f.escalations).padStart(3)}`),
+        ...report.flows.map((f) => metrics.flowRow(f, { wide: true })),
         '',
         `HPI_accuracy ${report.overall.hpi_accuracy} (${report.overall.runs} runs, ` +
           `${report.overall.runs - runs.filter((r) => r.completed && !r.wrong_action_taken).length} not clean)`,

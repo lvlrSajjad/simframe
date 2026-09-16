@@ -186,11 +186,7 @@ const report = {
 
 console.log('\nflow                      runs  agent p50   human p50   HPI_time  step_ratio');
 for (const f of report.flows) {
-  console.log(
-    `${f.flow.padEnd(24)} ${String(f.runs).padStart(5)}  ${`${f.agent_ms.p50}ms`.padStart(9)}   ` +
-      `${(f.human_median_ms ? `${f.human_median_ms}ms` : '—').padStart(9)}   ` +
-      `${String(f.hpi_time ?? '—').padStart(8)}  ${String(f.step_ratio ?? '—').padStart(10)}`,
-  );
+  console.log(metrics.flowRow(f));
 }
 report.overall.hpi_time_median_of_passes = passTimes.length ? Number(metrics.median(passTimes).toFixed(3)) : null;
 const o = report.overall;
