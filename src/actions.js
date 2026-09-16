@@ -1582,12 +1582,35 @@ async function stillOnPlan(deviceQuery, verification, nextStep, options) {
   // neither is evidence about where we are.
   if (!target || /^#\d+$/.test(String(target).trim()) || /^@?-?\d+\s*,\s*-?\d+$/.test(String(target).trim())) return false;
   if (!ACTION_STEPS.has(nextStep.action) && nextStep.action !== 'assert' && nextStep.action !== 'waitFor') return false;
-  try {
-    const hit = await api.locate(deviceQuery, String(target), { options });
-    return Boolean(hit?.target);
-  } catch {
-    return false;
+  // **Settle before looking, and look twice.**
+  //
+  // This asked once, immediately, and the circumstance it is asked in is
+  // precisely a screen that is still arriving: a content-driven screen whose
+  // rows have not rendered hashes differently from the one memory expected —
+  // which is what produced the `unexpected-screen` — *and* does not yet hold
+  // the next step's target. So the one signal that could have rescued the batch
+  // was read at the only moment it was guaranteed to be absent, and a correct
+  // navigation aborted the run.
+  //
+  // Measured cost of getting this wrong: a field report lost a 7-step plan at
+  // step 5 on a tap that had correctly advanced a wizard, and every discarded
+  // step is ~20s of model latency to re-plan. A settle here costs under a
+  // second and is paid only on the failure path.
+  //
+  // It cannot manufacture a continue: the next step's own target still has to
+  // resolve, which is strong evidence about where we are.
+  for (let look = 0; look < 2; look += 1) {
+    await api.waitFor(deviceQuery, {
+      mode: 'settle', stableMs: 300, timeoutMs: look === 0 ? 1200 : 800, options,
+    }).catch(() => null);
+    try {
+      const hit = await api.locate(deviceQuery, String(target), { refresh: true, options });
+      if (hit?.target) return true;
+    } catch {
+      /* not here yet; one more look, then the halt stands */
+    }
   }
+  return false;
 }
 
 /**

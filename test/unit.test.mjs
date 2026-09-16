@@ -6263,3 +6263,39 @@ test('a supervise brief with no supervisor enabled says so, and names the remedy
   // screens, ignored by the fourth occurrence).
   assert.match(src, /if \(args\.supervise &&/, 'gated on a brief having been passed');
 });
+
+test('the escape hatch from a wrong-turn verdict settles before it gives up', async () => {
+  // `unexpected-screen` aborts a batch, and `stillOnPlan` is the one thing that
+  // can rescue it: if the NEXT step's own target resolves here, we are on a
+  // screen the plan can continue from. It asked once, immediately — and the
+  // circumstance it is asked in is a screen still arriving, which is what
+  // produced the unexpected hash in the first place. So the rescuing signal was
+  // read at the only moment it was guaranteed to be absent.
+  //
+  // A field report lost a 7-step plan at step 5 to this, on a tap that had
+  // correctly advanced a wizard. Every discarded step is ~20s of model latency
+  // to re-plan, so the settle pays for itself many times over and is only ever
+  // paid on the failure path.
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('async function stillOnPlan'));
+  const body = fn.slice(0, fn.indexOf('\n}\n'));
+  assert.match(body, /mode: 'settle'/, 'it must let the screen arrive before looking');
+  assert.match(body, /look < 2/, 'and look more than once');
+  assert.match(body, /refresh: true/, 'against the live screen, not the remembered map');
+
+  // **It must not be able to manufacture a continue.** The next step's target
+  // still has to resolve; the guards that make a non-answer inadmissible stay.
+  assert.match(body, /\^#\\d\+\$/, 'a #ref was numbered on another screen and proves nothing');
+  assert.match(body, /\n  return false;/, 'and a target that never appears still halts');
+
+  // The halt itself is unchanged: a wrong turn with nothing to continue into
+  // still fails the run, which is the verify barrier and not negotiable.
+  const actions = await import('../src/actions.js');
+  const wrong = { verdict: 'unexpected-screen', detail: 'landed somewhere else' };
+  assert.deepEqual(
+    actions.haltDecision({ verification: wrong }),
+    { halt: true, failRun: true, error: 'unexpected-screen: landed somewhere else' },
+  );
+  // And a caller who has said continueOnError still gets to continue.
+  assert.equal(actions.haltDecision({ verification: wrong, continueOnError: true }).halt, false);
+});

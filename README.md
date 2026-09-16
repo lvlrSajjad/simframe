@@ -701,6 +701,36 @@ Reproduce all of it with `npm run bench`, which prints the same table against
 your machine. Full detail, including the measurement traps, is in
 [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
+### Wall clock per step — where the time really goes
+
+Every number above is microscopic next to the one that decides how fast this
+feels, and it took two field reports to see it. Per-step wall clock is
+
+```
+(model round trip + simframe work × n) / n        for n steps in one call
+```
+
+| | per step |
+| --- | --- |
+| a human tester, measured | **1.95 s** |
+| **a saved flow replayed — zero model calls** | **1.98 s** |
+| simframe's own work inside a batch | **~1.7 s** |
+| a batch of 4 steps, one model call | ~6.7 s |
+| a batch of 2 steps | ~11.7 s |
+| one model call per step | ~21.7 s |
+
+**A replayed flow runs at human speed**, and simframe's own work already does.
+A field report put the split at **34% simframe, 60% agent round trips** over
+462 s of wall clock — the tester's *"30+ seconds between each step"* was
+accurate and was not simframe. So there is nothing left to win inside the
+engine, and the only variable is `n`: `simframe hpi` reports `steps_per_call`
+for exactly that reason.
+
+Which is why **every hard-fail that drops a caller back to single-stepping is a
+latency bug**. Between two field reports on the same flow, one run took 33 tool
+calls and the next took **16**, for 28 executed steps and no screenshots at
+all — the difference being defects fixed, not code made faster.
+
 ## How it works
 
 ```

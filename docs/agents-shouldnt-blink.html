@@ -976,6 +976,44 @@ worked here before: tap "NEW REQUEST" (7x)</code></pre>
   </section>
 
   <section>
+    <p class="sec-label">The number I should have measured first</p>
+    <h2>The engine was already faster than the human</h2>
+    <div class="track">
+      <p class="lede">Latency was the reason I started this. The existing simulator tooling was too slow to watch an agent use, and every benchmark in this piece exists because I went after that. Two field reports later, the measurement I had never taken says I was optimising the wrong end of the system for months.</p>
+      <p>A tester driving a four-step wizard described the experience as <em>&ldquo;30+ seconds between each step&rdquo;</em>. That perception was exactly right, and simframe was not what was spending it. Of <b>462&nbsp;seconds</b> of wall clock, about <b>156</b> were simframe and about <b>276</b> were the agent thinking between calls &mdash; <b>34 per cent against 60 per cent</b>. The remaining 6 per cent was one device reboot.</p>
+      <p>So per-step wall clock is not a property of the engine at all. It is arithmetic about how many steps fit in one model call:</p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-label">Wall clock per step, by steps per model call</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>How it runs</th><th>Per step</th></tr></thead>
+          <tbody>
+            <tr><td>one model call per step</td><td>~21.7&nbsp;s</td></tr>
+            <tr><td>a batch of 2 &mdash; the recorded median</td><td>~11.7&nbsp;s</td></tr>
+            <tr><td>a batch of 4</td><td>~6.7&nbsp;s</td></tr>
+            <tr><td>simframe&rsquo;s own work inside a batch</td><td><b>~1.7&nbsp;s</b></td></tr>
+            <tr><td><b>a saved flow replayed, zero model calls</b></td><td><b>1.98&nbsp;s</b></td></tr>
+            <tr><td>a human tester doing it by hand</td><td><b>1.95&nbsp;s</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="track">
+      <ul class="findings">
+        <li><strong>simframe is already at human speed per step</strong> &mdash; 1.7&nbsp;s against a measured human&rsquo;s 1.95&nbsp;s. There is no headroom left inside the engine, and there had not been for a while.</li>
+        <li><strong>A replayed flow hits human parity outright</strong> &mdash; 1.98&nbsp;s against 1.95&nbsp;s, three runs, median of 1,984&nbsp;ms. Not a faster engine: the same engine with the model out of the loop.</li>
+        <li><strong>The lever was in the log the whole time.</strong> Every run records how many steps it took and how many model turns it cost. Nothing divided them. Over 186 recorded runs the median is <b>2.0</b> steps per call and the 25th percentile is <b>1.0</b> &mdash; and that tail is recovery.</li>
+      </ul>
+      <p>Which reorders every other item on the list. A wrong tap is a correctness bug and a false refusal is an annoyance, but both of them are also <em>latency</em> bugs, and the latency is the larger cost: <b>every hard-fail that drops a caller back to single-stepping costs a round trip worth ten to twenty times the failed call itself.</b> One reporter reached the same place from the other end and put it better than my own issue tracker did &mdash; their run took 33 tool calls where a clean one needs about 8, and <em>&ldquo;the 25 extra calls were all recovery, and they are essentially the entire 7m42s.&rdquo;</em></p>
+      <p>Fixing four of those defects took the same flow, on the same app, from <b>33 tool calls to 16</b>, with no screenshots and no device reboot. Faster code contributed nothing to that.</p>
+      <p>The embarrassing part is the last one. The replay path &mdash; the only route that reaches human latency &mdash; had been <em>unreachable</em>, because a flow could only be saved if every step verified, and a first traversal is all-unverified by construction: there is nothing to compare it against yet. So no flow could ever be recorded, so replay could never be used, and a reporter hit the wall with a clean ten-of-ten batch in hand. A gate nobody can pass protects nothing, and this one was sitting in front of the fastest thing here.</p>
+    </div>
+  </section>
+
+  <section>
     <p class="sec-label">What three strangers agreed on</p>
     <h2>The bill for a confident wrong answer</h2>
     <div class="track">
