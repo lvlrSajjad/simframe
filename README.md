@@ -172,6 +172,18 @@ selector that did not *resolve* and nothing else, because retrying from a screen
 you did not expect to be on is a second guess. A destructive-looking label is
 refused as a substitute even if you list it.
 
+**Steps that may legitimately have nothing to act on.** `{"tap": "Not Now",
+"optional": true}` is skipped when nothing matches and runs normally when
+something does. It exists because the opposite cost real time: a batch that
+included a dismissal for a first-launch sheet lost **six correct steps** on the
+next run because the sheet *did not appear*. A nag screen, a permission prompt,
+a "What's New" or a cold-start splash otherwise makes a flow unbatchable, which
+is the expensive outcome — a call per step instead of a call per flow. Only a
+selector that resolved to **nothing** is absorbed: a target that is on screen
+twice is ambiguous, not absent, and must still verify. Skipped steps are
+reported, because "the sheet was gone" and "the sheet was dismissed" are
+different facts.
+
 **`{"seek": "change username", "budget": 6}`** opens containers, checks, and
 comes back, depth first, inside a hard budget. It **acts** — opening a door
 changes state — and it refuses to open anything that commits, abandons or
@@ -400,7 +412,7 @@ steer the model is a tool surface the model uses wrong.
 | `sim_do` | **The main tool.** A whole flow in one call — tap, type, scroll, wait, assert — each step settling before the next and verified against what it did last time. |
 | `sim_state` | The cheapest question there is: has anything changed **since your last look**, and which regions moved. |
 | `sim_goto` | Walk to a screen simframe has been to before, planning the route through remembered transitions. |
-| `sim_flow_run` | Replay a flow that verified end to end. |
+| `sim_flow_run` | Replay a saved flow — **zero model calls**, which is the only path to human wall clock. A first traversal saves as *provisional*; one replay in which every step passed confirms it. A run with a contradicted step, a failed step, or one that never reached its last step is refused and says which. |
 | `sim_find` | Resolve an intent to one control, without acting on it. |
 | `sim_tap` · `sim_type_into` · `sim_scroll_to` · `sim_wait_for` · `sim_assert` | Single actions, for when you genuinely only have one step. Each is one `sim_do` step underneath. |
 | `sim_launch` · `sim_open_url` · `sim_permission` | Launch with arguments and environment; open a deep link; grant a privacy permission instead of tapping a system alert. A launch is **confirmed to have reached the front**, by comparing the pid `simctl` started against the pid the device reports as frontmost — so *"the process started"* is no longer reported as *"the app is on screen"*. |

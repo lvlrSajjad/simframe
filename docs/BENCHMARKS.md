@@ -4214,6 +4214,34 @@ simframe**.
 So **simframe is already at human speed per step** (1.7 s against 1.95 s) and
 there is nothing left to win inside the engine. The only variable is `n`.
 
+### Independently replicated — 2026-09-17
+
+The number above was produced on one machine, on Settings, by the person who
+wanted it to be true. It has now been reproduced by a third party on a different
+machine and a different app.
+
+| | per step | how |
+| --- | --- | --- |
+| **replay, external stopwatch** | **1.82 s** | 12.773 s / 7 steps, Reminders, via the CLI — includes Node start-up |
+| replay, in-daemon | 1.68 s | 11.78 s / 7 steps, same flow |
+| a second flow | 1.31 s | 6.55 s / 5 steps |
+| a human tester | 1.95 s | committed baseline, unchanged |
+
+Measured with a stopwatch outside the tool, which is the point: the claim does
+not depend on simframe's own clock. **The parity result holds off this machine**
+— two earlier rounds skipped this measurement, and it was the one number that
+could have falsified the central claim of the rebuild.
+
+The same session reproduced the split, too: **68% model round trips, 32%
+simframe** on a more exploratory run, against the 60/34 measured here. The
+engine is not the problem; the round trips are.
+
+One caveat carried from that round, because it is the reason this section is not
+larger: the replays that produced these numbers **failed on their final
+asserts**, on a flow that creates records — the assert matched 2 things, then 3,
+because the flow had worked twice. The timings are sound; the flows were not
+confirmable. See DEFERRED 179.
+
 `steps_per_call` is now reported by `simframe hpi`, and it was in the log the
 whole time — every run records `steps_taken` and `model_turns` and nothing
 divided them. Over 186 recorded runs on this device the median is **2.0** and

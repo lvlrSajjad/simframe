@@ -496,6 +496,8 @@ Which reorders every other item on the list. A wrong tap is a correctness bug an
 
 Fixing four of those defects took the same flow, on the same app, from **33 tool calls to 16**, with no screenshots and no device reboot. Faster code contributed nothing to that.
 
+**It replicates off this machine.** Every number above was produced on one laptop, on Settings, by the person who wanted them to be true — which is the weakest possible evidence for a claim this load-bearing. A third party has now reproduced it on a different machine and a different app: **1.82 s per step by external stopwatch** (12.773 s over 7 steps, through the CLI, including Node start-up), 1.68 s in-daemon, and 1.31 s on a second flow. They measured the split too, and got **68% model round trips against 32% simframe** where this machine had measured 60/34. Two earlier rounds skipped this measurement; it was the one number that could have falsified the whole argument, and it did not.
+
 The embarrassing part is the last one. The replay path — the only route that reaches human latency — had been *unreachable*, because a flow could only be saved if every step verified, and a first traversal is all-unverified by construction: there is nothing to compare it against yet. So no flow could ever be recorded, so replay could never be used, and a reporter hit the wall with a clean ten-of-ten batch in hand. A gate nobody can pass protects nothing, and this one was sitting in front of the fastest thing here.
 
 *What three strangers agreed on*
