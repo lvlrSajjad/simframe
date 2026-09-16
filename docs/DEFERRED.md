@@ -2511,6 +2511,40 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+173. **The bench suite wedges the device it measures.** OPEN, and it is the
+   reason `HPI` has never been measured on a hosted runner. Observed four times
+   in one afternoon on two machines: SpringBoard crashing mid-suite, `simctl`
+   then exceeding its 90 s budget, and capture reporting no frame for 600 ms. A
+   revive cures it, the next pass runs, and the pass after that wedges again.
+
+   It defeats measurement in both directions. `bench` on run `35110888779`
+   abstained because `settings-larger-text` failed **7 of 7**; an attempt to A/B
+   item 169 against its parent commit in a git worktree produced nothing usable
+   because the device went bad rather than the code. Any conclusion drawn from a
+   bench run on this host has to survive that, and most cannot.
+
+   Worth trying, in order: a revive between passes rather than only on failure
+   (the suite's own reset already terminates and relaunches an app before every
+   run, which is the churn the README's "rapid app relaunch" note is about); and
+   a shorter suite per device session. Both are cheap; neither is a diagnosis.
+
+172. **`HPI_time` counted failed runs, and a failure is fast.** FIXED,
+   2026-09-16. `metrics.hpi` took every run's `wall_time_ms` regardless of
+   whether the run completed, so breaking a flow registered as the agent
+   getting quicker.
+
+   Measured, not hypothesised: `settings-larger-text` failed all three runs at
+   ~3.6 s against a 7799 ms human median and the report read `hpi_time 2.163` —
+   *twice as fast as a person*, about a flow that never once reached its
+   destination. The composite `HPI` survived because accuracy divides it down,
+   but **the CI gate's threshold is written against `HPI_time`**, so the single
+   number the gate reads was the one that breakage flattered.
+
+   Time is now taken over completed runs only, and a flow where nothing
+   completed reports **no** time rather than a flattering one — the same
+   discipline as the suite's own "no comparable HPI was measured". The committed
+   baseline rows are unaffected, because every run in them completed.
+
 171. **An app is frontmost by pid while the display renders a clock.** OPEN,
    and it exists only because 169 made it *separable*. Before the launch could
    confirm a front, this and 169 arrived as the same sentence — a tour waiting

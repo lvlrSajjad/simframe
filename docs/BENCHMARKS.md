@@ -4084,3 +4084,77 @@ gating would make a settle unsatisfiable on the screens 123 is about. The answer
 there is 123's expensive half, letting the caller name a region to ignore. The
 objection has moved from an unmeasured fear to a known trade-off with a named
 solution.
+
+## HPI, measured again — 2026-09-16, and the first reading in this series
+
+`bench` had been **skipped on every push** for the whole 0.14.x series — the job
+runs only on tags, the nightly, or a manual dispatch — so items 148 (tap the
+activation point), 152, 154 and 169 shipped with no HPI reading at all. A
+dispatched run (`35110888779`) then *abstained*: `settings-larger-text` failed
+**7 of 7** attempts across three passes and the suite correctly refused to
+publish a partial number.
+
+It was measured locally instead, on `326464A4` (iPhone 17 Pro, iOS 26.5,
+macOS 15, Xcode 26), same 3-runs shape the gate uses. **N=3, one pass — weaker
+than the committed N=5 baseline, and not a hosted runner.** Recorded because
+*something measured* beats the nothing this series has had.
+
+| | committed run A<br>(warm, N=5) | committed run C<br>(fresh restart, N=5) | **2026-09-16**<br>(fresh revive, N=3) |
+| --- | --- | --- | --- |
+| `HPI_time` | 0.475 | 0.406 | **0.477** |
+| `HPI_accuracy` | 0.5 | 0.5 | **0.833** |
+| `HPI` | 0.237 | — | **0.398** |
+| `step_ratio` | 1.0 | — | **1.0** |
+| `settings-larger-text` p50 | 13977 ms | 19199 ms | **11707 ms** |
+| `contacts-kate-bell` p50 | 10407 ms | 10570 ms | **11560 ms** |
+
+**Read it against run C, not run A** — a freshly revived device is condition C,
+and C is the lowest of the three. On that comparison `HPI_time` is 0.477 against
+0.406. Against A it is 0.477 against 0.475, which is *flat*, and this document's
+own finding two sections up is that identical code spans **0.406–0.475** across
+conditions. So the honest statement is the negative one, and it is the one that
+mattered: **no time regression is visible from 148/154/169**, including the
+launch wait 169 adds. Nothing here is a claim of improvement.
+
+`HPI_accuracy` 0.5 → **0.833** is the one real movement. The 0.5 had a single
+named cause — `contacts-kate-bell` failing on *every* run on contact-row
+ambiguity — and that flow now passes **3 of 3**. Items 152 (identifiers scored
+in `matching.rank`) and 154 (`stateDelta`) are both plausible causes and this
+measurement does not separate them.
+
+### Two defects found by measuring rather than by reasoning
+
+**`HPI_time` counted failed runs, and a failure is fast.** A second local run,
+after the reset fix below, had `settings-larger-text` fail all three runs at
+~3.6 s against a 7799 ms human median — and the report said `hpi_time 2.163`,
+"twice as fast as a person", about a flow that never once reached its
+destination. The composite `HPI` survived because accuracy divides it down, but
+**the CI gate's threshold is written against `HPI_time`**, so the single number
+the gate reads was the one breakage flattered. Time is now taken over completed
+runs only, and a flow where nothing completed reports no time rather than a
+flattering one — the same discipline as the suite's own "no comparable HPI was
+measured". Note that this shifts the metric: the table above was computed the
+old way, on runs that all completed, so those rows are unaffected.
+
+**The suite's reset resolved its first look from memory.** `src/baseline.js`
+carried `refresh: attempt > 0` — the exact pattern `actions.js` has a test
+forbidding, except the test only ever read `actions.js`. Every run, the reset
+looked for the flow's root marker against the map remembered from the *previous*
+run's end screen, missed a marker plainly on screen, and then hunted a "back"
+control that a root screen does not have. The assertion now sweeps all of
+`src/`.
+
+### The blocker, stated plainly
+
+**The bench suite wedges the device it measures.** Observed four times in one
+afternoon, on two machines: SpringBoard crashing mid-suite, `simctl` then
+exceeding its 90 s budget, and capture reporting no frame for 600 ms. A revive
+cures it and the next pass runs; the pass after that wedges again. That is why
+HPI has never been measured on a hosted runner, and it is a bigger obstacle than
+any individual flow. An A/B of item 169 against its parent commit was attempted
+in a worktree and produced nothing usable for exactly this reason — the device
+went bad, not the code.
+
+Escalation log on this device at the time of measuring: **998 entries** —
+`verification_failed` 551, `ambiguous_intent` 207, `unknown_screen` 167,
+`no_plan` 73.

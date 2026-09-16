@@ -2023,8 +2023,34 @@ test('HPI is null without a human, and accuracy punishes a wrong action', async 
   // Agent median 2000 against a human's 4000 is twice human speed.
   assert.equal(a.hpi_time, 2);
   assert.equal(report.overall.hpi_accuracy, 0.667);
-  assert.equal(report.overall.hpi_time, 1.333);
-  assert.equal(report.overall.hpi, Number((0.667 * 1.333).toFixed(3)));
+  // Flow `b` completed nothing, so it contributes NO time — not a flattering
+  // one. It used to contribute 1.0 and pull the overall down to 1.333, which
+  // reads like a measurement of b and is not one: nothing about b was measured
+  // except that it failed. Accuracy is where b is accounted for, and it is.
+  const b = report.flows.find((f) => f.flow === 'b');
+  assert.equal(b.hpi_time, null, 'a flow that never finished has no time to report');
+  assert.equal(b.timed_runs, 0);
+  assert.equal(report.overall.hpi_time, 2, 'over the flows that could be timed');
+  assert.equal(report.overall.hpi, Number((0.667 * 2).toFixed(3)));
+
+  // **The defect this rule exists for, with the real numbers.** A failure is
+  // FAST, so counting failed runs in the time made breakage look like speed:
+  // `settings-larger-text` failed all three runs at ~3.6 s against a 7799 ms
+  // human median and reported `hpi_time 2.163` — "twice as fast as a person"
+  // about a flow that never once reached its destination. The CI gate's
+  // threshold is written against HPI_time, so the one number the gate reads
+  // was the one breakage flattered.
+  const broke = metrics.hpi({
+    flows: [
+      flow('settings-larger-text', 3473, { completed: false }),
+      flow('settings-larger-text', 3605, { completed: false }),
+      flow('settings-larger-text', 3789, { completed: false }),
+    ],
+    baselines: { 'settings-larger-text': { wall_time_ms: { p50: 7799 } } },
+  });
+  assert.equal(broke.flows[0].hpi_time, null, 'failing fast is not going fast');
+  assert.equal(broke.overall.hpi_time, null);
+  assert.equal(broke.overall.hpi_accuracy, 0, 'and accuracy is where it shows');
   // Flows with no name are ad-hoc runs; they are timed but have no counterpart.
   assert.equal(metrics.hpi({ flows: [{ wall_time_ms: 10, completed: true }] }).flows.length, 0);
 });

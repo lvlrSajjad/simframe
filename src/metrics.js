@@ -610,13 +610,31 @@ export function hpi({ flows, baselines = {} }) {
   }
 
   const perFlow = [...byName.entries()].map(([name, runs]) => {
-    const agent = quartiles(runs.map((r) => r.wall_time_ms));
+    // **Time is measured over runs that finished the flow.** This took every
+    // run's wall time, failures included, and a failure is fast — so a change
+    // that broke a flow registered as the agent getting quicker.
+    //
+    // Measured, not hypothesised: `settings-larger-text` failed all three runs
+    // at ~3.6 s against a 7799 ms human median and reported `hpi_time 2.163`,
+    // i.e. "twice as fast as a person", about a flow that never once reached
+    // its destination. The composite `hpi` survives that because accuracy
+    // divides it down — but the CI gate's threshold is written against
+    // `HPI_time`, so the one number the gate reads was the one being flattered
+    // by breakage.
+    //
+    // A flow where nothing completed reports no time at all rather than a
+    // flattering one. That is the same discipline as the suite's own "no
+    // comparable HPI was measured": a number that cannot be compared must not
+    // be offered as one.
+    const finished = runs.filter((r) => r.completed);
+    const agent = quartiles(finished.map((r) => r.wall_time_ms));
     const human = baselines[name]?.wall_time_ms ?? null;
     const humanMedian = human?.p50 ?? null;
     const stepRatios = runs.map((r) => r.step_ratio).filter((x) => Number.isFinite(x));
     return {
       flow: name,
       runs: runs.length,
+      timed_runs: finished.length,
       agent_ms: agent,
       human_median_ms: humanMedian,
       hpi_time: humanMedian && agent?.p50 ? Number((humanMedian / agent.p50).toFixed(3)) : null,
