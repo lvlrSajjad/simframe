@@ -43,6 +43,28 @@
 > conditions on this machine alone. One replay on hardware this project has
 > never touched would settle it. Five minutes. Not run.
 >
+> **Two framings in this repo were too generous, and the owner corrected both.**
+> First: "a replayed flow is at human latency" is true and is about *replay*,
+> which has no model in the loop and needs a flow recorded first. **The tool as
+> used is roughly 6x a human at the recorded median (~11.7 s/step) and ~11x when
+> a hard-fail forces one step per call (~21.7 s).** The engine is below human;
+> the product is not. The honest headline is "much less slow", and the README,
+> BENCHMARKS and the article now lead with the bottom of the table rather than
+> the top. Second: **accuracy is the neglected half.** `HPI_accuracy` reads 0.483
+> over 151 runs with 78 not clean, against a baseline that is itself invalid
+> (`contacts-kate-bell` has `completed: 0`) on a device the suite keeps wedging.
+> Speed has had three days of attention; precision has had none.
+>
+> **The defect rate has not saturated, and that is a planning input.** Every
+> field round so far — 0.13.0, two on 0.14.1, 0.15.0, 0.15.1, 0.16.0 — has
+> opened **at least one major defect plus several smaller ones**, and the 0.16.0
+> round found a silent success in the feature shipped the previous day. A tool
+> whose discovery rate is still one-major-per-session is not near stable, and
+> **the next field round is worth more than the next phase**. Phases 13 and 14
+> optimise simframe's own 1.7 s, which is already below human and is a minority
+> of the clock; on the arithmetic they buy single-digit percentages. Read
+> `docs/ESCALATIONS.md` and run a round instead.
+>
 > **The one idea worth carrying forward.** That CI line is the same fault the
 > peer hit on a laptop, where `sim_look` served them a frame from a *previous
 > session* while the element map correctly described the app in front of them.

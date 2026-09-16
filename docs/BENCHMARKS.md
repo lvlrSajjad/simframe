@@ -4203,6 +4203,15 @@ faster engine; it is the same engine with the model removed from the loop, and
 it includes Node process start-up on every replay, which an in-process MCP
 caller does not pay.
 
+**And the tool as used is not at human latency.** The parity row applies to
+replay only, which requires a flow that was recorded first and has no model in
+the loop. Real use has a model deciding each move: at the recorded median of two
+steps per call that is **~11.7 s per step, about 6× a human**, and a hard-fail
+that forces one step per call costs **~21.7 s, about 11×**. Both numbers are in
+the table above and both are the honest description of the experience. Quoting
+1.98 s as simframe's speed is a category error — it is the speed of the one path
+that consults nobody.
+
 ### The arithmetic that reorders every other priority
 
 Per-step wall clock is `(model_latency + 1.7 s × n) / n` for `n` steps in one

@@ -488,9 +488,11 @@ So per-step wall clock is not a property of the engine at all. It is arithmetic 
 | **a saved flow replayed, zero model calls** | **1.98 s** |
 | a human tester doing it by hand | **1.95 s** |
 
-- **simframe is already at human speed per step** — 1.7 s against a measured human’s 1.95 s. There is no headroom left inside the engine, and there had not been for a while.
+- **simframe’s own work is already below human speed** — 1.7 s against a measured human’s 1.95 s. Note the scope: that is the engine, not the product. There is no headroom left inside it, and there had not been for a while.
 - **A replayed flow hits human parity outright** — 1.98 s against 1.95 s, three runs, median of 1,984 ms. Not a faster engine: the same engine with the model out of the loop.
 - **The lever was in the log the whole time.** Every run records how many steps it took and how many model turns it cost. Nothing divided them. Over 186 recorded runs the median is **2.0** steps per call and the 25th percentile is **1.0** — and that tail is recovery.
+
+**None of which means this tool is as fast as a person.** It is not, and the table above says so if you read the bottom of it. Driving an app for real means a model deciding what to do next, and at the recorded median of two steps per call that is **~11.7 s per step — about six times a human**; every failure that drops the caller back to one step per call costs **~21.7 s, about eleven times**. The parity result is real and it is narrow: it belongs to *replay*, which has no model in the loop and only exists once a flow has been recorded. What has genuinely improved is the multiplier, and it improved by a lot — but the honest headline is “much less slow”, not “as fast as a human”.
 
 Which reorders every other item on the list. A wrong tap is a correctness bug and a false refusal is an annoyance, but both of them are also *latency* bugs, and the latency is the larger cost: **every hard-fail that drops a caller back to single-stepping costs a round trip worth ten to twenty times the failed call itself.** One reporter reached the same place from the other end and put it better than my own issue tracker did — their run took 33 tool calls where a clean one needs about 8, and *“the 25 extra calls were all recovery, and they are essentially the entire 7m42s.”*
 

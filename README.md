@@ -722,16 +722,26 @@ feels, and it took two field reports to see it. Per-step wall clock is
 (model round trip + simframe work × n) / n        for n steps in one call
 ```
 
-| | per step |
-| --- | --- |
-| a human tester, measured | **1.95 s** |
-| **a saved flow replayed — zero model calls** | **1.98 s** |
-| simframe's own work inside a batch | **~1.7 s** |
-| a batch of 4 steps, one model call | ~6.7 s |
-| a batch of 2 steps | ~11.7 s |
-| one model call per step | ~21.7 s |
+| | per step | when you get it |
+| --- | --- | --- |
+| a human tester, measured | **1.95 s** | the bar |
+| simframe's own work inside a batch | ~1.7 s | never on its own — always plus a model call |
+| a saved flow replayed — zero model calls | **1.98 s** | only once a flow exists and is saved |
+| a batch of 4 steps, one model call | ~6.7 s | a good plan, on a screen that behaves |
+| **a batch of 2 — the recorded median** | **~11.7 s** | **what real use measures today** |
+| one model call per step | ~21.7 s | every recovery from a hard-fail |
 
-**A replayed flow runs at human speed**, and simframe's own work already does.
+**Read the bottom half of that table, not the top.** simframe is *not* at human
+speed; simframe's engine is, and the engine is a minority of the clock. With a
+model deciding each move — which is what using this tool actually is — the
+recorded median is **~11.7 s per step, about six times a human**, and a failure
+that drops the caller back to single-stepping costs **~21.7 s, about eleven
+times**. The replay path is genuinely at parity, and it is the only path that
+is: it has no model in the loop, and it requires a flow that was recorded
+first.
+
+That is still a large improvement, and the improvement did not come from making
+anything faster. It came from `n`.
 A field report put the split at **34% simframe, 60% agent round trips** over
 462 s of wall clock — the tester's *"30+ seconds between each step"* was
 accurate and was not simframe. So there is nothing left to win inside the
