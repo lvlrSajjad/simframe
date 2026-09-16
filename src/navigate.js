@@ -140,17 +140,51 @@ export function knownScreens(udid) {
 }
 
 /**
+ * A verdict that is evidence *against* a step, as opposed to no evidence yet.
+ *
+ * This distinction is the whole of the fix below. `unexpected-*` means the step
+ * did something other than what memory predicted — a real objection. `unverified`
+ * means this edge has never been walked before, which on a first traversal is
+ * true of every step by definition and says nothing about whether it worked.
+ */
+const CONTRADICTED = /^unexpected/;
+
+/**
  * Save a flow.
  *
- * Only flows that verified end to end are worth saving: a flow with an
- * unverified step in it is a recording of something that may not have worked,
- * and replaying it faithfully reproduces the doubt.
+ * The rule was "only flows that verified end to end", and it was right about
+ * replay safety and wrong about arithmetic: **a first successful traversal is
+ * all-`unverified` by construction**, so nothing could ever be recorded, so
+ * `sim_flow_run` was unreachable. A field report hit it on a clean 10-of-10
+ * batch — *"I never obtained a saved flow, so `sim_flow_run` went untested"* —
+ * and it matters far more than its severity suggests: a replayed flow costs
+ * **zero model calls**, which is the only path to human-level wall clock. A
+ * gate nobody can pass protects nothing and blocks the fastest thing here.
+ *
+ * So the refusal now needs evidence against a step, not the absence of evidence
+ * for it. A flow that ran every step with nothing contradicted saves as
+ * **provisional**, and one clean replay promotes it — a bootstrap in two runs,
+ * where the second run is the confirmation and is useful anyway.
+ *
+ * Still refused, because these are real objections: any `unexpected-*` verdict,
+ * and a flow that did not reach its own last step.
  */
 export function saveFlow(udid, name, script, { force = false } = {}) {
   const verdicts = (script.results ?? []).map((r) => r.verification?.verdict);
-  if (!force && verdicts.some((v) => v && v !== 'ok')) {
-    return { ok: false, reason: 'unverified-steps', verdicts };
+  const contradicted = verdicts.filter((v) => v && CONTRADICTED.test(v));
+  const ranAll = script.ranSteps == null
+    || script.steps == null
+    || script.ranSteps >= (script.steps?.length ?? 0);
+  if (!force && contradicted.length) {
+    return { ok: false, reason: 'contradicted-steps', verdicts };
   }
+  if (!force && !ranAll) {
+    return { ok: false, reason: 'incomplete-run', verdicts };
+  }
+  // Provisional whenever any step lacked a confirming verdict. Recorded on the
+  // flow rather than inferred later, so a replay can promote it and a listing
+  // can say which flows are still on their first observation.
+  const provisional = verdicts.some((v) => !v || v !== 'ok');
   const dir = flowDir(udid);
   fs.mkdirSync(dir, { recursive: true });
   const body = {
@@ -158,9 +192,28 @@ export function saveFlow(udid, name, script, { force = false } = {}) {
     savedAt: Date.now(),
     steps: script.steps ?? (script.results ?? []).map((r) => r.step).filter(Boolean),
     startScreen: script.startScreen ?? null,
+    ...(provisional ? { provisional: verdicts.filter(Boolean) } : {}),
   };
   store.writeAtomic(path.join(dir, `${encodeURIComponent(name)}.json`), JSON.stringify(body, null, 2));
-  return { ok: true, name, steps: body.steps.length };
+  return { ok: true, name, steps: body.steps.length, provisional };
+}
+
+/**
+ * A provisional flow that replays cleanly becomes a confirmed one.
+ *
+ * The second half of the bootstrap. Without it "provisional" would be a label
+ * that never comes off, and the honest state of a flow that has now worked
+ * twice is "confirmed".
+ */
+export function confirmFlow(udid, name) {
+  const flow = loadFlow(udid, name);
+  if (!flow?.provisional) return false;
+  const { provisional, ...rest } = flow;
+  store.writeAtomic(
+    path.join(flowDir(udid), `${encodeURIComponent(name)}.json`),
+    JSON.stringify({ ...rest, confirmedAt: Date.now() }, null, 2),
+  );
+  return true;
 }
 
 export function loadFlow(udid, name) {
@@ -192,5 +245,11 @@ export async function runFlow(deviceQuery, name, { options, ...runOptions } = {}
     minSteps: flow.minSteps ?? null,
     ...runOptions,
   });
-  return { ok: result.ranSteps === flow.steps.length, name, ...result };
+  const ok = result.ranSteps === flow.steps.length;
+  // A clean replay is the confirmation a first traversal could not give.
+  // Only when nothing was contradicted — a replay that ran to the end while
+  // objecting to a step is not a promotion.
+  const objected = (result.results ?? []).some((r) => CONTRADICTED.test(r.verification?.verdict ?? ''));
+  const promoted = ok && !objected ? confirmFlow(device.udid, name) : false;
+  return { ok, name, ...result, ...(promoted ? { promoted: true } : {}) };
 }

@@ -1048,10 +1048,19 @@ async function doScript(target, args, options) {
   }
   if (args.saveAs) {
     const saved = navigate.saveFlow(res.device.udid, args.saveAs, res);
+    // Say what to do about it. The refusal this replaced named a condition and
+    // no remedy, and the reporter read it as "recording a flow is impossible"
+    // — which it was.
+    const how = saved.provisional
+      ? ' — PROVISIONAL, because this was the first traversal and nothing had been'
+        + ' seen before to compare against. Replay it once with sim_flow_run and it'
+        + ' is confirmed. A replay costs no model calls.'
+      : ' — confirmed; replay with sim_flow_run for zero model calls';
     lines.push(
       saved.ok
-        ? `saved as flow "${saved.name}" (${saved.steps} steps) — replay with sim_flow_run`
-        : `NOT saved as "${args.saveAs}": ${saved.reason}${saved.verdicts ? ` (${saved.verdicts.join(', ')})` : ''}`,
+        ? `saved as flow "${saved.name}" (${saved.steps} steps)${how}`
+        : `NOT saved as "${args.saveAs}": ${saved.reason}`
+          + `${saved.verdicts ? ` (${saved.verdicts.join(', ')})` : ''}`,
     );
   }
   const escalated = (res.results ?? []).some((r) => metrics.ESCALATING_VERDICTS.has(r.verification?.verdict));

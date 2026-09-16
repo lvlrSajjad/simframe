@@ -349,7 +349,7 @@ import { editDistance, nameScore, rank as rankIntent, resolve } from '../src/mat
 import { detectKeyboardTop, navSlot, regionFor } from '../src/regions.js';
 import { fingerprint } from '../src/fingerprint.js';
 import { describe } from '../src/graph.js';
-import { stepFor, saveFlow } from '../src/navigate.js';
+import { stepFor, saveFlow, confirmFlow, loadFlow } from '../src/navigate.js';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -470,9 +470,60 @@ test('an edge keeps the step that made it, because the signature is lossy', () =
   assert.equal(stepFor({ action: 'type:"hello"' }), null);
 });
 
-test('a flow with an unverified step is not saved', () => {
-  const script = { steps: [{ tap: 'A' }], results: [{ verification: { verdict: 'unverified' } }] };
-  assert.equal(saveFlow('nonexistent-udid', 'x', script).ok, false);
+test('a first traversal saves as provisional; a contradicted or partial one does not', () => {
+  // **This assertion used to say the opposite, and the opposite was a deadlock.**
+  // The rule was "only flows that verified end to end", which is right about
+  // replay safety and wrong about arithmetic: a first traversal is
+  // all-`unverified` by construction, so no flow could ever be recorded, so
+  // `sim_flow_run` was unreachable. A field report hit it on a clean 10-of-10
+  // batch — "I never obtained a saved flow, so sim_flow_run went untested" —
+  // and it is the costliest kind of gate to get wrong, because a replayed flow
+  // takes ZERO model calls and model round trips are ~92% of this tool's wall
+  // clock per step.
+  //
+  // A refusal now needs evidence *against* a step, not the absence of evidence
+  // for it.
+  const udid = freshDevice('flow-provisional');
+  const first = saveFlow(udid, 'boot', {
+    steps: [{ tap: 'A' }],
+    ranSteps: 1,
+    results: [{ verification: { verdict: 'unverified' } }],
+  });
+  assert.equal(first.ok, true, 'a first traversal must be recordable at all');
+  assert.equal(first.provisional, true, 'and must say it is on its first observation');
+
+  // Still refused, because these are real objections rather than missing ones.
+  const wrong = saveFlow(udid, 'bad', {
+    steps: [{ tap: 'A' }],
+    ranSteps: 1,
+    results: [{ verification: { verdict: 'unexpected-screen' } }],
+  });
+  assert.equal(wrong.ok, false);
+  assert.equal(wrong.reason, 'contradicted-steps');
+
+  const partial = saveFlow(udid, 'half', {
+    steps: [{ tap: 'A' }, { tap: 'B' }],
+    ranSteps: 1,
+    results: [{ verification: { verdict: 'ok' } }],
+  });
+  assert.equal(partial.ok, false);
+  assert.equal(partial.reason, 'incomplete-run');
+
+  // A flow every step of which verified is confirmed outright, not provisional.
+  const clean = saveFlow(udid, 'clean', {
+    steps: [{ tap: 'A' }],
+    ranSteps: 1,
+    results: [{ verification: { verdict: 'ok' } }],
+  });
+  assert.equal(clean.provisional, false);
+
+  // And the label comes off: the second half of the bootstrap, or "provisional"
+  // would be a state nothing ever leaves.
+  assert.equal(confirmFlow(udid, 'boot'), true, 'a provisional flow is promotable');
+  assert.equal(loadFlow(udid, 'boot').provisional, undefined);
+  assert.ok(loadFlow(udid, 'boot').confirmedAt, 'and records when');
+  assert.equal(confirmFlow(udid, 'boot'), false, 'promoting twice is a no-op');
+  assert.equal(confirmFlow(udid, 'clean'), false, 'an already-confirmed flow is not re-promoted');
 });
 
 // --- variant fingerprints -------------------------------------------------

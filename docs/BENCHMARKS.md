@@ -4182,3 +4182,46 @@ went bad, not the code.
 Escalation log on this device at the time of measuring: **998 entries** —
 `verification_failed` 551, `ambiguous_intent` 207, `unknown_screen` 167,
 `no_plan` 73.
+
+## Wall clock per step, and where it actually goes — 2026-09-16
+
+The founding concern of this project, finally measured end to end rather than
+argued about. `326464A4`, iPhone 17 Pro / iOS 26.5, five-step flow (launch,
+wait, three taps).
+
+| | per step | how |
+| --- | --- | --- |
+| a human tester | **1.95 s** | committed baseline, 7799 ms / 4 taps |
+| **a replayed flow — zero model calls** | **1.98 s** | 10849 / 7753 / 9918 ms over 5 steps, median 1984 ms |
+| simframe's own work inside a batch | ~1.7 s | field-measured, 10 steps in 16.7 s |
+| a batch of 4 steps, one model call | ~6.7 s | (20 s + 1.7 s × 4) / 4 |
+| a batch of 2 steps — the recorded median | ~11.7 s | (20 s + 1.7 s × 2) / 2 |
+| one model call per step | ~21.7 s | 20 s + 1.7 s |
+
+**A replayed flow is at human latency — 1.98 s against 1.95 s.** That is not a
+faster engine; it is the same engine with the model removed from the loop, and
+it includes Node process start-up on every replay, which an in-process MCP
+caller does not pay.
+
+### The arithmetic that reorders every other priority
+
+Per-step wall clock is `(model_latency + 1.7 s × n) / n` for `n` steps in one
+call. A field report measured the split directly: of 462 s of wall clock, ~156 s
+(34%) was simframe and ~276 s (60%) was agent round trips, with the tester's own
+observation — *"30+ seconds between each step"* — accurate and **not about
+simframe**.
+
+So **simframe is already at human speed per step** (1.7 s against 1.95 s) and
+there is nothing left to win inside the engine. The only variable is `n`.
+
+`steps_per_call` is now reported by `simframe hpi`, and it was in the log the
+whole time — every run records `steps_taken` and `model_turns` and nothing
+divided them. Over 186 recorded runs on this device the median is **2.0** and
+the 25th percentile is **1.0**. That p25 tail is recovery, and it is the entire
+difference between 11.7 s and 21.7 s a step.
+
+Which is the real conclusion: **every hard-fail that drops a caller back to
+single-stepping is a latency regression**, worth more as "the batch kept going"
+than as "the error message was better". The reporter reached the same place from
+the other end: their run took 33 tool calls where a clean one needs about 8, and
+the 25 extra were all recovery.
