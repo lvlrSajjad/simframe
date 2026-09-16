@@ -722,26 +722,35 @@ feels, and it took two field reports to see it. Per-step wall clock is
 (model round trip + simframe work × n) / n        for n steps in one call
 ```
 
-| | per step | when you get it |
-| --- | --- | --- |
-| a human tester, measured | **1.95 s** | the bar |
-| simframe's own work inside a batch | ~1.7 s | never on its own — always plus a model call |
-| a saved flow replayed — zero model calls | **1.98 s** | only once a flow exists and is saved |
-| a batch of 4 steps, one model call | ~6.7 s | a good plan, on a screen that behaves |
-| **a batch of 2 — the recorded median** | **~11.7 s** | **what real use measures today** |
-| one model call per step | ~21.7 s | every recovery from a hard-fail |
+**Compare like with like, which this table used not to.** A human tester's
+1.95 s per step is the *whole* loop — look at the screen, decide what to do,
+do it. Any row that does not include a decision is not comparable to it.
 
-**Read the bottom half of that table, not the top.** simframe is *not* at human
-speed; simframe's engine is, and the engine is a minority of the clock. With a
-model deciding each move — which is what using this tool actually is — the
-recorded median is **~11.7 s per step, about six times a human**, and a failure
-that drops the caller back to single-stepping costs **~21.7 s, about eleven
-times**. The replay path is genuinely at parity, and it is the only path that
-is: it has no model in the loop, and it requires a flow that was recorded
-first.
+| | perceives | decides | acts | per step |
+| --- | --- | --- | --- | --- |
+| **a human tester, measured** | yes | yes | yes | **1.95 s** |
+| **simframe, batch of 2 — the recorded median** | yes | yes | yes | **~11.7 s** |
+| simframe, batch of 4 | yes | yes | yes | ~6.7 s |
+| simframe, one model call per step | yes | yes | yes | ~21.7 s |
+| — simframe's mechanical half alone | yes | **no** | yes | ~1.7 s |
+| — a saved flow replayed | yes | **no** | yes | 1.98 s |
 
-That is still a large improvement, and the improvement did not come from making
-anything faster. It came from `n`.
+**The only like-for-like comparison is 1.95 s against ~11.7 s: about six times
+a human**, and about eleven times when a failure forces one model call per step.
+
+The two indented rows are the ones this README used to lead with, and both are
+category errors when set against 1.95 s. The 1.7 s is simframe with the thinking
+taken out — the thinking is the model round trip, which is most of the clock.
+And a replay *decides nothing*: it is a recording being played back, so its fair
+counterpart is a human repeating a flow they have memorised, who would be well
+under 1.95 s. Replay against a human working something out for the first time is
+a rehearsal measured against a first attempt.
+
+What the two rows do establish, and it is the finding that reordered this
+project: **there is nothing left to win inside the engine.** 1.7 s is small
+beside a 20 s round trip, so making perception or input faster buys single-digit
+percentages. The only variable that matters is `n` — how many steps one decision
+covers. Every improvement here has come from raising it, not from faster code.
 A field report put the split at **34% simframe, 60% agent round trips** over
 462 s of wall clock — the tester's *"30+ seconds between each step"* was
 accurate and was not simframe. So there is nothing left to win inside the

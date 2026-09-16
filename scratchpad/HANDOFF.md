@@ -44,13 +44,18 @@
 > never touched would settle it. Five minutes. Not run.
 >
 > **Two framings in this repo were too generous, and the owner corrected both.**
-> First: "a replayed flow is at human latency" is true and is about *replay*,
-> which has no model in the loop and needs a flow recorded first. **The tool as
-> used is roughly 6x a human at the recorded median (~11.7 s/step) and ~11x when
-> a hard-fail forces one step per call (~21.7 s).** The engine is below human;
-> the product is not. The honest headline is "much less slow", and the README,
-> BENCHMARKS and the article now lead with the bottom of the table rather than
-> the top. Second: **accuracy is the neglected half.** `HPI_accuracy` reads 0.483
+> First, and it took three passes to state correctly: **a human's 1.95 s per step
+> is perceive + decide + act.** Two rows of this project's headline table do not
+> include a decision and were being set against it anyway. The 1.7 s is simframe
+> with the deciding removed — the deciding *is* the round trip. And a replay
+> decides nothing at all; its honest counterpart is a person repeating a
+> memorised flow, who would be well under 1.95 s, so "replay is at human
+> latency" compares a rehearsal to a first attempt. **The one like-for-like
+> comparison is 1.95 s against ~11.7 s: about 6x a human, ~11x when a hard-fail
+> forces a call per step.** The tables in the README, BENCHMARKS and the article
+> now carry a `decides` column for exactly this reason. What the 1.7 s figure
+> *does* establish is the finding that reordered the project: beside a 20 s round
+> trip there is nothing left to win inside the engine. Second: **accuracy is the neglected half.** `HPI_accuracy` reads 0.483
 > over 151 runs with 78 not clean, against a baseline that is itself invalid
 > (`contacts-kate-bell` has `completed: 0`) on a device the suite keeps wedging.
 > Speed has had three days of attention; precision has had none.

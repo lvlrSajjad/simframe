@@ -977,7 +977,7 @@ worked here before: tap "NEW REQUEST" (7x)</code></pre>
 
   <section>
     <p class="sec-label">The number I should have measured first</p>
-    <h2>The engine was already faster than the human</h2>
+    <h2>The round trip is the whole clock</h2>
     <div class="track">
       <p class="lede">Latency was the reason I started this. The existing simulator tooling was too slow to watch an agent use, and every benchmark in this piece exists because I went after that. Two field reports later, the measurement I had never taken says I was optimising the wrong end of the system for months.</p>
       <p>A tester driving a four-step wizard described the experience as <em>&ldquo;30+ seconds between each step&rdquo;</em>. That perception was exactly right, and simframe was not what was spending it. Of <b>462&nbsp;seconds</b> of wall clock, about <b>156</b> were simframe and about <b>276</b> were the agent thinking between calls &mdash; <b>34 per cent against 60 per cent</b>. The remaining 6 per cent was one device reboot.</p>
@@ -988,14 +988,14 @@ worked here before: tap "NEW REQUEST" (7x)</code></pre>
       <p class="panel-label">Wall clock per step, by steps per model call</p>
       <div class="scroller">
         <table>
-          <thead><tr><th>How it runs</th><th>Per step</th></tr></thead>
+          <thead><tr><th>How it runs</th><th>Decides?</th><th>Per step</th></tr></thead>
           <tbody>
-            <tr><td>one model call per step</td><td>~21.7&nbsp;s</td></tr>
-            <tr><td>a batch of 2 &mdash; the recorded median</td><td>~11.7&nbsp;s</td></tr>
-            <tr><td>a batch of 4</td><td>~6.7&nbsp;s</td></tr>
-            <tr><td>simframe&rsquo;s own work inside a batch</td><td><b>~1.7&nbsp;s</b></td></tr>
-            <tr><td><b>a saved flow replayed, zero model calls</b></td><td><b>1.98&nbsp;s</b></td></tr>
-            <tr><td>a human tester doing it by hand</td><td><b>1.95&nbsp;s</b></td></tr>
+            <tr><td>one model call per step</td><td>yes</td><td>~21.7&nbsp;s</td></tr>
+            <tr><td><b>a batch of 2 &mdash; the recorded median</b></td><td>yes</td><td><b>~11.7&nbsp;s</b></td></tr>
+            <tr><td>a batch of 4</td><td>yes</td><td>~6.7&nbsp;s</td></tr>
+            <tr><td><b>a human tester doing it by hand</b></td><td>yes</td><td><b>1.95&nbsp;s</b></td></tr>
+            <tr><td>&mdash; simframe&rsquo;s mechanical half alone</td><td>no</td><td>~1.7&nbsp;s</td></tr>
+            <tr><td>&mdash; a saved flow replayed</td><td>no</td><td>1.98&nbsp;s</td></tr>
           </tbody>
         </table>
       </div>
@@ -1003,11 +1003,12 @@ worked here before: tap "NEW REQUEST" (7x)</code></pre>
 
     <div class="track">
       <ul class="findings">
-        <li><strong>simframe&rsquo;s own work is already below human speed</strong> &mdash; 1.7&nbsp;s against a measured human&rsquo;s 1.95&nbsp;s. Note the scope: that is the engine, not the product. There is no headroom left inside it, and there had not been for a while.</li>
-        <li><strong>A replayed flow hits human parity outright</strong> &mdash; 1.98&nbsp;s against 1.95&nbsp;s, three runs, median of 1,984&nbsp;ms. Not a faster engine: the same engine with the model out of the loop.</li>
+        <li><strong>There is nothing left to win inside the engine</strong> &mdash; its mechanical half costs ~1.7&nbsp;s beside a ~20&nbsp;s round trip, so halving it changes the total by single-digit percentages. That is the useful conclusion, and it is the <em>only</em> thing the 1.7&nbsp;s figure supports.</li>
+        <li><strong>A replayed flow costs 1.98&nbsp;s a step</strong> &mdash; three runs, median 1,984&nbsp;ms, with zero model calls. Not a faster engine: the same engine with the model out of the loop.</li>
         <li><strong>The lever was in the log the whole time.</strong> Every run records how many steps it took and how many model turns it cost. Nothing divided them. Over 186 recorded runs the median is <b>2.0</b> steps per call and the 25th percentile is <b>1.0</b> &mdash; and that tail is recovery.</li>
       </ul>
-      <p><strong>None of which means this tool is as fast as a person.</strong> It is not, and the table above says so if you read the bottom of it. Driving an app for real means a model deciding what to do next, and at the recorded median of two steps per call that is <b>~11.7&nbsp;s per step &mdash; about six times a human</b>; every failure that drops the caller back to one step per call costs <b>~21.7&nbsp;s, about eleven times</b>. The parity result is real and it is narrow: it belongs to <em>replay</em>, which has no model in the loop and only exists once a flow has been recorded. What has genuinely improved is the multiplier, and it improved by a lot &mdash; but the honest headline is &ldquo;much less slow&rdquo;, not &ldquo;as fast as a human&rdquo;.</p>
+      <p><strong>Two of those rows do not belong next to the human, and for a while I wrote as though they did.</strong> A tester&rsquo;s 1.95&nbsp;s is the entire loop &mdash; look, decide, act. The 1.7&nbsp;s is simframe with the deciding taken out, because the deciding <em>is</em> the round trip. And a replay decides nothing at all: it is a recording being played back, so its honest counterpart is a person repeating a flow they have memorised, who would be comfortably under 1.95&nbsp;s. Setting either against a human working a wizard out for the first time compares a subset to a whole, or a rehearsal to a first attempt.</p>
+      <p>The one like-for-like comparison in the table is <b>1.95&nbsp;s against ~11.7&nbsp;s &mdash; about six times a human</b>, and about eleven times when a failure forces a call per step. That is the number, and it is the one that has improved: the same flow went from 33 tool calls to 16 in two days. <em>Much less slow</em> is the honest headline. <em>As fast as a person</em> was never true, and I had the arithmetic to know it.</p>
       <p>Which reorders every other item on the list. A wrong tap is a correctness bug and a false refusal is an annoyance, but both of them are also <em>latency</em> bugs, and the latency is the larger cost: <b>every hard-fail that drops a caller back to single-stepping costs a round trip worth ten to twenty times the failed call itself.</b> One reporter reached the same place from the other end and put it better than my own issue tracker did &mdash; their run took 33 tool calls where a clean one needs about 8, and <em>&ldquo;the 25 extra calls were all recovery, and they are essentially the entire 7m42s.&rdquo;</em></p>
       <p>Fixing four of those defects took the same flow, on the same app, from <b>33 tool calls to 16</b>, with no screenshots and no device reboot. Faster code contributed nothing to that.</p>
       <p><strong>A second reading, and an honest note about what it is worth.</strong> Every number above was produced on one laptop, on Settings, by the person who wanted them to be true &mdash; the weakest possible evidence for a claim this load-bearing. A peer session has now measured it on a <em>different app</em> with an <em>external stopwatch</em>: <b>1.82&nbsp;s per step</b> (12.773&nbsp;s over 7 steps through the CLI, including Node start-up), 1.68&nbsp;s in-daemon, 1.31&nbsp;s on a second flow, and a <b>68/32</b> split where this machine had measured 60/34.</p>

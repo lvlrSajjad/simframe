@@ -4189,28 +4189,40 @@ The founding concern of this project, finally measured end to end rather than
 argued about. `326464A4`, iPhone 17 Pro / iOS 26.5, five-step flow (launch,
 wait, three taps).
 
-| | per step | how |
-| --- | --- | --- |
-| a human tester | **1.95 s** | committed baseline, 7799 ms / 4 taps |
-| **a replayed flow — zero model calls** | **1.98 s** | 10849 / 7753 / 9918 ms over 5 steps, median 1984 ms |
-| simframe's own work inside a batch | ~1.7 s | field-measured, 10 steps in 16.7 s |
-| a batch of 4 steps, one model call | ~6.7 s | (20 s + 1.7 s × 4) / 4 |
-| a batch of 2 steps — the recorded median | ~11.7 s | (20 s + 1.7 s × 2) / 2 |
-| one model call per step | ~21.7 s | 20 s + 1.7 s |
+**A human's 1.95 s is perceive + decide + act.** Rows that do not include a
+decision are not comparable to it, and the `decides` column exists because this
+table was read the wrong way for a day.
 
-**A replayed flow is at human latency — 1.98 s against 1.95 s.** That is not a
-faster engine; it is the same engine with the model removed from the loop, and
-it includes Node process start-up on every replay, which an in-process MCP
-caller does not pay.
+| | decides | per step | how |
+| --- | --- | --- | --- |
+| **a human tester** | yes | **1.95 s** | committed baseline, 7799 ms / 4 taps |
+| **a batch of 2 — the recorded median** | yes | **~11.7 s** | (20 s + 1.7 s × 2) / 2 |
+| a batch of 4 steps, one model call | yes | ~6.7 s | (20 s + 1.7 s × 4) / 4 |
+| one model call per step | yes | ~21.7 s | 20 s + 1.7 s |
+| — simframe's mechanical half alone | **no** | ~1.7 s | field-measured, 10 steps in 16.7 s |
+| — a replayed flow, zero model calls | **no** | 1.98 s | 10849 / 7753 / 9918 ms over 5 steps, median 1984 ms |
 
-**And the tool as used is not at human latency.** The parity row applies to
-replay only, which requires a flow that was recorded first and has no model in
-the loop. Real use has a model deciding each move: at the recorded median of two
-steps per call that is **~11.7 s per step, about 6× a human**, and a hard-fail
-that forces one step per call costs **~21.7 s, about 11×**. Both numbers are in
-the table above and both are the honest description of the experience. Quoting
-1.98 s as simframe's speed is a category error — it is the speed of the one path
-that consults nobody.
+**The like-for-like row is 1.95 s against ~11.7 s — about 6×**, and about 11×
+when a hard-fail forces one call per step.
+
+**A replayed flow costs 1.98 s a step with no model in the loop**, including
+Node process start-up on every replay, which an in-process MCP caller does not
+pay. This was written here — and in the README and the article — as *"a replayed
+flow is at human latency"*, and that reading does not survive stating what the
+human's 1.95 s contains. A replay **decides nothing**: it is a recording being
+played back. Its honest counterpart is a person repeating a flow they have
+memorised, who would be well under 1.95 s. Comparing it to a tester working a
+wizard out for the first time is a rehearsal against a first attempt.
+
+The same applies to the 1.7 s row, more plainly: that is simframe with the
+deciding removed, and the deciding is the round trip — which is most of the
+clock. Both figures were set against 1.95 s here for a day, and both were
+comparing a subset to a whole.
+
+**What the 1.7 s figure does establish, and it is the finding that reordered the
+project:** there is nothing left to win inside the engine. 1.7 s beside a 20 s
+round trip means halving perception and input changes the total by single-digit
+percentages. The only variable that matters is `n`.
 
 ### The arithmetic that reorders every other priority
 

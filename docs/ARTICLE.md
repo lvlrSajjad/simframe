@@ -469,7 +469,7 @@ The measurement cost three peer sessions and most of a day, and one of those req
 
 *The number I should have measured first*
 
-## The engine was already faster than the human
+## The round trip is the whole clock
 
 Latency was the reason I started this. The existing simulator tooling was too slow to watch an agent use, and every benchmark in this piece exists because I went after that. Two field reports later, the measurement I had never taken says I was optimising the wrong end of the system for months.
 
@@ -479,20 +479,22 @@ So per-step wall clock is not a property of the engine at all. It is arithmetic 
 
 **Wall clock per step, by steps per model call**
 
-| How it runs | Per step |
-| --- | --- |
-| one model call per step | ~21.7 s |
-| a batch of 2 — the recorded median | ~11.7 s |
-| a batch of 4 | ~6.7 s |
-| simframe’s own work inside a batch | **~1.7 s** |
-| **a saved flow replayed, zero model calls** | **1.98 s** |
-| a human tester doing it by hand | **1.95 s** |
+| How it runs | Decides? | Per step |
+| --- | --- | --- |
+| one model call per step | yes | ~21.7 s |
+| **a batch of 2 — the recorded median** | yes | **~11.7 s** |
+| a batch of 4 | yes | ~6.7 s |
+| **a human tester doing it by hand** | yes | **1.95 s** |
+| — simframe’s mechanical half alone | no | ~1.7 s |
+| — a saved flow replayed | no | 1.98 s |
 
-- **simframe’s own work is already below human speed** — 1.7 s against a measured human’s 1.95 s. Note the scope: that is the engine, not the product. There is no headroom left inside it, and there had not been for a while.
-- **A replayed flow hits human parity outright** — 1.98 s against 1.95 s, three runs, median of 1,984 ms. Not a faster engine: the same engine with the model out of the loop.
+- **There is nothing left to win inside the engine** — its mechanical half costs ~1.7 s beside a ~20 s round trip, so halving it changes the total by single-digit percentages. That is the useful conclusion, and it is the *only* thing the 1.7 s figure supports.
+- **A replayed flow costs 1.98 s a step** — three runs, median 1,984 ms, with zero model calls. Not a faster engine: the same engine with the model out of the loop.
 - **The lever was in the log the whole time.** Every run records how many steps it took and how many model turns it cost. Nothing divided them. Over 186 recorded runs the median is **2.0** steps per call and the 25th percentile is **1.0** — and that tail is recovery.
 
-**None of which means this tool is as fast as a person.** It is not, and the table above says so if you read the bottom of it. Driving an app for real means a model deciding what to do next, and at the recorded median of two steps per call that is **~11.7 s per step — about six times a human**; every failure that drops the caller back to one step per call costs **~21.7 s, about eleven times**. The parity result is real and it is narrow: it belongs to *replay*, which has no model in the loop and only exists once a flow has been recorded. What has genuinely improved is the multiplier, and it improved by a lot — but the honest headline is “much less slow”, not “as fast as a human”.
+**Two of those rows do not belong next to the human, and for a while I wrote as though they did.** A tester’s 1.95 s is the entire loop — look, decide, act. The 1.7 s is simframe with the deciding taken out, because the deciding *is* the round trip. And a replay decides nothing at all: it is a recording being played back, so its honest counterpart is a person repeating a flow they have memorised, who would be comfortably under 1.95 s. Setting either against a human working a wizard out for the first time compares a subset to a whole, or a rehearsal to a first attempt.
+
+The one like-for-like comparison in the table is **1.95 s against ~11.7 s — about six times a human**, and about eleven times when a failure forces a call per step. That is the number, and it is the one that has improved: the same flow went from 33 tool calls to 16 in two days. *Much less slow* is the honest headline. *As fast as a person* was never true, and I had the arithmetic to know it.
 
 Which reorders every other item on the list. A wrong tap is a correctness bug and a false refusal is an annoyance, but both of them are also *latency* bugs, and the latency is the larger cost: **every hard-fail that drops a caller back to single-stepping costs a round trip worth ten to twenty times the failed call itself.** One reporter reached the same place from the other end and put it better than my own issue tracker did — their run took 33 tool calls where a clean one needs about 8, and *“the 25 extra calls were all recovery, and they are essentially the entire 7m42s.”*
 
