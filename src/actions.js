@@ -3339,15 +3339,18 @@ export function flowSummary(res, { withTime = true } = {}) {
   // screen was dismissed". Same lesson as the denominator above: a count that
   // quietly means two things is the defect.
   const skipped = (res.results ?? []).filter((r) => r.skipped).length;
-  const skips = skipped ? `, ${skipped} optional step(s) skipped as absent` : '';
-  if (res.ok) return `flow completed — ${res.ranSteps}/${res.totalSteps} steps${skips}${time}`;
+  // After the time, in parentheses. Written inline before it, this read
+  // "skipped as absent in 3412ms" — which says the skipping took 3.4 seconds.
+  const skips = skipped
+    ? ` (${skipped} optional step${skipped === 1 ? '' : 's'} skipped as absent)`
+    : '';
+  if (res.ok) return `flow completed — ${res.ranSteps}/${res.totalSteps} steps${time}${skips}`;
   const failed = (res.results ?? []).filter((r) => r.ok === false).length || 1;
   const worked = Math.max(0, res.ranSteps - failed);
   const unattempted = Math.max(0, res.totalSteps - res.ranSteps);
   return `FLOW FAILED — ${worked} ok, ${failed} failed`
     + (unattempted ? `, ${unattempted} not attempted` : '')
-    + skips
-    + ` (of ${res.totalSteps})${time}`;
+    + ` (of ${res.totalSteps})${time}${skips}`;
 }
 
 /**
