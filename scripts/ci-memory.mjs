@@ -635,19 +635,31 @@ check(walked.ok === true || outcomes.includes(walked.reason),
   walked.ok ? (walked.already ? 'already there' : `walked ${walked.ranSteps} step(s)`) : walked.reason);
 
 console.log('\n--- what may be saved, and what may not ---');
-// A flow with an unverified step in it is a recording of something that may not
-// have worked, and replaying it faithfully reproduces the doubt. So the
-// contract runs both ways and both directions are checked against whatever the
-// run actually produced, rather than assuming it verified.
+// **A first traversal must be recordable**, which is the opposite of what this
+// check used to assert. The old contract refused any flow with a non-`ok`
+// verdict — and a first traversal is all-`unverified` by construction, since
+// there is no prior observation to compare against. So no flow could ever be
+// recorded, replay was unreachable, and the only zero-model-call path in the
+// tool was sealed shut behind a gate nobody could pass.
+//
+// The refusal now needs evidence *against* a step rather than the absence of
+// evidence for it. Checked against whatever the run actually produced rather
+// than assuming a shape, as before.
 const attempt = await jsonRetry(['do', LOOP, `--save=${FLOW_NAME}`], { allowFail: true });
+const contradicted = attempt.results.some((r) => /^unexpected/.test(r.verification?.verdict ?? ''));
 const clean = attempt.results.every((r) => !r.verification || r.verification.verdict === 'ok');
-if (clean) {
-  check(attempt.saved?.ok === true, 'a flow whose every step verified is saved',
-    `${attempt.saved?.steps} steps`);
-} else {
-  check(attempt.saved?.ok === false && attempt.saved?.reason === 'unverified-steps',
-    'a flow with an unverified step is refused, not quietly saved',
+if (contradicted) {
+  check(attempt.saved?.ok === false && attempt.saved?.reason === 'contradicted-steps',
+    'a flow with a contradicted step is refused, not quietly saved',
     `${attempt.saved?.reason} (${(attempt.saved?.verdicts ?? []).join(', ')})`);
+} else {
+  check(attempt.saved?.ok === true, 'a first traversal is recordable',
+    `${attempt.saved?.steps} steps`);
+  check(attempt.saved?.provisional === !clean,
+    clean
+      ? 'and a flow whose every step verified is confirmed outright'
+      : 'and it is marked provisional, because nothing had been seen before to compare against',
+    `provisional=${attempt.saved?.provisional}`);
 }
 
 // --force is the deliberate override, and it is what lets the replay machinery
@@ -660,6 +672,17 @@ if (check(forced.saved?.ok === true, 'and --force saves it anyway', `${forced.sa
   check(replayed.ranSteps >= 1 && Array.isArray(replayed.results),
     'and replays from disk with no model in the loop',
     `${replayed.ranSteps}/${replayed.totalSteps} steps`);
+  // The other half of the bootstrap, and the reason "provisional" is not a
+  // state nothing ever leaves: a clean replay is the confirmation a first
+  // traversal could not give. Only asserted when the replay actually ran to
+  // the end — a partial replay promotes nothing, deliberately.
+  if (replayed.ok) {
+    const after = await jsonRetry(['flow', 'list']);
+    const entry = after.find((f) => f.name === FLOW_NAME);
+    check(entry && !entry.provisional,
+      'and a clean replay confirms a provisional flow',
+      `provisional=${entry?.provisional ?? 'gone'}`);
+  }
   const unknown = await cli(['flow', 'run', 'no-such-flow'], { expectFail: true });
   check(/no flow/i.test(unknown), 'an unknown flow name is refused with what is known');
 }

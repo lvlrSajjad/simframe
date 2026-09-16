@@ -227,7 +227,18 @@ export function listFlows(udid) {
     .filter((f) => f.endsWith('.json'))
     .map((f) => store.readJson(path.join(dir, f)))
     .filter(Boolean)
-    .map((f) => ({ name: f.name, steps: f.steps?.length ?? 0, savedAt: f.savedAt }));
+    // `provisional` travels with the listing, for two reasons. A caller should
+    // be able to see which of their flows are still on a first observation
+    // without opening the file — and without it the integration check that
+    // asserts promotion reads `undefined`, which is always falsy, so the check
+    // would pass whether or not anything was promoted. A vacuous check is worse
+    // than no check.
+    .map((f) => ({
+      name: f.name,
+      steps: f.steps?.length ?? 0,
+      savedAt: f.savedAt,
+      ...(f.provisional ? { provisional: true } : {}),
+    }));
 }
 
 export async function runFlow(deviceQuery, name, { options, ...runOptions } = {}) {
