@@ -2511,6 +2511,41 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+171. **An app is frontmost by pid while the display renders a clock.** OPEN,
+   and it exists only because 169 made it *separable*. Before the launch could
+   confirm a front, this and 169 arrived as the same sentence — a tour waiting
+   for a label on a screen that does not show it.
+
+   The run that split them, `34982380118`. First attempt, 169: `launched
+   com.apple.Preferences (pid 39452) but it never came to the front within
+   6614ms — pid 38661 still is`. The guard revived the device and ran again, and
+   the second attempt failed the other way:
+
+   ```
+   FAIL round 2, "settings" never arrived: step waitFor did not succeed:
+     waited 8000ms for General: "General" is not on this screen.
+     Visible: 2:55 (the screen has not moved for 7515ms)
+   ```
+
+   The launch step **passed** there — `never came to the front` appears exactly
+   once in that whole log, in attempt 1. So AXPTranslator reported the launched
+   pid as frontmost while the framebuffer showed a clock and had not moved for
+   7.5 s. **"Frontmost" and "rendering" are independent signals**, and this is
+   the pathology DEFERRED 126 and the README's "rapid app relaunch" note are
+   about, now with a way to name it: a launch that verified plus a screen that
+   did not.
+
+   That distinction is worth wiring up rather than just recording, because it
+   picks the remedy. A confirmed front with a still, contentless screen is a
+   capture/display fault and `revive` is the right answer; a front that never
+   changed hands is a launch fault and another launch is. The guard currently
+   reaches the same verdict for both by a much weaker route — "two labels, one
+   of them a clock".
+
+   Also from that run: `simctl terminate` **blocks** on a debugger-suspended
+   app, which is how a local experiment of mine wedged the bench device. Worth a
+   signature of its own if it ever appears on a runner.
+
 170. **A CLI that dies with empty stdout is not classified as a device
    failure.** OPEN. `simframe do <flow> --save=… --force --json` returned
    **nothing at all** on a runner:
@@ -2605,12 +2640,29 @@ worth more than the verdict.
    | a cold switch to Contacts | **1552 ms**, 8 polls |
    | budget | 5 s, which clears both with room for a loaded runner |
 
-   The failure case was **forced rather than waited for**: `simctl launch
-   --wait-for-debugger` starts a process that never fronts, which is item 169
-   on demand. pid 16332 started, pid 15830 stayed in front, and the step now
-   refuses after 3032 ms instead of returning ok. The cold-switch row is why a
-   single read would not do — a verdict taken from one look would have called
-   Contacts a failure seven times out of eight.
+   The failure case, twice, on two machines. Locally: pid 16332 started, pid
+   15830 stayed in front, and the step refused after 3032 ms instead of
+   returning ok. On a hosted runner, the first run after this shipped:
+
+   ```
+   FAIL round 3, "settings-general" never arrived: step launch did not succeed:
+     launched com.apple.Preferences (pid 39452) but it never came to the front
+     within 6614ms — pid 38661 still is.
+   ```
+
+   That is the same tour that used to fail 8000 ms later as *"General is not on
+   this screen. Visible: Back, Contacts, John Appleseed, …"* — the right
+   diagnosis 8 s earlier and one layer down. The cold-switch row is why a single
+   read would not do: a verdict from one look would have called Contacts a
+   failure seven times in eight.
+
+   **A correction, because I published the wrong claim first.** I wrote that
+   `simctl launch --wait-for-debugger` gives item 169 on demand. It does not.
+   It worked once and then, retried, the suspended app *was* reported frontmost
+   — a debugger-suspended process can hold the front perfectly well, and which
+   way SpringBoard goes is not ours to decide. It also leaves an app that
+   `simctl terminate` then blocks on. There is no reliable local reproducer;
+   there are two real observations, and that is what the numbers here rest on.
 
    Three verdicts, and the third is not a failure: `fronted`, `did-not-front`,
    and `cannot-say` when nothing reports a pid. `cannot-say` leaves the launch
@@ -2619,6 +2671,32 @@ worth more than the verdict.
    refusals on the legitimate case. It is decided on the **first** read, so a
    backend that cannot answer says so immediately rather than spending the
    budget learning it.
+
+   **One bounded retry, on a measured condition.** The first pass deliberately
+   did not retry, because retrying on *"no visible change"* papers over a signal
+   that cannot tell success from failure. That objection does not apply to a
+   known `did-not-front`: the process is running, a second `launch` without a
+   terminate simply fronts it, and that is the 237 ms path. It is explicitly
+   **not** a terminate-and-relaunch — that is the gesture this project already
+   knows wedges the display pipeline, so the recovery must not be the cause of
+   the next failure — and it is reported in the step summary, because CI's own
+   vehicle has been retrying launches by hand three times *invisibly*, which is
+   how this stayed a harness problem for so long.
+
+   **The instrument, so the next widening is not a guess.** The wait records
+   which pids held the front while it waited. One pid for the whole budget is a
+   launch that never took effect and wants another launch; a front that changed
+   hands and never arrived here is a budget that was short. Both produce
+   `did-not-front` and want opposite remedies, and item 146 is what raising a
+   number without that distinction costs. The runner's `held` was `[38661]` —
+   the first kind.
+
+   **What the runner then showed, which nothing could see before.** After the
+   guard revived the device, the rerun failed *differently*: the launch check
+   **passed** and the tour's wait failed with `Visible: 2:55` on a screen still
+   for 7515 ms. So the app was frontmost by pid while the display rendered a
+   clock. "Frontmost" and "rendering" are independent, and before this fix both
+   conditions arrived as the same sentence. Filed as 171.
 
    Two smaller things fall out. The ambiguous note in `actions.js` now resolves:
    an unmoved screen with a confirmed front reads *"confirmed frontmost — it was

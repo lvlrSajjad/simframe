@@ -77,10 +77,18 @@ export async function landed({
   const started = now();
   let seen = null;
   let asked = 0;
+  // Who held the front while we waited, in order. The instrument, not decoration:
+  // "the budget was too short" and "the app never went anywhere" produce the same
+  // verdict and want opposite remedies, and one list of pids tells them apart —
+  // a front that changed hands twice is a slow device, a single pid for the whole
+  // budget is a launch that did not happen. Widening a budget without this is the
+  // mistake item 146 was, twice.
+  const held = [];
   for (;;) {
     seen = await read();
     asked += 1;
-    if (seen === pid) return { verdict: 'fronted', ms: now() - started, polls: asked };
+    if (held[held.length - 1] !== seen) held.push(seen);
+    if (seen === pid) return { verdict: 'fronted', ms: now() - started, polls: asked, held };
     // Checked after at least one read, so a platform that cannot answer says so
     // rather than spending the whole budget finding that out.
     if (seen === null && asked === 1) {
@@ -88,11 +96,34 @@ export async function landed({
     }
     if (now() - started >= budgetMs) {
       return {
-        verdict: 'did-not-front', ms: now() - started, polls: asked, frontmost: seen,
+        verdict: 'did-not-front', ms: now() - started, polls: asked, frontmost: seen, held,
       };
     }
     await wait(pollMs);
   }
+}
+
+/**
+ * `held` as a sentence, because a list of pids is not a diagnosis by itself.
+ *
+ * **Only meaningful for a `did-not-front`.** Handed a successful wait's `held`
+ * it says the launch never took effect about a launch that plainly did — I did
+ * exactly that while testing this — so `pid` is taken and the success is
+ * refused rather than described. Callers that hold the verdict gate on it;
+ * this is the belt for the one that forgets.
+ */
+export function describeHeld(held = [], pid = null) {
+  const real = held.filter((p) => p !== null);
+  if (pid !== null && real[real.length - 1] === pid) {
+    return `pid ${pid} did reach the front — there is nothing to explain`;
+  }
+  if (real.length <= 1) {
+    return real.length === 1
+      ? `pid ${real[0]} held the front for the whole wait, so the launch never took effect`
+      : 'nothing held the front at any point';
+  }
+  return `the front changed hands ${real.length - 1} time(s) (${real.join(' → ')}),`
+    + ' so the device was switching apps and simply never reached this one';
 }
 
 /** `landed`, reading from the daemon. */

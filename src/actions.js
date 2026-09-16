@@ -2502,19 +2502,45 @@ async function runStep(deviceQuery, udid, step, ctx) {
       // app came forward, and the two came apart repeatedly on a loaded
       // runner — leaving the device on the previous app under a step that
       // reported success. The pid settles it; the screen cannot.
-      const landed = await frontmost.check(udid, started?.pid ?? null);
+      let landed = await frontmost.check(udid, started?.pid ?? null);
+      // One bounded retry, on a condition we have now *measured* rather than
+      // guessed at. This was rejected in the first pass for a good reason —
+      // retrying on "no visible change" papers over a signal that cannot tell
+      // success from failure — and that objection does not apply to a known
+      // `did-not-front`: the app is running, a second `launch` without a
+      // terminate simply fronts it, and that is the 237ms path.
+      //
+      // It is deliberately NOT a terminate-and-relaunch. That is the gesture
+      // this project already knows wedges the simulator's display pipeline
+      // (README, "rapid app relaunch"), so the recovery must not be the thing
+      // that causes the next failure.
+      //
+      // Reported, never silent: CI's own step vehicle has been doing this by
+      // hand three times, invisibly, which is how the defect stayed at the
+      // harness layer for so long. A retry that does not show up in the
+      // summary is a rate nobody can argue with.
+      let retried = null;
+      if (landed.verdict === 'did-not-front') {
+        retried = landed;
+        await launchApp(udid, bundleId, { args: step.args ?? [], env: step.env ?? {} });
+        landed = await frontmost.check(udid, started?.pid ?? null);
+      }
       if (landed.verdict === 'did-not-front') {
         throw new Error(
           `launched ${bundleId} (pid ${started.pid}) but it never came to the front`
-          + ` within ${landed.ms}ms — ${landed.frontmost === null
+          + ` within ${landed.ms}ms${retried ? ', on either of two attempts' : ''} — ${landed.frontmost === null
             ? 'nothing is frontmost'
             : `pid ${landed.frontmost} still is`}`
-          + '. The process started; the screen did not change hands.',
+          + `. ${frontmost.describeHeld(landed.held, started.pid)}.`,
         );
       }
       if (ctx.landing) ctx.landing.verdict = landed.verdict;
       return `launched ${bundleId}${step.relaunch ? ' (relaunched)' : ''}`
-        + (landed.verdict === 'fronted' ? ` (frontmost after ${landed.ms}ms)` : '');
+        + (landed.verdict === 'fronted' ? ` (frontmost after ${landed.ms}ms)` : '')
+        + (retried
+          ? ` [it did not front on the first attempt — ${frontmost.describeHeld(retried.held, started.pid)}`
+            + `; a second launch fronted it. The launch is unreliable on this host.]`
+          : '');
     }
     case 'terminate':
       await terminateApp(udid, step.value ?? step.bundleId);

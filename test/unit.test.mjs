@@ -5811,6 +5811,71 @@ test('a launch is confirmed by pid identity, not by the screen changing', async 
   );
 });
 
+test('a launch that did not front says which of the two reasons it was', async () => {
+  const { landed, describeHeld } = await import('../src/frontmost.js');
+  const noWait = { wait: async () => {}, pollMs: 0 };
+
+  // The runner case, verbatim: pid 39452 launched, pid 38661 held the front for
+  // the whole 6614ms. One pid for the entire budget is not a slow device, it is
+  // a launch that did not take effect — and the remedy is another launch.
+  let clock = 0;
+  const stuck = await landed({
+    pid: 39452, read: async () => 38661, budgetMs: 3000, pollMs: 0,
+    wait: async () => {}, now: () => (clock += 200),
+  });
+  assert.deepEqual(stuck.held, [38661]);
+  assert.match(describeHeld(stuck.held), /held the front for the whole wait/);
+
+  // The other shape, which wants the opposite remedy: the front moved and just
+  // never arrived here, so the budget is what was short. Distinguishing these
+  // is the whole reason `held` is recorded — item 146 widened a budget twice
+  // without an instrument that could say which case it was.
+  clock = 0;
+  const pids = [100, 100, 200, 200, 300];
+  let i = 0;
+  const moving = await landed({
+    pid: 999, read: async () => pids[Math.min(i++, pids.length - 1)],
+    budgetMs: 900, pollMs: 0, wait: async () => {}, now: () => (clock += 200),
+  });
+  assert.equal(moving.verdict, 'did-not-front');
+  assert.deepEqual(moving.held, [100, 200, 300]);
+  assert.match(describeHeld(moving.held), /changed hands 2 time\(s\) \(100 → 200 → 300\)/);
+
+  assert.match(describeHeld([]), /nothing held the front/);
+
+  // And it refuses to explain a success. Handed a successful wait's `held` the
+  // first version said "the launch never took effect" about a launch that
+  // plainly had — I ran into that myself testing this on a device, which is
+  // why the launched pid is passed in rather than inferred from the shape.
+  assert.match(describeHeld([48011], 48011), /did reach the front/);
+  assert.match(describeHeld([100, 200], 200), /did reach the front/);
+  assert.match(describeHeld([100, 200], 999), /changed hands/);
+});
+
+test('a launch that did not front is retried once, without a terminate, and the retry is reported', async () => {
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const launchCase = src.slice(src.indexOf("case 'launch': {"), src.indexOf("case 'terminate':"));
+
+  // The retry exists, and it is bounded: one re-launch, then the throw.
+  assert.equal((launchCase.match(/await launchApp\(/g) ?? []).length, 2,
+    'exactly one retry, not a loop');
+
+  // **The half that matters.** The retry must not terminate first. Terminating
+  // and relaunching is the gesture this project already knows wedges the
+  // simulator's display pipeline, so a recovery that did it would be causing
+  // the next failure. The retry call carries args and env and nothing else.
+  const retry = launchCase.slice(launchCase.indexOf('let retried'));
+  assert.doesNotMatch(retry, /terminateFirst/,
+    'the recovery must not be the thing that wedges the display');
+
+  // And it is visible. CI's own vehicle has been retrying launches by hand
+  // three times, silently, which is how this stayed a harness problem.
+  assert.match(launchCase, /it did not front on the first attempt/,
+    'a retry the summary does not mention is a rate nobody can argue with');
+  assert.match(launchCase, /on either of two attempts/,
+    'and a failure after a retry must say it was two');
+});
+
 test('the launch step refuses a launch that never fronted, and says so definitely when it did', async () => {
   const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
   assert.match(src, /landed\.verdict === 'did-not-front'/,
