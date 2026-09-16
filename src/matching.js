@@ -220,7 +220,48 @@ export function rank(targets, intent, { screen } = {}) {
     // them disappears into the ceiling.
     scored.push({ target: t, score, reasons });
   }
-  return scored.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) => b.score - a.score);
+
+  // **A distinctive fragment of one long name, when nothing else came close.**
+  //
+  // Reported from the field: `waitFor "6322594"` gave up after 20 s on a screen
+  // whose own "Visible:" list printed `Work Order #6322594`. The reporter's
+  // guess was that `#` was being treated as significant, or that the matcher
+  // was anchored. It is neither — the number scores **0.287** against the 0.45
+  // floor, because the substring branch in `nameScore` scales by how much of
+  // the name the query covers, and seven digits are 41% of that label.
+  //
+  // That scaling is right and stays: it is what stops "back" beating a real
+  // back button from inside a long list row. But its purpose is to resolve
+  // *competition*, and when there is no competition it is charging a penalty
+  // for a risk that does not exist. So the promotion fires only when **nothing
+  // reached the floor** and **exactly one element** contains the query. The
+  // "back" case is untouched, because a screen with a back button has at least
+  // two names containing "back" and this never runs.
+  //
+  // The score lands just above the floor, not at 1: it is an act of
+  // desperation, not a confident match, and the reason says so — so an
+  // ambiguity check downstream still has something honest to weigh.
+  if (!scored.some((c) => c.score >= MINIMUM_SCORE)) {
+    const q = norm(bare) || norm(intent);
+    const holds = (t) => [t.label, t.identifier, ...(t.aliases ?? [])]
+      .filter(Boolean)
+      .some((n) => norm(n).includes(q) && norm(n) !== q);
+    const only = q.length >= 3 ? visible.filter(holds) : [];
+    if (only.length === 1) {
+      const t = only[0];
+      const existing = scored.find((c) => c.target === t);
+      const reason = `the only element on this screen containing "${intent}"`;
+      if (existing) {
+        existing.score = MINIMUM_SCORE + 0.01;
+        existing.reasons.push(reason);
+      } else {
+        scored.push({ target: t, score: MINIMUM_SCORE + 0.01, reasons: [reason] });
+      }
+      scored.sort((a, b) => b.score - a.score);
+    }
+  }
+  return scored;
 }
 
 /** How close two candidates may be before the answer counts as ambiguous. */

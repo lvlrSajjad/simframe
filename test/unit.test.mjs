@@ -4398,11 +4398,11 @@ test('a typed field is verified by its contents, not by the screen moving', asyn
   // the one path where acting on the warning is destructive — re-typing doubles
   // a field that has no way to be cleared.
   assert.deepEqual(
-    actions.readbackNote('Mo Hatami', { value: 'Mo Hatami', landed: true, focused: true }),
-    { note: ' = "Mo Hatami"', empty: false, landed: true },
+    actions.readbackNote('a value', { value: 'a value', landed: true, focused: true }),
+    { note: ' = "a value"', empty: false, landed: true },
   );
   // The false `ok`: a valued control that reads empty after text was sent.
-  assert.equal(actions.readbackNote('Mo Hatami', { value: '', landed: false }).empty, true);
+  assert.equal(actions.readbackNote('a value', { value: '', landed: false }).empty, true);
   // Nothing was sent, so an empty field is not a contradiction.
   assert.equal(actions.readbackNote('', { value: '', landed: false }).empty, false);
   // No readback at all is no evidence, and no evidence is not counter-evidence.
@@ -6045,4 +6045,71 @@ test('the CI guard tells a wedged device from a check that failed on its merits'
     assert.ok(re instanceof RegExp, `${why} needs a RegExp`);
     assert.equal(typeof why, 'string');
   }
+});
+
+test('a distinctive fragment of one long name resolves, and only when nothing competes', async () => {
+  // Field report, 0.15.1: `waitFor "8471502"` gave up after 20s on a screen
+  // whose own "Visible:" list printed `Record #8471502`. The reporter
+  // guessed `#` was significant or the matcher was anchored. Neither: the
+  // substring branch scales by how much of the NAME the query covers, and
+  // seven digits are 41% of that label, so it scored 0.287 against a 0.45
+  // floor. Recorded as numbers so the next person does not re-guess.
+  const m = await import('../src/matching.js');
+  assert.ok(m.nameScore('Record #8471502', '8471502') < m.MINIMUM_SCORE,
+    'the raw score is genuinely below the floor — the promotion is what rescues it');
+
+  const el = (label, type = 'text') => ({
+    label, type, x: 100, y: 100, w: 200, h: 20, frame: { x: 100, y: 100, width: 200, height: 20 },
+  });
+  const screen = { width: 402, height: 874 };
+  const best = (targets, q) => m.rank(targets, q, { screen })[0];
+
+  const found = best([el('Record #8471502'), el('EDIT', 'button')], '8471502');
+  assert.ok(found.score >= m.MINIMUM_SCORE, 'it resolves now');
+  assert.match(found.reasons.join(' '), /the only element on this screen containing/,
+    'and says why, because it is desperation rather than confidence');
+  assert.ok(found.score < 0.5, 'promoted to just over the floor, not to a confident score');
+
+  // **The case the coverage scaling exists for, which must not regress.** A
+  // bare "back" must reach the back button, not a long list row that happens
+  // to contain the word. The promotion cannot fire here: two names contain
+  // "back", and nothing needed rescuing anyway.
+  const backwards = best([el('Back', 'button'), el('Back Room Storage Cabinet Shelf 4')], 'back');
+  assert.equal(backwards.target.label, 'Back');
+
+  // Two candidates hold the fragment: that is the ambiguity the scaling
+  // protects against, so no promotion and the floor still refuses.
+  const ambiguous = best([el('Record #8471502'), el('Parent of #8471502')], '8471502');
+  assert.ok(ambiguous.score < m.MINIMUM_SCORE, 'a contested fragment is still not good enough');
+
+  // And it invents nothing: a string genuinely absent stays absent.
+  assert.equal(best([el('EDIT', 'button'), el('Cancel', 'button')], '8471502'), undefined);
+
+  // Too short to be distinctive — two characters inside any label would
+  // otherwise promote on almost every screen.
+  assert.equal(best([el('Record #8471502')], '63')?.score >= m.MINIMUM_SCORE, false);
+});
+
+test('a swept fill carries the read-back verdict instead of claiming success', async () => {
+  // Field report, 0.15.1, filed as the critical defect: `sweep` printed
+  //   ok [0] sweep: ... filled "Full name" in section 1
+  // and the field was empty. The honesty already existed one function down —
+  // `paste`/`type` with `into` read the field back and qualify the claim, and
+  // `paste` even throws naming the system paste-consent dialog — and `sweep`
+  // awaited the step for its side effect and discarded everything it said.
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const sweepFill = src.slice(src.indexOf('Anything to fill in this section?'));
+  const upToCatch = sweepFill.slice(0, sweepFill.indexOf('} catch (err)'));
+  assert.match(upToCatch, /const said = await runStep\(/,
+    'the fill must keep what the step reported, not just that it returned');
+  assert.match(upToCatch, /unconfirmed\|NOT CONFIRMED\|reads empty/,
+    'and test it for a caveat before claiming the field was filled');
+
+  // The detection itself, against the real strings the two steps return.
+  const caveated = /unconfirmed|NOT CONFIRMED|reads empty|did not land|nothing was read back/i;
+  assert.ok(caveated.test('pasted into the focused field [unconfirmed — no field named, so nothing was read back]'));
+  assert.ok(caveated.test('typed text [NOT CONFIRMED: no field named, so nothing was read back.'));
+  // A confirmed fill stays clean — the caveat must not fire on every fill, or
+  // it becomes the habituation the same reporter warned about on 0.13.0.
+  assert.ok(!caveated.test('pasted into the field named "Full name" (read back: "a value")'));
 });

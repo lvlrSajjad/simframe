@@ -2300,10 +2300,23 @@ async function sweep(deviceQuery, udid, step, ctx) {
       for (const [label, text] of Object.entries(fill)) {
         if (!here.some((r) => alnum(r.label).includes(alnum(label)))) continue;
         try {
-          await runStep(deviceQuery, udid, {
+          // **Keep what the step said.** `paste` and `type` both read the field
+          // back and say so — "unconfirmed", "reads empty", the quiet-field
+          // caveat — and this threw all of it away and printed a bare
+          // `filled "X"`. A field report called that out as the worst failure
+          // mode an automation tool has: a silent no-op reported as a confirmed
+          // action, caught only because the tester took a screenshot on a
+          // hunch. The honesty existed one function down and stopped here.
+          const said = await runStep(deviceQuery, udid, {
             action: step.paste === false ? 'type' : 'paste', into: label, text: String(text),
           }, ctx);
-          filled.push(`${JSON.stringify(label)} in section ${section + 1}`);
+          // Anything the step qualified travels with the claim. A step that
+          // confirmed the read-back says nothing extra, so a clean fill still
+          // reads cleanly.
+          const caveat = /unconfirmed|NOT CONFIRMED|reads empty|did not land|nothing was read back/i.test(said ?? '')
+            ? ` — ${String(said).replace(/^(pasted|typed)[^[]*/i, '').trim() || said}`
+            : '';
+          filled.push(`${JSON.stringify(label)} in section ${section + 1}${caveat}`);
         } catch (err) {
           filled.push(`${JSON.stringify(label)} FAILED in section ${section + 1}: ${err.message.split('\n')[0].slice(0, 90)}`);
         }
