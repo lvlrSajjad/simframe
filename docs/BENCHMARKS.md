@@ -4133,8 +4133,32 @@ destination. The composite `HPI` survived because accuracy divides it down, but
 the gate reads was the one breakage flattered. Time is now taken over completed
 runs only, and a flow where nothing completed reports no time rather than a
 flattering one — the same discipline as the suite's own "no comparable HPI was
-measured". Note that this shifts the metric: the table above was computed the
-old way, on runs that all completed, so those rows are unaffected.
+measured".
+
+**A correction, because the first version of this note was wrong.** It said the
+table above "was computed the old way, on runs that all completed, so those rows
+are unaffected". They are not. `contacts-kate-bell` has **`completed: 0`** in
+the committed baseline — it failed every run, by design, refusing rather than
+guessing — and it still contributed a time, `hpi_time 0.407`, to runs A, B and
+C. Half of every committed HPI_time comes from a flow that never finished once.
+So the baseline is **invalid under the corrected metric and has to be
+re-recorded**, and the comparison in the table above was old-metric on both
+sides.
+
+Recomputed consistently, with time taken only over runs that completed:
+
+| | `HPI_time`, corrected |
+| --- | --- |
+| run A (warm, N=5) | **0.558** — contacts contributes nothing |
+| run C (fresh restart, N=5) | **0.406** — likewise |
+| 2026-09-16 (fresh revive, N=3) | **0.456** — settings p50 rises 11707 → 13244 ms once its one fast failure is excluded |
+
+Today's reading sits between them: better than C, an 18% regression against A.
+**Which is to say the same thing this document said before, only louder — the
+same-code spread is now 0.406–0.558, a 37% span, against a gate band of 10%.**
+A threshold smaller than the metric's own condition-noise can only ever be
+silent or wrong, and it has been silent: items 148, 152, 154 and 169 all shipped
+without it firing once.
 
 **The suite's reset resolved its first look from memory.** `src/baseline.js`
 carried `refresh: attempt > 0` — the exact pattern `actions.js` has a test
