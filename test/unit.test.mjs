@@ -5730,6 +5730,22 @@ test('a wait resolves against the live screen, not against memory', async () => 
   assert.doesNotMatch(code, /refresh: attempt > 0/,
     'no wait may resolve its first look against the recalled map');
 
+  // **Every file, not this one.** This assertion read only actions.js for as
+  // long as it existed, and the identical defect was sitting in baseline.js
+  // the whole time: the HPI suite's reset resolved its root marker against the
+  // map remembered from the previous run's end screen, failed to find a marker
+  // that was plainly on screen, and then hunted a "back" control that a root
+  // screen does not have — on every run of every pass, for as long as HPI has
+  // been measured. A rule enforced against the file where it was first noticed
+  // is a rule that only covers the symptom.
+  const srcDir = new URL('../src/', import.meta.url);
+  for (const name of fs.readdirSync(srcDir).filter((f) => f.endsWith('.js'))) {
+    const body = fs.readFileSync(new URL(name, srcDir), 'utf8')
+      .split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    assert.doesNotMatch(body, /refresh: attempt > 0/,
+      `${name} resolves a first look from memory; a check has no second opinion`);
+  }
+
   // Three fresh reads: both `waitFor` branches — a single target and
   // {"any": [...]} — and `assert`. All opt out the same way, so the contract is
   // one contract rather than three.

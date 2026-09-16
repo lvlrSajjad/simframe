@@ -175,7 +175,22 @@ export async function resetFor(udid, flow) {
       for (let attempt = 0; attempt <= (reset.maxBack ?? 4); attempt += 1) {
         await api.waitFor(udid, { mode: 'stable', stableMs: 350, timeoutMs: 3000 });
         try {
-          await api.locate(udid, reset.rootMarker, { refresh: attempt > 0 });
+          // **Fresh on every attempt, the first one included.** This read
+          // `refresh: attempt > 0`, which is the exact pattern `actions.js`
+          // has a test forbidding — and the test only ever read actions.js, so
+          // the same defect sat here unguarded. It is not theoretical: the
+          // reset ran immediately after a launch, resolved `Accessibility`
+          // against the map remembered from the PREVIOUS run's end screen,
+          // did not find it, and went looking for a "back" control on a
+          // Settings root that has none:
+          //
+          //   (reset: could not return com.apple.Preferences to its root
+          //    screen: "back" is not on this screen. Visible: Settings,
+          //    Apple Account, …, Accessibility, …)
+          //
+          // Accessibility is right there in that list. A check has no second
+          // opinion, so it may not resolve its first look from memory.
+          await api.locate(udid, reset.rootMarker, { refresh: true });
           break;
         } catch {
           const back = await api.locate(udid, 'back', { refresh: true });
