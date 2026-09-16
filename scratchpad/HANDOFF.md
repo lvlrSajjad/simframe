@@ -1,5 +1,47 @@
 # Handoff — 2026-09-17
 
+> **Read this block first; the rest of the file was written before the third
+> field report landed.**
+>
+> **A third peer tested 0.16.0 and found a silent success in the feature 0.16.0
+> shipped for.** Both flows they saved were marked confirmed on disk and both
+> were confirmed by replays that *failed*. `saveFlow` and `runFlow` both asked
+> `ranSteps >= steps.length`, and `ranSteps` counts steps **attempted** — a
+> failing step stops the batch, so a failure on the *last* step reads as a
+> complete run. Fixed in `25ecfe0`, in all three places it lived, with the
+> negative case added to `ci-memory`. Item **176**.
+>
+> Also fixed there: `"optional": true` on a step (**177**) — six correct steps
+> were being discarded because a first-launch sheet did *not* appear, so no flow
+> crossing an interstitial could be batched at all; `startScreen`, which every
+> 0.16.0 flow recorded as `null`; the malformed `(unverified, unverified, )`
+> refusal; and `hpi --help`.
+>
+> **Open and filed: 178–182.** 178 (`sim_find` returns a static label as a
+> "field") is the best return-per-line and deliberately *not* done — a hard type
+> filter breaks OCR-only WebView screens, so it wants a fixture first. 179 is
+> structural and pairs with 176: a flow that creates data can never replay
+> cleanly, so the confirmation path is closed to most flows worth recording —
+> **the two were hiding each other**, and fixing 176 alone makes the confirm
+> rate collapse, which is the honest number.
+>
+> **CI is red on `main` and on the `v0.16.0` tag**, and it is not this work.
+> `integration (fingerprint)` fails with *"a launched app never came to the
+> front (the screen shows a clock and nothing else)"* — item 171 inside item
+> 173. `bench` on the tag was **cancelled**, so it produced nothing: not an
+> abstention, not a gate, nothing. HPI still has no hosted-runner reading.
+>
+> **The one idea worth carrying forward.** That CI line is the same fault the
+> peer hit on a laptop, where `sim_look` served them a frame from a *previous
+> session* while the element map correctly described the app in front of them.
+> 171, 173, 180 and possibly 175 look like **one cause wearing four faces**: the
+> capture surface dies, the framebuffer keeps serving a stale frame, and the
+> tree stays right. If the overlap warning is computed from a11y-vs-OCR
+> disagreement, its 78% false-positive rate may be *measuring stale capture*.
+> The experiment is cheap — correlate frame staleness with overlap warnings over
+> the existing bench runs — and it must come before anyone touches the
+> heuristic. Working these as four flaky symptoms is how they have survived.
+
 **0.16.0 is published and verified.** npm `latest`, 85/85 files identical to the
 tree (`node scripts/check-published.mjs 0.16.0`), release green via OIDC, and the
 pre-tag diff was clean. `origin/main` at `f730eed`, nothing held locally. Gates:
@@ -122,9 +164,14 @@ Two reports, opposite conclusions, and only the second one counted anything.
 
 ## Unfinished business
 
-- **`bench` on the v0.16.0 tag was still running at compact** (run
-  `35157973651`). Read it. Expect it to abstain — 173 — and if it does, that is
-  *not* a passing gate and must not be reported as one.
+- **`bench` on the v0.16.0 tag was read: it was CANCELLED** (run
+  `35157973651`), so it produced nothing at all — less than the abstention this
+  line predicted. The same run's `integration (fingerprint)` failed, and so did
+  the one on `main` after it. See the block at the top of this file.
+- **0.16.1 is not cut.** The fixes in `25ecfe0` are on `main` and unreleased.
+  The standing rule is don't publish on a red CI, and CI is red for a reason
+  that predates this work — that is the owner's call, not an obstacle to route
+  around.
 - **The replay measurement has now been skipped by two peers in a row.** It is
   §3 of the peer prompt, numbered, with a stopwatch, and it is the one number
   that demonstrates human parity outside this machine. Insist on it.
