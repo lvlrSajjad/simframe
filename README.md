@@ -403,7 +403,7 @@ steer the model is a tool surface the model uses wrong.
 | `sim_flow_run` | Replay a flow that verified end to end. |
 | `sim_find` | Resolve an intent to one control, without acting on it. |
 | `sim_tap` · `sim_type_into` · `sim_scroll_to` · `sim_wait_for` · `sim_assert` | Single actions, for when you genuinely only have one step. Each is one `sim_do` step underneath. |
-| `sim_launch` · `sim_open_url` · `sim_permission` | Launch with arguments and environment; open a deep link; grant a privacy permission instead of tapping a system alert. |
+| `sim_launch` · `sim_open_url` · `sim_permission` | Launch with arguments and environment; open a deep link; grant a privacy permission instead of tapping a system alert. A launch is **confirmed to have reached the front**, by comparing the pid `simctl` started against the pid the device reports as frontmost — so *"the process started"* is no longer reported as *"the app is on screen"*. |
 | `sim_wait` | Waits for the screen to change *and then* settle. |
 | `sim_look` | **The only tool that returns an image**, capped at 1024 px. For layout, colour, spacing — questions text cannot answer. |
 | `sim_recall` · `sim_strip` | Look backwards: a text timeline of what happened, or recent frames tiled into one image. |
@@ -995,11 +995,22 @@ said a word — the exact failure shape, found by the thing built to catch it.
   dramatically between visits will simply be rebuilt.
 - It speeds up *confirming* a fix, not *locating* one. A bug living in a memo
   comparator or a stale closure is not visible in any frame.
-- A switch is tapped at the centre of its frame, and a switch's frame is the
-  whole row — so the tap lands on the label and the control, which sits at the
-  trailing end, does not move. Use `@x,y` on the control for now. Filed with
-  the measurement in `docs/DEFERRED.md`; it is a role-specific tap point, not a
-  patch at one call site.
+- A switch is tapped at its **activation point** when the app publishes one —
+  UIKit's `accessibilityActivationPoint`, which is what a switch answers with,
+  and tapping it flipped a real switch 3 of 3 times where the frame centre
+  managed 0 of 3. Only **4 of 75** elements on a measured screen publish one,
+  though, so where the app says nothing the tap still goes to the centre of the
+  frame — and a switch's frame is the whole row, so it lands on the label and
+  the control at the trailing end does not move. `@x,y` remains the escape
+  hatch there. Never a guessed offset: nil means the app did not answer.
+- A launch is confirmed to have fronted **on iOS only**. It compares the pid
+  `simctl launch` printed against the pid the device reports as frontmost, in
+  2–5 ms. Android reports neither, so a launch there is not checked — `am start`
+  fronts synchronously, which is why it has not bitten, but that is not a check
+  and `doctor` says so. Note that a launch which starts a process without
+  bringing it forward now **fails** rather than returning success: a flow that
+  used to pass through such a launch and then assert on the previous app's
+  screen will start failing, correctly.
 - The simulator's display pipeline stops rendering under rapid app relaunch —
   about six cycles, reproducibly — and every frame comes back black while
   `simctl` itself reports success. simframe now says so instead of reading a
