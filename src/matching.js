@@ -224,8 +224,9 @@ export function rank(targets, intent, { screen } = {}) {
 
   // **A distinctive fragment of one long name, when nothing else came close.**
   //
-  // Reported from the field: `waitFor "6322594"` gave up after 20 s on a screen
-  // whose own "Visible:" list printed `Work Order #6322594`. The reporter's
+  // Reported from the field: a `waitFor` on a seven-digit record number gave up
+  // after 20 s on a screen whose own "Visible:" list printed that number inside
+  // a heading — `Record #<digits>`, seventeen characters. The reporter's
   // guess was that `#` was being treated as significant, or that the matcher
   // was anchored. It is neither — the number scores **0.287** against the 0.45
   // floor, because the substring branch in `nameScore` scales by how much of
