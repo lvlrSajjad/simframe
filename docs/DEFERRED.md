@@ -2511,6 +2511,86 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+175. **The overlap warning fires on most screens and is ignored by the fourth
+   one.** OPEN, and it **cancels a fix the previous report asked for.**
+
+   One field report asked that a tap be refused when its point falls inside an
+   element flagged as an overlap — *"the information is already computed, it
+   just isn't wired to the tap decision"*. That is a good instinct and it would
+   have been a serious mistake, because the next report measured the signal:
+
+   > *appeared on **7 of 9 screens**, including screens with no sheet. It was
+   > never once actionable. At that hit rate it's noise and I started skipping
+   > it, which is the bad outcome for a warning that might someday matter.*
+
+   Gating taps on a signal with a ~78% false-positive rate would have produced
+   constant false refusals, and each false refusal costs a model round trip —
+   roughly 20 s — so the "fix" would have been a latency regression dressed as
+   a safety feature. **The warning is the defect, not the tap.** Nothing may be
+   wired to this signal until its hit rate is fixed.
+
+   Two reports, opposite conclusions, and only the second one counted. This is
+   the same shape as the 0.13.0 caret warning: *"the risk is habituation —
+   warnings that are usually wrong train the caller to ignore the one that
+   matters."* Both times the remedy was to measure the rate rather than trust
+   the intent.
+
+174. **Screen identity fragments on content-driven screens, and the cost is an
+   aborted batch.** OPEN, and it is the largest remaining cost on a first
+   traversal.
+
+   Reported twice. `unexpected-screen` fired on steps that had done exactly the
+   right thing:
+
+   ```
+   FAIL [0] tap: unexpected-screen: expected the screen this action reached 2x
+              before, and landed somewhere else · settled in 684ms
+   later steps were not run
+   ```
+
+   Both taps advanced a wizard correctly. Because a failed step discards the
+   rest of its batch, one of them killed a 7-step plan at step 5 — so a submit
+   that had already been paid for in model latency never ran. The reporter's
+   own ranking: *"§2 is the sharper bug, but §1 is what actually cost the run
+   its time."*
+
+   The same root produced a second symptom on four separate screens —
+   *"memory disagrees with this screen: 1 remembered control not present — this
+   screen has probably been confused with another"* — which is honest, correct,
+   and the same evidence.
+
+   **Why the obvious fix is wrong.** The request was to make
+   `unexpected-screen` non-fatal by default. That trades a wrong tap for a
+   saved round trip in precisely the place CLAUDE.md's verify barrier says not
+   to: an edge with a prior `unexpected-*` verdict waits for confirmed
+   perception. A right turn that stops the batch is expensive; a wrong turn
+   that keeps tapping is worse, and the barrier exists because the second is
+   unrecoverable.
+
+   **Why the real fix is not a threshold either.** `sameScreen` already passes
+   tokens so the similarity tolerance can work, and that was itself a fix for
+   this class. What remains is upstream: a content-driven screen whose first
+   divergence scores below `SIMILARITY_THRESHOLD` becomes a **new node** rather
+   than a variant, and the graph then holds two nodes for one logical screen.
+   Lowering the threshold is not available — the fingerprint eval measures
+   same-screen revisits at ≥0.63 and different screens at ≤0.08 on static
+   screens, and merging on content similarity would collapse genuinely
+   different screens.
+
+   And anchoring identity on chrome instead of content does not work as stated:
+   every step of that wizard shares its nav title, so chrome alone would make
+   steps 1–4 one screen — and the second false alarm was a step correctly
+   *advancing* from 1 to 2, which must read as a new screen. Identity has to
+   distinguish the steps while tolerating content churn within a step, and
+   nothing here does that yet.
+
+   The tractable half, and where to start: the **supervisor** is the escape
+   hatch the barrier already names — *"when in doubt, escalate"* — and
+   `unexpected-screen` does not consult it. That was unavailable in both
+   reported runs for a separate reason, now fixed (a brief with no supervisor
+   enabled said nothing). Wiring this verdict to a ruling keeps the barrier and
+   removes the false abort, without touching screen identity.
+
 173. **The bench suite wedges the device it measures.** OPEN, and it is the
    reason `HPI` has never been measured on a hosted runner. Observed four times
    in one afternoon on two machines: SpringBoard crashing mid-suite, `simctl`

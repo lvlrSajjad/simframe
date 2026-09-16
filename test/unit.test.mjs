@@ -6235,3 +6235,31 @@ test('sweep answers to the same selectors as tap and type, identifiers included'
   assert.equal(holds(testIdOnly, 'not-a-field'), false, 'and it invents nothing');
   assert.equal(holds(testIdOnly, ''), false, 'an empty needle matches nothing, not everything');
 });
+
+test('a supervise brief with no supervisor enabled says so, and names the remedy', async () => {
+  // Two independent field reports, same trap. `supervise` is standing guidance
+  // FOR a supervisor; which supervisor comes from options.supervisor or
+  // SIMFRAME_SUPERVISOR, and with neither set the brief is discarded. The code
+  // documented that as "always safe" — safe and silent.
+  //
+  // One reporter had written a brief describing the exact race that then
+  // aborted their batch, and the supervisor was never asked: "as written,
+  // `supervise` is a prompt I can't observe the effect of."
+  const supervisor = await import('../src/supervisor.js');
+  assert.equal(supervisor.requested({}), null, 'nothing configured means nobody is listening');
+  assert.equal(supervisor.requested({ supervisor: 'none' }), null);
+  assert.equal(supervisor.requested({ supervisor: 'off' }), null);
+  assert.equal(supervisor.requested({ supervisor: 'apple' }), 'apple');
+
+  const src = fs.readFileSync(new URL('../src/mcp.js', import.meta.url), 'utf8');
+  assert.match(src, /args\.supervise && !supervisor\.requested\(options\)/,
+    'a brief with nobody to read it must be reported');
+  assert.match(src, /so the "supervise" brief was not consulted/);
+  // The remedy, not just the condition — the whole reason the silence was
+  // expensive is that neither reporter could tell what to do about it.
+  assert.match(src, /set supervisor \(per call\) or SIMFRAME_SUPERVISOR/);
+  // And it must not fire when no brief was passed, or it becomes the noise the
+  // same reports complained about elsewhere (an overlap warning on 7 of 9
+  // screens, ignored by the fourth occurrence).
+  assert.match(src, /if \(args\.supervise &&/, 'gated on a brief having been passed');
+});

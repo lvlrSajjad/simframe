@@ -13,6 +13,7 @@ import { REGION_COLS, REGION_ROWS, regionMap } from './analyze.js';
 import * as actions from './actions.js';
 import * as api from './index.js';
 import * as input from './input.js';
+import * as supervisor from './supervisor.js';
 import * as metrics from './metrics.js';
 import * as navigate from './navigate.js';
 import { bootedDevices, listDevices, permissionServices, resolveDevice } from './platform/index.js';
@@ -1045,6 +1046,26 @@ async function doScript(target, args, options) {
   for (const s_ of res.supervisions ?? []) {
     lines.push(`supervisor at step ${s_.index}: ${s_.decision} — ${s_.outcome}`
       + (s_.reason ? ` (it said: "${s_.reason}")` : ''));
+  }
+  // **A brief with nobody to read it says so.**
+  //
+  // `supervise` is standing guidance for a supervisor; *which* supervisor comes
+  // from `options.supervisor` or SIMFRAME_SUPERVISOR, and with neither set the
+  // brief is discarded. The code even documented that as "always safe" — safe
+  // and silent, which is the trap. Two independent field reports hit it: both
+  // passed a brief on every call, neither ever saw a verdict, and one had
+  // written guidance describing the exact race that then aborted their batch.
+  // Their words: "as written, `supervise` is a prompt I can't observe the
+  // effect of."
+  //
+  // Said only when a brief was actually passed, so it is never noise, and it
+  // names the remedy rather than the condition.
+  if (args.supervise && !supervisor.requested(options)) {
+    lines.push('supervisor: none enabled, so the "supervise" brief was not consulted'
+      + ' — set supervisor (per call) or SIMFRAME_SUPERVISOR to enable one.');
+  } else if (args.supervise && !(res.supervisions ?? []).length) {
+    lines.push(`supervisor: ${supervisor.requested(options)} enabled, never consulted`
+      + ' — no step failed in a way that asks for a ruling.');
   }
   if (args.saveAs) {
     const saved = navigate.saveFlow(res.device.udid, args.saveAs, res);
