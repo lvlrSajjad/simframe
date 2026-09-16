@@ -654,7 +654,12 @@ export function hpi({ flows, baselines = {} }) {
     const agent = quartiles(finished.map((r) => r.wall_time_ms));
     const human = baselines[name]?.wall_time_ms ?? null;
     const humanMedian = human?.p50 ?? null;
-    const stepRatios = runs.map((r) => r.step_ratio).filter((x) => Number.isFinite(x));
+    // Completed runs only, for the same reason the time is: a run that stops
+    // three steps in reports a LOW step ratio, so breakage flattered this
+    // number too. The runner's suite, with 3 of 14 runs completing, reported
+    // `step_ratio 0.375` — "the agent uses a third of the human's steps" about
+    // flows that mostly never arrived.
+    const stepRatios = finished.map((r) => r.step_ratio).filter((x) => Number.isFinite(x));
     return {
       flow: name,
       runs: runs.length,
@@ -799,7 +804,33 @@ export function breakdown(records, { session = null, flow = null } = {}) {
  * than one, and accuracy stays strict at any drop at all. Numbers in
  * docs/BENCHMARKS.md under "What the gate is set to, and why".
  */
+/**
+ * The band HPI_time is *reported* against. It no longer fails a build.
+ *
+ * It was a gate, at 25% here and written down as 10% in CLAUDE.md — and the
+ * measurement cannot support either. `HPI_time` is `human_p50 / agent_p50`
+ * where the human was recorded once, on a laptop, and the agent is measured
+ * wherever CI happens to run: a hosted runner put the same flows at 37 s and
+ * 64 s against 11.5 s and 11.7 s on that laptop, so the ratio mixes the code's
+ * speed with the host's. Even on one machine, identical code spans 0.406-0.558
+ * across device conditions — a 37% spread. A band inside that can only be
+ * silent or wrong, and it was silent: items 148, 152, 154 and 169 all shipped
+ * without it firing.
+ *
+ * So time is a trend, per host, and accuracy is the gate. Accuracy asks
+ * whether the agent reached the destination and whether it tapped the wrong
+ * thing — properties of the code, not of the machine.
+ */
 export const TIME_REGRESSION = 0.25;
+
+/**
+ * The most steps-per-human-step we will accept. From the research: an agent
+ * taking half again as many actions as a person is wandering.
+ *
+ * An absolute target rather than a regression, deliberately — it is a ratio of
+ * two step counts, so unlike the time it does not change with the host.
+ */
+export const STEP_RATIO_CEILING = 1.5;
 
 /**
  * The HPI_time a gate should compare: the median across passes when a report
@@ -816,7 +847,7 @@ export const gateTime = (o) => o?.hpi_time_median_of_passes ?? o?.hpi_time ?? nu
  * fingerprint eval both shipped unable to fail, and both looked exactly like
  * this. Returns the reasons it should fail — empty means pass.
  */
-export function gateAgainst(baseline, measured, { timeRegression = TIME_REGRESSION } = {}) {
+export function gateAgainst(baseline, measured, { stepRatioCeiling = STEP_RATIO_CEILING } = {}) {
   const base = baseline?.overall ?? {};
   const now = measured?.overall ?? measured ?? {};
   const baseTime = gateTime(base);
@@ -825,17 +856,42 @@ export function gateAgainst(baseline, measured, { timeRegression = TIME_REGRESSI
   if (base.hpi_accuracy != null && now.hpi_accuracy != null && now.hpi_accuracy < base.hpi_accuracy) {
     failures.push(`HPI_accuracy dropped: ${now.hpi_accuracy} < ${base.hpi_accuracy} (any drop fails)`);
   }
-  if (baseTime != null && nowTime != null && nowTime < baseTime * (1 - timeRegression)) {
+  // Steps, which the host cannot inflate: a ratio of two step counts.
+  if (now.step_ratio != null && now.step_ratio > stepRatioCeiling) {
     failures.push(
-      `HPI_time regressed >${timeRegression * 100}%: ${nowTime} < ${(baseTime * (1 - timeRegression)).toFixed(3)}`,
+      `step_ratio ${now.step_ratio} is above the ${stepRatioCeiling} ceiling — the agent is taking more actions than a person`,
     );
   }
-  // A checkout missing the human baseline the committed number was computed
-  // against would otherwise pass by having nothing to compare.
+  // **HPI_time does not fail a build.** See TIME_REGRESSION. It is reported
+  // with its band so a trend is visible and a big move is obvious to a human,
+  // and `timeTrend` below is what prints it.
+  //
+  // A checkout missing the human baseline is still a failure, because it is a
+  // broken measurement rather than a slow one — a report with no time at all
+  // would otherwise pass by having nothing to say.
   if (baseTime != null && nowTime == null) {
     failures.push('HPI_time is null but the baseline has one — the human baseline it needs is missing from this checkout');
   }
   return failures;
+}
+
+/**
+ * HPI_time as a line to read, never a verdict.
+ *
+ * Says how far it moved and whether that is outside the reporting band, and
+ * says plainly that it is not a gate — a CI line that looks like a threshold
+ * gets read as one.
+ */
+export function timeTrend(baseline, measured, { timeRegression = TIME_REGRESSION } = {}) {
+  const baseTime = gateTime(baseline?.overall ?? {});
+  const nowTime = gateTime(measured?.overall ?? measured ?? {});
+  if (baseTime == null || nowTime == null) return 'HPI_time — not comparable (one side has no measurement)';
+  const delta = (nowTime - baseTime) / baseTime;
+  const pct = `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}%`;
+  const wide = Math.abs(delta) > timeRegression;
+  return `HPI_time ${baseTime} -> ${nowTime} (${pct})`
+    + `${wide ? ` — outside the ${timeRegression * 100}% reporting band, worth a look` : ''}`
+    + ' — reported, not gated: this ratio mixes the code with the host';
 }
 
 /** A flow id that sorts by time and is short enough to read in a log. */

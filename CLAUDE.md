@@ -154,8 +154,29 @@ human tester's speed and accuracy. Rationale and sources are in
 - **Human baselines are measured, not assumed.** `simframe baseline` records
   real humans on the same simulator; medians and IQR, N≥5, re-collected when
   the app changes. HPI is a trend metric, not a claim.
-- **CI gates on HPI.** The `bench` job fails on a >10% HPI_time regression or
-  any HPI_accuracy drop against the committed baseline.
+- **CI gates on HPI accuracy, not on HPI time.** The `bench` job fails on any
+  `HPI_accuracy` drop against the committed baseline, and on a `step_ratio`
+  above 1.5. `HPI_time` is **reported as a trend, per host, and never fails a
+  build**.
+
+  This replaces "fails on a >10% HPI_time regression", which was decided before
+  it had ever run and could not survive being measured. `HPI_time` is
+  `human_p50 / agent_p50` where the human was recorded once on a laptop and the
+  agent is measured wherever CI happens to run — a hosted runner put the same
+  two flows at 37 s and 64 s against 11.5 s and 11.7 s on that laptop, so the
+  ratio mixes the code's speed with the machine's. Even on one machine,
+  identical code spans **0.406–0.558** across device conditions, a 37% spread.
+  A band inside a metric's own noise can only be silent or wrong, and it was
+  silent: items 148, 152, 154 and 169 all shipped without it firing once.
+  Accuracy and step count are properties of the code — did it arrive, did it
+  tap the wrong thing, did it wander — and those gate.
+
+  Two consequences that are not optional. `docs/research/hpi-baseline.json`
+  **must be re-recorded**: half its time comes from `contacts-kate-bell`, which
+  has `completed: 0`, so the committed reference was built from runs that never
+  finished. And nothing about HPI is trustworthy until the suite stops wedging
+  the device it measures (DEFERRED 173) — 3 of 14 runs completed on the last
+  runner attempt. Re-record after that, not before.
 
 **Still deferred:** Phase 9 (Tier-2 local model), Android accessibility APK
 (8b), non-English reflex/confirm vocabulary.

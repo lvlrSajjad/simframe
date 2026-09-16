@@ -2248,33 +2248,52 @@ test('a run leaves the baseline without leaving the record', async () => {
   assert.equal(baseline.summarizeRuns('f', thin).ok, false);
 });
 
-test('the HPI gate fails on the two conditions it is supposed to, and no others', async () => {
+test('the HPI gate fails on accuracy and steps, reports time, and fails on nothing else', async () => {
   const metrics = await import('../src/metrics.js');
   const base = { overall: { hpi_accuracy: 0.5, hpi_time: 0.475 } };
   const at = (hpi_accuracy, hpi_time) => ({ overall: { hpi_accuracy, hpi_time } });
 
   assert.deepEqual(metrics.gateAgainst(base, at(0.5, 0.475)), [], 'the baseline passes against itself');
   assert.deepEqual(metrics.gateAgainst(base, at(1, 0.9)), [], 'better on both passes');
-  // 25%, a band measured from the noise between identical-code runs rather
-  // than chosen: 0.35625 sits exactly on the bound and passes.
-  assert.deepEqual(metrics.gateAgainst(base, at(0.5, 0.35625)), []);
-  assert.equal(metrics.gateAgainst(base, at(0.5, 0.35)).length, 1);
-  assert.match(metrics.gateAgainst(base, at(0.5, 0.35))[0], /HPI_time regressed/);
-  // The gate reads the median of three passes when a report carries them, so
-  // one slow pass cannot fail a build on its own — and one fast pass cannot
-  // hide a real regression either.
-  assert.deepEqual(
-    metrics.gateAgainst(base, { overall: { hpi_accuracy: 0.5, hpi_time: 0.2, hpi_time_median_of_passes: 0.46 } }),
-    [],
-  );
-  assert.equal(
-    metrics.gateAgainst(base, { overall: { hpi_accuracy: 0.5, hpi_time: 0.5, hpi_time_median_of_passes: 0.2 } }).length,
-    1,
-  );
-  assert.equal(metrics.TIME_REGRESSION, 0.25);
-  // Any accuracy drop at all, however small.
+
+  // **HPI_time does not fail a build, and this is the assertion that says so.**
+  // It used to, at 25% here and written as 10% in CLAUDE.md, and the
+  // measurement supports neither: the ratio is a laptop-recorded human over an
+  // agent measured wherever CI runs, and a hosted runner put the same flows at
+  // 37s and 64s against 11.5s and 11.7s on that laptop. Even on one machine
+  // identical code spans 0.406-0.558 — 37%. A band inside its own noise can
+  // only be silent or wrong, and it was silent: 148, 152, 154 and 169 all
+  // shipped without it firing once.
+  assert.deepEqual(metrics.gateAgainst(base, at(0.5, 0.35)), [],
+    'a time move must not fail a build');
+  assert.deepEqual(metrics.gateAgainst(base, at(0.5, 0.01)), [],
+    'not even an absurd one — the host can produce that on its own');
+  // It is still reported, with its band, and labelled so nobody reads the line
+  // as a threshold.
+  const trend = metrics.timeTrend(base, at(0.5, 0.35));
+  assert.match(trend, /0\.475 -> 0\.35/);
+  assert.match(trend, /-26\.3%/);
+  assert.match(trend, /reported, not gated/);
+  assert.doesNotMatch(metrics.timeTrend(base, at(0.5, 0.45)), /worth a look/,
+    'inside the band, no flag');
+  assert.match(metrics.timeTrend(base, at(0.5, null)), /not comparable/);
+
+  // Any accuracy drop at all, however small. This is the gate now.
   assert.match(metrics.gateAgainst(base, at(0.499, 0.475))[0], /HPI_accuracy dropped/);
-  assert.equal(metrics.gateAgainst(base, at(0.4, 0.3)).length, 2);
+  assert.equal(metrics.gateAgainst(base, at(0.4, 0.3)).length, 1, 'accuracy only');
+
+  // Steps, the other gate: an absolute ceiling, not a regression, because a
+  // ratio of two step counts does not change with the host.
+  assert.equal(metrics.STEP_RATIO_CEILING, 1.5);
+  assert.deepEqual(metrics.gateAgainst(base, { overall: { hpi_accuracy: 0.5, hpi_time: 0.475, step_ratio: 1.5 } }), [],
+    'the ceiling itself passes');
+  assert.match(
+    metrics.gateAgainst(base, { overall: { hpi_accuracy: 0.5, hpi_time: 0.475, step_ratio: 1.6 } })[0],
+    /step_ratio 1\.6 is above the 1\.5 ceiling/,
+  );
+  // A step_ratio BELOW 1 is not a pass to celebrate — it usually means runs
+  // stopped early — but accuracy is where that shows, so it does not fail here.
+  assert.deepEqual(metrics.gateAgainst(base, { overall: { hpi_accuracy: 0.5, hpi_time: 0.475, step_ratio: 0.375 } }), []);
   // A checkout with no human baseline must not pass by having nothing to compare.
   assert.match(metrics.gateAgainst(base, at(0.5, null))[0], /missing from this checkout/);
   // And with nothing committed there is nothing to fail against.

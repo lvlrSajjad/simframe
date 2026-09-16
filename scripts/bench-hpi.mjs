@@ -243,8 +243,11 @@ const base = committed.overall ?? {};
 const failures = metrics.gateAgainst(committed, report);
 
 console.log(`\ngate vs ${path.relative(ROOT, baselineFile)} (measured ${committed.measured_at ?? '?'})`);
-console.log(`  HPI_accuracy ${base.hpi_accuracy ?? '—'} -> ${o.hpi_accuracy ?? '—'}`);
-console.log(`  HPI_time     ${metrics.gateTime(base) ?? '—'} -> ${metrics.gateTime(o) ?? '—'}`);
-console.log(`  band         ${metrics.TIME_REGRESSION * 100}% (median of ${passTimes.length || 1} pass(es))`);
+console.log(`  HPI_accuracy ${base.hpi_accuracy ?? '—'} -> ${o.hpi_accuracy ?? '—'}   (any drop fails)`);
+console.log(`  step_ratio   ${o.step_ratio ?? '—'}   (fails above ${metrics.STEP_RATIO_CEILING})`);
+// Printed apart from the two that gate, and labelled, because a number in a
+// gate block gets read as a threshold whether or not it is one.
+console.log(`  ${metrics.timeTrend(committed, report)}`);
+console.log(`               median of ${passTimes.length || 1} pass(es), on this host`);
 for (const f of failures) console.log(`FAIL ${f}`);
 process.exit(failures.length ? 1 : 0);
