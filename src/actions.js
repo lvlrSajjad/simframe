@@ -2176,6 +2176,36 @@ export const SWEEP_SECTIONS = 10;
 
 const sweepKey = (r) => `${alnum(r.label)}\u0000${Math.round((r.x ?? 0) / 8)}`;
 
+/**
+ * Every name a caller may legitimately write for a swept row.
+ *
+ * `sweep` matched on `r.label` alone, and in React Native most interactive
+ * controls have a `testID` and no accessibility label — so a field `sweep`
+ * itself had just printed came back as **"NOT FOUND anywhere"**:
+ *
+ *   swept 3 section(s) ... 29 distinct element(s);
+ *   NOT FOUND anywhere: "create-service-request-3-requested-by-input"
+ *   ...
+ *   #18 field  201,480  create-service-request-3-requested-by-input
+ *
+ * Four lines apart, in one response. The next call filled it by `#18` first
+ * try. The reporter called it the most confidence-damaging failure of the run,
+ * because "NOT FOUND anywhere" is a strong claim and it briefly convinced them
+ * the form did not have the field they were looking at.
+ *
+ * **The third time this same assumption has been reported.** Item 152 was the
+ * identifier missing from `matching.rank`; `ee305d4` was a label the matcher
+ * refused; this is `sweep` carrying its own ad-hoc matcher that never learned
+ * either fix. A resolver per call site is a resolver that has to be corrected
+ * per call site — the names belong in one place, which is what this is.
+ */
+const sweepNames = (r) => [r.label, r.identifier, ...(r.aliases ?? [])].filter(Boolean).map(alnum);
+/** Does this row answer to `needle` by any of its names? */
+const sweepHolds = (r, needle) => {
+  const want = alnum(needle);
+  return want ? sweepNames(r).some((n) => n.includes(want)) : false;
+};
+
 async function sectionHere(deviceQuery, options) {
   try {
     const map = await view.screenMap(deviceQuery, { options, refresh: true });
@@ -2321,7 +2351,7 @@ async function sweep(deviceQuery, udid, step, ctx) {
     // scroll back to it.
     if (fill) {
       for (const [label, text] of Object.entries(fill)) {
-        if (!here.some((r) => alnum(r.label).includes(alnum(label)))) continue;
+        if (!here.some((r) => sweepHolds(r, label))) continue;
         try {
           // **Keep what the step said.** `paste` and `type` both read the field
           // back and say so — "unconfirmed", "reads empty", the quiet-field
@@ -2351,7 +2381,7 @@ async function sweep(deviceQuery, udid, step, ctx) {
       }
     }
 
-    if (wanted && [...seen.values()].some((r) => alnum(r.label).includes(alnum(wanted)))) break;
+    if (wanted && [...seen.values()].some((r) => sweepHolds(r, wanted))) break;
     if (fill && !Object.keys(fill).length) break;
     prev = here;
     await scrollOne(deviceQuery, udid, 'down', ctx);
@@ -2359,7 +2389,7 @@ async function sweep(deviceQuery, udid, step, ctx) {
 
   const all = [...seen.values()];
   ctx.sweep = all;
-  const hits = wanted ? all.filter((r) => alnum(r.label).includes(alnum(wanted))) : [];
+  const hits = wanted ? all.filter((r) => sweepHolds(r, wanted)) : [];
   const listed = (wanted ? hits : all).slice(0, 30)
     .map((r) => `[${r.section}] ${JSON.stringify(String(r.label).slice(0, 36))} @${r.x},${r.y}`);
   const unfilled = fill ? Object.keys(fill) : [];

@@ -6200,3 +6200,38 @@ test('a swept fill uses the keyboard for short values, so the paste consent aler
   assert.match(typeInto.slice(0, typeInto.indexOf("case 'swipe'")), /if \(back\.empty\)/,
     'the keyboard path must verify what landed');
 });
+
+test('sweep answers to the same selectors as tap and type, identifiers included', async () => {
+  // Second field report, and the THIRD time this assumption has been reported.
+  // `sweep` matched rows on `r.label` alone, and in React Native most
+  // interactive controls carry a testID and no accessibility label — so a field
+  // sweep had just printed in its own element map came back as
+  //   NOT FOUND anywhere: "create-service-request-3-requested-by-input"
+  // four lines above
+  //   #18 field  201,480  create-service-request-3-requested-by-input
+  // in one response. The reporter called it the most confidence-damaging
+  // failure of their run, because it briefly convinced them the form did not
+  // have a field they were looking at.
+  //
+  // Item 152 fixed this in `matching.rank`; ee305d4 fixed a label the matcher
+  // refused; `sweep` carried its own matcher and learned neither. A resolver
+  // per call site has to be corrected per call site.
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /alnum\(r\.label\)\.includes\(/,
+    'no sweep matcher may look only at the label');
+  assert.match(src, /const sweepNames = \(r\) => \[r\.label, r\.identifier/,
+    'the names a row answers to belong in one place');
+
+  // The rule itself, against the reported row: an identifier and no label.
+  const alnum = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const names = (r) => [r.label, r.identifier, ...(r.aliases ?? [])].filter(Boolean).map(alnum);
+  const holds = (r, needle) => {
+    const want = alnum(needle);
+    return want ? names(r).some((n) => n.includes(want)) : false;
+  };
+  const testIdOnly = { label: null, identifier: 'create-service-request-3-requested-by-input' };
+  assert.equal(holds(testIdOnly, 'create-service-request-3-requested-by-input'), true);
+  assert.equal(holds({ label: 'Full name' }, 'Full name'), true, 'labels still work');
+  assert.equal(holds(testIdOnly, 'not-a-field'), false, 'and it invents nothing');
+  assert.equal(holds(testIdOnly, ''), false, 'an empty needle matches nothing, not everything');
+});
