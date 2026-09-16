@@ -3718,10 +3718,49 @@ test('a step can carry its own fallbacks, and only some failures earn one', asyn
   // *absent*: `ambiguous_intent` means the target is on screen twice, which is
   // a step that must still verify, not a step to wave through. Otherwise
   // "skip if absent" quietly becomes "tap whatever is there".
+  //
+  // The fixtures below are the shapes the throw sites actually produce, and
+  // getting them wrong is how the first version of this shipped broken: the
+  // tag is chosen by whether the SCREEN was recognised, so an absent target on
+  // a screen recalled from memory is tagged `ambiguous_intent` as well. Keying
+  // on the reason alone made `optional` a no-op on every known screen — which
+  // is every screen it was built for — and this test passed anyway, because it
+  // tested the predicate rather than the path. It now uses the real shapes.
+  const absentOnKnownScreen = metrics.tag(
+    new Error('"Not Now" is not on this screen. Visible: Settings, General'),
+    'ambiguous_intent',
+    { candidates: [], intent: 'Not Now' },
+  );
+  const reallyAmbiguous = metrics.tag(
+    new Error('"Done" matches 2 things on this screen — say which, or pass index'),
+    'ambiguous_intent',
+    { candidates: [], intent: 'Done', ambiguous: true },
+  );
   assert.equal(actions.didNotResolve(notHere), true);
-  assert.equal(actions.didNotResolve(ambiguous), false, 'present twice is not absent');
+  assert.equal(actions.didNotResolve(absentOnKnownScreen), true,
+    'absent is absent whether or not the screen was recognised');
+  assert.equal(actions.didNotResolve(reallyAmbiguous), false, 'present twice is not absent');
   assert.equal(actions.didNotResolve(unverified), false);
   assert.equal(actions.didNotResolve(new Error('plain')), false, 'an unclassified failure is not an absence');
+
+  // `optional` now trusts one marker, so the marker has to be on every throw
+  // that means "present, several times over". A site that says "matches N
+  // things" without it would be silently skipped by an optional step — the
+  // exact failure this predicate exists to refuse. Swept across src/ rather
+  // than asserted where it was noticed, which is the mistake this file has
+  // recorded three times.
+  const srcDir = new URL('../src/', import.meta.url);
+  const sources = fs.readdirSync(srcDir, { recursive: true })
+    .filter((f) => String(f).endsWith('.js'))
+    .map((f) => [String(f), fs.readFileSync(new URL(String(f), srcDir), 'utf8')]);
+  for (const [name, body] of sources) {
+    for (const site of body.split('throw metrics.tag(').slice(1)) {
+      const call = site.slice(0, site.indexOf('\n  );') + 1 || 600);
+      if (!/matches \$\{|matches \d+ thing/.test(call)) continue;
+      assert.match(call, /ambiguous:\s*true/,
+        `${name}: a "matches N things" throw must carry ambiguous:true, or an optional step will skip it`);
+    }
+  }
 
   // The alternative is the same step aimed elsewhere, with its own fallbacks
   // stripped so a retry cannot recurse.

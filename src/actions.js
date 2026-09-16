@@ -1501,9 +1501,27 @@ export function alternativesFor(step) {
 /**
  * Did this failure mean "the thing is not here", as opposed to any other way a
  * step can fail? The one question `optional` is allowed to ask.
+ *
+ * **Not `reason === 'unknown_screen'`, which is what this said for one build and
+ * what made `optional` a no-op on every screen it was built for.** The tag at
+ * the throw site is chosen by whether the *screen* was recognised, not by
+ * whether the *target* was found: on a screen recalled from memory an absent
+ * target is tagged `ambiguous_intent` too. So a conditional interstitial on a
+ * well-known screen — the whole use case — never absorbed. Caught by running it
+ * against a device; the unit test exercised this predicate and passed, because
+ * it tested the predicate rather than the path.
+ *
+ * The distinction that actually exists is `ambiguous`, set only where something
+ * was found *several times over*, and the comment at that throw site had
+ * already written down why it matters: "more time cannot make a thing unique,
+ * and it can make an absent thing arrive." Absent is the case `optional` may
+ * skip; present-twice must still verify.
  */
+const RESOLVE_REASONS = new Set(['unknown_screen', 'ambiguous_intent']);
+
 export function didNotResolve(err) {
-  return metrics.escalationOf(err)?.reason === 'unknown_screen';
+  const tagged = metrics.escalationOf(err);
+  return Boolean(tagged && RESOLVE_REASONS.has(tagged.reason) && !tagged.ambiguous);
 }
 
 export function mayRetryAfter(err) {
