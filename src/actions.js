@@ -20,6 +20,29 @@ import { launchApp, openUrl, setPermission, terminateApp } from './platform/inde
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MAX_PAUSE_MS = 5000;
 /**
+ * Above this many characters a fill uses the pasteboard; at or below it, the
+ * keyboard.
+ *
+ * The pasteboard is the right default for long text and was the default for
+ * *all* text in `sweep`, which a field report showed costing far more than it
+ * saved. iOS 26 raises a system consent alert — *"… would like to paste from
+ * CoreSimulatorBridge"* — on the first paste into an app, and it fired on a
+ * **nine-character** value. The alert covered the form, collapsed the
+ * accessibility tree to OCR-only, and failed the batch; the recovery chain that
+ * followed was close to half of that session's wasted model round trips.
+ *
+ * `sim_type_into` already defaults to the keyboard. Only `sweep`'s fill did
+ * not, so the reporter got the pasteboard without asking for it.
+ *
+ * Why a threshold is safe rather than a trade against exactness — the reason
+ * pasteboard-by-default was chosen: `type` with `into` reads the field back,
+ * and retries once locally if nothing landed. So a keystroke path that a
+ * keyboard layout mangles is *caught*, not silently accepted. 40 characters is
+ * the reporter's own suggestion and covers names, emails and short
+ * descriptions, while a paragraph still goes by pasteboard where it belongs.
+ */
+const KEYBOARD_UP_TO = 40;
+/**
  * A tapped field is typed into once the screen has settled, not after a fixed
  * wait.
  *
@@ -2307,8 +2330,12 @@ async function sweep(deviceQuery, udid, step, ctx) {
           // mode an automation tool has: a silent no-op reported as a confirmed
           // action, caught only because the tester took a screenshot on a
           // hunch. The honesty existed one function down and stopped here.
+          const body = String(text);
+          // Explicit wins; otherwise length decides. See KEYBOARD_UP_TO.
+          const viaPaste = step.paste === true
+            || (step.paste !== false && body.length > KEYBOARD_UP_TO);
           const said = await runStep(deviceQuery, udid, {
-            action: step.paste === false ? 'type' : 'paste', into: label, text: String(text),
+            action: viaPaste ? 'paste' : 'type', into: label, text: body,
           }, ctx);
           // Anything the step qualified travels with the claim. A step that
           // confirmed the read-back says nothing extra, so a clean fill still

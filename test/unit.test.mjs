@@ -6113,3 +6113,39 @@ test('a swept fill carries the read-back verdict instead of claiming success', a
   // it becomes the habituation the same reporter warned about on 0.13.0.
   assert.ok(!caveated.test('pasted into the field named "Full name" (read back: "a value")'));
 });
+
+test('a swept fill uses the keyboard for short values, so the paste consent alert never fires', async () => {
+  // Field report, 0.15.1: "I never passed paste: true. simframe pasted anyway"
+  // — and iOS 26 answered with a system consent alert on a NINE-character
+  // value, which covered the form, collapsed the tree to OCR-only and failed
+  // the batch. The recovery chain after it was close to half the session's
+  // wasted model round trips.
+  //
+  // The reporter located it in `type`. It was not there — `sim_type_into`
+  // already defaults to the keyboard. `sweep`'s fill was the only path that
+  // pasted unconditionally, and `sweep` is what they used.
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /action: step\.paste === false \? 'type' : 'paste'/,
+    'a fill must not reach for the pasteboard by default');
+  const threshold = Number(/const KEYBOARD_UP_TO = (\d+)/.exec(src)?.[1]);
+  assert.ok(threshold >= 9,
+    `the threshold (${threshold}) must cover the nine-character value that triggered the alert`);
+
+  // The rule itself. Explicit intent wins in both directions; otherwise length
+  // decides, so a paragraph still goes by pasteboard where it is genuinely
+  // faster.
+  const via = (len, paste) => (paste === true || (paste !== false && len > threshold) ? 'paste' : 'type');
+  assert.equal(via(9, undefined), 'type', 'the reported case');
+  assert.equal(via(threshold, undefined), 'type', 'the threshold itself is keyboard');
+  assert.equal(via(threshold + 1, undefined), 'paste');
+  assert.equal(via(9, true), 'paste', 'paste: true is honoured');
+  assert.equal(via(5000, false), 'type', 'and so is paste: false');
+
+  // **Why a threshold does not trade away exactness**, which is the reason
+  // pasteboard-by-default was chosen: the keyboard path reads the field back
+  // and retries once locally before giving up, so a layout that mangles
+  // keystrokes is caught rather than silently accepted.
+  const typeInto = src.slice(src.indexOf("case 'type': {"));
+  assert.match(typeInto.slice(0, typeInto.indexOf("case 'swipe'")), /if \(back\.empty\)/,
+    'the keyboard path must verify what landed');
+});
