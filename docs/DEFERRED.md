@@ -2688,6 +2688,24 @@ worth more than the verdict.
    "the nag screen was gone" and "the nag screen was dismissed" are different
    facts.
 
+   **It shipped as a no-op for one build, and only a device found it.** The
+   predicate asked `reason === 'unknown_screen'`. But that tag is chosen by
+   whether the **screen** was recognised, not whether the **target** was found —
+   on a screen recalled from memory an absent target is tagged
+   `ambiguous_intent` as well. So a conditional interstitial on a well-known
+   screen, which is the entire use case, never absorbed. Measured on Settings:
+   the step failed and the next was never attempted, exactly as before the
+   feature existed.
+
+   The unit test passed throughout, because it exercised the predicate against
+   fixtures invented to match the predicate. The distinction that actually
+   exists is the `ambiguous` marker, set only where something was found several
+   times over — and the comment at that throw site had already written down why
+   it matters: *"more time cannot make a thing unique, and it can make an absent
+   thing arrive."* The test now uses the shapes the throw sites really produce
+   and sweeps `src/` to assert every "matches N things" throw carries the
+   marker, since a site that forgot it would be silently swallowed.
+
 176. **A replay that failed confirmed the flow it had just disproved, and a run
    whose last step failed saved itself.** FIXED, 2026-09-17. This was in the
    0.16.0 headline feature, shipped the day before, and it is a silent success —
@@ -2737,6 +2755,19 @@ worth more than the verdict.
    identity and discarded it. It is now recorded, and a mismatch is **reported
    rather than refused**; see `navigate.runFlow` for why making it a gate would
    put item 174's failure mode in front of the only zero-model-call path.
+
+   That one also had to be caught on a device. As first written it recorded a
+   start screen for **every** flow, including flows whose first step is `launch`,
+   `openUrl` or the home button — steps that make the previous screen
+   irrelevant. A launch-first flow replayed 4/4 and still printed *"recorded
+   starting on 8292b488, replayed from 39351dab"*, because the recording had
+   followed a run ending on Settings root and the replay followed one ending on
+   About. **Most flows open with a launch**, so the note would have fired on most
+   correct replays — 175's defect, in a feature written the same day 175 was
+   filed. `actions.resetsTheScreen` now suppresses it, and both directions are
+   verified on hardware: a launch-first flow records no start screen and fires
+   no note, while a flow opening with a tap records one and does fire — on a
+   replay that then failed for exactly the reason the note gave.
 
    **And the refusal string is no longer malformed** — `incomplete-run
    (unverified, unverified, )` had a hole wherever a step produced no verdict,

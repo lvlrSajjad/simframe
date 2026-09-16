@@ -348,6 +348,9 @@ export async function runScript(
   let endScreen = null;
   // Where this run began, so a flow saved from it can say what it assumes.
   //
+  // Null when the first step does not depend on where we were — see
+  // `resetsTheScreen`.
+  //
   // It was recorded as `null` on every flow 0.16.0 saved, which a peer caught:
   // "replay never checks it is starting where it was recorded". Reading it is
   // free — the first step computes the identity anyway — and it is a fact the
@@ -400,7 +403,9 @@ export async function runScript(
       ? (carriedScreen ?? await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, confirmNovel }))
       : null;
     carriedScreen = null;
-    if (i === 0) startScreen = beforeScreen ? { hash: beforeScreen.hash ?? null, tokens: beforeScreen.tokens ?? null } : null;
+    if (i === 0 && !resetsTheScreen(step)) {
+      startScreen = beforeScreen ? { hash: beforeScreen.hash ?? null, tokens: beforeScreen.tokens ?? null } : null;
+    }
     // What this action did last time it was taken here, if ever.
     const prediction = verify && beforeScreen?.hash ? graph.predict(udid, beforeScreen, step) : null;
     try {
@@ -1496,6 +1501,27 @@ export function alternativesFor(step) {
   if (raw == null) return [];
   const list = Array.isArray(raw) ? raw : [raw];
   return list.map((v) => (typeof v === 'string' ? v : v?.value ?? v?.target ?? v?.label)).filter(Boolean);
+}
+
+/**
+ * Does this step make the screen we were on irrelevant?
+ *
+ * A flow that opens with `launch`, a deep link, or the home button does not
+ * assume anything about where it starts — it goes and puts the device
+ * somewhere. Recording a start screen for such a flow records where the device
+ * happened to be beforehand, which is noise, and then reports a mismatch on
+ * every replay that began anywhere else.
+ *
+ * Measured, not reasoned: a flow opening with `launch --relaunch` replayed
+ * perfectly and still printed "recorded starting on 8292b488, replayed from
+ * 39351dab", because the recording had followed a run that ended on Settings
+ * root and the replay followed one that ended on About. Most flows open with a
+ * launch, so that note would have fired on most correct replays — which is
+ * item 175's defect exactly, in a feature added the same day 175 was written up.
+ */
+export function resetsTheScreen(step = {}) {
+  if (step.action === 'launch' || step.action === 'openUrl') return true;
+  return step.action === 'button' && /^home$/i.test(String(step.value ?? '').trim());
 }
 
 /**

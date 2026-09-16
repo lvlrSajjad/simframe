@@ -3743,6 +3743,20 @@ test('a step can carry its own fallbacks, and only some failures earn one', asyn
   assert.equal(actions.didNotResolve(unverified), false);
   assert.equal(actions.didNotResolve(new Error('plain')), false, 'an unclassified failure is not an absence');
 
+  // A flow that opens by going somewhere does not assume where it started, so
+  // it must not record a start screen — otherwise the mismatch note fires on
+  // every correct replay that began anywhere else, which is 175's defect in a
+  // feature written the same day 175 was filed. Observed on a device before it
+  // was written down: a flow opening with `launch --relaunch` replayed 4/4 and
+  // still reported "recorded starting on 8292b488, replayed from 39351dab".
+  assert.equal(actions.resetsTheScreen({ action: 'launch', value: 'com.x' }), true);
+  assert.equal(actions.resetsTheScreen({ action: 'openUrl', value: 'x://y' }), true);
+  assert.equal(actions.resetsTheScreen({ action: 'button', value: 'HOME' }), true);
+  assert.equal(actions.resetsTheScreen({ action: 'button', value: 'LOCK' }), false,
+    'locking does not put you on a known screen');
+  assert.equal(actions.resetsTheScreen({ action: 'tap', value: 'General' }), false,
+    'a tap depends entirely on where you are');
+
   // `optional` now trusts one marker, so the marker has to be on every throw
   // that means "present, several times over". A site that says "matches N
   // things" without it would be silently skipped by an optional step — the
