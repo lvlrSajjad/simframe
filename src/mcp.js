@@ -1181,6 +1181,14 @@ async function flowRun(target, args, options) {
     };
   }
   const lines = [`flow "${args.name}"`, ...stepLines(res)];
+  // Said out loud or not said at all. A flow now records the screen it was
+  // recorded on, and a mismatch that only exists in the return value is a fact
+  // nobody reads — which is the same shape as the check that could not fail.
+  if (res.startedElsewhere) {
+    lines.push(`NOTE: this flow was recorded starting on screen ${res.startedElsewhere.recorded},`
+      + ` and this replay started on ${res.startedElsewhere.here}. Not refused — content-driven`
+      + ' screens legitimately change identity — but if the steps below fail to resolve, this is why.');
+  }
   lines.push('', await mapFrom(target, options, res.endScreen, { verdictLine: verdictLineFor(res.results) }));
   return { content: [text(lines.join('\n'))], isError: !res.ok };
 }

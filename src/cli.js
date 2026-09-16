@@ -991,6 +991,9 @@ async function main() {
           return;
         }
         emit(flags, res, [
+          ...(res.startedElsewhere
+            ? [`NOTE: recorded starting on ${res.startedElsewhere.recorded}, replayed from ${res.startedElsewhere.here}`]
+            : []),
           ...(res.results ?? []).map(stepLine),
           actions.flowSummary(res, { withTime: false }),
         ]);
