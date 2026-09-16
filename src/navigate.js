@@ -170,13 +170,30 @@ const CONTRADICTED = /^unexpected/;
  * and a flow that did not reach its own last step.
  */
 export function saveFlow(udid, name, script, { force = false } = {}) {
-  const verdicts = (script.results ?? []).map((r) => r.verification?.verdict);
+  const results = script.results ?? [];
+  const verdicts = results.map((r) => r.verification?.verdict);
   const contradicted = verdicts.filter((v) => v && CONTRADICTED.test(v));
   const ranAll = script.ranSteps == null
     || script.steps == null
     || script.ranSteps >= (script.steps?.length ?? 0);
+  // A step that ran and failed is not a step that ran.
+  //
+  // `ranSteps` counts steps *attempted*, and a failing step stops the batch —
+  // so a run whose failure is on the **last** step has `ranSteps === steps.length`
+  // and passed the gate above. A peer watched `FLOW FAILED — 4 ok, 1 failed (of
+  // 5)` save itself as a flow, which is a flow guaranteed to fail forever. The
+  // predicate wanted "every step succeeded" and was written as "every step was
+  // reached"; on every run except one they are the same sentence.
+  //
+  // `!r.ok` rather than `r.ok === false` on purpose: a result that does not say
+  // it succeeded has not said it succeeded, and a gate that only catches an
+  // explicit `false` is one absent field away from being unable to fail.
+  const failedSteps = results.filter((r) => !r.ok);
   if (!force && contradicted.length) {
     return { ok: false, reason: 'contradicted-steps', verdicts };
+  }
+  if (!force && failedSteps.length) {
+    return { ok: false, reason: 'failed-steps', verdicts, failed: failedSteps.map((r) => r.index ?? null) };
   }
   if (!force && !ranAll) {
     return { ok: false, reason: 'incomplete-run', verdicts };
@@ -249,6 +266,28 @@ export async function runFlow(deviceQuery, name, { options, ...runOptions } = {}
   // a human doing the same thing. `minSteps` comes from the flow definition or
   // stays null — the step count of a recorded route is not a claim about the
   // shortest one.
+  // Is this the screen the flow was recorded on?
+  //
+  // Reported, not refused, and the distinction is deliberate. A replay from the
+  // wrong screen is mostly self-limiting — the first selector does not resolve
+  // and the run stops one step in, and the destructive vocabulary is barred by
+  // the verify barrier either way. Refusing on a mismatch would put the exact
+  // failure mode of item 174 — content-driven screens fragmenting into several
+  // identities — in front of the one path that costs zero model calls. So this
+  // says what it saw and lets the run proceed, which also measures how often
+  // the mismatch is spurious. If it turns out to be rare, it can become a gate;
+  // deciding that by reasoning is how 174 got built in the first place.
+  let startedElsewhere = null;
+  if (flow.startScreen?.hash) {
+    try {
+      const here = await api.screenIdentity(device.udid, {});
+      if (here.hash && !graph.sameScreen(device.udid, here, flow.startScreen)) {
+        startedElsewhere = { recorded: flow.startScreen.hash.slice(0, 8), here: here.hash.slice(0, 8) };
+      }
+    } catch {
+      /* not knowing where we are is not a reason to refuse to try */
+    }
+  }
   const result = await runScript(device.udid, {
     steps: flow.steps,
     stopOnUnexpected: true,
@@ -256,11 +295,18 @@ export async function runFlow(deviceQuery, name, { options, ...runOptions } = {}
     minSteps: flow.minSteps ?? null,
     ...runOptions,
   });
-  const ok = result.ranSteps === flow.steps.length;
+  // Same arithmetic as `saveFlow`, and the same defect: reaching the last step
+  // is not passing it. `result.ok` is the run's own verdict and was ignored
+  // here, so a replay that failed on its final assert promoted the flow it had
+  // just disproved. Both of a peer's saved flows were marked confirmed by
+  // replays that failed; the word "clean" in "confirmed by one clean replay"
+  // did not exist in the code path.
+  const everyStepPassed = (result.results ?? []).every((r) => r.ok);
+  const ok = result.ok !== false && everyStepPassed && result.ranSteps === flow.steps.length;
   // A clean replay is the confirmation a first traversal could not give.
   // Only when nothing was contradicted — a replay that ran to the end while
   // objecting to a step is not a promotion.
   const objected = (result.results ?? []).some((r) => CONTRADICTED.test(r.verification?.verdict ?? ''));
   const promoted = ok && !objected ? confirmFlow(device.udid, name) : false;
-  return { ok, name, ...result, ...(promoted ? { promoted: true } : {}) };
+  return { ok, name, ...result, ...(promoted ? { promoted: true } : {}), ...(startedElsewhere ? { startedElsewhere } : {}) };
 }

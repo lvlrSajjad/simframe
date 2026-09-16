@@ -2511,6 +2511,239 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+181. **`simframe hpi` reports the bench suite, not the session you just ran —
+   and a flag it does not understand is ignored rather than refused.** PARTLY
+   FIXED, 2026-09-17.
+
+   A peer ran ~50 steps through 15 MCP calls and then read `hpi`: `HPI_accuracy
+   0.483 (151 runs, 78 not clean)`, `steps per model call 1.5` — **identical to
+   the digit** before and after, with a flow table listing only the two bench
+   flows. That is correct behaviour for a bench metric and a trap for everyone
+   else, and the trap was one we set: **the peer prompt asks for "`steps per
+   model call`, from `simframe hpi` afterwards" as though it reflected the
+   peer's own run.** It cannot. Two reporters filling that row honestly would
+   both have written down a number produced by neither of them. A prompt that
+   manufactures a false measurement is worse than a prompt with a missing row —
+   the prompt is fixed, and the row now asks for the per-call `in Nms` totals
+   the tool already prints.
+
+   The open half is whether an ad-hoc `sim_do` should be observable at all.
+   Every run is already recorded; what it lacks is a `flowName`, which is what
+   makes it uncomparable to a human baseline. "Unnamed runs, counted separately,
+   never mixed into HPI" is probably right and is not yet built.
+
+   **Fixed today:** `simframe hpi --help` demanded a device before printing
+   help, and *with* a device ignored `--help` and ran the report. `--help` is
+   now handled on every command rather than only as the command. The reporter's
+   wider point stands and is item 182.
+
+182. **Unrecognised flags are silently dropped everywhere.** OPEN. `parseArgs`
+   collects whatever it is given and each command reads the flags it knows, so
+   a typo, a flag meant for another command, or a flag from a newer version all
+   do nothing and say nothing. The cost is a round trip each time and a false
+   belief about what ran. The fix is an allow-list per command and a refusal
+   naming the near miss; the reason it is not done here is that it wants one
+   owner for the flag vocabulary, which does not exist yet.
+
+180. **`sim_look` served a frame from a previous session as the current screen.**
+   OPEN, and it is the worst thing in the 0.16.0 round.
+
+   A peer cropped to two fields to check a read-back against pixels and got a
+   **web form from an earlier session on the same device**, while the element
+   map taken at the same moment correctly described the app in front of them.
+   The tool did warn —
+
+   > `WARNING: 6 gestures have been delivered without the screen moving at all
+   > (still for 17s), so the frames are new and the surface behind them may be
+   > dead.`
+
+   — and `simframe revive` cured it, so detection and recovery both work. What
+   is wrong is the order: **the image was returned anyway, under the warning.**
+   The tool's own division of labour says screenshots are for what text cannot
+   answer, so the one sensor a caller is told to trust for ground truth is the
+   one that silently lied. An agent trusting the picture over the map would have
+   concluded it was in a different app. A frame the capture layer believes may
+   be dead should be **withheld**, not captioned.
+
+   **A hypothesis about 175, filed here because it belongs to this cause.** The
+   overlap warning fired on 5 of 6 screens in this round, including a plain
+   article and a bare list with no sheet anywhere — the same ~78% rate the
+   previous reporter measured. If that warning is computed from a11y-vs-OCR
+   disagreement, and OCR reads a framebuffer that can go stale without saying
+   so, then **the false-positive rate may be measuring stale capture rather than
+   overlapping elements** — a real signal wired to the wrong conclusion.
+
+   **CI corroborates the cause, and it is why this item is worth more than one
+   bad screenshot.** `integration (fingerprint)` failed on both `main` and the
+   `v0.16.0` tag on 2026-09-16 with the same pair of lines:
+
+   ```
+   FAIL round 1, "settings" never arrived: waited 8000ms for General:
+     "General" is not on this screen. Visible: 11:03, .?o
+   FAIL the simulator is still in a bad state after a revive:
+     a launched app never came to the front (the screen shows a clock and nothing else)
+   ```
+
+   `Visible: 11:03` is the clock and nothing else — the tree reading a screen
+   the display is no longer painting. That is the same fault as the peer's, and
+   it is also 171 and the wedge in 173. **One cause wearing four faces**: an app
+   that is frontmost by pid while the display renders a clock (171), a bench
+   suite that wedges the device it measures (173), a `sim_look` serving a frame
+   from a previous session (this item), and — if the hypothesis below holds — an
+   overlap warning with a 78% false-positive rate (175). Treating them as four
+   flaky symptoms is how they have survived; they should be worked as one.
+
+   The experiment is cheap and must come before anyone touches the heuristic:
+   log frame staleness alongside every overlap warning across the existing bench
+   runs and test the correlation. If they correlate, the warning is a
+   capture-liveness alarm and should say so. If they do not, 175 stands as
+   written. Either way **nothing may gate taps on it** — that decision is
+   unchanged and both reporters agree.
+
+179. **A flow that creates data can never have a clean replay, so "confirmed by
+   one clean replay" is unreachable for most flows worth automating.** OPEN, and
+   it is structural rather than a bug.
+
+   A peer's saved flow appended two reminders. On replay its final
+   `assert "Order filter cartridges"` found **2** matches, then **3**:
+
+   ```
+   FAIL [6] assert: "Order filter cartridges" matches 2 things on this screen
+              — say which, or pass index
+   ```
+
+   Every action was performed correctly. **The flow failed because it had
+   worked twice.** Since most flows worth recording create something, the
+   confirmation path is closed to the majority of the target population.
+
+   This is why 176 went unnoticed: without a promotion bug, almost nothing would
+   ever have confirmed, so a confirmation rate near zero would have been the
+   visible symptom instead of a confirmation rate near one. **The two defects
+   were hiding each other**, and fixing 176 alone makes the confirm rate
+   collapse — which is the honest number, and is why it ships with the counter
+   printed rather than quietly.
+
+   What a replay of a creating flow should assert is *the delta it caused*, not
+   the end state: one more row than before, not "exactly one row named X". That
+   is a real design question about what a recorded assert means, and it should
+   not be answered by loosening asserts.
+
+178. **`sim_find` returned a static label as a "field", at exactly the floor,
+   with no caveat.** OPEN, and the reporter rates it the best return-per-line on
+   their list.
+
+   Intent: **"the Wikipedia search field"**. Answer:
+
+   ```
+   WIKIPEDIA — tap at (110, 87) · nav-bar · Text · seen by ocr · score 0.45
+   chosen because: label "WIKIPEDIA"
+   ```
+
+   It matched the word *Wikipedia*, ignored *search field* entirely, and
+   returned a non-interactive **Text** element as a field, at 0.45 — sitting
+   exactly on `MINIMUM_SCORE`. No ambiguity note and no "nothing reached the
+   floor", so a confident wrong answer where a refusal was available. That is
+   the expensive direction, by this project's own rule.
+
+   The mechanism is visible in `matching.ROLE_HINTS`: it keys on **verbs**
+   (`type`, `tap`, `toggle`) and applies a **bonus**. An intent whose only kind
+   word is a *noun* — "field", "button", "tab", "toggle" — gets no hint at all,
+   and `bare` merely strips such a noun from the end of the query, so the kind
+   the caller named is discarded rather than used.
+
+   **Why this is not fixed here.** The obvious rule — a candidate whose type
+   contradicts the named kind cannot be promoted — is wrong as stated, because
+   OCR types nearly everything it reads as `text`, including real fields on
+   WebView screens where the a11y tree is absent. A hard type filter would
+   refuse the correct answer on precisely the screens where OCR is the only
+   sensor, and this round also reported OCR quality on web content as poor
+   enough to matter. So this wants a fixture and a measurement, per the standing
+   rule about perception fixes: record the screen, add it to the perception
+   eval, and check the rule against the existing corpus before shipping it.
+
+177. **A step could not be marked "skip this if it is not there", so any flow
+   crossing an interstitial could not be batched at all.** FIXED, 2026-09-17.
+
+   A peer included `{"tap":"Not Now"}` for a first-launch iCloud sheet. On the
+   next relaunch the sheet did not appear:
+
+   ```
+   FAIL [1] tap: none of 3 selector(s) resolved ... later steps were not run
+   NOT saved as "reminders-two": incomplete-run
+   ```
+
+   **Six correct steps discarded because an interstitial did not appear.** `or:`
+   supplies alternative *selectors*, not "skip if absent", so a nag screen, a
+   permission prompt, a "What's New" or a cold-start splash forced exactly the
+   single-stepping that costs ~20 s per step. On the framing that every hard-fail
+   dropping a caller back to single-stepping is a latency bug, this was the
+   largest one in the round.
+
+   `"optional": true` on any step. Deliberately narrow, and the narrowness is
+   the safety argument: only `unknown_screen` — the selector resolved to nothing
+   — absorbs. `ambiguous_intent` means the target **is** there, twice, and a
+   step that is present must still verify; so must one that resolved and then
+   failed. Otherwise "skip if absent" becomes "tap whatever is there". A skipped
+   step is reported in the flow summary rather than passed over silently, since
+   "the nag screen was gone" and "the nag screen was dismissed" are different
+   facts.
+
+176. **A replay that failed confirmed the flow it had just disproved, and a run
+   whose last step failed saved itself.** FIXED, 2026-09-17. This was in the
+   0.16.0 headline feature, shipped the day before, and it is a silent success —
+   the class this project treats as the priority finding.
+
+   A peer saved two flows. Both were marked confirmed on disk. **Both were
+   confirmed by replays that failed.**
+
+   ```
+   reminders-two   saved 00:49:47   confirmed 00:50:14   <- replay FAILED
+   settings-about  saved 00:51:37   confirmed 00:52:01   <- replay FAILED
+   ```
+
+   And `settings-about` was **saved from a run that failed**: `FLOW FAILED — 4
+   ok, 1 failed (of 5)` ... `saved as flow "settings-about" (5 steps) —
+   PROVISIONAL`. Their summary is exact: *"the word 'clean' in 'confirmed by one
+   clean replay' does not exist in the code path. A flow that has never once
+   succeeded end-to-end is indistinguishable, on disk, from one that always
+   works."*
+
+   **One cause, and it is an English sentence that means two things.** Both
+   gates were written as `ranSteps >= steps.length`, and `ranSteps` counts steps
+   *attempted*. A failing step stops the batch — so a failure on the **last**
+   step leaves `ranSteps === steps.length` and the run reads as complete. The
+   predicate wanted "every step succeeded" and was spelled "every step was
+   reached", and on every run except one they are the same sentence.
+
+   The most useful thing about this is that **the identical conflation had
+   already been found and fixed one layer up**, in the flow summary, by an
+   earlier reporter: *"the denominator means attempted on failure and succeeded
+   on success, so the same shape carries opposite meanings."* That fix went into
+   the message and not into the gates that compute the same thing. Third
+   instance in two days of a rule being enforced where it was noticed rather
+   than everywhere its cause reaches.
+
+   Fixed in three places, because it lived in three: `saveFlow` refuses with a
+   new `failed-steps` reason naming the step, `runFlow` promotes only when the
+   run's own verdict is good **and** every step passed, and `ci-memory.mjs`
+   gained the negative case — *a replay that failed does NOT confirm the flow* —
+   since the previous check only ever asserted the positive direction and so
+   could not have caught this. The unit test fixtures now carry `ok` on every
+   step: the old ones did not, and the new gate reads a field no old fixture
+   set, which would have made it a gate no test could fail.
+
+   **Also fixed:** every flow 0.16.0 saved recorded `"startScreen": null`, so a
+   replay never checked it was starting where it was recorded — the run had the
+   identity and discarded it. It is now recorded, and a mismatch is **reported
+   rather than refused**; see `navigate.runFlow` for why making it a gate would
+   put item 174's failure mode in front of the only zero-model-call path.
+
+   **And the refusal string is no longer malformed** — `incomplete-run
+   (unverified, unverified, )` had a hole wherever a step produced no verdict,
+   in the exact message the peer prompt tells reporters to quote verbatim. Each
+   reason now names its own remedy, because `incomplete-run` and `failed-steps`
+   ask for opposite things from the caller.
+
 175. **The overlap warning fires on most screens and is ignored by the fourth
    one.** OPEN, and it **cancels a fix the previous report asked for.**
 
@@ -2590,6 +2823,24 @@ worth more than the verdict.
    reported runs for a separate reason, now fixed (a brief with no supervisor
    enabled said nothing). Wiring this verdict to a ruling keeps the barrier and
    removes the false abort, without touching screen identity.
+
+   **Two things a third report added, both of which raise its price.**
+
+   It is **non-deterministic**: the reporter re-issued the identical call with
+   no state change and it passed. A gate that fails once and passes on retry is
+   flaky rather than protective, which also means the supervisor ruling has
+   something to rule on — asked twice, the perception disagrees with itself.
+
+   And it **also blocks `saveFlow`**, with `contradicted-steps`. So this defect
+   prevents the 0.16.0 flagship feature from ever recording a flow on exactly
+   the screens where it misfires — a first traversal that would have become a
+   zero-model-call replay is refused by a false alarm. That coupling makes 174
+   worth more than its per-batch latency cost.
+
+   One caveat on the tractable half: the supervisor is **off by default**
+   (`doctor` says `local supervisor: none — not requested`). If the ruling only
+   exists when one is configured, the default install keeps the false abort, and
+   "fixed" would mean "fixed for callers who opted in".
 
 173. **The bench suite wedges the device it measures.** OPEN, and it is the
    reason `HPI` has never been measured on a hosted runner. Observed four times

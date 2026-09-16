@@ -346,6 +346,13 @@ export async function runScript(
   // the caller returns to Claude is rendered from this, so describing the end
   // state costs nothing beyond the verification pass the flow already ran.
   let endScreen = null;
+  // Where this run began, so a flow saved from it can say what it assumes.
+  //
+  // It was recorded as `null` on every flow 0.16.0 saved, which a peer caught:
+  // "replay never checks it is starting where it was recorded". Reading it is
+  // free — the first step computes the identity anyway — and it is a fact the
+  // recording had and discarded.
+  let startScreen = null;
   // At most one recovery per run. Pressing home while already on the springboard
   // moves nothing and is not a failure, so an unbounded retry would rebuild the
   // session and press again on every such step for no reason.
@@ -393,6 +400,7 @@ export async function runScript(
       ? (carriedScreen ?? await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, confirmNovel }))
       : null;
     carriedScreen = null;
+    if (i === 0) startScreen = beforeScreen ? { hash: beforeScreen.hash ?? null, tokens: beforeScreen.tokens ?? null } : null;
     // What this action did last time it was taken here, if ever.
     const prediction = verify && beforeScreen?.hash ? graph.predict(udid, beforeScreen, step) : null;
     try {
@@ -945,6 +953,33 @@ export async function runScript(
         break;
       }
     } catch (err) {
+      // A step that was allowed not to be there, and is not there.
+      //
+      // `or:` supplies alternative *selectors*; nothing could express "skip
+      // this if absent". So a batch crossing a first-launch nag, a permission
+      // prompt or a "What's New" could not be batched at all — the interstitial
+      // appears on run one and not on run two, the step fails, and every
+      // remaining step is discarded. A peer lost six correct steps because a
+      // sheet *did not* appear, and on the framing that every hard-fail
+      // dropping a caller back to single-stepping is a latency bug, that is the
+      // most expensive shape there is: ~20 s per step, for the rest of the plan.
+      //
+      // Deliberately narrow. Only `unknown_screen` — the selector resolved to
+      // nothing — absorbs. `ambiguous_intent` means the target *is* there,
+      // twice, and a step that is present must still verify; so must one that
+      // resolved and then failed. "Skip if absent" must not become "tap
+      // whatever is there".
+      if (step.optional && didNotResolve(err)) {
+        results.push({
+          index: i,
+          action: step.action,
+          ok: true,
+          skipped: true,
+          ms: Date.now() - stepStart,
+          detail: `skipped — optional, and ${JSON.stringify(String(goalOf(step) ?? step.action))} is not on this screen`,
+        });
+        continue;
+      }
       results.push({ index: i, action: step.action, ok: false, ms: Date.now() - stepStart, error: err.message });
       const why = metrics.reasonForStepError(step, err);
       noteEscalation({
@@ -1020,6 +1055,7 @@ export async function runScript(
     // navigate.saveFlow without the caller reassembling what it just ran.
     steps,
     flowId,
+    startScreen,
     endScreen,
     results,
     ok: !failed,
@@ -1460,6 +1496,14 @@ export function alternativesFor(step) {
   if (raw == null) return [];
   const list = Array.isArray(raw) ? raw : [raw];
   return list.map((v) => (typeof v === 'string' ? v : v?.value ?? v?.target ?? v?.label)).filter(Boolean);
+}
+
+/**
+ * Did this failure mean "the thing is not here", as opposed to any other way a
+ * step can fail? The one question `optional` is allowed to ask.
+ */
+export function didNotResolve(err) {
+  return metrics.escalationOf(err)?.reason === 'unknown_screen';
 }
 
 export function mayRetryAfter(err) {
@@ -3246,12 +3290,19 @@ export function settleEvidence(w) {
  */
 export function flowSummary(res, { withTime = true } = {}) {
   const time = withTime && Number.isFinite(res.totalMs) ? ` in ${res.totalMs}ms` : '';
-  if (res.ok) return `flow completed — ${res.ranSteps}/${res.totalSteps} steps${time}`;
+  // A step that was allowed not to be there and was not there did not run, and
+  // saying so is the difference between "the nag screen was gone" and "the nag
+  // screen was dismissed". Same lesson as the denominator above: a count that
+  // quietly means two things is the defect.
+  const skipped = (res.results ?? []).filter((r) => r.skipped).length;
+  const skips = skipped ? `, ${skipped} optional step(s) skipped as absent` : '';
+  if (res.ok) return `flow completed — ${res.ranSteps}/${res.totalSteps} steps${skips}${time}`;
   const failed = (res.results ?? []).filter((r) => r.ok === false).length || 1;
   const worked = Math.max(0, res.ranSteps - failed);
   const unattempted = Math.max(0, res.totalSteps - res.ranSteps);
   return `FLOW FAILED — ${worked} ok, ${failed} failed`
     + (unattempted ? `, ${unattempted} not attempted` : '')
+    + skips
     + ` (of ${res.totalSteps})${time}`;
 }
 

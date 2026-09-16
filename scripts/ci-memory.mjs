@@ -646,12 +646,25 @@ console.log('\n--- what may be saved, and what may not ---');
 // evidence for it. Checked against whatever the run actually produced rather
 // than assuming a shape, as before.
 const attempt = await jsonRetry(['do', LOOP, `--save=${FLOW_NAME}`], { allowFail: true });
+//
+// Three outcomes, not two. The missing one is a step that ran and *failed*: a
+// failing step stops the batch, so a failure on the last step leaves
+// `ranSteps === steps.length` and the run reads as complete. A peer watched
+// `FLOW FAILED — 4 ok, 1 failed (of 5)` save itself. This branch is also the
+// one that goes stale: yesterday the save contract was replaced, the unit test
+// was updated, and this file was left asserting the old rule — so the three
+// cases are enumerated here explicitly rather than left as an `else`.
 const contradicted = attempt.results.some((r) => /^unexpected/.test(r.verification?.verdict ?? ''));
+const anyFailed = attempt.results.some((r) => !r.ok);
 const clean = attempt.results.every((r) => !r.verification || r.verification.verdict === 'ok');
 if (contradicted) {
   check(attempt.saved?.ok === false && attempt.saved?.reason === 'contradicted-steps',
     'a flow with a contradicted step is refused, not quietly saved',
     `${attempt.saved?.reason} (${(attempt.saved?.verdicts ?? []).join(', ')})`);
+} else if (anyFailed) {
+  check(attempt.saved?.ok === false && attempt.saved?.reason === 'failed-steps',
+    'a flow with a step that ran and failed is refused, not quietly saved',
+    `${attempt.saved?.reason} (failed step ${(attempt.saved?.failed ?? []).join(', ')})`);
 } else {
   check(attempt.saved?.ok === true, 'a first traversal is recordable',
     `${attempt.saved?.steps} steps`);
@@ -676,12 +689,21 @@ if (check(forced.saved?.ok === true, 'and --force saves it anyway', `${forced.sa
   // state nothing ever leaves: a clean replay is the confirmation a first
   // traversal could not give. Only asserted when the replay actually ran to
   // the end — a partial replay promotes nothing, deliberately.
+  const after = await jsonRetry(['flow', 'list']);
+  const entry = after.find((f) => f.name === FLOW_NAME);
   if (replayed.ok) {
-    const after = await jsonRetry(['flow', 'list']);
-    const entry = after.find((f) => f.name === FLOW_NAME);
     check(entry && !entry.provisional,
       'and a clean replay confirms a provisional flow',
       `provisional=${entry?.provisional ?? 'gone'}`);
+  } else {
+    // The other direction, and it is the one that was silently wrong: promotion
+    // keyed on `ranSteps === steps.length`, which a failure on the *last* step
+    // satisfies. Both of a peer's saved flows were marked confirmed by replays
+    // that failed. A confirmation that a failing replay can grant is not a
+    // confirmation, so the negative case has to be checked too.
+    check(entry?.provisional === true,
+      'and a replay that failed does NOT confirm the flow it just disproved',
+      `ok=${replayed.ok}, provisional=${entry?.provisional}`);
   }
   const unknown = await cli(['flow', 'run', 'no-such-flow'], { expectFail: true });
   check(/no flow/i.test(unknown), 'an unknown flow name is refused with what is known');

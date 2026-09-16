@@ -285,6 +285,20 @@ async function main() {
   // is a different machine and should say so rather than be guessed at.
   if (flags.readyTimeoutMs) options.readyTimeoutMs = num(flags.readyTimeoutMs);
 
+  // `--help` on any command, not only as the command.
+  //
+  // `simframe hpi --help` did the two worst things in sequence: without
+  // `--device` it demanded a device *before* printing help, and with one it
+  // ignored `--help` and ran the report. A flag that is ignored is worse than
+  // one that is rejected — it silently does something other than what was
+  // asked. (The general case, unrecognised flags being dropped everywhere
+  // rather than here, is filed separately; this is the one that was measured
+  // costing a round trip.)
+  if (flags.help || flags.h) {
+    process.stdout.write(USAGE);
+    return;
+  }
+
   switch (command) {
     case undefined:
     case '-h':

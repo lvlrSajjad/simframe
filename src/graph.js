@@ -869,7 +869,7 @@ export const VERDICTS = ['ok', 'no-visible-change', 'unexpected-screen', 'unveri
  * that already exists do its job. A string still works and still means "exact
  * match only", which is right for a stored prediction that has no tokens.
  */
-function sameScreen(udid, a, b) {
+export function sameScreen(udid, a, b) {
   const hashOf = (v) => (typeof v === 'string' ? v : v?.hash);
   const ha = hashOf(a);
   const hb = hashOf(b);

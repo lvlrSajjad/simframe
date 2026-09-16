@@ -487,7 +487,7 @@ test('a first traversal saves as provisional; a contradicted or partial one does
   const first = saveFlow(udid, 'boot', {
     steps: [{ tap: 'A' }],
     ranSteps: 1,
-    results: [{ verification: { verdict: 'unverified' } }],
+    results: [{ index: 0, ok: true, verification: { verdict: 'unverified' } }],
   });
   assert.equal(first.ok, true, 'a first traversal must be recordable at all');
   assert.equal(first.provisional, true, 'and must say it is on its first observation');
@@ -496,7 +496,7 @@ test('a first traversal saves as provisional; a contradicted or partial one does
   const wrong = saveFlow(udid, 'bad', {
     steps: [{ tap: 'A' }],
     ranSteps: 1,
-    results: [{ verification: { verdict: 'unexpected-screen' } }],
+    results: [{ index: 0, ok: true, verification: { verdict: 'unexpected-screen' } }],
   });
   assert.equal(wrong.ok, false);
   assert.equal(wrong.reason, 'contradicted-steps');
@@ -504,7 +504,7 @@ test('a first traversal saves as provisional; a contradicted or partial one does
   const partial = saveFlow(udid, 'half', {
     steps: [{ tap: 'A' }, { tap: 'B' }],
     ranSteps: 1,
-    results: [{ verification: { verdict: 'ok' } }],
+    results: [{ index: 0, ok: true, verification: { verdict: 'ok' } }],
   });
   assert.equal(partial.ok, false);
   assert.equal(partial.reason, 'incomplete-run');
@@ -513,9 +513,31 @@ test('a first traversal saves as provisional; a contradicted or partial one does
   const clean = saveFlow(udid, 'clean', {
     steps: [{ tap: 'A' }],
     ranSteps: 1,
-    results: [{ verification: { verdict: 'ok' } }],
+    results: [{ index: 0, ok: true, verification: { verdict: 'ok' } }],
   });
   assert.equal(clean.provisional, false);
+
+  // The gate that was not there.
+  //
+  // A failing step stops the batch, so a failure on the LAST step leaves
+  // `ranSteps === steps.length` and the run looks complete. A peer watched
+  // `FLOW FAILED — 4 ok, 1 failed (of 5)` save itself, which records a route
+  // that is guaranteed to fail on every replay. Note that these fixtures now
+  // carry `ok` on every step: the old ones did not, and a gate reading a field
+  // no fixture sets is a gate no test can fail.
+  const lastFailed = saveFlow(udid, 'ends-badly', {
+    steps: [{ tap: 'A' }, { tap: 'B' }],
+    ranSteps: 2,
+    ok: false,
+    results: [
+      { index: 0, ok: true, verification: { verdict: 'ok' } },
+      { index: 1, ok: false, error: 'assert: not on screen' },
+    ],
+  });
+  assert.equal(lastFailed.ok, false, 'reaching the last step is not passing it');
+  assert.equal(lastFailed.reason, 'failed-steps');
+  assert.deepEqual(lastFailed.failed, [1], 'and it says which step');
+  assert.equal(loadFlow(udid, 'ends-badly'), null, 'nothing was written');
 
   // And the label comes off: the second half of the bootstrap, or "provisional"
   // would be a state nothing ever leaves.
@@ -3690,6 +3712,16 @@ test('a step can carry its own fallbacks, and only some failures earn one', asyn
   assert.equal(actions.mayRetryAfter(ambiguous), true);
   assert.equal(actions.mayRetryAfter(unverified), false, 'a wrong turn is not a wrong label');
   assert.equal(actions.mayRetryAfter(new Error('plain')), false);
+
+  // `optional` asks a narrower question than a retry does, and the difference
+  // is the whole of the safety argument. "Skip if absent" may only absorb
+  // *absent*: `ambiguous_intent` means the target is on screen twice, which is
+  // a step that must still verify, not a step to wave through. Otherwise
+  // "skip if absent" quietly becomes "tap whatever is there".
+  assert.equal(actions.didNotResolve(notHere), true);
+  assert.equal(actions.didNotResolve(ambiguous), false, 'present twice is not absent');
+  assert.equal(actions.didNotResolve(unverified), false);
+  assert.equal(actions.didNotResolve(new Error('plain')), false, 'an unclassified failure is not an absence');
 
   // The alternative is the same step aimed elsewhere, with its own fallbacks
   // stripped so a retry cannot recurse.
