@@ -2914,12 +2914,40 @@ worth more than the verdict.
    **Still open and now separable:** the fast failure. 5 of 9 `settings-larger-text`
    runs ended with the tap on `Accessibility` verified `ok` while the screen
    stayed on Settings root, so the next step looked for `Display & Text Size` on
-   a root list. It is not the device, it is the failure a user would hit, and it
-   is the next thing to chase. The flow has no `waitFor` between its cold
-   `launch` and that tap, and the passing run took 15.3 s against the failures'
-   3.3 s — so the suspicion is a tap resolving from the remembered screen map
-   before the app has painted. Suspicion, not a finding: the reproduction has
-   not been run.
+   a root list. It is not the device, it is the failure a user would hit.
+
+   Reproduced outside the suite: **5 of 6, then 2 of 5, then varying** — the
+   rate swings between roughly 40% and 83%, which is why a five-run A/B is not
+   enough to conclude anything and the first one was duly inconclusive. Every
+   failing tap reports the same thing:
+
+   ```
+   tapped "Accessibility" at 201,380 (memory d=0, via ax|ocr)
+   ```
+
+   The right label, the right coordinate — 201,380 is where `Accessibility` sits
+   on the live screen — resolved from memory, reported `ok`, and the screen does
+   not move.
+
+   **First hypothesis: falsified.** The suspicion was that the tap resolved from
+   the remembered screen map before the app had painted — "fronted is not
+   rendered", which would also have tied it to 171. Measured directly: `launch`
+   returns with the live tree already holding **15, 15 and 17 elements** over
+   three runs. The screen is rendered when the tap is issued. That story is
+   wrong and the tie to 171 does not hold.
+
+   **What the evidence still supports.** Delay before the tap is the only thing
+   that separates a pass from a failure, in every sample taken: the bench's one
+   passing run took 15.3 s against the failures' 3.3 s, and in a six-run
+   reproduction the 10.4 s run landed while the five ~7.7 s runs did not. A
+   screen that is *rendered but not yet accepting touches* — the window not yet
+   key, or a launch transition still owning hit-testing — fits that and fits the
+   falsification above, since the tree is populated either way.
+
+   If that holds, the remedy is in `launch` rather than in the flow: fronting by
+   pid (169) and painting are both necessary and neither is sufficient, and what
+   a caller needs to know is when the app will *act* on a tap. An experiment
+   varying only the post-launch delay is the cheap test.
 
    It defeats measurement in both directions. `bench` on run `35110888779`
    abstained because `settings-larger-text` failed **7 of 7**; an attempt to A/B
