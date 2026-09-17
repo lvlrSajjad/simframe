@@ -2946,8 +2946,26 @@ worth more than the verdict.
 
    If that holds, the remedy is in `launch` rather than in the flow: fronting by
    pid (169) and painting are both necessary and neither is sufficient, and what
-   a caller needs to know is when the app will *act* on a tap. An experiment
-   varying only the post-launch delay is the cheap test.
+   a caller needs to know is when the app will *act* on a tap.
+
+   **The delay experiment was run and it invalidated itself.** Varying only the
+   wait between launch and tap gave **4/4 landings at 0 ms and 4/4 at 600 ms** —
+   the failure did not occur at all. The reason is in the apparatus: to report
+   tree size, every arm performed a `screenIdentity(fresh: true)` between the
+   launch and the tap. That is not a neutral observation. It forces a fresh
+   perception pass, and every failing tap on record had reported `memory d=0`.
+
+   So the instrument removed the phenomenon it was measuring, and the evidence
+   moves off *delay* and onto **whether the tap resolves from memory or from a
+   fresh read**. The next experiment holds elapsed time constant and varies only
+   that: `launch → sleep(t) → tap` against `launch → fresh read → tap`, with `t`
+   matched to the cost of the read. Not yet run — the device wedges every couple
+   of dozen launches (see above), which is what makes this expensive.
+
+   Worth stating plainly because it cuts against the obvious fix: if fresh
+   resolution is what makes the tap land, then "wait longer after a launch" is
+   the wrong remedy, and "do not resolve the first tap after a launch from
+   memory" is the right one.
 
    It defeats measurement in both directions. `bench` on run `35110888779`
    abstained because `settings-larger-text` failed **7 of 7**; an attempt to A/B
