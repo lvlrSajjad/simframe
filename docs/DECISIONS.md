@@ -450,3 +450,56 @@ sessions against a release still in beta. The provider protocol is the
 interesting one — it would let a different model sit behind the same Swift API —
 but it is still a dependency-and-weights decision, taken deliberately or not at
 all. Nothing we ship today may depend on any of it.
+
+## Web as a third target: deferred, and redirected — 2026-09-18
+
+**Decision: do not build `src/platform/web.js` yet.** Three baseline runs on an
+internal web app say the win on that target is not the thing this project has
+built, and one cheap experiment remains that would decide it.
+
+**What was measured** (memoryless arm, ordinary browser tooling, no simframe):
+
+| | flow 1 | flow 2 | flow 3 |
+| --- | --- | --- | --- |
+| actions per model turn | 0.51 | 0.70 | 0.83 (partial) |
+| wall clock | 354 s | ~11 min | aborted |
+| the same human | ~30-60 s | **under 30 s** | — |
+
+**Why deferred.** Both completed flows ran **below 1.0 actions per model turn**:
+most turns bought a probe, not progress. The probes are per *control* — each one
+cost 2-4 turns to learn how it accepts input, two required fields in the same
+form used two different DOM shapes, and a pattern learned on one combobox was
+wrong for the next. A `(screen_hash, action) -> screen_hash'` graph does not hold
+that, so the memory layer this project has would not collect the cost that
+exists.
+
+What would help is **actuation recovery**: try strategy A, verify by DOM read,
+fall through to B and C locally without a round trip. That is this project's
+own recovery-without-a-round-trip philosophy applied to actuation rather than
+selectors — and **iOS does not need it**, because there actuation is uniform and
+everything is a tap at a point. So it is a pure web investment with no carry-over
+to the existing target, which is a different proposition from "a third backend
+behind the seam".
+
+**The experiment that would change this decision, and it needs no code.** The
+largest untested term is **batching**, which lives above the platform boundary
+and would apply to a web target unchanged. A peer instructed to batch
+aggressively — plan 5-8 actions per turn, actuate through page JS, verify by DOM
+read once at the end — and report `n`. If `n` reaches 3-4, batching alone is
+worth the backend. If probing is irreducible and `n` stays below 1, web needs the
+actuation layer first and is a larger project than it looked.
+
+**What is kept.** The CDP client (`src/platform/cdp.js`) is built, tested and
+proven against Chrome; it is the transport any future work needs and it cost a
+day. The baseline numbers are collected and cannot be tuned after the fact,
+because the thing they will be compared against does not exist yet.
+
+**What this costs if we are wrong.** If web turns out to be easy later, we have
+lost two days of ordering. If it had been built first, we would have a backend
+aimed at the wrong subsystem and a benchmark that flattered it.
+
+**Also settled here, for iOS as well as web:** the index question. Flow 1 asked
+whether the store should be screen-keyed or control-pattern-keyed. For the web
+the answer is control-pattern-keyed. For iOS it is not yet established and the
+uniform-actuation argument suggests the screen graph remains right there — but
+the question is now on the record rather than assumed.
