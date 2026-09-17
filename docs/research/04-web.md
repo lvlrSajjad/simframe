@@ -259,6 +259,48 @@ Comparing 0.51 against a simframe run with working actuation would measure that
 bug. **The number to beat is the post-diagnosis rate: 5 actions in 6 turns,
 0.83.**
 
+#### The baseline's slowness is the measurement, and it has a size
+
+The owner, watching a later run, put it at *"10x slower than mobile, so slow it
+pisses me off"*. That reaction is a number, and it is not the number flow 1's
+report was measuring. Flow 1 measured **within-session learning** (~1.6x
+recoverable). This is **batching**, a separate and multiplicative lever, and it
+is the one this project's own arithmetic has always said dominates.
+
+At 354 s over 45 model turns, the baseline's turns cost **7.9 s** each — cheaper
+than the ~20 s a planning round trip costs on the iOS side, presumably smaller
+payloads. But it runs at **n = 0.51 actions per model turn**, so:
+
+| | n | per action |
+| --- | --- | --- |
+| the baseline arm, no engine | **0.51** | **15.4 s** |
+| simframe on iOS, recorded median | 2 | 11.7 s |
+| simframe, batch of 4 | 4 | 6.7 s |
+| simframe, batch of 10 | 10 | 3.7 s |
+| a replayed route, zero model calls | — | **1.8 s** |
+
+15.4 s against 1.8 s is **8.5x**, which is where the owner's "10x" lands. The
+baseline consults a model twice per action; a replayed route consults none.
+
+**How much of that gap is actually addressable is smaller, and should be said in
+the same breath.** About 15 of the 45 turns went to routing around broken
+synthetic input — a defect in this arm's harness, not something an engine
+removes. At the post-diagnosis rate of 0.83 actions/turn the baseline costs
+**~9.5 s per action**, so the honest addressable gap is closer to **5x** against
+replay and **~1.4x** against a batch of four.
+
+Which reorders the three claims for the web target:
+
+| claim | status |
+| --- | --- |
+| perception is cheaper on the web | **dead** — this app's dropdowns expose no option roles at all |
+| within-flow memory | ~1.6x, and keyed on the wrong index today (per widget, not per screen) |
+| **batching** | **~4x, unmeasured on the web so far, and the largest term** |
+
+The second peer's run should therefore be read for **n** first and transfer
+second. `n` is what the engine changes; transfer is what the memory changes; and
+on this evidence the first is worth more than the second.
+
 #### What this does to the product argument
 
 Even the optimistic version of this arm — harness fixed, actuation known from
