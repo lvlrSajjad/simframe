@@ -4183,6 +4183,38 @@ Escalation log on this device at the time of measuring: **998 entries** —
 `verification_failed` 551, `ambiguous_intent` 207, `unknown_screen` 167,
 `no_plan` 73.
 
+## Sensor fusion on a healthy screen — 2026-09-17
+
+Taken to ground the `stale-frame` threshold in `src/wedge.js`, because the first
+version of that constant cited CLAUDE.md's "the tree and OCR agree on 0.33-0.47"
+— which is about *structural tokens*, a different quantity from element-level
+fusion. A live reading of 0.846 printed beside a claimed healthy band of
+0.33-0.47 is how the mismatch surfaced.
+
+`326464A4`, iPhone 17 Pro / iOS 26.5, five real screens, one read each.
+
+| screen | elements | by tree | by OCR | by both | fusion |
+| --- | --- | --- | --- | --- | --- |
+| Settings root | 18 | 14 | 16 | 12 | 0.857 |
+| General | 17 | 12 | 15 | 10 | 0.833 |
+| About | 19 | 14 | 18 | 13 | **0.929** |
+| springboard | 22 | 13 | 20 | 11 | 0.846 |
+| Reminders | 11 | 6 | 9 | 4 | **0.667** |
+
+`fusion = both / min(tree, OCR)`. **Healthy is 0.67-0.93, median 0.846.** The
+floor belongs to the sparsest screen, which is also the case the classifier
+withholds judgement on (`ENOUGH_TO_COMPARE`).
+
+The `stale-frame` threshold is **0.1**, 6.7x below the observed floor. That
+margin is the point: the `HPI_time` gate failed because its band sat inside its
+own metric's noise, and a threshold chosen the same way here would revive
+working devices — the false-refusal shape of item 175.
+
+What a collapse means: the accessibility tree is read live and in-process while
+OCR reads a framebuffer that can go stale without saying so. If both sensors
+report plenty and almost nothing fuses, they are describing different screens,
+and the frame is the one that is behind.
+
 ## Wall clock per step, and where it actually goes — 2026-09-16
 
 The founding concern of this project, finally measured end to end rather than
