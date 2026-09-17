@@ -1,4 +1,90 @@
-# Handoff — 2026-09-17
+# Handoff — 2026-09-18
+
+## The queue, in priority order
+
+Work these top down. Each line says why it is where it is and where the detail
+lives. Everything below this section is history, kept for its reasoning.
+
+**0. [OWNER, not the agent] Record the human HPI baseline.** Blocks every HPI
+number in the repo. The committed `docs/research/hpi-baseline.json` is invalid:
+half its time comes from `contacts-kate-bell`, which has `completed: 0`. An
+agent cannot do this — if simframe drives it, HPI is simframe measured against
+itself. Runbook at the end of this section.
+
+**1. The fast failure (iOS).** 5 of 9 bench runs: `tap Accessibility` verified
+`ok` while the screen stayed on Settings root. Not the device. It is the failure
+a user hits, and every hard-fail that drops a caller back to single-stepping is
+a latency bug. One hypothesis already falsified — it is *not* "the app has not
+rendered", `launch` returns with 15-17 elements in the tree. The corrected
+experiment is written up in DEFERRED 173: hold elapsed time constant and vary
+only whether the tap resolves from memory or from a fresh read. Do not repeat
+the delay A/B; it invalidated itself by inserting a fresh read into every arm.
+
+**2. Item 174 — screen identity fragments on content-driven screens.** The
+escalation log now nominates it independently: `unexpected-screen` is the only
+verdict in 1022 records that names a faculty. It also blocks `saveFlow` on the
+screens where it misfires, so it throttles the zero-model-call path as well as
+costing batches. Start with the supervisor ruling, not a threshold — DEFERRED
+174 says why both obvious fixes are wrong.
+
+**3. Item 183 follow-up — why does an app launch restore a silent tree?** One
+observation is not causation. The cheap test: revive, wait the same interval
+without launching anything, read again. If time alone does it, `revive` needs
+patience; if a launch is required, `revive` should do one.
+
+**4. Item 173's cheap remedy.** It is a *transient* SpringBoard crash, so wait
+for the shell and retry the launch instead of a ~40 s device restart. Never
+tried, because the old "persistent wedge" framing made it look pointless.
+
+**5. Web: the batching experiment (no code).** See `docs/DECISIONS.md` —
+`web.js` is deferred pending one measurement. Batching lives above the platform
+boundary and is the largest untested term; a peer batching aggressively and
+reporting `n` decides whether the backend is worth two days.
+
+**6. Item 179 — a data-creating flow can never replay cleanly**, so the
+confirmation path is closed to most flows worth recording. Design question, not
+a bug fix: a recorded assert should check the *delta* it caused, not the end
+state.
+
+**7. Item 178 — `sim_find` returns a static label as a "field".** Cheap and
+well-targeted, but record a fixture first: a hard type filter breaks OCR-only
+WebView screens.
+
+**8. The rest** — 170, 181, 182, and the perception group (153, 155, 156, 162,
+163).
+
+### The number none of this has moved
+
+`steps_per_call` is **1.5-2.0** and the vision needs 8-10. Two releases, a
+diagnostic instrument, a fixed steering wheel, a corrected latency model and a
+CDP client all shipped without touching it. That was defensible while the
+instruments were untrustworthy. It stops being defensible now. **Items 1 and 2
+are the ones that move it** — prefer them over anything that merely measures
+better.
+
+### Runbook for item 0, so it is five minutes and not a project
+
+```bash
+simframe diagnose --device=326464A4-331E-47A3-A90F-6A2E85BCEE18   # must say healthy
+simframe baseline record contacts-kate-bell   --device=326464A4-331E-47A3-A90F-6A2E85BCEE18 --runs=5
+simframe baseline summarize contacts-kate-bell
+simframe baseline record settings-larger-text --device=326464A4-331E-47A3-A90F-6A2E85BCEE18 --runs=5
+simframe baseline summarize settings-larger-text
+simframe baseline list
+```
+
+The flows, as a person performs them (from `flows/hpi-suite.json`):
+
+- **contacts-kate-bell** — tap Contacts on the home screen, tap Kate Bell, stop.
+- **settings-larger-text** — tap Settings, tap Accessibility, tap Display & Text
+  Size, tap Larger Text, stop.
+
+N>=5 because it refuses under 3, and a median of two numbers is one of the two.
+Re-record when the app changes. The device wedges every few dozen launches —
+`simframe revive` between flows if `diagnose` stops saying `healthy`.
+
+---
+
 
 > **0.18.0 — start here. Everything below this block predates it.**
 >
