@@ -75,8 +75,35 @@ const seenBy = (targets, sensor) =>
  * collected because it is interesting.
  */
 export async function snapshot(deviceQuery, { options } = {}) {
-  const { device, state } = await api.ensureDaemon(deviceQuery, options);
+  // **`ensureDaemon` throws on the loudest condition this module exists to
+  // name.** "the daemon is running and the display produced no frame in 60s" is
+  // reported as an exception, so the first version of this function propagated
+  // it and `simframe diagnose` died with a stack trace on a genuinely wedged
+  // device — the one moment it is worth running. Caught within an hour of
+  // shipping, by the device wedging.
+  //
+  // So a snapshot of a dead device is a snapshot, not an error. `classify`
+  // already has a verdict for it.
+  let device;
+  let state = null;
+  let daemonError = null;
+  try {
+    ({ device, state } = await api.ensureDaemon(deviceQuery, options));
+  } catch (err) {
+    daemonError = err.message;
+    device = { udid: String(deviceQuery ?? '?'), name: String(deviceQuery ?? 'unknown device') };
+  }
   const udid = device.udid;
+  if (daemonError) {
+    return {
+      device: { udid, name: device.name },
+      readError: daemonError,
+      frame: null,
+      elements: { total: 0, ax: 0, ocr: 0, fused: 0 },
+      agreement: null,
+      frontmost: null,
+    };
+  }
 
   let identity = null;
   let readError = null;
@@ -134,7 +161,12 @@ export function classify(snap) {
   if (!snap?.frame) {
     return {
       state: 'capture-down',
-      detail: 'no frame state at all — the daemon is not producing frames',
+      // The daemon's own words when it has them. They are more specific than
+      // anything derivable here — "produced no frame in 60s" distinguishes a
+      // live daemon over a dead display from a daemon that is not running.
+      detail: snap?.readError
+        ? `capture is not producing frames: ${snap.readError}`
+        : 'no frame state at all — the daemon is not producing frames',
       revive: true,
     };
   }

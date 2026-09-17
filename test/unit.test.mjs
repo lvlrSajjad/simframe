@@ -603,7 +603,21 @@ test('a wedged device is diagnosed from what it shows, not from the shape of the
     frontmost: { pid: null, title: null },
   }).state, 'stale-frame');
 
+  // The instrument must survive the condition it exists to name. `ensureDaemon`
+  // *throws* on "the display produced no frame in 60s", so the first version of
+  // `snapshot` propagated it and `simframe diagnose` died with a stack trace on
+  // a genuinely wedged device — the one moment worth running it. A snapshot of
+  // a dead device is a snapshot, and it carries the daemon's own words, which
+  // are more specific than anything derivable here.
   assert.equal(wedge.classify({ frame: null }).state, 'capture-down');
+  const down = wedge.classify({
+    frame: null,
+    readError: 'the daemon is running and the display produced no frame in 60s',
+    elements: { total: 0, ax: 0, ocr: 0, fused: 0 },
+  });
+  assert.equal(down.state, 'capture-down');
+  assert.match(down.detail, /produced no frame in 60s/,
+    'and it reports what the daemon said, not a generic line');
   assert.equal(wedge.classify({
     frame: { seq: 1 }, elements: { total: 0, ax: 0, ocr: 0, fused: 0 }, agreement: null, frontmost: {},
   }).state, 'nothing-readable');
