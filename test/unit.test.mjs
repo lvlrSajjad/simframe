@@ -750,6 +750,59 @@ test('a run the simulator broke is unmeasured, not inaccurate', async () => {
   assert.equal(recovered.overall.runs, 1, 'it completed, so it is evidence');
 });
 
+test('the CDP websocket client speaks RFC 6455, pinned against a real peer', async () => {
+  const cdp = await import('../src/platform/cdp.js');
+  const crypto = await import('node:crypto');
+
+  // **The test that would have saved an hour.** The handshake proof is
+  // `base64(sha1(clientKey + GUID))`, and the GUID was written from memory as
+  // `...-95CA-5AB0DC85B11F` — the leading `C` of the last group moved to the
+  // end as an `F`. It is 36 characters either way, all ASCII, and reads
+  // correctly at a glance. Chrome answered 101 and the accept simply did not
+  // match, which the client reported as "this is not a websocket peer".
+  //
+  // The vector below is RFC 6455 §1.3 and was confirmed against a live
+  // headless Chrome (153.0.8010.48) before being written down: given this key,
+  // Chrome returns exactly this accept. A constant that can only be checked by
+  // a browser is a constant that gets checked by a browser.
+  const key = 'dGhlIHNhbXBsZSBub25jZQ==';
+  const accept = crypto.createHash('sha1')
+    .update(key + cdp.WS_GUID).digest('base64');
+  assert.equal(accept, 's3pPLMBiTxaQ9kYGzzhZRbK+xOo=',
+    'the websocket GUID is wrong — every handshake will be rejected as a bad peer');
+
+  // A CDP reply routinely exceeds one TCP segment: a full accessibility tree is
+  // tens of kilobytes. A reader that assumes one frame per `data` event works
+  // on a hello-world and fails on the first real payload.
+  const server = (text) => {
+    const body = Buffer.from(text, 'utf8');
+    if (body.length < 126) return Buffer.concat([Buffer.from([0x81, body.length]), body]);
+    const head = Buffer.from([0x81, 126, 0, 0]);
+    head.writeUInt16BE(body.length, 2);
+    return Buffer.concat([head, body]);
+  };
+
+  const one = cdp.decodeFrames(server('{"id":1}'));
+  assert.equal(one.frames.length, 1);
+  assert.equal(one.frames[0].payload.toString(), '{"id":1}');
+  assert.equal(one.rest.length, 0);
+
+  // Two frames arriving in one chunk, which is ordinary under load.
+  const two = cdp.decodeFrames(Buffer.concat([server('{"id":1}'), server('{"id":2}')]));
+  assert.equal(two.frames.length, 2);
+  assert.equal(two.frames[1].payload.toString(), '{"id":2}');
+
+  // A 16-bit length, and a frame split across two reads: the decoder must keep
+  // the remainder rather than mis-parse it as a new frame.
+  const big = server(JSON.stringify({ nodes: 'x'.repeat(400) }));
+  const split = cdp.decodeFrames(big.subarray(0, 50));
+  assert.equal(split.frames.length, 0, 'half a frame is not a frame');
+  assert.equal(split.rest.length, 50, 'and the half is kept');
+  const whole = cdp.decodeFrames(Buffer.concat([split.rest, big.subarray(50)]));
+  assert.equal(whole.frames.length, 1);
+  assert.equal(JSON.parse(whole.frames[0].payload.toString()).nodes.length, 400);
+});
+
 // --- variant fingerprints -------------------------------------------------
 
 const tok = (n, tag) => Array.from({ length: n }, (_, i) => `${tag}:cell:content:w16:h4:x0:y${i}#1`);
