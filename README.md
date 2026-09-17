@@ -895,6 +895,7 @@ simframe supervisions          # local supervisor rulings, and what came of each
 simframe hpi                   # speed and accuracy against a human baseline
 simframe baseline record settings-larger-text --runs=5   # record the human
 simframe input reset           # rebuild the HID session, without restarting anything
+simframe diagnose              # what this device is doing right now, and which failure it is
 simframe revive                # power-cycle a wedged device: stop, shutdown, boot, start, reset input
 simframe start / status / stop [--force] / devices
 simframe ui --device=emulator-5554      # or export SIMFRAME_DEVICE once
@@ -918,6 +919,29 @@ capture is wedged and both recoveries are spent (2 port re-resolves, 2 device
 rebinds, no frame since). This needs the device restarted —
 `simframe revive --device=<udid>`. Backing off until a frame arrives.
 ```
+
+**`simframe diagnose` says which failure it is**, which `doctor` cannot: `doctor`
+answers "can this machine capture", and this answers "what is this device doing
+right now". It reads only what discriminates — frame sequence, age and
+stillness, element counts split by sensor, how many of them fuse, and who holds
+the front by pid — and returns one of:
+
+| verdict | what it means |
+| --- | --- |
+| `capture-down` | no frames at all, carrying the daemon's own sentence |
+| `nothing-readable` | frames arriving, neither sensor finds a single element |
+| `stale-frame` | both sensors full, almost nothing fuses — the framebuffer is behind the tree, so **an image from this device is not safe to trust** |
+| `not-presenting` | an app holds the front by pid and the display shows almost nothing |
+| `healthy` | — |
+
+`not-presenting` deliberately does **not** say whether that is a lock screen, a
+dead surface or a crashed system shell. It is not knowable from here, and
+guessing is how a regex ended up standing where a measurement belongs.
+
+The `stale-frame` threshold is measured rather than chosen: element fusion on
+five healthy screens ran 0.667–0.929, so the threshold sits at 0.1 — 6.7× below
+the observed floor rather than inside the metric's own noise. Numbers in
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 `simframe revive` is that restart, in the order that matters — stop the daemon,
 shut the device down, boot it and *wait for the boot to finish*, start capture,
