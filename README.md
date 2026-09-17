@@ -932,11 +932,19 @@ the front by pid — and returns one of:
 | `nothing-readable` | frames arriving, neither sensor finds a single element |
 | `stale-frame` | both sensors full, almost nothing fuses — the framebuffer is behind the tree, so **an image from this device is not safe to trust** |
 | `not-presenting` | an app holds the front by pid and the display shows almost nothing |
+| `tree-silent` / `ocr-silent` | one sensor is reading and the other returns nothing. A silent tree is the serious one: it is authoritative when present, so every intent silently falls back to OCR |
 | `healthy` | — |
 
 `not-presenting` deliberately does **not** say whether that is a lock screen, a
 dead surface or a crashed system shell. It is not knowable from here, and
 guessing is how a regex ended up standing where a measurement belongs.
+
+**It is not the same question `doctor` answers, and they can disagree.** Observed
+on the bench device: `doctor` reported *"sensor mode: full — accessibility and
+OCR fused on every read"* while `diagnose` reported `tree-silent`, 0 elements
+from the tree against 20 from OCR. `doctor` is right about what is configured
+and `diagnose` is right about what is happening. Ask the second one when
+something is behaving oddly.
 
 The `stale-frame` threshold is measured rather than chosen: element fusion on
 five healthy screens ran 0.667–0.929, so the threshold sits at 0.1 — 6.7× below

@@ -2873,6 +2873,35 @@ worth more than the verdict.
    exists when one is configured, the default install keeps the false abort, and
    "fixed" would mean "fixed for callers who opted in".
 
+183. **A revive can bring the device back with the accessibility tree silent,
+   and `doctor` cannot see it.** OPEN, observed 2026-09-17.
+
+   After a `simframe revive` that reported *"iPhone 17 Pro is producing frames
+   again"*, `simframe diagnose` read **0 elements from the accessibility tree
+   and 20 from OCR**. Capture was restored; the tree was not. Every intent on
+   that device was resolving against OCR alone — the reading quality a field
+   report called *"materially less reliable"* on web content — with nothing
+   announcing the downgrade.
+
+   `doctor`, asked at the same moment, said `sensor mode: full — accessibility
+   and OCR fused on every read (~164ms)`. It is not wrong: it reports what is
+   *configured*, and the configuration was fine. It has no way to say that the
+   layer is configured and returning nothing, which is the distinction
+   CLAUDE.md already names in another place — *"a claim about a tool that has
+   never spoken to an Android device"*.
+
+   Two things follow, and only the first is done. `diagnose` now has
+   `tree-silent` and `ocr-silent` verdicts, so the state has a name and the
+   classifier stops calling it `healthy` — it did, for an hour after shipping,
+   because `agreement` is null unless both sensors report something and nothing
+   else was looking.
+
+   Not done: **`revive` should verify the tree, not only the frames.** Its final
+   check reads `getState().hash`, which capture alone satisfies. Reading one
+   element through `AXPTranslator` would cost a single call and would have
+   caught this. Whether the tree can be restored without a second restart is
+   unknown and is the first thing to find out.
+
 173. **The bench suite wedges the device it measures.** OPEN, and **the framing
    was wrong in a way that matters**: it is a *transient crash*, not a
    persistent wedge, and it is not the only thing stopping measurement.

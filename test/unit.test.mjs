@@ -609,6 +609,39 @@ test('a wedged device is diagnosed from what it shows, not from the shape of the
   // a genuinely wedged device — the one moment worth running it. A snapshot of
   // a dead device is a snapshot, and it carries the daemon's own words, which
   // are more specific than anything derivable here.
+  // A whole sensor silent, which the first version of this classifier called
+  // `healthy`. Observed on the bench device an hour after shipping: 0 elements
+  // from the accessibility tree, 20 from OCR, verdict `healthy`. `agreement` is
+  // null unless both sensors report something, so the disagreement branch could
+  // not fire and nothing else was looking.
+  //
+  // It matters beyond the instrument: CLAUDE.md makes the tree authoritative
+  // when present, so a silent tree means every intent resolves against OCR
+  // alone — with nothing announcing the downgrade.
+  const treeDead = wedge.classify({
+    frame: { seq: 9, ageMs: 200, stableForMs: 500 },
+    elements: { total: 20, ax: 0, ocr: 20, fused: 0 },
+    agreement: null,
+    frontmost: { pid: 71790, title: null },
+  });
+  assert.equal(treeDead.state, 'tree-silent');
+  assert.match(treeDead.detail, /resolving against\s+OCR alone/);
+  assert.equal(wedge.classify({
+    frame: { seq: 9, ageMs: 200, stableForMs: 500 },
+    elements: { total: 14, ax: 14, ocr: 0, fused: 0 },
+    agreement: null,
+    frontmost: { pid: 1, title: null },
+  }).state, 'ocr-silent');
+
+  // A genuinely sparse screen is still not a broken sensor: below
+  // ENOUGH_TO_COMPARE this must stay quiet, or a springboard reads as a fault.
+  assert.notEqual(wedge.classify({
+    frame: { seq: 9, ageMs: 200, stableForMs: 500 },
+    elements: { total: 2, ax: 0, ocr: 2, fused: 0 },
+    agreement: null,
+    frontmost: { pid: 1, title: null },
+  }).state, 'tree-silent');
+
   assert.equal(wedge.classify({ frame: null }).state, 'capture-down');
   const down = wedge.classify({
     frame: null,

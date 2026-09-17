@@ -193,6 +193,33 @@ export function classify(snap) {
       revive: true,
     };
   }
+  // One sensor is reading and the other is silent.
+  //
+  // **Found within an hour of shipping this classifier, by it calling a device
+  // `healthy` while the accessibility tree returned nothing at all** — 0 by
+  // tree, 20 by OCR. `agreement` is null unless both sensors report something,
+  // so the disagreement check above cannot fire on this, and nothing else was
+  // looking. A classifier blind to a whole sensor being dead is worse than no
+  // classifier, because it answers.
+  //
+  // It is not cosmetic. CLAUDE.md's perception order makes the tree
+  // authoritative when present, so a silent tree means every intent resolves
+  // against OCR alone — the reading quality a field report called "materially
+  // less reliable" on web content, applied to the whole device, with nothing
+  // saying so.
+  if (total >= ENOUGH_TO_COMPARE && (ax === 0 || ocr === 0)) {
+    const treeDead = ax === 0;
+    return {
+      state: treeDead ? 'tree-silent' : 'ocr-silent',
+      detail: `${treeDead ? 'OCR' : 'the accessibility tree'} found ${Math.max(ax, ocr)} element(s)`
+        + ` and ${treeDead ? 'the accessibility tree' : 'OCR'} found none.`
+        + (treeDead
+          ? ' The tree is authoritative when present, so every intent is now resolving against'
+            + ' OCR alone — materially less reliable, and nothing else says so.'
+          : ' Frames are not being read, so anything that needs pixels is unavailable.'),
+      revive: true,
+    };
+  }
   // An app holds the front, and the display is showing almost nothing. This is
   // the CI signature that `device-state.mjs` recognises as "a clock and nothing
   // else", now stated as an observation. It deliberately does NOT claim to know
