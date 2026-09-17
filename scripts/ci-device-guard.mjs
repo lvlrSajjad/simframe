@@ -59,6 +59,25 @@ if (!cause) {
   process.exit(first.code ?? 1);
 }
 
+// Diagnose BEFORE reviving, because reviving is what destroys the evidence.
+//
+// This guard has been recognising wedges from the shape of the failure text
+// since 126, and then immediately power-cycling the device — so item 173 has
+// accumulated a dozen occurrences and not one observation of what the device
+// was doing at the time. `cause` above names a *consequence* ("a launched app
+// never came to the front"); this names what the two sensors actually saw, and
+// the difference decides between a stale framebuffer, a screen that is not the
+// app, and capture being down. Its cost is one read on a path that is already
+// failing.
+const diagnose = async (when) => {
+  const d = await run(['node', 'src/cli.js', 'diagnose', `--device=${udid}`]);
+  console.error(`\n     (diagnosis ${when} — for DEFERRED 173)`);
+  const verdict = /— (\S+)\n/.exec(d.out)?.[1] ?? 'unreadable';
+  summary(`  - diagnosis ${when}: \`${verdict}\``);
+  return verdict;
+};
+const before = await diagnose('before the revive');
+
 console.error(`\n     (${cause} — DEFERRED 126. Reviving once and running again.)`);
 await run(['node', 'src/cli.js', 'revive', `--device=${udid}`], { capture: false });
 const second = await run(cmd);
@@ -70,4 +89,12 @@ if (second.code === 0) {
 const again = deviceCause(second.out);
 summary(`- \`${cmd.join(' ')}\` — **${again ? 'device unavailable' : 'check failed'}** after a revive${again ? ` (${again})` : ''}`);
 if (again) console.error(`\nFAIL the simulator is still in a bad state after a revive: ${again}`);
+// Twice is the interesting case: a revive cured it and it came back, or the
+// revive did not cure it at all. Those are different faults and the pair of
+// diagnoses says which.
+const after = await diagnose('after the revive');
+if (before !== after) {
+  console.error(`\n     (the device changed state across the revive: ${before} -> ${after})`);
+  summary(`  - state changed across the revive: \`${before}\` -> \`${after}\``);
+}
 process.exit(second.code ?? 1);

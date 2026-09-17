@@ -11,6 +11,7 @@ import * as input from './input.js';
 import * as baseline from './baseline.js';
 import * as metrics from './metrics.js';
 import * as navigate from './navigate.js';
+import * as wedge from './wedge.js';
 import { decodePng } from './png.js';
 import * as storage from './storage.js';
 import * as store from './store.js';
@@ -51,6 +52,7 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe escalations [device]      why simframe handed decisions back, by reason
   simframe supervisions [device]     local supervisor rulings, and what came of each
   simframe revive [device]           power-cycle a wedged device: stop, shutdown, boot, start, reset input
+  simframe diagnose [device]         what this device is doing right now, and which failure it is
                                      (--session=<id> narrows to one agent; the
                                      ids are listed in the output. SIMFRAME_SESSION
                                      names one, but only at process start — an
@@ -444,6 +446,26 @@ async function main() {
         : `\n${dev.name} is still not producing frames. This is past what simframe can do —`
           + ' check Simulator.app is not showing an error, and see docs/DEFERRED.md item 95.');
       if (!alive) process.exitCode = 1;
+      return;
+    }
+
+    // Not folded into `doctor`, which answers "can this machine capture". This
+    // answers "what is this device doing right now", which is item 173's
+    // question and has never had an instrument.
+    case 'diagnose': {
+      const dev = await resolveDevice(device);
+      const r = await wedge.diagnose(dev.udid, { options });
+      emit(flags, r, [
+        `${r.device.name} — ${r.verdict.state}`,
+        `  ${r.verdict.detail}`,
+        '',
+        `  frame      seq ${r.frame?.seq ?? '-'}, ${r.frame?.ageMs ?? '-'}ms old, still for ${r.frame?.stableForMs ?? '-'}ms, ${r.frame?.size ?? '-'}`,
+        `  elements   ${r.elements.total} total — ${r.elements.ax} by tree, ${r.elements.ocr} by OCR, ${r.elements.fused} by both`,
+        `  fusion     ${r.agreement ?? 'n/a'} of elements seen by both sensors (measured healthy ${wedge.HEALTHY_FUSION}; at or below ${wedge.DISAGREEMENT} the frame is stale)`,
+        `  frontmost  ${r.frontmost?.pid ?? 'unknown'}${r.frontmost?.title ? ` (${r.frontmost.title})` : ''}`,
+        ...(r.verdict.revive ? ['', '  `simframe revive` is the recovery. Keep this output — item 173 needs it.'] : []),
+      ]);
+      if (r.verdict.revive) process.exitCode = 1;
       return;
     }
 

@@ -548,6 +548,74 @@ test('a first traversal saves as provisional; a contradicted or partial one does
   assert.equal(confirmFlow(udid, 'clean'), false, 'an already-confirmed flow is not re-promoted');
 });
 
+test('a wedged device is diagnosed from what it shows, not from the shape of the failure text', async () => {
+  const wedge = await import('../src/wedge.js');
+  // Item 173 has never had an instrument. The evidence has been arriving as a
+  // *consequence*: `scripts/device-state.mjs` recognises a wedge from the shape
+  // of a tour's failure text and names it "a launched app never came to the
+  // front", which is enough to decide whether to revive and cannot tell a dead
+  // framebuffer from a lock screen from an app that never fronted.
+  //
+  // Pure fixtures on purpose. device-state.mjs records that two runtime bugs in
+  // this project came from logic that was correct and had never executed,
+  // because a hosted runner at minute fifteen was the only thing exercising it.
+  const healthy = {
+    frame: { seq: 12, ageMs: 900, stableForMs: 3000 },
+    elements: { total: 22, ax: 13, ocr: 20, fused: 11 },
+    agreement: 0.846,
+    frontmost: { pid: 501, title: 'Settings' },
+  };
+  assert.equal(wedge.classify(healthy).state, 'healthy');
+  assert.equal(wedge.classify(healthy).revive, false);
+
+  // The peer's case: both sensors full, almost nothing fuses. The tree is read
+  // live and in-process; OCR reads a framebuffer that can go stale without
+  // saying so, so the frame is the one that is behind.
+  const stale = {
+    frame: { seq: 12, ageMs: 900, stableForMs: 17000 },
+    elements: { total: 21, ax: 9, ocr: 12, fused: 0 },
+    agreement: 0,
+    frontmost: { pid: 501, title: 'Reminders' },
+  };
+  assert.equal(wedge.classify(stale).state, 'stale-frame');
+  assert.match(wedge.classify(stale).detail, /not safe to trust/);
+
+  // CI's case: an app holds the front by pid and the display shows a clock.
+  // The verdict must NOT claim to know which of three causes it is.
+  const notPresenting = {
+    frame: { seq: 3, ageMs: 4000, stableForMs: 23000 },
+    elements: { total: 2, ax: 1, ocr: 2, fused: 1 },
+    agreement: 1,
+    frontmost: { pid: 39452, title: 'Preferences' },
+  };
+  const v = wedge.classify(notPresenting);
+  assert.equal(v.state, 'not-presenting');
+  assert.match(v.detail, /not knowable from here/,
+    'it must not pick between a lock screen, a dead surface and a crashed SpringBoard');
+
+  // A sparse screen is not a disagreeing screen. A springboard and a lock
+  // screen are legitimately sparse, and calling either a stale frame would
+  // revive a device that is working — the false-refusal shape of item 175.
+  assert.notEqual(wedge.classify({
+    frame: { seq: 1, ageMs: 100, stableForMs: 100 },
+    elements: { total: 3, ax: 2, ocr: 2, fused: 0 },
+    agreement: 0,
+    frontmost: { pid: null, title: null },
+  }).state, 'stale-frame');
+
+  assert.equal(wedge.classify({ frame: null }).state, 'capture-down');
+  assert.equal(wedge.classify({
+    frame: { seq: 1 }, elements: { total: 0, ax: 0, ocr: 0, fused: 0 }, agreement: null, frontmost: {},
+  }).state, 'nothing-readable');
+
+  // The threshold is not a band inside the metric's own noise, which is what
+  // the HPI_time gate was. Measured on 326464A4 across five real screens:
+  // 0.857 0.833 0.929 0.846 0.667 — so the floor is 0.667 and the threshold
+  // sits 6.7x below it.
+  assert.ok(wedge.DISAGREEMENT * 6 < 0.667,
+    'the stale-frame threshold must sit well clear of the measured healthy floor');
+});
+
 // --- variant fingerprints -------------------------------------------------
 
 const tok = (n, tag) => Array.from({ length: n }, (_, i) => `${tag}:cell:content:w16:h4:x0:y${i}#1`);
