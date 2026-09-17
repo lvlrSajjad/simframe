@@ -1,5 +1,61 @@
 # Handoff — 2026-09-17
 
+> **0.18.0 — start here. Everything below this block predates it.**
+>
+> Published and verified: `release` green via OIDC, npm `latest` = 0.18.0,
+> `check-published.mjs 0.18.0` **87/87 identical** to the tree, pre-tag diff
+> empty, all three `test` jobs and `integration (memory)` green on the release
+> commit.
+>
+> **Three items were worked and the first one changed its own definition.**
+>
+> **173 is a transient crash, not a persistent wedge.** The 69 s bench failure
+> was `The system shell (SpringBoard:58637) probably crashed`; a device read
+> taken seconds later said `healthy`, fusion 0.857. It dies, the launch fails,
+> it comes back. That is why a dozen occurrences produced no observation, and it
+> means `revive` — a ~40 s restart — is a heavy cure for something that
+> self-heals. **Waiting for the shell and retrying the launch has never been
+> tried and is the obvious next thing.**
+>
+> **`simframe diagnose` is the instrument that settled it**, and the CI guard
+> now runs it *before* it revives — the guard used to power-cycle the device the
+> moment it recognised a wedge, destroying the only evidence. Verdicts:
+> `capture-down`, `nothing-readable`, `stale-frame`, `not-presenting`,
+> `healthy`. `not-presenting` deliberately refuses to say *why*.
+>
+> **The escalation log can finally name a faculty.** It had 20 read reasons out
+> of 1022 (723 legacy, 279 assumed). `FACULTY` was keyed on the reason, so every
+> `verification_failed` pointed at "sense of time (Phase 11)" — but the class
+> holds 163 `no-visible-change`, 26 `unexpected-screen` (= item 174) and **51
+> records that were the device, not the code**. Split by verdict now, with the
+> device pulled out. `no-visible-change` is deliberately left unnamed: two
+> causes wear it and the site already had the measured argument.
+>
+> **`HPI_accuracy` was counting SpringBoard's crashes as simframe's errors** —
+> 5 of 17 runs. Device-caused runs leave the denominator. This is item 172's
+> fault in the other column, and it had been fixed there and left standing here.
+>
+> **The latency model was missing a term**, and this one came from measurement
+> rather than argument: a cold app launch is a **fixed cost amortised over the
+> route**, not a per-step one. With zero model calls the agent is 2.9x a human
+> on a 2-step route (6.2 s/step) and 2.0x on a 4-step one. So
+> `per step = (round trip + launch + ~1.7s × n) / n`, and `~1.7 s` describes
+> *warm taps inside a batch* only. Short routes are much worse than any table
+> previously implied. `step_ratio` was **1** throughout — no wandering.
+>
+> **The open thread: the fast failure.** 5 of 9 `settings-larger-text` runs had
+> `tap Accessibility` verified `ok` while the screen stayed on Settings root.
+> Not the device. One hypothesis falsified (it is **not** "rendered yet?" —
+> `launch` returns with 15-17 elements already in the tree), and one experiment
+> invalidated by its own apparatus: every arm inserted a fresh read between
+> launch and tap, which is exactly the variable under suspicion, and the failure
+> vanished. Evidence now points at **memory-vs-fresh resolution**, which cuts
+> against the obvious "wait longer" fix. Corrected design is written up in 173.
+>
+> **What did not move: `steps_per_call`, still 1.5-2.0.** This release makes the
+> instruments trustworthy; it does not make the tool faster. The number the
+> vision depends on is untouched.
+>
 > **Read this block first; the rest of the file was written before the third
 > field report landed.**
 >
