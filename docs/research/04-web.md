@@ -213,11 +213,28 @@ learned order to measure the within-session improvement directly — because tha
 improvement is exactly the quantity a transition graph claims to supply for
 free, and controlling it away removes the measurement instead of taking it.
 
-**And the attach cost belongs in the numbers.** Reaching a drivable,
-authenticated page cost 6 tool calls and one re-plan before any flow began. Every
-arm pays it. If simframe's web runs start from a pre-attached, pre-authenticated
+**And the attach cost belongs in the numbers — on its own line.** Reaching a
+drivable, authenticated page cost 6 tool calls and one re-plan in the first
+attempt, and 4 calls over 9.4 s to a conclusive failure in the second. Every arm
+pays it. If simframe's web runs start from a pre-attached, pre-authenticated
 harness while the baseline arm does not, the gap between them is a measurement
 artifact rather than a result.
+
+The second reporter sharpened it correctly: the web arm's attach depends on a
+browser extension being installed and signed in on the same account, which is an
+**out-of-band, human-only setup step the agent cannot recover from**. It is a
+real recurring cost and it should be reported as a separate line rather than
+folded into flow timings, because it is orthogonal to the question actually on
+trial — actions per model turn.
+
+**Both baseline attempts were blocked at that step and neither ran a flow**, and
+the second was also blocked by a defect in the prompt: it said one flow runs per
+session and "you will be told which", and nothing told them. A coordination step
+that exists only in the author's head is a step that does not exist. The prompt
+is now three files, each naming its own flow, and each carrying a path that needs
+no extension: the agent opens the page, stops at the login screen, and the owner
+signs in to that pane by hand. Credentials stay with the human either way; what
+changes is that a login screen is no longer terminal.
 
 ## Where this belongs in the article
 
