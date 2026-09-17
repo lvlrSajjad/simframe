@@ -180,6 +180,45 @@ promotion: measure the prize before building the solution.
    against Playwright driven by the same model with no memory. Anything else
    flatters the result.
 
+### Three corrections to that design, from a baseline attempt — 2026-09-17
+
+The first attempt to collect the baseline arm was **blocked before flow 1, step
+1**: the browser holding the authenticated session was unreachable, and the
+isolated pane had no session cookie and landed on a login screen, where the
+reporter correctly stopped rather than typing credentials. Zero flows ran. The
+methodology notes it produced are better than the numbers would have been.
+
+**Tool calls are not a comparable unit across the arms.** Both sides batch — the
+browser tooling has a batch primitive, `sim_do` is one — so "number of tool
+calls" measures *batching style*, not memory, and either arm can be made to look
+arbitrarily good by one authoring choice. Count **actions executed** and **model
+turns** separately, and hold both arms to the same batching policy. This project
+already has the right metric and should simply use it on both sides:
+`steps_per_call = steps_taken / model_turns`.
+
+**"Screenshots needed" structurally favours the browser, and that is the finding
+rather than a flaw to correct.** Their words: *"On iOS, perception is the
+expensive part; on the web it is close to free. So if the web pitch rests on
+perception parity it has no case, and the memory layer has to carry the whole
+argument alone."* That is this document's own thesis, re-derived from outside by
+someone who had not read it — which is the strongest form the argument has been
+stated in so far. It also sets the bar: a web go/no-go that shows perception
+wins has shown nothing.
+
+**"Run each flow cold" is not enforceable inside one session.** The prompt asked
+a model to un-see flow 1 while running flow 2, and mitigated it with self-report
+of something nobody has reliable introspective access to. The clean design is
+**one flow per session, no shared context**, plus one deliberate session in
+learned order to measure the within-session improvement directly — because that
+improvement is exactly the quantity a transition graph claims to supply for
+free, and controlling it away removes the measurement instead of taking it.
+
+**And the attach cost belongs in the numbers.** Reaching a drivable,
+authenticated page cost 6 tool calls and one re-plan before any flow began. Every
+arm pays it. If simframe's web runs start from a pre-attached, pre-authenticated
+harness while the baseline arm does not, the gap between them is a measurement
+artifact rather than a result.
+
 ## Where this belongs in the article
 
 The piece currently argues that an agent's senses should not be a function the
