@@ -191,6 +191,14 @@ for (const f of report.flows) {
 report.overall.hpi_time_median_of_passes = passTimes.length ? Number(metrics.median(passTimes).toFixed(3)) : null;
 const o = report.overall;
 console.log(`\nHPI_accuracy ${o.hpi_accuracy}   HPI_time ${o.hpi_time ?? '—'}   HPI ${o.hpi ?? '—'}   step_ratio ${o.step_ratio ?? '—'}`);
+if (o.runs_lost_to_device) {
+  // Measured on a full local suite: 5 of 17 runs failed because the guest's
+  // SpringBoard crashed or simctl stopped answering. They used to lower
+  // HPI_accuracy, which is the number this job gates on.
+  console.log(`  over ${o.runs} measurable run(s); ${o.runs_lost_to_device} left the denominator`
+    + ' because the DEVICE failed, not the code (item 173):');
+  for (const c of o.device_causes ?? []) console.log(`    ${c}`);
+}
 if (passTimes.length > 1) {
   console.log(`HPI_time per pass: ${passTimes.join(', ')} — median ${o.hpi_time_median_of_passes} (what the gate reads)`);
 }

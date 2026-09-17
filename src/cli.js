@@ -1275,8 +1275,14 @@ async function main() {
         'flow                      runs  agent p50   human p50   HPI_time  step_ratio  turns  esc',
         ...report.flows.map((f) => metrics.flowRow(f, { wide: true })),
         '',
-        `HPI_accuracy ${report.overall.hpi_accuracy} (${report.overall.runs} runs, ` +
+        `HPI_accuracy ${report.overall.hpi_accuracy} (${report.overall.runs} measurable run(s), ` +
           `${report.overall.runs - runs.filter((r) => r.completed && !r.wrong_action_taken).length} not clean)`,
+        // A denominator that quietly shrinks is worse than one that is wrong.
+        report.overall.runs_lost_to_device
+          ? `  ${report.overall.runs_lost_to_device} further run(s) left the denominator because the DEVICE failed,`
+            + ' not the code — those are unmeasured, not inaccurate (item 173):'
+            + `\n${(report.overall.device_causes ?? []).map((c) => `    ${c}`).join('\n')}`
+          : null,
         report.overall.hpi_time == null
           ? `HPI_time and HPI need a human baseline — none of ${report.overall.flows_measured} measured flow(s) has one yet.`
           : `HPI_time ${report.overall.hpi_time} (harmonic mean over ${report.overall.flows_with_human_baseline} flow(s)), HPI ${report.overall.hpi}`,
@@ -1287,7 +1293,10 @@ async function main() {
         `steps per model call ${report.overall.steps_per_call ?? '—'}`
           + (report.overall.steps_per_call
             ? ` — about ${(((20000 + 1700 * report.overall.steps_per_call) / report.overall.steps_per_call) / 1000).toFixed(1)}s`
-              + ' per step end to end, of which simframe is ~1.7s. Raise this, not the engine.'
+              + ' per step end to end. Raise this, not the engine — but note the ~1.7s'
+              + ' figure for simframe\'s own work is WARM taps inside a batch: a cold app'
+              + ' launch is a large one-off on top, and it dominates short flows'
+              + ' (measured: 6.2s/step over 2 steps with no model at all).'
             : ''),
         flags.out ? `wrote ${flags.out}` : null,
       ]);

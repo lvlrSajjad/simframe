@@ -2873,11 +2873,53 @@ worth more than the verdict.
    exists when one is configured, the default install keeps the false abort, and
    "fixed" would mean "fixed for callers who opted in".
 
-173. **The bench suite wedges the device it measures.** OPEN, and it is the
-   reason `HPI` has never been measured on a hosted runner. Observed four times
-   in one afternoon on two machines: SpringBoard crashing mid-suite, `simctl`
-   then exceeding its 90 s budget, and capture reporting no frame for 600 ms. A
-   revive cures it, the next pass runs, and the pass after that wedges again.
+173. **The bench suite wedges the device it measures.** OPEN, and **the framing
+   was wrong in a way that matters**: it is a *transient crash*, not a
+   persistent wedge, and it is not the only thing stopping measurement.
+
+   Caught on 2026-09-17, in the first complete local run of the suite since
+   item 148. Of 17 runs: 7 passed, **5 failed because the device failed** (two
+   `The system shell (SpringBoard:NNNNN) probably crashed`, three `simctl did
+   not return within 90s`), and **5 failed fast and repeatably for a reason that
+   is not the device at all** — `tap Accessibility` reporting `ok` and not
+   navigating, in 3.2-3.5 s, during passes when the device was healthy.
+
+   **The transience is the reason this was never diagnosed.** After the 69 s
+   SpringBoard failure, `simframe diagnose` — run seconds later — reported
+   `healthy`, fusion 0.857. SpringBoard dies, the launch fails, SpringBoard
+   comes back. A dozen occurrences and not one observation, because by the time
+   anything looks, there is nothing to see. Two consequences:
+
+   - `revive` is a ~40 s device restart for a fault that self-heals in seconds.
+     Waiting for the shell to return and retrying the launch is the cheaper
+     remedy and has not been tried.
+   - The evidence has to be captured **by the failing step**, not afterwards.
+     `ci-device-guard` now diagnoses before it revives, which is better than
+     nothing and is still too late for this signature — the error text itself
+     (`SpringBoard ... probably crashed`) is the observation, and `deviceCause`
+     has recognised it all along. Nothing acted on it.
+
+   It does degrade across passes: passes 1-2 failed fast, pass 3 produced a
+   SpringBoard crash followed by two consecutive 90 s `simctl` timeouts.
+
+   **Fixed as part of this:** `HPI_accuracy` counted all five device failures
+   against the code, so the number CI gates on was partly measuring
+   SpringBoard's stability. Runs whose own escalations record a device cause now
+   leave the denominator and are reported separately. That is item 172's fault
+   in the other column — there `HPI_time` took every run's wall clock regardless
+   of completion, so breaking a flow registered as the agent getting quicker.
+   Accuracy had the mirror image and kept it. New runs only: historical flow
+   records do not keep the error text.
+
+   **Still open and now separable:** the fast failure. 5 of 9 `settings-larger-text`
+   runs ended with the tap on `Accessibility` verified `ok` while the screen
+   stayed on Settings root, so the next step looked for `Display & Text Size` on
+   a root list. It is not the device, it is the failure a user would hit, and it
+   is the next thing to chase. The flow has no `waitFor` between its cold
+   `launch` and that tap, and the passing run took 15.3 s against the failures'
+   3.3 s — so the suspicion is a tap resolving from the remembered screen map
+   before the app has painted. Suspicion, not a finding: the reproduction has
+   not been run.
 
    It defeats measurement in both directions. `bench` on run `35110888779`
    abstained because `settings-larger-text` failed **7 of 7**; an attempt to A/B

@@ -619,7 +619,9 @@ export function flowRecordFrom({
     images_sent: imagesSent,
     input_tokens: null,
     output_tokens: null,
-    escalations: escalations.map((e) => ({ reason: e.reason, step_index: e.step_index, outcome: e.outcome })),
+    escalations: escalations.map((e) => ({
+      reason: e.reason, step_index: e.step_index, outcome: e.outcome, device_cause: e.device_cause ?? null,
+    })),
     escalation_count: escalations.length,
     mis_taps: misTaps,
     verdict_histogram: histogram,
@@ -627,6 +629,22 @@ export function flowRecordFrom({
     exploration_events: [],
     completed: Boolean(completed),
     wrong_action_taken: verdicts.includes('unexpected-screen'),
+    // Did this run fail because the *simulator* failed?
+    //
+    // Measured, on a full local suite: of 17 runs, 5 failed because the guest's
+    // SpringBoard crashed or `simctl` stopped answering for 90 s. `hpi`
+    // counted every one against `HPI_accuracy`, so the gate CI reads was partly
+    // measuring SpringBoard's stability.
+    //
+    // This is item 172 in the other column. There, `HPI_time` took every run's
+    // wall clock regardless of completion, so breaking a flow registered as the
+    // agent getting quicker; the fix was to time only completed runs. Accuracy
+    // had the mirror-image fault and kept it.
+    //
+    // Derived from the escalations this run already wrote — `device_cause` is
+    // set at the step that suffered it — so nothing new has to be plumbed and a
+    // run cannot claim a device fault that its own log does not show.
+    device_cause: escalations.map((e) => e.device_cause).find(Boolean) ?? null,
   };
 }
 
@@ -772,8 +790,14 @@ export function hpi({ flows, baselines = {} }) {
     };
   }).sort((a, b) => a.flow.localeCompare(b.flow));
 
-  const total = flows.length;
-  const clean = flows.filter((f) => f.completed && !f.wrong_action_taken).length;
+  // A run the simulator broke is not a run the code got wrong. It is an
+  // **unmeasured** run, and it leaves the denominator rather than lowering the
+  // score — the same discipline as timing only completed runs (172), and the
+  // same discipline as the suite refusing to publish a partial HPI at all.
+  const lostToDevice = flows.filter((f) => f.device_cause && !f.completed);
+  const measurable = flows.filter((f) => !(f.device_cause && !f.completed));
+  const total = measurable.length;
+  const clean = measurable.filter((f) => f.completed && !f.wrong_action_taken).length;
   const accuracy = total ? Number((clean / total).toFixed(3)) : null;
   const times = perFlow.map((f) => f.hpi_time).filter((x) => Number.isFinite(x));
   const hpiTime = harmonicMean(times);
@@ -781,6 +805,11 @@ export function hpi({ flows, baselines = {} }) {
     flows: perFlow,
     overall: {
       runs: total,
+      // Said out loud, because a denominator that quietly shrinks is worse than
+      // one that is wrong: an accuracy of 1.0 over two measurable runs is not
+      // the same claim as 1.0 over eighteen.
+      runs_lost_to_device: lostToDevice.length,
+      device_causes: [...new Set(lostToDevice.map((f) => f.device_cause))],
       flows_measured: perFlow.length,
       flows_with_human_baseline: times.length,
       hpi_accuracy: accuracy,

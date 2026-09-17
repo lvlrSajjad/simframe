@@ -652,6 +652,46 @@ test('the escalation log names a faculty per verdict, and takes the device out o
     'a named refusal is a read reason — goto knows exactly why it refused');
 });
 
+test('a run the simulator broke is unmeasured, not inaccurate', async () => {
+  const metrics = await import('../src/metrics.js');
+
+  // Measured on a full local suite, 2026-09-17: of 17 runs, 5 failed because
+  // the guest's SpringBoard crashed or `simctl` stopped answering for 90s, and
+  // `hpi` counted every one against HPI_accuracy — the number CI gates on. So
+  // the gate was partly measuring SpringBoard's stability.
+  //
+  // This is item 172 in the other column: there, HPI_time took every run's
+  // wall clock regardless of completion, so breaking a flow registered as the
+  // agent getting faster.
+  const run = (over) => ({
+    flow_name: 'f', wall_time_ms: 1000, steps_taken: 2, total_steps: 2, min_steps: 2,
+    model_turns: 1, completed: true, wrong_action_taken: false, device_cause: null, ...over,
+  });
+  const r = metrics.hpi({ flows: [
+    run({}),
+    run({}),
+    run({ completed: false, device_cause: "the guest's SpringBoard crashed, so nothing can be fronted" }),
+    run({ completed: false, device_cause: 'simctl stopped answering (NSPOSIXErrorDomain 60)' }),
+  ] });
+  assert.equal(r.overall.hpi_accuracy, 1,
+    'two clean runs out of two measurable ones is 1.0 — the simulator dying is not a wrong tap');
+  assert.equal(r.overall.runs, 2, 'and the denominator is the measurable runs');
+  assert.equal(r.overall.runs_lost_to_device, 2);
+  assert.equal(r.overall.device_causes.length, 2,
+    'a denominator that quietly shrinks is worse than one that is wrong');
+
+  // A run that failed on its own merits still counts against accuracy. The
+  // exclusion is narrow on purpose: it needs a device cause the run's own
+  // escalations recorded, not merely a failure.
+  const withRealFailure = metrics.hpi({ flows: [run({}), run({ completed: false })] });
+  assert.equal(withRealFailure.overall.hpi_accuracy, 0.5);
+  assert.equal(withRealFailure.overall.runs_lost_to_device, 0);
+
+  // And a run that completed despite a device hiccup is still a measured run.
+  const recovered = metrics.hpi({ flows: [run({ device_cause: 'simctl stopped answering (NSPOSIXErrorDomain 60)' })] });
+  assert.equal(recovered.overall.runs, 1, 'it completed, so it is evidence');
+});
+
 // --- variant fingerprints -------------------------------------------------
 
 const tok = (n, tag) => Array.from({ length: n }, (_, i) => `${tag}:cell:content:w16:h4:x0:y${i}#1`);

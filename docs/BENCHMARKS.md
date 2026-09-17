@@ -4183,6 +4183,63 @@ Escalation log on this device at the time of measuring: **998 entries** —
 `verification_failed` 551, `ambiguous_intent` 207, `unknown_screen` 167,
 `no_plan` 73.
 
+## A full local bench suite, and what its failures were — 2026-09-17
+
+The first complete local run of the HPI suite since item 148. `326464A4`,
+iPhone 17 Pro / iOS 26.5, `--runs=3 --passes=3`, both flows, no model in the
+loop. **The suite abstained**, correctly: *"a partial suite and must not be
+adopted as a baseline or read as a regression."* Nothing below is a baseline.
+
+What makes it worth recording is the failure set, which nobody had before.
+
+| outcome | runs | what |
+| --- | --- | --- |
+| passed | 7 | contacts x6, settings x1 |
+| **the device failed** | 5 | 2x `SpringBoard probably crashed`, 3x `simctl did not return within 90s` |
+| a fast, repeatable failure | 5 | settings: `tap Accessibility` reports `ok` and does not navigate (3.2-3.5 s) |
+
+**Item 173 is a transient crash, not a persistent wedge.** The 69 s failure was
+`The system shell (SpringBoard:58637) probably crashed`; `simframe diagnose`,
+run seconds later, reported **healthy** with fusion 0.857. SpringBoard dies, the
+launch fails, SpringBoard restarts itself — which is why a dozen occurrences
+have never been observed in the act, and why `revive` (a ~40 s device restart)
+is a heavy cure for something that self-heals.
+
+It also degrades across passes: passes 1-2 failed fast, pass 3 produced a
+SpringBoard crash and two 90 s `simctl` timeouts in a row.
+
+### The launch is a fixed cost, and the arithmetic was missing it
+
+| flow | steps | agent p50 | per step | human p50 | per step |
+| --- | --- | --- | --- | --- | --- |
+| contacts-kate-bell | 2 | 12419 ms | **6.2 s** | 4300 ms | 2.15 s |
+| settings-larger-text | 4 | 15281 ms | 3.8 s | 7799 ms | 1.95 s |
+
+With **zero model calls**, the agent is 2.9x the human on the two-step flow and
+2.0x on the four-step one. That does not fit `1.7s x n`, and the reason is that
+a cold app launch is a **one-off cost amortised over the flow**, not a per-step
+one:
+
+```
+per step = (model round trip + launch cost + ~1.7s x n) / n
+```
+
+which is why a 7-step replay measured 1.82 s/step and a 2-step flow measures
+6.2 s/step. The `~1.7s` figure describes **warm taps inside a batch** and has
+been quoted as though it covered whole flows. Short flows are materially worse
+than the earlier table implied.
+
+`step_ratio` was **1** throughout: when a run completed, it took exactly the
+minimum number of steps. No wandering.
+
+### One consequence in the metric
+
+`HPI_accuracy` counted all five device failures against the code. Runs whose
+own escalations record a device cause now leave the denominator and are reported
+separately — the same discipline as item 172, which had the mirror-image fault
+in `HPI_time`. It applies to new runs only: historical flow records do not keep
+the error text, so there is nothing to derive from.
+
 ## Sensor fusion on a healthy screen — 2026-09-17
 
 Taken to ground the `stale-frame` threshold in `src/wedge.js`, because the first
