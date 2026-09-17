@@ -180,6 +180,105 @@ promotion: measure the prize before building the solution.
    against Playwright driven by the same model with no memory. Anything else
    flatters the result.
 
+### The first baseline flow that ran, and what it falsified — 2026-09-17
+
+One flow — create a record through a four-step wizard — on an internal web app,
+driven with ordinary browser tooling and no memory layer. It completed, with an
+unambiguous confirmation.
+
+| | |
+| --- | --- |
+| wall clock | **354 s** |
+| actions executed | 23 |
+| model turns | **45** |
+| **actions per model turn** | **0.51** |
+| screenshots | 10 |
+| a human who uses the app daily, relaxed | **~60 s** |
+| the same human, rushed | **~30 s** |
+
+**The agent was ~6x slower than a relaxed person and ~12x slower than a rushed
+one**, in the arm with no memory. The 6x figure is the same multiple this
+project measured against a human on iOS, arrived at independently on a different
+target — and the owner supplied the 30 s figure unprompted after reading the
+report, which is the number a skilled operator actually works at.
+
+**The within-session curve is the quantity a transition graph claims to hand a
+fresh session for free**, and it was measured directly rather than controlled
+away:
+
+| phase | actions/turn |
+| --- | --- |
+| locate the entry point, diagnose dead clicks | 0.27 |
+| first dropdown — crack its option markup | 0.50 |
+| second dropdown — crack a *different* markup | 0.63 |
+| **third dropdown — a third markup** | **0.40** |
+| wizard steps, fill, submit | 0.78 |
+
+~2.9x end to end, but the reporter's own discount is the honest figure: much of
+phase 1 is harness diagnosis that a fresh session repeats regardless of app
+memory, so **the recoverable span is ~1.6x**.
+
+#### Three findings that change this document
+
+**1. "Perception is close to free on the web" is false for this app, and that
+premise was load-bearing.** Written here since 2026-09-11 and re-derived
+approvingly by an earlier reporter who had not read it. The flow contained
+**three different dropdown option markups inside one form**, none exposing a
+standard option role, one using a hyphenated invalid ARIA role. The
+accessibility-tree tools could not see a single selectable option anywhere in
+the flow; every selection went through raw HTML dumps and screenshots.
+Perception cost roughly what it costs on iOS.
+
+The reporter's own reading of that is the right one and cuts against their
+result: it means the comparison **can** be won on perception after all — but
+winning it that way is winning against one app's accessibility debt, which is a
+worse reason to build the tool than the memory claim is. A go/no-go decided on
+perception should still be read as a no.
+
+**2. Where memory would actually pay is actuation, not navigation — and this
+project's index does not hold it.** About 12 of the 45 turns were spent learning
+things like *"this control needs hit-test-then-click"*, *"this one needs a
+DOM-level fill followed by a click on a non-semantic div"*. That is **per
+widget**, not per screen. The `(screen_hash, action) -> screen_hash'` graph this
+project builds is keyed on screens and would not store it.
+
+The phase-4 dip is the evidence, and it is the sharpest single observation in
+the report: the third dropdown *in the same form* broke the technique learned on
+the first two and gave back a third of the gain. Their conclusion — *"what was
+being learned was not how this app navigates but how this widget actuates"* — is
+a claim about the shape of the memory, not its value, and it applies to iOS too.
+**Before building a web backend, decide whether the store is screen-keyed,
+control-pattern-keyed, or both.**
+
+**3. This arm's headline number is contaminated, and not in simframe's favour.**
+Roughly 15 of the 45 turns went to discovering and routing around **synthetic
+input that never reached the page** — 4 clicks and 2 keypresses were no-ops,
+including one whose coordinate was verified against the element's bounding rect
+to the pixel. That is a defect in the baseline's harness, not in the flow.
+Comparing 0.51 against a simframe run with working actuation would measure that
+bug. **The number to beat is the post-diagnosis rate: 5 actions in 6 turns,
+0.83.**
+
+#### What this does to the product argument
+
+Even the optimistic version of this arm — harness fixed, actuation known from
+turn one, the best phase rate sustained — lands near 2 minutes. Against a
+relaxed human minute that is ~2x; **against the 30 s a rushed operator actually
+takes, it is ~4x.** A memory layer that removes model turns closes some of that
+and **does not cross the line under any reading.**
+
+So the case cannot rest on beating a human operator's speed, on this evidence.
+It rests on what a human minute cannot do: running unattended, at 3am, fifty
+times, reporting what it saw rather than relying on a person to remember to
+look. And both arms should be reported **against the human time**, because a
+1.6x improvement on a 6x deficit reads very differently from 1.6x presented
+alone.
+
+One caveat the reporter raised unprompted and it is fair: the human minute is a
+*learned* minute. A cold human on an unfamiliar app would not manage 60 s
+either. That is an argument that the memory layer aims at a real cost, not that
+it closes this particular gap.
+
 ### Three corrections to that design, from a baseline attempt — 2026-09-17
 
 The first attempt to collect the baseline arm was **blocked before flow 1, step
