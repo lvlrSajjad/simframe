@@ -259,6 +259,87 @@ Comparing 0.51 against a simframe run with working actuation would measure that
 bug. **The number to beat is the post-diagnosis rate: 5 actions in 6 turns,
 0.83.**
 
+### Flows 2 and 3, and the finding all three runs agree on — 2026-09-17
+
+| | flow 2 (cold, completed) | flow 3 (warm, aborted) |
+| --- | --- | --- |
+| wall clock | ~11 min | 17m45s, unfinished |
+| actions | 7 (2 wasted) | ~15 |
+| model turns | 10 | 18 |
+| **actions per model turn** | **0.70** | **0.83** |
+| screenshots | 2 | 1 |
+
+A human does flow 2 in **under 30 seconds**. The agent took ~11 minutes —
+roughly **20x**. Flow 3's numbers are a partial-flow rate and must not be read
+as a flow cost.
+
+**Transfer: partial and shallow, and the split is the result.** What carried
+between flows was *harness-level* — the coordinate frame, that `.click()` from
+page JS actuates this app's React buttons while synthetic mouse coordinates do
+not, and the discipline of reading state back from the DOM rather than trusting
+a call's success. What did **not** carry was anything *app-level*. A combobox
+pattern learned on one field worked on a second, was wrong for a third (a
+readonly input whose options only exist after a real click), and never opened a
+fourth. **Two required fields in the same form use two different DOM shapes.**
+
+#### A correction to what was written here after flow 1
+
+Flow 1's report was recorded above as falsifying "perception is close to free on
+the web". That was too broad, and flow 2 is explicit: *"Not perception. Reading
+this app is nearly free — one `innerText` dump answers what is on screen."*
+
+The honest split, which all three runs support:
+
+- **Reading a web screen is cheap.** Cheaper than iOS, as originally claimed.
+- **Reading a *control's* actuation contract is expensive**, because the
+  accessibility layer lies about it: a list container carrying `role="list-box"`
+  (a typo for `listbox`) with children carrying no `role="option"` is invisible
+  to every accessibility query, so the tree is confidently wrong rather than
+  merely silent.
+- **Actuating is expensive and non-uniform.** Each control cost 2-4 turns to
+  learn how it accepts input, and the price is paid **per control**, not per
+  screen.
+
+That inverts the platforms rather than equalising them. On iOS, perception is
+expensive and actuation is uniform — everything is a tap at a point. On the web,
+perception is cheap and actuation is a per-widget negotiation.
+
+#### What that means for the thing to build, and it is not a transition graph
+
+Three reports now say the same thing from different directions, and the third
+says it plainly:
+
+> *"No amount of remembering what happened last time helps when the next control
+> is a different widget. If simframe's layer is to beat this arm on the web, the
+> win has to come from* ***recovery*** *— retry-with-a-different-actuation-strategy
+> without consulting the model — rather than from a transition graph, because the
+> graph's unit, a screen and its transitions, is not where the cost is."*
+
+Both flows ran **below 1.0 actions per model turn**, which is the same statement
+arithmetically: most turns bought no progress, only a probe. A local loop that
+tries actuation strategy A, verifies by DOM read, and falls through to B and C
+without a round trip would collapse those probes into single turns. That is
+exactly this project's existing "recovery without a round trip" philosophy —
+the thing `or:` fallbacks and bounded local retry already do for *selectors* —
+applied to *actuation strategy* instead.
+
+So the web go/no-go is **not** a no. It is a redirect: build the actuation-retry
+layer, not the perception layer, and treat the screen graph as secondary on this
+target. And the question raised after flow 1 — screen-keyed or
+control-pattern-keyed — now has an answer for the web, and it is
+control-pattern-keyed.
+
+#### One diagnosis carried back to flow 1
+
+Flow 1 lost ~15 of 45 turns to synthetic input that "never reached the page",
+cause unknown at the time. Flow 2 found it: **the screenshot frame is 800 px wide
+while the CSS viewport is 1532 px**, so every coordinate read off a screenshot
+was ~1.9x off. Clicks landed, just not where they were aimed, and returned
+success. It is a harness defect rather than an app or engine one — and it is
+worth noting that a tool reporting success for a click delivered to the wrong
+place is precisely the silent-success class this project treats as its highest
+priority finding.
+
 #### The baseline's slowness is the measurement, and it has a size
 
 The owner, watching a later run, put it at *"10x slower than mobile, so slow it
