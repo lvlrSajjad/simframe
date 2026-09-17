@@ -1,5 +1,51 @@
 # Escalations — where simframe still needs a model
 
+## What the log could not say, and now can — 2026-09-17
+
+**1,022 records, and 20 of them carried a reason that had been read.** The rest
+were either assumed (279) or written before the `classified` field existed
+(723). CLAUDE.md makes this breakdown decide which faculty gets built next, and
+it had been pointing at one for three phases on 2% evidence.
+
+Three separate faults, all found by reading the corpus rather than the code:
+
+**`FACULTY` is keyed on the reason, and the reason is too coarse.** Every
+`verification_failed` record mapped to "sense of time (Phase 11)". Split by the
+verdict that actually fired:
+
+| verdict | count | points at |
+| --- | --- | --- |
+| `no-visible-change` | 163 | **nothing nameable** — two causes wear it |
+| `unexpected-screen` | 26 | screen identity (item 174) |
+
+`no-visible-change` stays unnamed on purpose. In the field it came
+overwhelmingly from tapping an inert label whose real hit target was an
+invisible chevron — icon semantics — but it also covers a switch moving 0.1% of
+the screen, which is neither faculty. Naming one for 163 records on a coin flip
+is the failure this split exists to fix.
+
+**51 escalations were the device, not the code.** 36 `simctl stopped answering
+(NSPOSIXErrorDomain 60)` and 15 `the guest's SpringBoard crashed`. Item 173's
+own occurrences, filed under a code faculty and reported as evidence that
+Phase 11 was insufficient. They are now excluded from faculty naming and
+counted separately.
+
+**A named refusal is a read reason.** `navigate.refuse` maps `no-route`,
+`unreplayable-edge`, `unknown-flow`, `arrived-elsewhere` and the rest
+deterministically through `PLAN_REASONS`, and never passed `classified: true` —
+so 82 records whose reason was known exactly were filed as assumed. The default
+of `false` is right as a policy; this caller was simply not claiming what it
+knew.
+
+Both new groupings are **derived from `detail` for records that predate the
+fields**, and the report says how many — a recorded fact and a parsed one are
+not the same evidence.
+
+One thing this does not fix: the corpus is dominated by `script` sessions, i.e.
+the bench harness. Even perfectly classified, it describes the harness's
+troubles more than a user's. See item 181.
+
+
 Every time simframe hands a decision back to the agent, it writes a line to
 `~/.simframe/<udid>/escalations.jsonl` (schema: `docs/research/03-human-parity.md`
 §8). This file is the steering wheel for Phases 11–16: **the reason breakdown

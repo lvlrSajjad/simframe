@@ -616,6 +616,42 @@ test('a wedged device is diagnosed from what it shows, not from the shape of the
     'the stale-frame threshold must sit well clear of the measured healthy floor');
 });
 
+test('the escalation log names a faculty per verdict, and takes the device out of the count', async () => {
+  const metrics = await import('../src/metrics.js');
+
+  // The steering wheel CLAUDE.md designates could not steer. Measured on the
+  // bench device's 1022 records: `verification_failed` held 163
+  // `no-visible-change`, 26 `unexpected-screen` and 51 failures that were the
+  // simulator itself — and `FACULTY`, being keyed on the reason, reported all
+  // of them as evidence for "sense of time (Phase 11)".
+  assert.equal(metrics.VERDICT_FACULTY['unexpected-screen'], 'screen identity (item 174)');
+  assert.equal(metrics.VERDICT_FACULTY['no-visible-change'], undefined,
+    'two causes wear this verdict and nothing here can tell them apart — naming a faculty '
+    + 'for 163 records on a coin flip is what this grouping exists to stop');
+
+  // A prefix parser with no vocabulary reported a verdict called "capture",
+  // count 8, from details reading `capture: ...`. An invented category gets
+  // counted, printed, and eventually used to choose a phase.
+  assert.equal(metrics.verdictFromDetail('unexpected-screen: landed elsewhere'), 'unexpected-screen');
+  assert.equal(metrics.verdictFromDetail('capture: no frame for 600ms'), null,
+    '"capture" is not a verdict');
+  assert.equal(metrics.verdictFromDetail('waited 8000ms for General'), null);
+
+  const rows = [
+    { reason: 'verification_failed', outcome: 'escalated_to_model', session_id: 's', detail: 'unexpected-screen: x' },
+    { reason: 'verification_failed', outcome: 'escalated_to_model', session_id: 's', detail: 'no-visible-change: y' },
+    { reason: 'verification_failed', outcome: 'escalated_to_model', session_id: 's', detail: 'could not launch com.apple.Preferences: The system shell (SpringBoard:36454) probably crashed.' },
+    { reason: 'no_plan', outcome: 'escalated_to_model', session_id: 's', classified: true, detail: 'no route' },
+  ];
+  const b = metrics.breakdown(rows);
+  assert.equal(b.total, 4);
+  assert.deepEqual(b.verdicts.map((v) => v.name).sort(), ['no-visible-change', 'unexpected-screen']);
+  assert.equal(b.device_total, 1, 'the SpringBoard crash is the device, not a faculty');
+  assert.equal(b.derived.verdicts, 2, 'and the report must say which half was parsed rather than recorded');
+  assert.equal(b.classified_by_reason.no_plan, 1,
+    'a named refusal is a read reason — goto knows exactly why it refused');
+});
+
 // --- variant fingerprints -------------------------------------------------
 
 const tok = (n, tag) => Array.from({ length: n }, (_, i) => `${tag}:cell:content:w16:h4:x0:y${i}#1`);

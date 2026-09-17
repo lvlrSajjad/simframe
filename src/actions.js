@@ -933,7 +933,19 @@ export async function runScript(
           // switch moving 0.1% of the screen, which is neither faculty. Saying
           // "assumed" is the honest answer; guessing a better-sounding reason
           // would be the same mistake in the other direction.
-          classified: false,
+          //
+          // **Per verdict, though, not per site.** That argument is about
+          // `no-visible-change` and does not extend to every verdict: an
+          // `unexpected-screen` means the screen after the action was not the
+          // one memory predicted, which is item 174 and nothing else.
+          // `metrics.VERDICT_FACULTY` holds the verdicts whose faculty is read,
+          // and `no-visible-change` is deliberately not one of them — so this
+          // still says "assumed" for the 162 records the reasoning above is
+          // actually about, and stops saying it for the 26 it never covered.
+          classified: Boolean(metrics.VERDICT_FACULTY[verification?.verdict]),
+          // Recorded as a field rather than left as a prefix of `detail`, which
+          // is how the breakdown had to recover it: by parsing a string.
+          verdict: verification?.verdict ?? null,
           // `verification_failed` is the largest reason class in the log and it
           // was the only one carrying no intent, which made most of the corpus
           // useless for asking what kind of decision costs us. The step knows
@@ -989,6 +1001,11 @@ export async function runScript(
       const why = metrics.reasonForStepError(step, err);
       noteEscalation({
         stepIndex: i,
+        // When the failure is the simulator rather than the code, say so. 78 of
+        // the bench device's `verification_failed` records are `simctl` failing,
+        // an app that would not launch, or capture stopping — item 173, counted
+        // towards a perception phase.
+        device: why.device ?? null,
         fingerprint: beforeScreen?.hash ?? metrics.fingerprintNow(udid, screenmap),
         reason: why.reason,
         candidates: why.candidates,

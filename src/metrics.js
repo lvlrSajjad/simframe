@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as store from './store.js';
+import { deviceCause } from './device-state.js';
 
 /** The five reasons, from docs/research/03-human-parity.md §8. Nothing else is a reason. */
 export const REASONS = [
@@ -65,6 +66,52 @@ export const FACULTY = {
  * able to say than a count of things nobody has written yet.
  */
 export const BUILT_FACULTIES = new Set(['sense of time (Phase 11)']);
+
+/**
+ * The faculty a `verification_failed` record points at, by **verdict**.
+ *
+ * `FACULTY` is keyed on the reason, and for this class the reason is too coarse
+ * to steer by. Measured on the bench device's 1022 records: of the
+ * `verification_failed` ones, 162 are `no-visible-change`, 26 are
+ * `unexpected-screen`, and about 172 are a wait that timed out — three
+ * different faculties, all of which the report named as "sense of time
+ * (Phase 11)" because that is what the reason maps to.
+ *
+ * `unexpected-screen` is the clearest case: it is item 174, screen identity
+ * fragmenting on content-driven screens, and reporting it as a timing problem
+ * is how a tester was once told their unlabeled-control problem was a timing
+ * problem.
+ */
+/**
+ * The verdict a legacy record carries in the first token of its `detail`.
+ *
+ * Written as `${verdict}: ${detail}` since the field existed, so the prefix is
+ * reliable — but only for records whose detail came from a verdict at all,
+ * which is why this returns null rather than guessing on anything else.
+ */
+export function verdictFromDetail(detail) {
+  const m = /^([a-z][a-z-]{3,30}):\s/.exec(String(detail ?? ''));
+  // Only a verdict that exists. The first draft returned any lowercase prefix
+  // and duly reported a verdict called **"capture"** with a count of 8, from
+  // details reading `capture: ...`. A parser that invents a category gets it
+  // counted, named in a report, and eventually used to choose a phase — which
+  // is the whole failure this grouping was added to fix, reproduced inside the
+  // fix.
+  return m && KNOWN_VERDICTS.has(m[1]) ? m[1] : null;
+}
+
+export const VERDICT_FACULTY = {
+  'unexpected-screen': 'screen identity (item 174)',
+  'still-filling-in': 'sense of time (Phase 11)',
+  // **`no-visible-change` is deliberately absent, and it is the largest verdict
+  // in the log (162 of 1022).** The escalation site has a measured argument for
+  // leaving it unclassified and it is right: in the field it came
+  // overwhelmingly from tapping an inert text label whose real hit target was
+  // an invisible chevron — icon semantics, Phase 15 — but it also covers a
+  // switch moving 0.1% of the screen, which is neither faculty. Two causes, one
+  // verdict, and no way to tell them apart from here. Putting it in this map
+  // would name a faculty for 162 records on a coin flip.
+};
 
 function metricPaths(udid) {
   const dir = store.deviceDir(udid);
@@ -323,6 +370,17 @@ export function reasonForStepError(step, err) {
   // admits "other" collects a pile of "other". What changes is that the record
   // carries whether the reason was *read off the failure* or *assumed*, and
   // the report declines to recommend a faculty for the assumed ones.
+  // The device, not a faculty.
+  //
+  // 78 of this class on the bench device are `xcrun simctl openurl` failing, an
+  // app that would not launch, or capture stopping. Those are item 173, and
+  // filing them under a code faculty is how the log came to offer "sense of
+  // time (Phase 11)" as the remedy for a simulator that had stopped answering.
+  // `classified` stays false because no *faculty* was read; `device` says what
+  // was, so the report can take these out of the faculty count instead of
+  // counting them towards a phase.
+  const device = deviceCause(err?.message);
+  if (device) return { reason: 'verification_failed', candidates: [], tried: [], classified: false, device };
   return { reason: 'verification_failed', candidates: [], tried: [], classified: false };
 }
 
@@ -335,6 +393,17 @@ export function reasonForStepError(step, err) {
  * leaves the agent to judge whether the flow really did what it says.
  */
 export const ESCALATING_VERDICTS = new Set(['unexpected-screen', 'no-visible-change']);
+
+/**
+ * Every verdict the engine can report, for reading legacy details back.
+ *
+ * Wider than `ESCALATING_VERDICTS` — which is the two that hand back to a model
+ * — because a record's detail may carry any of them, and narrower than "any
+ * lowercase word", which is what a prefix parser accepts if nobody bounds it.
+ */
+export const KNOWN_VERDICTS = new Set([
+  'unexpected-screen', 'no-visible-change', 'still-filling-in', 'unverified', 'ok',
+]);
 
 /** How `goto`/`flow run` refusals map. They refuse rather than guess, and the refusal is the hand-back. */
 export const PLAN_REASONS = {
@@ -463,6 +532,14 @@ export function recordEscalation(udid, {
   // Default `false`, so a caller that does not think about it cannot
   // accidentally claim precision it does not have.
   classified = false,
+  // Which device-state condition this failure shows, when it shows one. Kept
+  // separate from `reason` because the five-reason vocabulary is fixed and a
+  // sixth reason collects a pile of "other" — see REASONS.
+  device = null,
+  // Which local verdict fired, for the records that have one. Derivable from
+  // `detail` today by parsing a prefix, which is exactly the fragility the log
+  // should not depend on.
+  verdict = null,
 } = {}) {
   if (!REASONS.includes(reason)) throw new Error(`not an escalation reason: ${reason}`);
   if (!OUTCOMES.includes(outcome)) throw new Error(`not an escalation outcome: ${outcome}`);
@@ -479,6 +556,10 @@ export function recordEscalation(udid, {
     // go/no-go, and on its own it answers "what kind of decision is costing us".
     intent: intent ? String(intent).slice(0, 120) : null,
     classified: Boolean(classified),
+    // Null unless read. Both of these separate "we know" from "we assumed" for
+    // a class that is otherwise one coarse bucket.
+    device_cause: device ? String(device).slice(0, 120) : null,
+    verdict: verdict ? String(verdict).slice(0, 60) : null,
     step_index: stepIndex,
     screen_fingerprint: fingerprint,
     reason,
@@ -728,12 +809,20 @@ export function breakdown(records, { session = null, flow = null } = {}) {
   const classifiedByReason = {};
   const assumedByReason = {};
   for (const r of REASONS) { byReason[r] = 0; classifiedByReason[r] = 0; assumedByReason[r] = 0; }
+  // Two more groupings, because the reason alone could not steer. `byVerdict`
+  // splits the largest class into the three different things it holds, and
+  // `byDevice` takes out the records that are the simulator rather than the
+  // code — those were being counted towards a perception phase.
+  const byVerdict = new Map();
+  const byDevice = new Map();
   const byScreen = new Map();
   const byOutcome = {};
   const bySession = new Map();
   const byFlow = new Map();
   let avoidable = 0;
   let unattributed = 0;
+  let derivedVerdicts = 0;
+  let derivedDevice = 0;
   // Filtering happens here rather than at the call site so `total` and every
   // rate below it describe the same set of records.
   const kept = records.filter((r) => (session ? r?.session_id === session : true))
@@ -757,6 +846,18 @@ export function breakdown(records, { session = null, flow = null } = {}) {
     // real one gets ignored, which this file already knows in another place.
     if (r.classified === true) classifiedByReason[r.reason] += 1;
     else if (r.classified === false) assumedByReason[r.reason] += 1;
+    // Derived for the records that predate the fields, rather than waiting for
+    // a fresh corpus. `detail` already carries both facts — the verdict as its
+    // prefix, the device signature inside the message — so a read-time
+    // derivation turns 1022 existing records into signal without rewriting a
+    // single line of the log. Marked in the output as derived, because a
+    // recorded fact and a parsed one are not the same evidence.
+    const verdict = r.verdict ?? verdictFromDetail(r.detail);
+    const device = r.device_cause ?? deviceCause(r.detail);
+    if (verdict) byVerdict.set(verdict, (byVerdict.get(verdict) ?? 0) + 1);
+    if (device) byDevice.set(device, (byDevice.get(device) ?? 0) + 1);
+    if (!r.verdict && verdict) derivedVerdicts += 1;
+    if (!r.device_cause && device) derivedDevice += 1;
     byOutcome[r.outcome] = (byOutcome[r.outcome] ?? 0) + 1;
     // Already avoided locally, so not avoidable by anything unbuilt.
     if (r.outcome !== 'resolved_locally') avoidable += 1;
@@ -770,8 +871,19 @@ export function breakdown(records, { session = null, flow = null } = {}) {
       return { session_id: id, client, count };
     })
     .sort((a, b) => b.count - a.count);
+  const sorted = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count }));
   return {
     total,
+    // What the reason could not say. `verdicts` is the largest class split into
+    // the faculties it actually implies; `device` is the part that is item 173
+    // wearing a code reason.
+    verdicts: sorted(byVerdict),
+    device: sorted(byDevice),
+    device_total: [...byDevice.values()].reduce((a, b) => a + b, 0),
+    // How much of the two groupings above was parsed out of `detail` rather
+    // than recorded at the time. A reader deciding a phase order should know
+    // which half they are looking at.
+    derived: { verdicts: derivedVerdicts, device: derivedDevice },
     // The log is per-device and shared: two agents on one booted simulator
     // write one interleaved file. More than one session here means the counts
     // below are a pool, and CLAUDE.md uses those counts to choose a phase.

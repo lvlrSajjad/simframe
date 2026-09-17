@@ -47,6 +47,16 @@ function refuse(udid, result, { detail = null, flowName = null } = {}) {
     if (reason) {
       metrics.recordEscalation(udid, {
         reason,
+        // Read, not assumed. `recordEscalation` defaults `classified` to false
+        // so a careless caller cannot claim precision it does not have, which
+        // is right — and this caller is not careless: `result.reason` is a
+        // named refusal (`no-route`, `unreplayable-edge`, `unknown-flow`,
+        // `arrived-elsewhere`…) and PLAN_REASONS maps it deterministically.
+        // Saying nothing filed 82 records on the bench device as "reason
+        // assumed" when the reason was known exactly, which makes the log
+        // understate its own knowledge and the report decline to name a
+        // faculty it was entitled to name.
+        classified: true,
         // A refusal by `goto` is about a destination and one by `flow run` is
         // about a named flow. Either is what a breakdown wants to group by.
         flowName,

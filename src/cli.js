@@ -1376,13 +1376,45 @@ async function main() {
             if (read > 0) {
               verdict = named + (read < n ? ` (on the ${read} of ${n} whose reason was read)` : '');
             } else if (assumed > 0) {
-              verdict = 'reason assumed, not read — no faculty can be named from these';
+              // For `verification_failed` this line used to end the story, and
+              // it is no longer the whole truth: the verdict split below names
+              // a faculty for some of them and takes the device's own failures
+              // out altogether.
+              verdict = r === 'verification_failed' && (b.verdicts?.length || b.device_total)
+                ? 'reason too coarse to steer by — see the verdict split below'
+                : 'reason assumed, not read — no faculty can be named from these';
             } else {
               // Neither read nor assumed: the log predates the distinction.
-              verdict = `${named} — but these records predate the check, so treat it as untested`;
+              verdict = `${named} — but these records predate the check, so treat it as untested`
+                + ' (legacy, not assumed)';
             }
             return `  ${r.padEnd(20)} ${String(n).padStart(4)}   ${verdict}`;
           }),
+        // The two things the reason alone could not say.
+        //
+        // Both exist because the per-reason table above was the steering wheel
+        // and it pointed at one faculty for a class holding three, and counted
+        // the simulator's own failures towards a perception phase.
+        b.verdicts?.length ? '' : null,
+        b.verdicts?.length
+          ? 'verification_failed, split by the verdict that fired'
+            + (b.derived?.verdicts
+              ? ` (${b.derived.verdicts} of ${b.verdicts.reduce((a, v) => a + v.count, 0)} derived from the detail text, not recorded at the time):`
+              : ':')
+          : null,
+        ...(b.verdicts ?? []).slice(0, 8).map((v) => {
+          const faculty = metrics.VERDICT_FACULTY[v.name];
+          return `  ${v.name.padEnd(20)} ${String(v.count).padStart(4)}   `
+            + (faculty
+              ? `points at: ${faculty}`
+              : 'no faculty follows from this verdict alone — see metrics.VERDICT_FACULTY');
+        }),
+        b.device_total ? '' : null,
+        b.device_total
+          ? `${b.device_total} escalation(s) were the DEVICE, not the code — item 173, and not evidence for any faculty`
+            + `${b.derived?.device ? ` (${b.derived.device} derived from the detail text)` : ''}:`
+          : null,
+        ...(b.device ?? []).slice(0, 6).map((d) => `  ${String(d.count).padStart(4)}  ${d.name}`),
         b.total ? '' : null,
         b.total ? `avoidable ${b.avoidable}/${b.total} (${b.avoidable_escalation_rate})` : null,
         // Said out loud rather than left for someone to discover: the rate is
