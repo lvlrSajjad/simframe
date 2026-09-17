@@ -236,6 +236,15 @@ no extension: the agent opens the page, stops at the login screen, and the owner
 signs in to that pane by hand. Credentials stay with the human either way; what
 changes is that a login screen is no longer terminal.
 
+One more round trip was lost to *who* the request was addressed to. The peer
+reported the login screen as "your move: type the credentials yourself", which
+reached another Claude rather than a person — and was correctly refused twice
+over: no agent enters credentials, and a browser pane belongs to the session that
+opened it, so no other session could have acted on it anyway. The prompt now says
+to name the human operator explicitly and to never hand the request to a relaying
+agent. Worth the line, because "ask a human" and "ask whoever is reading this"
+are the same sentence to a model and different instructions in practice.
+
 ## Where this belongs in the article
 
 The piece currently argues that an agent's senses should not be a function the
