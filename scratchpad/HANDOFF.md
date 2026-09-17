@@ -11,6 +11,15 @@
 > complete run. Fixed in `25ecfe0`, in all three places it lived, with the
 > negative case added to `ci-memory`. Item **176**.
 >
+> **Both fixes below were found broken again by running them on a device after
+> the unit suite was green** — `optional` was a no-op on every screen it was
+> built for (the tag it keyed on is chosen by whether the *screen* was
+> recognised, not whether the *target* was found), and the start-screen note
+> fired on most correct replays because most flows open with a `launch`. Neither
+> was caught by a test; both tests passed because their fixtures were invented
+> to match the assumption rather than taken from what the throw sites produce.
+> **Run new behaviour on `326464A4` before believing a green suite.**
+>
 > Also fixed there: `"optional": true` on a step (**177**) — six correct steps
 > were being discarded because a first-launch sheet did *not* appear, so no flow
 > crossing an interstitial could be batched at all; `startScreen`, which every
@@ -207,10 +216,16 @@ Two reports, opposite conclusions, and only the second one counted anything.
   `35157973651`), so it produced nothing at all — less than the abstention this
   line predicted. The same run's `integration (fingerprint)` failed, and so did
   the one on `main` after it. See the block at the top of this file.
-- **0.16.1 is not cut.** The fixes in `25ecfe0` are on `main` and unreleased.
-  The standing rule is don't publish on a red CI, and CI is red for a reason
-  that predates this work — that is the owner's call, not an obstacle to route
-  around.
+- **0.17.0 is published and verified** (2026-09-17). `release` green via OIDC,
+  npm `latest` = 0.17.0, `check-published.mjs 0.17.0` 85/85 identical, pre-tag
+  diff empty. Minor rather than patch because `"optional": true` is new
+  functionality, not only a fix.
+
+  It shipped with `integration (fingerprint)` **red**, deliberately and with the
+  owner's decision: the failure is the device wedge (171 inside 173) and it
+  fails identically on `main` and on the `v0.16.0` tag, i.e. it predates this
+  work. **`bench` does not run on this path, so 0.17.0 carries no HPI
+  measurement** — the same as every release since item 148.
 - **The replay measurement has now been skipped by two peers in a row.** It is
   §3 of the peer prompt, numbered, with a stopwatch, and it is the one number
   that demonstrates human parity outside this machine. Insist on it.
