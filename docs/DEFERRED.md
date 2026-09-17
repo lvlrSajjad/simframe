@@ -2896,11 +2896,37 @@ worth more than the verdict.
    because `agreement` is null unless both sensors report something and nothing
    else was looking.
 
-   Not done: **`revive` should verify the tree, not only the frames.** Its final
-   check reads `getState().hash`, which capture alone satisfies. Reading one
-   element through `AXPTranslator` would cost a single call and would have
-   caught this. Whether the tree can be restored without a second restart is
-   unknown and is the first thing to find out.
+   **Done: `revive` now asks `diagnose`'s question rather than a weaker one of
+   its own.** Its final check read `getState().hash`, which capture alone
+   satisfies, so it reported "producing frames again" on a device whose tree was
+   dead. It now polls the classifier and reports the verdict.
+
+   **And the first version of that fix was wrong in the other direction**, which
+   is worth recording because it is this project's recurring shape. It demanded
+   `healthy` and exited non-zero otherwise — turning a *transient* state into a
+   hard failure. Measured sequence on `326464A4`:
+
+   | step | tree | OCR |
+   | --- | --- | --- |
+   | after a revive that reported success | **0** | 20 |
+   | after a *second* full revive | **0** | 20 |
+   | after launching Preferences | 14 | 15 |
+   | back on the springboard | 13 | 20 |
+
+   So a silent tree **survives a device restart and clears on the next app
+   launch**. It is not springboard-specific — the springboard reads 13 elements
+   either side of it — and the device taps and reads by OCR throughout. Failing
+   it would be a false refusal, item 175's shape. `revive` now exits non-zero
+   only for `UNUSABLE` states (`capture-down`, `nothing-readable`,
+   `read-failed`) and reports the rest as degraded.
+
+   **Still open:** *why* an app launch restores it, and whether the daemon
+   should do that itself at the end of a revive. One observation is not
+   causation — it may simply have recovered with time — and the cheap
+   experiment is to revive, wait the same interval without launching anything,
+   and read again. The suspicion worth testing is that a SpringBoard crash
+   (item 173) leaves its accessibility server unregistered until something
+   re-establishes the bridge, which would tie 183 to 173 rather than to revive.
 
 173. **The bench suite wedges the device it measures.** OPEN, and **the framing
    was wrong in a way that matters**: it is a *transient crash*, not a

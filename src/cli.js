@@ -12,6 +12,17 @@ import * as baseline from './baseline.js';
 import * as metrics from './metrics.js';
 import * as navigate from './navigate.js';
 import * as wedge from './wedge.js';
+
+/**
+ * How hard `revive` looks before calling a device unhealthy.
+ *
+ * A device seconds out of a boot is still settling, and one reading would make
+ * that a false alarm — the failure shape of item 175. Five looks over ~8s is
+ * longer than any settle observed after a boot and far shorter than the revive
+ * itself.
+ */
+const REVIVE_HEALTH_POLLS = 5;
+const REVIVE_HEALTH_WAIT_MS = 2000;
 import { decodePng } from './png.js';
 import * as storage from './storage.js';
 import * as store from './store.js';
@@ -439,13 +450,42 @@ async function main() {
         () => restartDevice(dev.udid));
       await did('started capture', () => api.ensureDaemon(dev.udid));
       await did('rebuilt the HID session', () => input.resetSession(dev.udid));
-      const health = await api.getState(dev.udid).then((s) => s?.state ?? null).catch(() => null);
-      const alive = Boolean(health?.hash);
-      emit(flags, { ok: alive, device: dev.udid, steps }, alive
-        ? `\n${dev.name} is producing frames again`
-        : `\n${dev.name} is still not producing frames. This is past what simframe can do —`
-          + ' check Simulator.app is not showing an error, and see docs/DEFERRED.md item 95.');
-      if (!alive) process.exitCode = 1;
+      // **Frames are not the whole device.** This check read `getState().hash`,
+      // which capture alone satisfies — so a revive that restored the
+      // framebuffer and left the accessibility tree dead reported "producing
+      // frames again" and exited 0. Observed on the bench device (item 183):
+      // 0 elements from the tree, 20 from OCR, immediately after a revive that
+      // called itself a success. Every intent on that device was silently
+      // resolving against OCR alone.
+      //
+      // So it asks the question `diagnose` asks, rather than a weaker one of
+      // its own. Polled, because a device seconds out of a boot is legitimately
+      // still settling and one reading would turn that into a false alarm —
+      // the shape of item 175, which this file has had to correct twice.
+      let diag = null;
+      for (let attempt = 0; attempt < REVIVE_HEALTH_POLLS; attempt += 1) {
+        diag = await wedge.diagnose(dev.udid, { options }).catch(() => null);
+        if (diag?.verdict?.state === 'healthy') break;
+        if (attempt < REVIVE_HEALTH_POLLS - 1) await new Promise((r) => setTimeout(r, REVIVE_HEALTH_WAIT_MS));
+      }
+      // Usable, not perfect. Demanding `healthy` here failed a device whose
+      // accessibility tree was briefly silent — a state that survives a revive
+      // and then clears on the next app launch, while the device taps and reads
+      // by OCR throughout. Exiting non-zero on that is a false refusal.
+      const state = diag?.verdict?.state ?? 'read-failed';
+      const usable = !wedge.UNUSABLE.has(state);
+      const degraded = usable && state !== 'healthy';
+      emit(flags, { ok: usable, device: dev.udid, steps, verdict: diag?.verdict ?? null }, usable
+        ? (degraded
+          ? `\n${dev.name} is back and usable, but ${state}:\n  ${diag.verdict.detail}`
+            + '\nNot a failure — it taps and reads. An app launch often clears a silent tree.'
+          : `\n${dev.name} is healthy again — ${diag.verdict.detail}`)
+        : `\n${dev.name} came back ${state}, which is not usable.`
+          + `\n  ${diag?.verdict?.detail ?? 'nothing could be read from it'}`
+          + '\nA second revive sometimes clears it. If it does not, this is past what simframe'
+          + ' can do — check Simulator.app is not showing an error, and see docs/DEFERRED.md'
+          + ' items 95 and 183.');
+      if (!usable) process.exitCode = 1;
       return;
     }
 

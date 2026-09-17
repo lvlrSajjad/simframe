@@ -239,6 +239,19 @@ export function classify(snap) {
   return { state: 'healthy', detail: `${total} element(s), sensors agree on ${snap.agreement ?? 'n/a'}`, revive: false };
 }
 
+/**
+ * States that mean the device cannot be driven at all, as opposed to states
+ * that mean it is degraded and should be said out loud.
+ *
+ * The distinction earns its place in `revive`. Demanding `healthy` there turned
+ * a **transient** `tree-silent` into a hard failure and a non-zero exit — and it
+ * is transient: observed surviving a full revive, then clearing after any app
+ * launch, with the springboard reading 13 tree elements again afterwards. A
+ * device whose tree is briefly silent still taps, still reads by OCR, and still
+ * recovers. Failing it is the false-refusal shape of item 175.
+ */
+export const UNUSABLE = new Set(['capture-down', 'nothing-readable', 'read-failed']);
+
 export async function diagnose(deviceQuery, { options } = {}) {
   const snap = await snapshot(deviceQuery, { options });
   return { ...snap, verdict: classify(snap) };

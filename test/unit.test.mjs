@@ -642,6 +642,17 @@ test('a wedged device is diagnosed from what it shows, not from the shape of the
     frontmost: { pid: 1, title: null },
   }).state, 'tree-silent');
 
+  // Usable is not the same question as healthy, and `revive` asks the first.
+  // Demanding healthy there failed a device whose tree was briefly silent — a
+  // state that survived a full revive and then cleared on the next app launch,
+  // while the device tapped and read by OCR throughout. Exiting non-zero on
+  // that is a false refusal, which is item 175's shape.
+  assert.equal(wedge.UNUSABLE.has('tree-silent'), false, 'a silent tree still taps and reads');
+  assert.equal(wedge.UNUSABLE.has('stale-frame'), false);
+  assert.equal(wedge.UNUSABLE.has('not-presenting'), false);
+  assert.equal(wedge.UNUSABLE.has('capture-down'), true);
+  assert.equal(wedge.UNUSABLE.has('nothing-readable'), true);
+
   assert.equal(wedge.classify({ frame: null }).state, 'capture-down');
   const down = wedge.classify({
     frame: null,
