@@ -475,7 +475,7 @@ Latency was the reason I started this. The existing simulator tooling was too sl
 
 A tester driving a four-step wizard described the experience as *“30+ seconds between each step”*. That perception was exactly right, and simframe was not what was spending it. Of **462 seconds** of wall clock, about **156** were simframe and about **276** were the agent thinking between calls — **34 per cent against 60 per cent**. The remaining 6 per cent was one device reboot.
 
-So per-step wall clock is not a property of the engine at all. It is arithmetic about how many steps fit in one model call:
+So per-step wall clock is not a property of the engine at all. It is arithmetic about how many steps fit in one model call — plus one term I left out for a week, which the section after this one is about:
 
 **Wall clock per step, by steps per model call**
 
@@ -495,6 +495,27 @@ So per-step wall clock is not a property of the engine at all. It is arithmetic 
 **Two of those rows do not belong next to the human, and for a while I wrote as though they did.** A tester’s 1.95 s is the entire loop — look, decide, act. The 1.7 s is simframe with the deciding taken out, because the deciding *is* the round trip. And a replay decides nothing at all: it is a recording being played back, so its honest counterpart is a person repeating a flow they have memorised, who would be comfortably under 1.95 s. Setting either against a human working a wizard out for the first time compares a subset to a whole, or a rehearsal to a first attempt.
 
 The one like-for-like comparison in the table is **1.95 s against ~11.7 s — about six times a human**, and about eleven times when a failure forces a call per step. That is the number, and it is the one that has improved: the same flow went from 33 tool calls to 16 in two days. *Much less slow* is the honest headline. *As fast as a person* was never true, and I had the arithmetic to know it.
+
+### The launch is a fixed cost, and the formula was missing it
+
+The corrections above all came from people reading what I had written. This one came from finally running the benchmark suite end to end, which had never completed since the instrumentation landed. Two routes, **no model in the loop at all**:
+
+**Measured with zero model calls — iPhone 17 Pro, iOS 26.5**
+
+| Route | Steps | Agent | Per step | Human | Per step |
+| --- | --- | --- | --- | --- | --- |
+| contacts | 2 | 12,419 ms | **6.2 s** | 4,300 ms | 2.15 s |
+| settings | 4 | 15,281 ms | 3.8 s | 7,799 ms | 1.95 s |
+
+2.9× a human on the short route with nothing thinking, which does not fit `1.7s × n` in any reading. A cold app launch is a **one-off cost amortised over the route**, not a per-step one:
+
+```
+per step = (model round trip + launch cost + ~1.7s × n) / n
+```
+
+That reconciles the two numbers that had looked inconsistent: a 7-step replay at 1.82 s/step and a 2-step route at 6.2 s/step are the same machine, with one launch spread over 7 steps or over 2. The `~1.7 s` figure describes *warm taps inside a batch*, and I had been quoting it as though it covered whole routes. **Short routes are materially worse than every table I had published.**
+
+One number from that suite is unambiguously good, and it is worth saying because most of this section is not: `step_ratio` was **1** throughout. When a run completed, it took exactly the minimum number of steps. It does not wander.
 
 Which reorders every other item on the list. A wrong tap is a correctness bug and a false refusal is an annoyance, but both of them are also *latency* bugs, and the latency is the larger cost: **every hard-fail that drops a caller back to single-stepping costs a round trip worth ten to twenty times the failed call itself.** One reporter reached the same place from the other end and put it better than my own issue tracker did — their run took 33 tool calls where a clean one needs about 8, and *“the 25 extra calls were all recovery, and they are essentially the entire 7m42s.”*
 

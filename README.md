@@ -751,6 +751,30 @@ project: **there is nothing left to win inside the engine.** 1.7 s is small
 beside a 20 s round trip, so making perception or input faster buys single-digit
 percentages. The only variable that matters is `n` — how many steps one decision
 covers. Every improvement here has come from raising it, not from faster code.
+
+### One more term: the launch is a fixed cost
+
+Measured on the benchmark suite with **no model in the loop at all**:
+
+| route | steps | agent | per step | human | per step |
+| --- | --- | --- | --- | --- | --- |
+| contacts-kate-bell | 2 | 12419 ms | **6.2 s** | 4300 ms | 2.15 s |
+| settings-larger-text | 4 | 15281 ms | 3.8 s | 7799 ms | 1.95 s |
+
+2.9× a human on the short route with nothing thinking, which does not fit
+`1.7s × n`. A cold app launch is a **one-off cost amortised over the route**:
+
+```
+per step = (model round trip + launch cost + ~1.7s × n) / n
+```
+
+That reconciles a 7-step replay at 1.82 s/step with a 2-step route at 6.2 s/step
+— one launch spread over 7 steps or over 2. **The `~1.7 s` figure is warm taps
+inside a batch**, and short routes are materially worse than the table above
+implies on its own.
+
+`step_ratio` was **1** throughout: when a run completed it took exactly the
+minimum number of steps.
 A field report put the split at **34% simframe, 60% agent round trips** over
 462 s of wall clock — the tester's *"30+ seconds between each step"* was
 accurate and was not simframe. So there is nothing left to win inside the
