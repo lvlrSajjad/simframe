@@ -2950,7 +2950,15 @@ worth more than the verdict.
 
    **The delay experiment was run and it invalidated itself.** Varying only the
    wait between launch and tap gave **4/4 landings at 0 ms and 4/4 at 600 ms** —
-   the failure did not occur at all. The reason is in the apparatus: to report
+   the failure did not occur at all. A third arm at 2000 ms reported **0/4**,
+   and it must be discarded rather than read as a result: its tree sizes at tap
+   time were `0, 13, 0, 0`, so three of its four runs were taken against a
+   device that was showing nothing at all. `simframe diagnose`, run straight
+   afterwards, confirmed `nothing-readable`. That arm measured a dying device.
+
+   The column that spoiled this experiment is the same column that proves its
+   last arm invalid, which is an argument for keeping it and controlling for it
+   rather than removing it. The reason is in the apparatus: to report
    tree size, every arm performed a `screenIdentity(fresh: true)` between the
    launch and the tap. That is not a neutral observation. It forces a fresh
    perception pass, and every failing tap on record had reported `memory d=0`.
