@@ -22,6 +22,7 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 | 2026-09-10 | Phase 11.5's premise (the agent is not batching) | **OVERTURNED** | It batches 84% of the time |
 | 2026-09-10 | The map cut — drop prose from the element list | **REVERTED, same day** | It deleted list rows |
 | 2026-09-10 | No third-party app identifier in this repo, ever | **ADOPTED** | A real leak, mine |
+| 2026-09-18 | Screen memory may deny a target on its own | **OVERTURNED** | 12/12: memory missed, a fresh read found it |
 | 2026-09-11 | Phase 19 — the web as a third target | **ROADMAP** | Port the philosophy, not the implementation |
 | 2026-09-09 | Learned stillness — a settle window per edge | **REVERTED for cause** | Faster, and it corrupted the graph |
 | 2026-09-09 | Phase 8b — Android accessibility APK | **DEFERRED** | OCR + CV first; the pain is elsewhere |
@@ -450,6 +451,49 @@ sessions against a release still in beta. The provider protocol is the
 interesting one — it would let a different model sit behind the same Swift API —
 but it is still a dependency-and-weights decision, taken deliberately or not at
 all. Nothing we ship today may depend on any of it.
+
+## Screen memory may confirm, never deny — 2026-09-18
+
+**Decision: a miss that came out of a recall is not an answer.** It earns one
+fresh read before the step fails. A miss off a freshly built map is still final,
+and so is a genuine ambiguity.
+
+**What settled it.** At the instant a flow's next step asks, asked twice:
+memory said "not on this screen" in **25 ms**, a fresh read found the target in
+**1.8 s**, twelve times out of twelve, on the same device, with nothing touching
+it in between. The recall was keying on the first frame of a push animation —
+captured 47-124 ms *after* the tap, so newer than the action, and still showing
+the screen being left. Numbers in `docs/BENCHMARKS.md`, mechanism in DEFERRED
+184.
+
+**Why this is a judgement and not just a bug fix.** It puts a second rule beside
+the one this project already had for OCR — *a sensor may confirm, never deny* —
+and says screen memory is in the same category. Memory is a cache of a
+perception, so it inherits the perception's authority to say "yes, here it is"
+and not the authority to say "no, and stop". The asymmetry is what makes it
+cheap: the hit path, which is the entire speed argument, pays nothing, and the
+cost lands only where the alternative was aborting the batch and buying a ~20 s
+model round trip.
+
+**The cost if this is wrong.** A genuine "not on this screen" now costs ~1.8 s
+more before it is reported. That is the wrong trade only if misses are common
+and mostly real; today they are common and were mostly stale.
+
+**What it does not fix, said here so nobody reads it as closed.** `settledState`
+still calls a mid-animation frame settled and `recallNearest` will still name the
+previous screen from one. A recall that finds a *same-named* control on the old
+screen's map would tap the wrong place and nothing here would notice, because
+nothing here made the recall more correct — it made a miss recoverable. The
+structural fix belongs with item 174.
+
+**And the methodological half, because it cost three days.** Item 173 ran two
+experiments on this failure and both measured the wrong step. The failure needs
+the step *after* the tap: launch-and-tap in isolation reproduces it 0 times in
+12, in either arm. One of those experiments also invalidated itself by inserting
+a fresh read into every arm — the variable under test. The rule this leaves:
+**before varying anything, establish the smallest vehicle that still reproduces
+the failure.** Both experiments would have been unnecessary if that had been
+done first, and the third one found it in an afternoon.
 
 ## Web as a third target: deferred, and redirected — 2026-09-18
 

@@ -2511,6 +2511,140 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+184. **The fast failure: a memory recall answered from the screen the flow had
+   just left.** FIXED, 2026-09-18. This is item 173's open half, and the
+   diagnosis is not any of the three things that had been suspected.
+
+   **Where it lives, which took three vehicles to find.** The failure needs the
+   step *after* the tap. Launch-and-tap in isolation: 12 trials, 0 failures,
+   including trials that resolved `memory d=0` at `201,380` — the exact failing
+   signature — and landed. The bench's own reset plus `runScript`, two steps: 8
+   trials, 0 failures. The same thing with the full four steps: **6 of 6**. So
+   the tap was never the problem, and every experiment that stopped at the tap
+   was measuring the wrong step.
+
+   **The decisive measurement.** At the instant the next step asks, ask the same
+   question twice — once from memory, which is what the step does, and once with
+   `refresh: true`. Two runs, four trials and eight:
+
+   ```
+   memory: not found (25ms) — "Display & Text Size" is not on this screen. Visible: Settings, …
+   fresh : FOUND at 201,504 (from=built) in 1808ms
+   ```
+
+   Twelve for twelve. Nothing touched the device between the two calls.
+
+   **Why the recall is wrong, and it is not staleness in the usual sense.** The
+   frame it keys on was captured **47-124 ms after the tap** — newer than the
+   input, so every "is this frame older than the action" guard passes it. It is
+   the first frame of the push animation, which still looks like the screen
+   being left. Capture is damage-driven, so that frame then goes still;
+   `settledState` saw 508-713 ms of stillness and returned `settled: true` on
+   every trial; and `recallNearest` — tolerant on purpose, because a list with
+   new rows is still the same screen — matched it back to the previous screen
+   and answered out of *that* screen's stored element list. Hence an error that
+   lists Settings root's rows while the device is mid-push to Accessibility. The
+   destination arrives about 750 ms later and has the target on it.
+
+   `stableForMs` is measuring **capture** stillness, not screen stillness. The
+   animation was running the whole time. "Frames are not a clock", again.
+
+   **The fix: memory may confirm, never deny.** A miss whose answer came out of
+   a recall earns one fresh read; a miss off a freshly built map does not,
+   because it has already read both sensors, and a genuine ambiguity does not,
+   because reading again cannot make two things one. The cost is paid only on a
+   miss — which today aborts the batch and buys a ~20 s model round trip, so
+   1.8 s to be sure is the cheaper mistake — and the hit path, which is what the
+   whole speed argument rests on, is untouched.
+
+   **The recovery already existed and had never run.** `locate` retries with
+   `refresh: true` on exactly these reasons — and only in `ax-first` sensor
+   mode, behind a guard at the top of the function. The default mode is `full`.
+   So the code that answers this had been sitting one branch away from every
+   affected call since it was written.
+
+   **Measured after**: `settings-larger-text` 5 of 5 measurable runs at the
+   bench's own cooldown and 8 of 8 at 4000 ms, against 1 of 9 on 2026-09-17.
+   `HPI_accuracy 1`, `step_ratio 1`. Numbers in `docs/BENCHMARKS.md`.
+
+   **What is NOT fixed, and is the better fix if anyone returns to this.** The
+   underlying wrongness is still there: `settledState` calls a mid-animation
+   frame settled, and `recallNearest` will still name the previous screen from
+   it. Everything above makes a *miss* recoverable. A recall that mid-push
+   happens to find a same-named control on the old screen's map would still tap
+   the wrong place and nothing here would notice. The structural version is
+   item 174's territory — a recall must not return the screen the previous step
+   was just verified to have left — and it needs the graph's `from` plumbed into
+   `locate`, which is a bigger change than this one.
+
+185. **`diagnose` cannot tell a device with no display port from a daemon that
+   is stuck attaching.** OPEN, seen once, 2026-09-18, and cheap.
+
+   A booted device that had never been attached to Simulator.app reported:
+
+   ```
+   326464A4 — capture-down
+     capture is not producing frames: simframe daemon did not produce a frame
+     for iPhone 17 Pro — the daemon process started but never claimed the device
+     in 60s — it is stuck attaching to the simulator rather than failing to launch
+   ```
+
+   The daemon was not stuck attaching. `simctl` says the actual condition in one
+   sentence — `Device does not have a 'default' display port` — and `doctor`
+   reached it (`even simctl could not screenshot this device`) while `diagnose`,
+   the instrument that exists to name device states, asserted a cause it had not
+   checked. Shutting the device down and booting it with Simulator.app running
+   fixed it; whether `revive` would have is untested, so the recommended remedy
+   may or may not be right, which is its own argument for naming the state.
+
+   Worth a verdict of its own rather than a better sentence under
+   `capture-down`: "no display" and "capture is broken" want different actions.
+
+186. **A run lost to the device still writes `device_cause: null`, so
+   `HPI_accuracy` counts it against the code.** PARTLY FIXED, 2026-09-18.
+
+   Item 173 recorded this as fixed — "runs whose own escalations record a device
+   cause now leave the denominator". Checked against the record, it is not, for
+   the failure shape that matters most. Every one of the 2026-09-17 bench's
+   device deaths is on disk with `device_cause: null`:
+
+   ```
+   12:20:29  settings-larger-text  68957ms  1/4  device_cause= None   (SpringBoard crashed)
+   12:21:49  settings-larger-text  95584ms  1/4  device_cause= None   (simctl did not return within 90s)
+   12:24:30  settings-larger-text  95602ms  1/4  device_cause= None   (simctl did not return within 90s)
+   ```
+
+   **Half of it was a missing signature and is fixed.** `simctl did not return
+   within 90s (killed by simframe…)` matched nothing in `DEVICE_STATE`, so two
+   thirds of those runs were unclassifiable by construction. It is in the table
+   now, with the bench output verbatim in the test, and the next run proved it:
+   *"3 left the denominator because the DEVICE failed, not the code"*, naming
+   both causes, `HPI_accuracy 1` instead of 0.625.
+
+   **Half of it is still open.** The 68957 ms run failed on the SpringBoard
+   signature, which `deviceCause` has recognised since v0.14.3 — and its record
+   still says `null`. A launch that throws leaves `runScript` by a path that
+   writes the flow record without an escalation carrying the cause. Until that
+   is traced, the derivation in `metrics.js` ("derived from the escalations this
+   run already wrote") is true and the escalations are not always written.
+
+187. **The bench paces itself faster than the device tolerates, and that is a
+   large part of "the suite wedges the device it measures".** OPEN, measured
+   2026-09-18, not yet acted on.
+
+   Same flow, same device, same afternoon, varying only `--cooldown`:
+
+   | cooldown | trials before the device stopped being readable |
+   |---|---|
+   | 1500 ms (the default) | 4, 4, 5 |
+   | 4000-5000 ms | 8, and `healthy` at the end |
+
+   One sample per run, so this is a direction and not a threshold. It points the
+   same way as the suite's own comment about relaunching an app as fast as a
+   script can, and it is the cheapest thing left that would let a full pass
+   finish. Raising a default is a measurement change, though — every committed
+   HPI number was taken at 1500 — so it wants deciding rather than doing.
+
 181. **`simframe hpi` reports the bench suite, not the session you just ran —
    and a flag it does not understand is ignored rather than refused.** PARTLY
    FIXED, 2026-09-17.
@@ -2920,13 +3054,30 @@ worth more than the verdict.
    only for `UNUSABLE` states (`capture-down`, `nothing-readable`,
    `read-failed`) and reports the rest as degraded.
 
-   **Still open:** *why* an app launch restores it, and whether the daemon
-   should do that itself at the end of a revive. One observation is not
-   causation — it may simply have recovered with time — and the cheap
-   experiment is to revive, wait the same interval without launching anything,
-   and read again. The suspicion worth testing is that a SpringBoard crash
-   (item 173) leaves its accessibility server unregistered until something
-   re-establishes the bridge, which would tie 183 to 173 rather than to revive.
+   **Answered, 2026-09-18, by the experiment this paragraph asked for.** The
+   device was left in the condition and read six times over 60 seconds with
+   nothing touching it — `0` elements by tree and `4` by OCR, every single
+   read. Then one app launch: **14 by tree**, immediately.
+
+   ```
+    0s tree-silent  tree=0 ocr=4      41s tree-silent  tree=0 ocr=4
+   10s tree-silent  tree=0 ocr=4      51s tree-silent  tree=0 ocr=4
+   21s tree-silent  tree=0 ocr=4      → one launch → healthy  tree=14 ocr=16
+   31s tree-silent  tree=0 ocr=4
+   ```
+
+   So time alone does **not** restore it and a launch does. `revive` now
+   performs that launch itself when it ends `tree-silent`, rather than printing
+   "an app launch often clears a silent tree" and leaving the caller to do it —
+   and the first device it ran on afterwards came back `healthy` where it would
+   previously have reported "usable, but tree-silent". Settings, because it
+   exists on every simulator and opening it changes nothing a caller relies on;
+   the app is incidental, what clears the tree is that something launched.
+
+   **Still open:** *why*. The suspicion is unchanged and now has one fact under
+   it — that a SpringBoard crash (item 173) leaves its accessibility server
+   unregistered until something re-establishes the bridge. The 60-second null
+   result is consistent with that and does not prove it.
 
 173. **The bench suite wedges the device it measures.** OPEN, and **the framing
    was wrong in a way that matters**: it is a *transient crash*, not a
@@ -2947,7 +3098,13 @@ worth more than the verdict.
 
    - `revive` is a ~40 s device restart for a fault that self-heals in seconds.
      Waiting for the shell to return and retrying the launch is the cheaper
-     remedy and has not been tried.
+     remedy and has not been tried. **Tried, 2026-09-18: 6 crashes, 6
+     recoveries, 5.7-7.9 s each (median ~6.3 s).** It is in the `launch` step
+     now, bounded at 20 s, scoped to the SpringBoard signature alone and
+     reported in the summary. Its limit was observed in the same session: the
+     one crash that preceded a full device collapse was *not* recovered — the
+     retry ran 63 s and the device went on to two 90 s `simctl` timeouts. This
+     remedy is for the transient kind, which is the kind that was measured.
    - The evidence has to be captured **by the failing step**, not afterwards.
      `ci-device-guard` now diagnoses before it revives, which is better than
      nothing and is still too late for this signature — the error text itself
@@ -2966,10 +3123,20 @@ worth more than the verdict.
    Accuracy had the mirror image and kept it. New runs only: historical flow
    records do not keep the error text.
 
-   **Still open and now separable:** the fast failure. 5 of 9 `settings-larger-text`
-   runs ended with the tap on `Accessibility` verified `ok` while the screen
-   stayed on Settings root, so the next step looked for `Display & Text Size` on
-   a root list. It is not the device, it is the failure a user would hit.
+   **The fast failure is FIXED — see item 184, which carries the diagnosis.** It
+   was not the tap, the launch or the delay: the *next* step resolved from
+   screen memory against the first frame of the push animation, which still
+   looks like the screen being left, and answered out of the previous screen's
+   stored element list. 12 of 12 trials had memory miss in 25 ms and a fresh
+   read find the target 1.8 s later, at the same instant. Everything from here
+   to the end of this item is the investigation as it stood before that, kept
+   because two of its hypotheses were falsified and the falsifications are what
+   eventually pointed at the right step.
+
+   5 of 9 `settings-larger-text` runs ended with the tap on `Accessibility`
+   verified `ok` while the screen stayed on Settings root, so the next step
+   looked for `Display & Text Size` on a root list. It is not the device, it is
+   the failure a user would hit.
 
    Reproduced outside the suite: **5 of 6, then 2 of 5, then varying** — the
    rate swings between roughly 40% and 83%, which is why a five-run A/B is not
@@ -3029,6 +3196,13 @@ worth more than the verdict.
    resolution is what makes the tap land, then "wait longer after a launch" is
    the wrong remedy, and "do not resolve the first tap after a launch from
    memory" is the right one.
+
+   **Both of those turned out to be wrong too, and the second one only just.**
+   The tap does land — 12 trials of launch-and-tap in isolation, memory arm and
+   fresh arm, 0 failures, including trials resolving `memory d=0` at the exact
+   failing coordinate. Fresh resolution matters at the step *after*, not at the
+   tap. Every experiment in this item stopped at the tap, which is why none of
+   them saw anything. See item 184.
 
    It defeats measurement in both directions. `bench` on run `35110888779`
    abstained because `settings-larger-text` failed **7 of 7**; an attempt to A/B

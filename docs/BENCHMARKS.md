@@ -4380,3 +4380,118 @@ single-stepping is a latency regression**, worth more as "the batch kept going"
 than as "the error message was better". The reporter reached the same place from
 the other end: their run took 33 tool calls where a clean one needs about 8, and
 the 25 extra were all recovery.
+
+## The fast failure, diagnosed and fixed — 2026-09-18
+
+Host: M-series laptop, Xcode 26, iOS 26.5, `326464A4` (iPhone 17 Pro). Every
+number here was taken on that device on one afternoon, with `simframe diagnose`
+between blocks so a reading taken against a dying device could be thrown out
+rather than averaged in.
+
+**What the failure was.** `settings-larger-text` ran 3.2-3.5 s and stopped:
+`tap Accessibility` reported `ok`, and the next step said *"Display & Text Size"
+is not on this screen*, listing Settings root. Five of nine runs on 2026-09-17.
+Two hypotheses had already been falsified — it is not "the app has not rendered"
+(the tree holds 15-17 elements at launch), and the delay A/B invalidated itself.
+
+**Reproduction, and the first clean one.**
+
+| vehicle | trials | fast failures |
+| --- | --- | --- |
+| launch + tap in isolation, memory arm and fresh arm | 12 | **0** |
+| the bench's own reset + `runScript`, 2 steps | 8 | **0** |
+| the bench's own reset + `runScript`, the full 4 steps | 6 | **6** |
+
+So it needs the step *after* the tap. That is what moved the suspicion off the
+tap, off the launch and off the delay.
+
+**The decisive measurement.** At the instant the next step asks, ask the same
+question twice:
+
+| | memory | fresh |
+| --- | --- | --- |
+| run A, 4 trials | 0/4 found, 24-28 ms | 4/4 found, 1.76-1.98 s |
+| run B, 8 trials | 0/8 found | 8/8 found |
+
+Twelve for twelve, on the same device, with nothing touching it in between. A
+recall answers in 25 ms and is confidently wrong; a read answers in 1.8 s and is
+right.
+
+**Why the recall is wrong**, which is not staleness in the usual sense:
+
+| | measured |
+| --- | --- |
+| frame's capture time, relative to the tap | **+47 to +124 ms** |
+| how still that frame then was, when asked | 508-713 ms |
+| `settledState` verdict | `settled: true`, every trial |
+| when the screen actually arrived | **~750 ms** after the tap |
+
+The frame is *newer* than the tap. It is the first frame of the push animation,
+which still looks like the screen being left; capture is damage-driven, so it
+then goes still, `settledState` calls it settled, and `recallNearest` —
+deliberately tolerant, because a list with new rows is still the same screen —
+matches it back to the previous screen and answers out of that screen's stored
+element list. A full read taken at t+750 ms shows the destination with the
+target on it.
+
+**The fix: memory may confirm, never deny.** A miss that came out of a recall
+earns one fresh read. The recovery already existed and only ran in `ax-first`
+sensor mode, which is not the default; in the default `full` mode a memory miss
+was final.
+
+**After, on the same device and flow:**
+
+| | runs | passed | fast failures | device-caused |
+| --- | --- | --- | --- | --- |
+| 2026-09-17, before | 9 | 1 | **5** | 3 |
+| today, before, `--cooldown=1500` | 8 | 1 | 1 | 6 |
+| today, after, `--cooldown=1500` | 8 | 5 | **0** | 3 |
+| today, after, `--cooldown=4000` | 8 | **8** | **0** | 0 |
+
+`HPI_accuracy 1`, `step_ratio 1`, `HPI_time 0.72` and `0.726` across the two.
+The cost is the re-read, and only on a miss: a passing run went from ~10.8 s
+failing to ~10.7 s passing at cooldown 4000, and the flow now finishes.
+
+## Two device faults, measured rather than inferred — 2026-09-18
+
+**A crashed guest shell heals by itself, and waiting is 6x cheaper than
+reviving.** Item 173 recorded that retrying the launch "has never been tried".
+
+| | |
+| --- | --- |
+| SpringBoard crashes provoked in one run | 6 |
+| recovered by waiting and launching again | **6 of 6** |
+| time to recover | 5.7, 5.7, 5.8, 6.7, 6.8, 7.9 s — median ~6.3 s |
+| `simframe revive`, the remedy in use until now | ~40 s |
+
+Now in the `launch` step, bounded at 20 s and reported in the summary. **Its
+limit, stated because it was observed:** the one shell crash that preceded a
+full device collapse was *not* recovered — the retry ran for 63 s and the device
+went on to two 90 s `simctl` timeouts. This remedy is for the transient kind,
+which is the kind that was measured.
+
+**A silent accessibility tree does not heal with time, and does heal with a
+launch.** Item 183 asked which, and said plainly that one observation is not
+causation.
+
+| elapsed, nothing touching the device | tree | OCR |
+| --- | --- | --- |
+| 0 s | 0 | 4 |
+| 10, 21, 31, 41, 51 s | 0 | 4 |
+| after one app launch | **14** | 16 |
+
+Six reads over 60 s, no recovery; one launch, immediate recovery. `revive` now
+performs that launch when it ends `tree-silent`, and the first device it ran on
+afterwards came back `healthy` instead of "usable, but tree-silent".
+
+**Cooldown governs whether the suite survives its own measurement.** The bench
+paces itself at 1500 ms between runs. Same flow, same device, same afternoon:
+
+| cooldown | trials before the device stopped being readable |
+| --- | --- |
+| 1500 ms | **4** (two independent runs; a third reached 5) |
+| 4000-5000 ms | **8**, still `healthy` at the end |
+
+One sample per condition per run, so this is a direction rather than a
+threshold — but it points the same way as the suite's own note about relaunching
+an app as fast as a script can.

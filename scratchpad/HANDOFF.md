@@ -5,36 +5,45 @@
 Work these top down. Each line says why it is where it is and where the detail
 lives. Everything below this section is history, kept for its reasoning.
 
-**0. [OWNER, not the agent] Record the human HPI baseline.** Blocks every HPI
+**0. [OWNER, not the agent] Record the human HPI baseline.** Now unblocked on
+the device side: `settings-larger-text` ran **8 of 8** today with
+`HPI_accuracy 1` and `step_ratio 1`, and `revive` brings a silent tree back by
+itself. The runbook below should now complete rather than wedge. Blocks every HPI
 number in the repo. The committed `docs/research/hpi-baseline.json` is invalid:
 half its time comes from `contacts-kate-bell`, which has `completed: 0`. An
 agent cannot do this — if simframe drives it, HPI is simframe measured against
 itself. Runbook at the end of this section.
 
-**1. The fast failure (iOS).** 5 of 9 bench runs: `tap Accessibility` verified
-`ok` while the screen stayed on Settings root. Not the device. It is the failure
-a user hits, and every hard-fail that drops a caller back to single-stepping is
-a latency bug. One hypothesis already falsified — it is *not* "the app has not
-rendered", `launch` returns with 15-17 elements in the tree. The corrected
-experiment is written up in DEFERRED 173: hold elapsed time constant and vary
-only whether the tap resolves from memory or from a fresh read. Do not repeat
-the delay A/B; it invalidated itself by inserting a fresh read into every arm.
+**1. Item 174 — screen identity fragments on content-driven screens.** Promoted
+to the top now that the fast failure is closed, and today's work made it *more*
+urgent rather than less. The escalation log nominates it independently:
+`unexpected-screen` is the only verdict in 1022 records that names a faculty. It
+also blocks `saveFlow` on the screens where it misfires, so it throttles the
+zero-model-call path as well as costing batches. Start with the supervisor
+ruling, not a threshold — DEFERRED 174 says why both obvious fixes are wrong.
 
-**2. Item 174 — screen identity fragments on content-driven screens.** The
-escalation log now nominates it independently: `unexpected-screen` is the only
-verdict in 1022 records that names a faculty. It also blocks `saveFlow` on the
-screens where it misfires, so it throttles the zero-model-call path as well as
-costing batches. Start with the supervisor ruling, not a threshold — DEFERRED
-174 says why both obvious fixes are wrong.
+**And it now owns the other half of 184.** The fast-failure fix makes a stale
+recall's *miss* recoverable; it does not make the recall correct. A recall that
+lands mid-push and finds a same-named control on the previous screen's map still
+taps the wrong place and nothing notices. The structural rule — a recall must not
+return the screen the previous step was just verified to have left — needs the
+graph's `from` plumbed into `locate`, and that is 174's territory.
 
-**3. Item 183 follow-up — why does an app launch restore a silent tree?** One
-observation is not causation. The cheap test: revive, wait the same interval
-without launching anything, read again. If time alone does it, `revive` needs
-patience; if a launch is required, `revive` should do one.
+**2. Item 187 — the bench's cooldown.** Measured today: at the default 1500 ms
+the device stops being readable after 4-5 runs; at 4000-5000 ms a full 8-run pass
+finishes `healthy`. This is the cheapest remaining thing that would let a pass
+complete, and it is a *decision* rather than an edit, because every committed HPI
+number was taken at 1500.
 
-**4. Item 173's cheap remedy.** It is a *transient* SpringBoard crash, so wait
-for the shell and retry the launch instead of a ~40 s device restart. Never
-tried, because the old "persistent wedge" framing made it look pointless.
+**3. Item 186's open half — a launch that throws leaves `runScript` without
+writing an escalation that carries the device cause**, so a run lost to a
+recognised SpringBoard crash is still recorded `device_cause: null` and counted
+against `HPI_accuracy`. The missing *signature* half is fixed; this half needs
+the throw path traced.
+
+**4. Item 185 — `diagnose` asserts "the daemon is stuck attaching" for a device
+that has no display port**, a cause `simctl` names in one sentence. Cheap, and
+it is the instrument item 173 depends on being honest.
 
 **5. Web: the batching experiment (no code).** See `docs/DECISIONS.md` —
 `web.js` is deferred pending one measurement. Batching lives above the platform
@@ -58,9 +67,14 @@ WebView screens.
 `steps_per_call` is **1.5-2.0** and the vision needs 8-10. Two releases, a
 diagnostic instrument, a fixed steering wheel, a corrected latency model and a
 CDP client all shipped without touching it. That was defensible while the
-instruments were untrustworthy. It stops being defensible now. **Items 1 and 2
-are the ones that move it** — prefer them over anything that merely measures
-better.
+instruments were untrustworthy. It stops being defensible now. **Item 1 is the
+one that moves it** — prefer it over anything that merely measures better.
+
+2026-09-18 is the first day that did move something adjacent: a four-step flow
+that completed 1 time in 9 now completes 8 in 8, and every one of those
+completions is a batch that did not hand control back. That is the shape
+`steps_per_call` is made of, even though the metric itself has not been
+re-measured against a real session yet.
 
 ### Runbook for item 0, so it is five minutes and not a project
 
@@ -82,6 +96,50 @@ The flows, as a person performs them (from `flows/hpi-suite.json`):
 N>=5 because it refuses under 3, and a median of two numbers is one of the two.
 Re-record when the app changes. The device wedges every few dozen launches —
 `simframe revive` between flows if `diagnose` stops saying `healthy`.
+
+---
+
+> **2026-09-18 — the fast failure is fixed, and three device faults were
+> measured rather than argued about. Everything below this block predates it.**
+>
+> **The fast failure was never the tap.** Launch-and-tap in isolation reproduces
+> it 0 times in 12, in both arms, including trials that resolved `memory d=0` at
+> the exact failing coordinate. It needs the step *after*: at that instant, a
+> memory recall says "not on this screen" in **25 ms** and a fresh read finds the
+> target in **1.8 s** — 12 for 12, same device, nothing touching it in between.
+> The recall keys on the first frame of the push animation, captured 47-124 ms
+> *after* the tap, so it is newer than the action and still looks like the screen
+> being left; capture is damage-driven so it then goes still, `settledState`
+> calls it settled, and `recallNearest` matches it back to the previous screen.
+> The destination arrives ~750 ms later.
+>
+> **The fix is one rule: memory may confirm, never deny.** A recall's miss earns
+> one fresh read. The recovery already existed and only ran in `ax-first` sensor
+> mode, which is not the default — so the answer had been one branch away from
+> every affected call since it was written. `settings-larger-text`: **1 of 9
+> before, 8 of 8 after**, `HPI_accuracy 1`, `step_ratio 1`.
+>
+> **Item 173's cheap remedy works.** A crashed SpringBoard recovered **6 of 6**
+> by waiting and launching again, in 5.7-7.9 s, against a ~40 s `revive`. In the
+> `launch` step now, bounded, scoped to that one signature, reported. Its limit
+> was also observed: the crash that preceded a full device collapse was not
+> recovered.
+>
+> **Item 183 is answered.** A silent accessibility tree does **not** heal with
+> time — six reads over 60 s, 0 elements every time — and heals instantly on one
+> app launch. `revive` does that launch itself now.
+>
+> **Two instrument defects found by using them**: `simctl did not return within
+> 90s` matched no device signature, so three bench runs counted a dead simulator
+> against the code (fixed, and the next run said so out loud); and `diagnose`
+> asserts "the daemon is stuck attaching" for a device that simply has no display
+> port (item 185, open).
+>
+> **Read the method note in `docs/DECISIONS.md` before the next experiment.**
+> Two experiments on this failure measured the wrong step, and one invalidated
+> itself by inserting the variable under test into every arm. The rule that would
+> have saved both: establish the smallest vehicle that still reproduces the
+> failure before varying anything.
 
 ---
 

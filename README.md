@@ -896,7 +896,7 @@ simframe hpi                   # speed and accuracy against a human baseline
 simframe baseline record settings-larger-text --runs=5   # record the human
 simframe input reset           # rebuild the HID session, without restarting anything
 simframe diagnose              # what this device is doing right now, and which failure it is
-simframe revive                # power-cycle a wedged device: stop, shutdown, boot, start, reset input
+simframe revive                # power-cycle a wedged device: stop, shutdown, boot, start, reset input, launch
 simframe start / status / stop [--force] / devices
 simframe ui --device=emulator-5554      # or export SIMFRAME_DEVICE once
 ```
@@ -956,6 +956,13 @@ shut the device down, boot it and *wait for the boot to finish*, start capture,
 rebuild the HID session — and it ends by checking frames are flowing again
 rather than by reporting that the steps ran. It is a command and not a
 behaviour: the decision stays yours.
+
+Frames are not the whole device, so the check is the one `diagnose` makes. If
+the device comes back with its accessibility tree silent, the revive launches an
+app, because that is what brings the tree back: measured on 2026-09-18, six
+reads over sixty seconds left the tree at zero elements every time and a single
+launch took it to fourteen. Waiting was the wrong remedy and the file used to
+say so as advice to the caller.
 
 ### Reading what the local supervisor decided
 
