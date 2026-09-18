@@ -4626,3 +4626,47 @@ changed, which is the whole reason the old behaviour was wrong. The cheap way
 out is a second opinion that does not go through the framebuffer at all — the
 accessibility tree is read live and in-process — and that is worth trying before
 anyone reaches for a duration threshold here.
+
+## `scrollTo`: one undeclared variable, three symptoms — 2026-09-18
+
+A field reporter measured 12.6 s and 18.4 s burned for zero progress and called
+it the largest single latency cost of their round. Item 190 recorded two
+hypotheses for it and both were wrong: the matcher resolves the target at score
+**1.0** when it is visible, and the frame hash does track scrolling. The item's
+own instruction was to instrument rather than reason, and one instrumented run
+answered it:
+
+```
+i=0 locate threw: "Developer" is not on this screen   (true — it was below)
+i=0 after scroll down: moved
+i=1 locate threw: points is not defined               (it had FOUND it)
+i=2 locate threw: points is not defined               (again)
+```
+
+`points` was destructured inside one closure and referenced in three places.
+`inViewport` runs on every *successful* locate, so the moment the step found its
+target it threw `ReferenceError`, the loop's `catch` filed that as "not found",
+and it scrolled on until the budget ran out. All three reported symptoms are
+that one fault: failing on a visible target, failing after a scroll that had
+just brought the target into view, and spending the whole budget doing it.
+
+A second fault surfaced only once the first was fixed: a target *above* the
+viewport still gave `scrolled down 6x` on a list that had been at its bottom
+stop the whole time. The end detector compared whole-frame hashes, and iOS
+rubber-bands at the end of a list — the content does not advance and the pixels
+do. It compares visible labels now, which do not bounce.
+
+| field transcript | before | after |
+| --- | --- | --- |
+| target below, from the top | 4 scrolls, 22.5 s, FAIL | **1 scroll, ok** |
+| target above, from the bottom | 6 scrolls, 21.5 s, FAIL | **2 scrolls, 7.2 s, ok** |
+
+`settings-larger-text` after: 5/5, p50 **10382 ms**, `HPI_accuracy 1`,
+`step_ratio 1`.
+
+**Worth keeping for the method.** An earlier fix the same day gave the give-up
+path a "look again before failing" guarantee, and it appeared not to work —
+because its own helper called `inViewport` and threw the same ReferenceError.
+A correct fix can look like a failed one when the thing it calls is broken, and
+the only reason this was untangled is that the instrument printed the exception
+text instead of the loop's interpretation of it.

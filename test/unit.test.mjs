@@ -3829,18 +3829,60 @@ test('round 7: a type never sends a selector, and scrollTo follows the offset', 
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
   const step = src.slice(src.indexOf("case 'scrollTo': {"), src.indexOf("case 'waitFor': {"));
-  assert.match(step, /if \(y < 0\) return 'up'/);
-  assert.match(step, /if \(y > \(points\?\.height \?\? Infinity\)\) return 'down'/);
-  assert.match(step, /if \(asked\) return asked/, 'an explicit direction still wins');
+  assert.match(step, /else if \(y < 0\) says = 'up'/);
+  assert.match(step, /else if \(y > \(points\?\.height \?\? Infinity\)\) says = 'down'/);
+  assert.match(step, /if \(asked\) return \{ says: asked/, 'an explicit direction still wins');
 
-  // No evidence is not a direction. Guessing "up" without it scrolls to the top
+  // **No evidence is not a direction to OPEN with**, and that half is unchanged
+  // and is the half that mattered. Guessing "up" at the start scrolls to the top
   // of a web page, which triggers pull-to-refresh — reloading the page, changing
   // the screen hash, and defeating the end-detection below it. Observed live:
-  // six attempts and 38s, reading from outside as an endless loop. With the
-  // reversal gated on evidence: one attempt, 3.7s, and an honest message.
+  // six attempts and 38s, reading from outside as an endless loop.
   assert.match(step, /if \(evidence\) dir = evidence/);
-  assert.match(step, /if \(reversed \|\| !evidence\)/);
-  assert.match(step, /how a web page\s*\n?\s*\/\/ gets pulled to refresh|gets pulled to refresh/);
+  assert.match(step, /let dir = asked \?\? 'down'/, 'it never opens with an unfounded "up"');
+  assert.match(step, /pull-to-refresh/, 'and the reason is kept where the next reader will find it');
+
+  // **What changed on 2026-09-18, and why the gate moved (item 190).** The
+  // reversal used to require the same evidence, and on a native list that
+  // evidence never arrives: iOS puts only the *visible* rows of a table in the
+  // accessibility tree, so a scrolled-away row is absent rather than present
+  // with an out-of-bounds coordinate. Measured — Settings at the top,
+  // `resolve("Developer")` returns `status=none`; at the bottom,
+  // `resolve("Accessibility")` returns `status=none`; zero elements even
+  // *containing* the word, both times.
+  //
+  // So the common case was: no evidence, the default direction, and if that was
+  // the wrong one the step burned its budget moving away and refused without
+  // ever looking the other way. Field-measured at 12.6s and 18.4s for nothing.
+  //
+  // A stall is not a guess — having scrolled and moved nothing, this direction
+  // is exhausted and the only place left is the other one. Still exactly once,
+  // still bounded by `max`.
+  assert.match(step, /if \(reversed\) \{/, 'a stall alone now earns the one reversal');
+  assert.doesNotMatch(step, /if \(reversed \|\| !evidence\)/);
+  // The give-up line must not still claim there was nowhere to try: by the time
+  // it runs, both ways have been tried.
+  assert.match(step, /it stopped moving both ways/);
+
+  // **`points` must be in scope.** It was declared only inside `offsetSays`'s
+  // own destructure, so `inViewport` — which runs on every SUCCESSFUL locate —
+  // referenced an undeclared name and threw `ReferenceError: points is not
+  // defined`. The loop's catch swallowed that as "not found", so the step could
+  // not report success on a target it had located, could not report success
+  // after a scroll that had just brought the target into view, and burned its
+  // whole budget either way. One variable, all three reported symptoms.
+  assert.match(step, /const points = \{ width: geo\.pointWidth, height: geo\.pointHeight \}/,
+    'the screen size is in scope for the whole step, not just one closure');
+  const inView = step.slice(step.indexOf('const inViewport'), step.indexOf('const scrolled'));
+  assert.match(inView, /points\?\.width/, 'and inViewport is what needed it');
+
+  // **The end detector reads labels, not pixels.** At the end of a list iOS
+  // rubber-bands: the content does not advance and the framebuffer does, so a
+  // whole-frame hash answers "it moved" on every attempt and the end is never
+  // found. Measured: `scrolled down 6x` against a list that was already at its
+  // bottom stop, 21.5s for nothing.
+  assert.match(step, /const signature = targets\.map/);
+  assert.doesNotMatch(step, /hashNow/, 'the frame hash is not what says a scroll achieved nothing');
   // And a scroll gets a scroll's budget, not a transition's.
   assert.match(src, /const SCROLL_SETTLE_MS = 800/);
 });
@@ -6785,7 +6827,7 @@ test('scrollTo looks before it reports a scroll it just performed as a failure',
   // the target scrolled into view — the visible tabs demonstrably changed — and
   // this step reported `not reachable by scrolling` anyway. A confident wrong
   // failure costs what a silent success costs.
-  const giveUp = body.slice(body.indexOf('wasAt === nowAt'));
+  const giveUp = body.slice(body.indexOf('wasShowing === nowShowing'));
   const look = giveUp.indexOf('await nowInView()');
   const throwAt = giveUp.indexOf('is not reachable by scrolling');
   assert.ok(look > -1, 'it looks again');

@@ -2932,6 +2932,30 @@ async function runStep(deviceQuery, udid, step, ctx) {
       // `direction` still wins, for a caller who knows better.
       const asked = step.direction ? String(step.direction).toLowerCase() : null;
       const max = Math.min(MAX_SCROLLS, step.maxScrolls ?? 6);
+      // **The screen's size, in scope.** It was not, and that single omission is
+      // the whole of item 190 and of the field report's Defect 2.
+      //
+      // `points` existed only inside `offsetSays`'s own destructure, so every
+      // other reference to it — `inViewport`, and the message that reports a
+      // target as out of view — was an undeclared identifier. `inViewport` runs
+      // on **every successful locate**, so the moment this step found what it
+      // was looking for it threw `ReferenceError: points is not defined`, the
+      // loop's own `catch` swallowed it as "not found", and it scrolled on until
+      // the budget ran out and it reported the target unreachable.
+      //
+      // So `scrollTo` could fail on a target that was on screen, could fail
+      // after a scroll that had just brought the target into view, and could
+      // burn its whole budget doing it — all three of the reported symptoms,
+      // and all three are this. Measured from the loop, i is the iteration:
+      //
+      //   i=0 locate threw: "Developer" is not on this screen   (true, it was above)
+      //   i=1 locate threw: points is not defined               (it had FOUND it)
+      //   i=2 locate threw: points is not defined               (again)
+      //
+      // Optional chaining does not help: `points?.width` on an undeclared name
+      // is still a ReferenceError, which is why nothing caught this by reading.
+      const geo = await ctx.screen();
+      const points = { width: geo.pointWidth, height: geo.pointHeight };
       let dir = asked ?? 'down';
       let reversed = false;
       // Where the target is, when the tree knows. `null` means no evidence, and
@@ -2939,18 +2963,40 @@ async function runStep(deviceQuery, udid, step, ctx) {
       // the top of a web page, which **triggers pull-to-refresh**, reloads the
       // page and changes the screen hash — defeating the end-detection below
       // and reading, from outside, as an endless loop. Observed live.
-      const offsetSays = async () => {
-        if (asked) return asked;
+      //
+      // **And it answers `null` far more often than this was written for.**
+      // Measured on 2026-09-18, which is item 190: iOS puts only the *visible*
+      // rows of a table in the accessibility tree. A scrolled-away row is not
+      // there with an out-of-bounds coordinate — it is absent.
+      //
+      //   Settings at the top,    resolve("Developer")     -> status=none, y=undefined
+      //   Settings at the bottom, resolve("Accessibility")  -> status=none, y=undefined
+      //
+      // Zero elements whose label even contains the query, both times. So on a
+      // native list this returns `null` in precisely the case it exists to
+      // answer, and the y<0 / y>height reasoning below only ever fires on the
+      // frameworks that do keep off-screen rows in the tree — React Native, and
+      // the `y = -693` case this was written for.
+      // One read answers both questions, so asking them costs what asking one
+      // used to: which way is the target, and what is on screen right now.
+      const lookAround = async () => {
         try {
-          const { entry, points } = await api.readScreenWith(deviceQuery, { useOcr: false, options: ctx.options });
-          const hit = matching.resolve(entry.targets ?? [], String(query));
+          const { entry } = await api.readScreenWith(deviceQuery, { useOcr: false, options: ctx.options });
+          const targets = entry.targets ?? [];
+          // What is visible, as one comparable string. This is the end detector
+          // now, and the frame hash is not — see `scrolledNowhere`.
+          const signature = targets.map((t) => String(t.label ?? '')).filter(Boolean).sort().join('\u0000');
+          if (asked) return { says: asked, signature };
+          const hit = matching.resolve(targets, String(query));
           const y = hit?.target?.y;
-          if (!Number.isFinite(y)) return null;
-          if (y < 0) return 'up';
-          if (y > (points?.height ?? Infinity)) return 'down';
-          return dir;
+          let says = null;
+          if (!Number.isFinite(y)) says = null;
+          else if (y < 0) says = 'up';
+          else if (y > (points?.height ?? Infinity)) says = 'down';
+          else says = dir;
+          return { says, signature };
         } catch {
-          return null;
+          return { says: asked ?? null, signature: null };
         }
       };
       /**
@@ -3032,9 +3078,8 @@ async function runStep(deviceQuery, udid, step, ctx) {
             throw new Error(`scrolled ${dir} ${max}x without finding ${query}: ${err.message}`);
           }
         }
-        const evidence = await offsetSays();
+        const { says: evidence, signature: wasShowing } = await lookAround();
         if (evidence) dir = evidence;
-        const wasAt = await hashNow(deviceQuery, ctx.options);
         scrolled.push(dir);
         await runStep(deviceQuery, udid, { action: 'scroll', value: dir }, ctx);
         // A scroll either moves immediately or not at all, so it does not need a
@@ -3048,8 +3093,19 @@ async function runStep(deviceQuery, udid, step, ctx) {
         // page"*. Reverse once — the target may be behind us, and on a page
         // whose fields never enter the tree there is no offset to follow — then
         // stop rather than thrash.
-        const nowAt = await hashNow(deviceQuery, ctx.options);
-        if (wasAt && nowAt && wasAt === nowAt) {
+        // **What "it stopped moving" is measured on, and the frame hash was the
+        // wrong thing.** At the end of a list iOS rubber-bands: the content does
+        // not advance and the pixels do, so a whole-frame comparison answers
+        // "yes, it moved" on every attempt and the end is never detected. Seen
+        // on 2026-09-18 — `scrolled down 6x without finding Accessibility` on a
+        // list that had been against its bottom stop the whole time, 21.5s for
+        // nothing.
+        //
+        // The visible labels do not bounce. If the same rows are on screen after
+        // a scroll as before it, the scroll achieved nothing, whatever the
+        // framebuffer did.
+        const { signature: nowShowing } = await lookAround();
+        if (wasShowing && nowShowing && wasShowing === nowShowing) {
           // Before believing the hash, look. See `nowInView` — an unchanged
           // whole-frame hash is weak evidence about a strip, and this step has
           // reported failure on a scroll that worked.
@@ -3059,14 +3115,32 @@ async function runStep(deviceQuery, udid, step, ctx) {
               + `${arrivedHow()} (the frame hash did not register the scroll — looked again rather than`
               + ' reporting a failure the screen contradicts)';
           }
-          // Reverse only on evidence. Without it we do not know the target is
-          // behind us, and scrolling blindly the other way is how a web page
-          // gets pulled to refresh.
-          if (reversed || !evidence) {
+          // **A stall is evidence, and treating it as none is item 190.**
+          //
+          // This used to reverse only when the *tree* said where the target
+          // was — and on a native list the tree never does, because scrolled-
+          // away rows are not in it. So the common case was: no evidence, the
+          // default direction, and if that direction happened to be the wrong
+          // one the step burned its budget moving away from the target and then
+          // refused, having never looked the other way. Field-measured at 12.6s
+          // and 18.4s for zero progress, the largest single latency cost in
+          // that round.
+          //
+          // Having scrolled and moved nothing, we know this direction is
+          // exhausted. That is a fact about the screen rather than a guess, and
+          // it is a different claim from the one the rule above was protecting
+          // against: the danger there was *opening* with an unfounded "up",
+          // which walks a web page to the top and pulls it to refresh. Here we
+          // are at one end and the only place left to look is the other. Still
+          // exactly once, still bounded by `max`.
+          if (reversed) {
             throw new Error(
-              `${query} is not reachable by scrolling: ${dir} stopped moving after ${i + 1} attempt(s)`
-              + (evidence ? ' and so did the other way.' : ' and the tree does not say where it is,'
-                + ' so there is no direction to try.')
+              // Both ways, always — this branch is now only reached after a
+              // reversal, so "there is no direction to try" (which it used to
+              // say when the tree was silent) is no longer true and would be
+              // the same kind of unchecked assertion as the sentence below it.
+              `${query} is not reachable by scrolling: it stopped moving both ways`
+              + ` (${scrolled.join(', ')}) after ${i + 1} attempt(s).`
               // Say what was established, not what would be convenient. This
               // used to assert "It may not be in the accessibility tree at all"
               // in every case — a claim the function never checks, and one the

@@ -2581,7 +2581,12 @@ worth more than the verdict.
    the hash stability of one screen across many visits before touching 174.
 
 190. **`scrollTo` scrolls away from the target and burns its whole budget.**
-   OPEN, reproduced twice on the bench device 2026-09-18, immediately after
+   **FIXED 2026-09-18, and it was one undeclared variable.** See the block at
+   the end of this item for what it actually was; everything before that is the
+   investigation, kept because both of its hypotheses were wrong and the
+   instrument is what found the answer in one run.
+
+   Reproduced twice on the bench device 2026-09-18, immediately after
    fixing a *different* `scrollTo` fault and while checking that fix had not
    regressed anything. This is almost certainly the defect a field reporter
    measured as **12.6 s and 18.4 s for zero progress — 31 s, which dwarfed every
@@ -2617,6 +2622,52 @@ worth more than the verdict.
    frame*, so "did the screen move" answers yes while nothing is being achieved.
    That would explain 4 attempts where the give-up path expects to throw on the
    first or second.
+
+   ---
+
+   **What it was: `points` was not in scope.** Both hypotheses above were wrong
+   — the matcher resolves the target at score 1.0 when it is visible, and the
+   frame hash does track scrolling. The instrument found it in one run:
+
+   ```
+   i=0 locate threw: "Developer" is not on this screen   (true — it was below)
+   i=0 after scroll down: moved
+   i=1 locate threw: points is not defined               (it had FOUND it)
+   i=2 locate threw: points is not defined               (again)
+   ```
+
+   `points` was destructured **inside the `offsetSays` closure only**, so every
+   other reference to it was an undeclared identifier. `inViewport` runs on
+   every *successful* locate, so the instant this step found what it was looking
+   for it threw `ReferenceError`, the loop's own `catch` recorded that as "not
+   found", and it scrolled on until the budget ran out.
+
+   That single fault produces all three reported symptoms: failing on a target
+   that is on screen, failing *after* a scroll that brought the target into
+   view, and burning the whole budget doing it. Optional chaining does not save
+   it — `points?.width` on an undeclared name is still a ReferenceError — which
+   is why nobody caught this by reading the code, including me: I wrote a fix
+   for the give-up path earlier the same day whose own `nowInView()` helper
+   called `inViewport` and therefore threw too, which is why that fix appeared
+   not to work.
+
+   **Second fault, found by the fix not being enough.** With `points` in scope,
+   a target *above* the viewport still failed: `scrolled down 6x` against a list
+   that had been at its bottom stop the whole time, 21.5 s for nothing. The end
+   detector compared whole-frame hashes, and iOS rubber-bands at the end of a
+   list — the content does not advance and the pixels do, so "did it move"
+   answered yes on every attempt and the reversal never fired. It compares the
+   **visible labels** now, which do not bounce.
+
+   **Measured, both field transcripts, before and after:**
+
+   | | before | after |
+   | --- | --- | --- |
+   | target below, from the top | 4 scrolls, 22.5 s, FAIL | **1 scroll, ok** |
+   | target above, from the bottom | 6 scrolls, 21.5 s, FAIL | **2 scrolls (down then up), 7.2 s, ok** |
+
+   `settings-larger-text` 5/5 after, p50 10382 ms. The field reporter measured
+   12.6 s and 18.4 s on this, "the largest single latency cost I saw".
 
 188. **`bench-hpi --out` writes the file even when the run has just said the
    result must not be adopted.** OPEN, found 2026-09-18 while re-recording the
