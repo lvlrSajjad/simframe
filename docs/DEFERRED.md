@@ -2511,6 +2511,61 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+188. **`bench-hpi --out` writes the file even when the run has just said the
+   result must not be adopted.** OPEN, found 2026-09-18 while re-recording the
+   reference, and it would have committed an invalid baseline.
+
+   The suite aborted mid-pass-2 on a wedged device and printed its own verdict:
+
+   ```
+   No comparable HPI was measured — what is above is a partial suite and
+   must not be adopted as a baseline or read as a regression.
+   wrote docs/research/hpi-baseline.json
+   ```
+
+   Both sentences, in that order, from the same run. The abstention is correct
+   and the write is unconditional, so the one path that exists to stop a bad
+   number becoming the committed reference does not reach the writer. Caught by
+   reading the output; nothing in the tooling would have objected, and the file
+   it produced looks entirely plausible — `hpi_accuracy 0.923`, `step_ratio 1`,
+   13 runs over 2 flows — with no field saying it came from a suite that never
+   finished.
+
+   This is the "a check that cannot fail is worse than no check" shape the
+   handoff already records twice, in its third variation: the check *can* fail,
+   it did fail, and the failure changes nothing downstream.
+
+   Fix is small: `--out` writes only when the suite completed, or the report
+   carries an `aborted` field and every reader honours it. Prefer the second —
+   a partial run is still evidence, it just must not be silently promoted.
+
+189. **A revive between passes is not enough, because the device degrades
+   *within* a pass.** OPEN, measured 2026-09-18, immediately after the
+   between-pass revive landed.
+
+   The recovery worked as designed and was not the problem. `settings-larger-text`
+   then `contacts-kate-bell`, 5 runs each per pass:
+
+   ```
+   pass 1   10 runs, 9 ok, 1 unexpected-screen          (a real item-174 fault)
+   pass 2   device before pass 2: healthy               (so no revive was owed)
+            3 ok, then SpringBoard crashed, then two 90s simctl timeouts,
+            then capture wedged. Pass 3 never ran.
+   ```
+
+   So the boundary the recovery is attached to is the wrong boundary. The
+   device tolerates roughly 8-10 launches and a pass is 10, which means the
+   collapse lands *inside* a pass often enough that checking only between them
+   is checking after the fact. What the evidence supports is a health check on
+   the same cadence as the damage — per run, or per flow — with the same
+   diagnose-first discipline so a healthy device is not power-cycled for
+   nothing.
+
+   **Do not just lower `--runs`.** Fewer runs per pass is a smaller sample, and
+   the thing being protected is a baseline that already suffers from being
+   recorded in small partial suites. The device's tolerance is the constant
+   here; the pass structure should be fitted to it rather than the reverse.
+
 184. **The fast failure: a memory recall answered from the screen the flow had
    just left.** FIXED, 2026-09-18. This is item 173's open half, and the
    diagnosis is not any of the three things that had been suspected.
