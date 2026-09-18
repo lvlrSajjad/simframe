@@ -1500,9 +1500,52 @@ export function sensorMode(options) {
  */
 const nameFor = (t) => t.label || t.identifier || null;
 
+/**
+ * Did screen memory alone produce this miss?
+ *
+ * A recall that finds the screen and not the target tags `ambiguous_intent`
+ * without `ambiguous` — "I know this screen, and what you asked for is not on
+ * it". That is the only miss worth re-asking, because it is the only one whose
+ * answer came from a file rather than from the device. A miss off a map that
+ * was just built has already read both sensors, and a genuine ambiguity is not
+ * settled by reading again.
+ */
+export function memoryMiss(err) {
+  const why = metrics.escalationOf(err);
+  return Boolean(why && why.reason === 'ambiguous_intent' && !why.ambiguous);
+}
+
 export async function locate(deviceQuery, query, opts = {}) {
   if (sensorMode(opts.options) !== 'ax-first' || opts.useOcr === false || opts.escalated) {
-    return locateWith(deviceQuery, query, opts);
+    if (opts.refresh || opts.escalated) return locateWith(deviceQuery, query, opts);
+    try {
+      return await locateWith(deviceQuery, query, opts);
+    } catch (err) {
+      // **Memory may confirm, never deny.** Measured on the bench device, 8 of
+      // 8 and 4 of 4 in two separate runs: at the instant a flow's next step
+      // asks, a recall says "not on this screen" in 25 ms and a fresh read
+      // finds the target 1.8 s later, on the same device, without anything
+      // touching it in between.
+      //
+      // Why the recall is wrong, and it is not staleness in the usual sense:
+      // the frame it keys on was captured 47-124 ms *after* the tap — the first
+      // frame of the push animation, which still looks like the screen being
+      // left. Capture is damage-driven, so that frame then goes still,
+      // `settledState` calls it settled at 500-700 ms of stillness, and
+      // `recallNearest` — deliberately tolerant, because a list with new rows is
+      // still the same screen — matches it back to the previous screen and
+      // answers out of that screen's stored element list. The screen itself
+      // arrives about 750 ms later.
+      //
+      // The cost is paid only on a miss, which today aborts the batch and buys
+      // a ~20 s model round trip. 1.8 s to be sure is the cheaper mistake. The
+      // hit path — the one the speed argument rests on — is untouched.
+      //
+      // This recovery already existed for `ax-first` (below) and had never run
+      // in the default sensor mode, which is `full`.
+      if (!memoryMiss(err)) throw err;
+      return locateWith(deviceQuery, query, { ...opts, refresh: true, escalated: true });
+    }
   }
   const options = opts;
   try {

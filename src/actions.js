@@ -16,6 +16,7 @@ import * as planner from './planner.js';
 import * as metrics from './metrics.js';
 import * as screenmap from './screenmap.js';
 import { launchApp, openUrl, setPermission, terminateApp } from './platform/index.js';
+import { shellCrashed } from './device-state.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MAX_PAUSE_MS = 5000;
@@ -162,6 +163,59 @@ export function normalizeStep(raw) {
   // builder before the tap was ever sent.
   for (const k of Object.keys(step)) if (step[k] === undefined) delete step[k];
   return step;
+}
+
+/**
+ * How long to keep waiting for a guest shell that has just crashed.
+ *
+ * Measured: six crashes on `326464A4`, every one of them recovered by waiting
+ * and launching again, in 5.7-7.9 s. 20 s is that with room, and it is bounded
+ * so a device that is genuinely gone still fails rather than hanging.
+ */
+export const SHELL_PATIENCE_MS = 20_000;
+
+/** How often to try again while waiting for it. */
+export const SHELL_POLL_MS = 1500;
+
+/**
+ * Launch, and survive the guest's window server dying under the attempt.
+ *
+ * `simctl` reports a SpringBoard crash as a launch failure, which is true and
+ * unhelpful: the shell is back a few seconds later and the same launch works.
+ * Until now the only remedy in the project was `simframe revive`, a ~40 s
+ * device restart — and item 173 notes that waiting and retrying "has never been
+ * tried". It was tried on 2026-09-18 and recovered 6 of 6.
+ *
+ * Deliberately narrow. Only the shell-crash signature is retried; every other
+ * device failure, including `simctl did not return within 90s`, fails on the
+ * first attempt as before, because none of them has been observed to heal and a
+ * retry on that one costs another 90 s to learn nothing.
+ *
+ * `report` is filled in rather than returned so the step can say it happened.
+ * A retry that does not show up in the summary is a rate nobody can argue with.
+ */
+export async function launchThroughShellCrash(
+  udid,
+  bundleId,
+  options,
+  report = {},
+  { launch = launchApp, wait = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now } = {},
+) {
+  const started = now();
+  for (;;) {
+    report.attempts = (report.attempts ?? 0) + 1;
+    try {
+      const out = await launch(udid, bundleId, options);
+      report.waitedMs = now() - started;
+      return out;
+    } catch (err) {
+      if (!shellCrashed(err.message) || now() - started >= SHELL_PATIENCE_MS) {
+        report.waitedMs = now() - started;
+        throw err;
+      }
+      await wait(SHELL_POLL_MS);
+    }
+  }
 }
 
 /**
@@ -2716,11 +2770,12 @@ async function runStep(deviceQuery, udid, step, ctx) {
       return `pressed key ${step.value ?? step.code}`;
     case 'launch': {
       const bundleId = step.value ?? step.bundleId;
-      const started = await launchApp(udid, bundleId, {
+      const shell = { waitedMs: 0, attempts: 0 };
+      const started = await launchThroughShellCrash(udid, bundleId, {
         args: step.args ?? [],
         env: step.env ?? {},
         terminateFirst: step.relaunch === true,
-      });
+      }, shell);
       // Item 169: simctl returning ok means the process started, not that the
       // app came forward, and the two came apart repeatedly on a loaded
       // runner — leaving the device on the previous app under a step that
@@ -2760,6 +2815,10 @@ async function runStep(deviceQuery, udid, step, ctx) {
       if (ctx.landing) ctx.landing.verdict = landed.verdict;
       return `launched ${bundleId}${step.relaunch ? ' (relaunched)' : ''}`
         + (landed.verdict === 'fronted' ? ` (frontmost after ${landed.ms}ms)` : '')
+        + (shell.attempts > 1
+          ? ` [the guest's SpringBoard crashed and came back; launched again after ${shell.waitedMs}ms`
+            + `, on attempt ${shell.attempts}]`
+          : '')
         + (retried
           ? ` [it did not front on the first attempt — ${frontmost.describeHeld(retried.held, started.pid)}`
             + `; a second launch fronted it. The launch is unreliable on this host.]`

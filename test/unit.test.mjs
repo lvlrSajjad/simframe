@@ -6356,8 +6356,16 @@ test('a launch that did not front is retried once, without a terminate, and the 
   const launchCase = src.slice(src.indexOf("case 'launch': {"), src.indexOf("case 'terminate':"));
 
   // The retry exists, and it is bounded: one re-launch, then the throw.
-  assert.equal((launchCase.match(/await launchApp\(/g) ?? []).length, 2,
-    'exactly one retry, not a loop');
+  //
+  // Two different retries live in this case now and they are counted apart on
+  // purpose. The first launch goes through `launchThroughShellCrash`, which
+  // waits out a guest shell that died under the attempt; the plain `launchApp`
+  // that remains is the did-not-front retry this test was written for. Counting
+  // them together would let either one grow into a loop unnoticed.
+  assert.equal((launchCase.match(/await launchThroughShellCrash\(/g) ?? []).length, 1,
+    'the first launch, and only the first, waits out a shell crash');
+  assert.equal((launchCase.match(/await launchApp\(/g) ?? []).length, 1,
+    'exactly one did-not-front retry, not a loop');
 
   // **The half that matters.** The retry must not terminate first. Terminating
   // and relaunching is the gesture this project already knows wedges the
@@ -6418,6 +6426,15 @@ test('the CI guard tells a wedged device from a check that failed on its merits'
   assert.ok(deviceCause(
     'could not launch com.apple.Preferences: \tThe system shell (SpringBoard:36454) probably crashed.',
   ), "a crashed SpringBoard is the device");
+
+  // simctl itself stopped answering. Three runs of the 2026-09-17 bench died
+  // this way, 95.6s each, and every one was written to `flows.jsonl` with
+  // `device_cause: null` — so `HPI_accuracy`, which CI gates on, counted a
+  // simulator that had stopped answering as the code getting things wrong.
+  assert.ok(deviceCause(
+    'could not launch com.apple.Preferences: simctl did not return within 90s'
+    + ' (killed by simframe, not refused by simctl — the host is loaded or the device is not answering)',
+  ), 'simctl being killed at its timeout is the device');
 
   // The half that matters more, and the one an over-eager signature destroys:
   // a tour asking for a label that is genuinely not there must keep failing.
@@ -6638,4 +6655,92 @@ test('the escape hatch from a wrong-turn verdict settles before it gives up', as
   );
   // And a caller who has said continueOnError still gets to continue.
   assert.equal(actions.haltDecision({ verification: wrong, continueOnError: true }).halt, false);
+});
+
+test('a miss that came out of screen memory is not the final word', async () => {
+  const api = await import('../src/index.js');
+  const metrics = await import('../src/metrics.js');
+
+  // The three shapes, tagged exactly as the throw sites in `locateWith` tag
+  // them — not invented to match the assumption, which is how two fixes in this
+  // project passed their tests and failed on a device.
+  //
+  // A recall that knows the screen and not the target is the only one worth
+  // re-asking: its answer came from a file. Measured on the bench device, 8 of
+  // 8: memory said "not on this screen" in 25ms and a fresh read found the
+  // target 1.8s later, with nothing touching the device in between.
+  const recalled = metrics.tag(new Error('"Display & Text Size" is not on this screen. Visible: Settings, …'),
+    'ambiguous_intent', { candidates: [], intent: 'Display & Text Size' });
+  assert.equal(api.memoryMiss(recalled), true);
+
+  // A map that was just built has already read both sensors. Reading again buys
+  // nothing and costs ~1.8s.
+  const built = metrics.tag(new Error('"Save" is not on this screen. Visible: …'),
+    'unknown_screen', { candidates: [], intent: 'Save' });
+  assert.equal(api.memoryMiss(built), false);
+
+  // A genuine ambiguity is not settled by looking harder; both things are there.
+  const ambiguous = metrics.tag(new Error('"Save" matches 2 things on this screen'),
+    'ambiguous_intent', { ambiguous: true, intent: 'Save' });
+  assert.equal(api.memoryMiss(ambiguous), false);
+
+  // And nothing else earns the retry — a refused `#n` is not a perception
+  // failure, so re-reading cannot answer it.
+  assert.equal(api.memoryMiss(metrics.tag(new Error('#5 was numbered elsewhere'), 'verification_failed', {})), false);
+  assert.equal(api.memoryMiss(new Error('plain')), false);
+});
+
+test('a launch waits out a crashed guest shell instead of reviving the device', async () => {
+  const actions = await import('../src/actions.js');
+  const { shellCrashed } = await import('../src/device-state.js');
+
+  // The signature, exactly as simctl emits it.
+  assert.equal(shellCrashed('could not launch com.apple.Preferences: \tThe system shell (SpringBoard:81330) probably crashed.'), true);
+  // And the one device failure deliberately NOT retried: a retry costs another
+  // 90s to learn nothing, and it has never once been observed to recover.
+  assert.equal(shellCrashed('could not launch com.apple.Preferences: simctl did not return within 90s'), false);
+  assert.equal(shellCrashed('"Save" is not on this screen'), false);
+
+  const crash = () => { throw new Error('could not launch x: \tThe system shell (SpringBoard:9) probably crashed.'); };
+
+  // Measured 6 of 6 on the bench device: it comes back, and the next attempt
+  // works. Here that is driven rather than waited for.
+  let calls = 0;
+  let clock = 0;
+  const report = {};
+  const out = await actions.launchThroughShellCrash('d', 'b', {}, report, {
+    launch: async () => { calls += 1; if (calls < 2) crash(); return { pid: 42 }; },
+    wait: async () => { clock += actions.SHELL_POLL_MS; },
+    now: () => clock,
+  });
+  assert.deepEqual(out, { pid: 42 });
+  assert.equal(report.attempts, 2, 'one wait, then it worked');
+
+  // A failure that is not the shell is not retried at all, which is what keeps
+  // a genuinely broken launch fast.
+  calls = 0;
+  await assert.rejects(
+    actions.launchThroughShellCrash('d', 'b', {}, {}, {
+      launch: async () => { calls += 1; throw new Error('the second app never launched'); },
+      wait: async () => {},
+      now: () => 0,
+    }),
+    /never launched/,
+  );
+  assert.equal(calls, 1, 'not the shell, so not retried');
+
+  // Bounded, so a device that is genuinely gone still fails rather than hanging.
+  calls = 0;
+  clock = 0;
+  await assert.rejects(
+    actions.launchThroughShellCrash('d', 'b', {}, {}, {
+      launch: async () => { calls += 1; crash(); },
+      wait: async () => { clock += actions.SHELL_POLL_MS; },
+      now: () => clock,
+    }),
+    /SpringBoard/,
+  );
+  assert.ok(calls > 1, 'it did wait');
+  assert.ok(clock >= actions.SHELL_PATIENCE_MS, 'and it gave up at the budget');
+  assert.ok(actions.SHELL_PATIENCE_MS > 0 && actions.SHELL_PATIENCE_MS <= 30_000);
 });

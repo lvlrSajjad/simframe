@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runDaemon, DEFAULTS } from './daemon.js';
-import { bootedDevices, capabilitiesFor, listDevices, PLATFORMS, resolveDevice, restartDevice, screenshot, toolchainChecks } from './platform/index.js';
+import { bootedDevices, capabilitiesFor, launchApp, listDevices, PLATFORMS, resolveDevice, restartDevice, screenshot, toolchainChecks } from './platform/index.js';
 import * as actions from './actions.js';
 import * as analyze from './analyze.js';
 import * as api from './index.js';
@@ -27,6 +27,24 @@ import { decodePng } from './png.js';
 import * as storage from './storage.js';
 import * as store from './store.js';
 import * as view from './view.js';
+
+/**
+ * What a revive launches to bring a silent accessibility tree back, and the one
+ * platform it makes sense on.
+ *
+ * Settings, because it is on every iOS simulator and opening it changes nothing
+ * a caller could be relying on. The app is incidental — what clears the tree is
+ * that *something* launched; Preferences is simply the one that always exists.
+ * Measured with this bundle, so this is the one written down.
+ *
+ * Android is excluded by name rather than by accident. It has no accessibility
+ * tree at all and says so (CLAUDE.md), so `tree-silent` there is the backend's
+ * normal state and not a fault — launching an iOS bundle id at it would be the
+ * "borrowing the other platform's vocabulary" mistake the boundary exists to
+ * prevent.
+ */
+const REVIVE_LAUNCH = { ios: 'com.apple.Preferences' };
+
 
 const USAGE = `simframe — always-warm iOS Simulator frames
 
@@ -468,17 +486,38 @@ async function main() {
         if (diag?.verdict?.state === 'healthy') break;
         if (attempt < REVIVE_HEALTH_POLLS - 1) await new Promise((r) => setTimeout(r, REVIVE_HEALTH_WAIT_MS));
       }
+      // **A silent tree does not heal with time, and it does heal with a
+      // launch.** Item 183 asked which, and until 2026-09-18 the file said
+      // plainly that one observation is not causation. Measured on `326464A4`:
+      // six reads over 60 s with nothing touching the device left the tree at
+      // **0 elements** every time, and a single `launch` took it to **14**
+      // immediately. So patience was the wrong remedy and this is the right
+      // one, and the note that used to tell the *caller* "an app launch often
+      // clears a silent tree" is now something the command does itself.
+      //
+      // Only for `tree-silent`, which is the state that was measured. Capture
+      // failures are not touched: launching an app at a device that is not
+      // producing frames buys nothing and hides which fault it was.
+      const reviveLaunch = REVIVE_LAUNCH[dev.platform];
+      if (diag?.verdict?.state === 'tree-silent' && reviveLaunch) {
+        await did('launched an app, which is what brings a silent tree back', async () => {
+          await launchApp(dev.udid, reviveLaunch, { args: [], env: {} });
+          await new Promise((r) => setTimeout(r, REVIVE_HEALTH_WAIT_MS));
+        });
+        diag = await wedge.diagnose(dev.udid, { options }).catch(() => diag);
+      }
       // Usable, not perfect. Demanding `healthy` here failed a device whose
       // accessibility tree was briefly silent — a state that survives a revive
-      // and then clears on the next app launch, while the device taps and reads
-      // by OCR throughout. Exiting non-zero on that is a false refusal.
+      // and clears on the next app launch, while the device taps and reads by
+      // OCR throughout. Exiting non-zero on that is a false refusal, and the
+      // revive now performs that launch rather than leaving it to the caller.
       const state = diag?.verdict?.state ?? 'read-failed';
       const usable = !wedge.UNUSABLE.has(state);
       const degraded = usable && state !== 'healthy';
       emit(flags, { ok: usable, device: dev.udid, steps, verdict: diag?.verdict ?? null }, usable
         ? (degraded
           ? `\n${dev.name} is back and usable, but ${state}:\n  ${diag.verdict.detail}`
-            + '\nNot a failure — it taps and reads. An app launch often clears a silent tree.'
+            + '\nNot a failure — it taps and reads.'
           : `\n${dev.name} is healthy again — ${diag.verdict.detail}`)
         : `\n${dev.name} came back ${state}, which is not usable.`
           + `\n  ${diag?.verdict?.detail ?? 'nothing could be read from it'}`
