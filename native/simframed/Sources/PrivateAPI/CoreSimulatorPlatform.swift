@@ -45,13 +45,19 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     private static func loadFrameworks() throws {
         guard !loaded else { return }
         let developerDir = Self.developerDir()
-        let candidates = [
-            ("CoreSimulator", "/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator"),
-            ("SimulatorKit", "\(developerDir)/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"),
+        let candidates: [(String, [String])] = [
+            ("CoreSimulator", ["/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator"]),
+            ("SimulatorKit", [
+                "\(developerDir)/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit",
+                // Xcode moved this out of Contents/Developer into the top-level
+                // Contents/SharedFrameworks at some point around Xcode 16-27;
+                // keep the old path first since it's still what older Xcodes use.
+                "\(developerDir)/../SharedFrameworks/SimulatorKit.framework/SimulatorKit",
+            ]),
         ]
-        for (name, path) in candidates {
-            guard FileManager.default.fileExists(atPath: path) else {
-                throw PrivateAPIError.frameworksUnavailable("\(name) not found at \(path)")
+        for (name, paths) in candidates {
+            guard let path = paths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+                throw PrivateAPIError.frameworksUnavailable("\(name) not found at \(paths.joined(separator: " or "))")
             }
             guard let handle = dlopen(path, RTLD_NOW) else {
                 let reason = String(cString: dlerror())
