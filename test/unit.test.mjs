@@ -6804,3 +6804,60 @@ test('scrollTo looks before it reports a scroll it just performed as a failure',
   assert.match(body, /It IS in the tree and outside the viewport/,
     'when the tree did answer, say so — it picks a different remedy');
 });
+
+test('stillness from before the action is not settlement', async () => {
+  const api = await import('../src/index.js');
+
+  // `stableForMs` is measured as of the frame's capture, so the quiet began
+  // that long before `capturedAt`.
+  assert.equal(api.stillnessBegan({ capturedAt: 10_000, stableForMs: 4427 }), 5573);
+  assert.equal(api.stillnessBegan({ capturedAt: 10_000 }), null);
+  assert.equal(api.stillnessBegan(null), null);
+
+  // The three readings this rule was built from, taken on the bench device and
+  // not invented: the action is at t=0 and `capturedAt` is ms after it.
+  const acted = 0;
+  // 283ms after a Settings launch: `settled: true`, 4427ms of quiet, and the
+  // screen held ZERO elements — it filled 2.3s later. The quiet began 4.1s
+  // before the launch was issued.
+  assert.equal(api.stillSinceActing({ capturedAt: 283, stableForMs: 4427 }, acted), false);
+  // 408ms after `tap General`: 7753ms of quiet over the 23 elements of the
+  // screen being left.
+  assert.equal(api.stillSinceActing({ capturedAt: 408, stableForMs: 7753 }, acted), false);
+  // 1204ms after `tap About`: the quiet began 591ms AFTER the tap, and that
+  // read was complete — 14 of 14.
+  assert.equal(api.stillSinceActing({ capturedAt: 1204, stableForMs: 613 }, acted), true);
+
+  // **It may only ever add refusals it can demonstrate.** Missing timestamps
+  // mean the previous behaviour, never a new wait: a rule that turned "I cannot
+  // tell" into "wait" would hang every caller on a device whose state file is
+  // older than this field.
+  assert.equal(api.stillSinceActing({ capturedAt: 283, stableForMs: 4427 }, null), true);
+  assert.equal(api.stillSinceActing({}, acted), true);
+  assert.equal(api.stillSinceActing({ capturedAt: 283 }, acted), true);
+
+  // Exactly at the action counts as after it — a frame captured in the same
+  // millisecond is not evidence of the old screen.
+  assert.equal(api.stillSinceActing({ capturedAt: 500, stableForMs: 500 }, 0), true);
+});
+
+test('launch and openUrl stamp the action clock at the seam, not in the step', async () => {
+  const fs = await import('node:fs');
+  const seam = fs.readFileSync(new URL('../src/platform/index.js', import.meta.url), 'utf8');
+
+  // At the seam, so `baseline.resetFor`, `wedge.revive`, the bench and any
+  // future caller are covered. It was in the `launch` step first, which covered
+  // flows and missed all of those — the "a rule enforced where you noticed it
+  // covers a symptom" failure this project has three worked examples of.
+  assert.match(seam, /export const launchApp = \(udid, \.\.\.args\) => \{\s*\n\s*store\.noteAction\(udid\);/);
+  assert.match(seam, /export const openUrl = \(udid, \.\.\.args\) => \{\s*\n\s*store\.noteAction\(udid\);/);
+
+  // And terminate is deliberately NOT stamped: it removes an app rather than
+  // presenting one, so what it leaves behind is whatever was already there.
+  const terminate = seam.slice(seam.indexOf('export const terminateApp'), seam.indexOf('export const openUrl'));
+  assert.doesNotMatch(terminate, /noteAction/);
+
+  // The step must not stamp it a second time; one clock, one writer.
+  const actions = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(actions, /noteAction/);
+});

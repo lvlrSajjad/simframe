@@ -4562,3 +4562,67 @@ of the app, so any fixed band is below some real screen.
 `diagnose` now prints the reading and the threshold and no band at all on the
 healthy path. The threshold is **4.7x below the lowest healthy reading yet
 seen**, which is the property that was ever load-bearing.
+
+## Read completeness: `settled` was measuring the screen we had left — 2026-09-18
+
+Field-reported as the highest-priority class — a read returning chrome with the
+content missing, no loading marker, so an empty list and a zero-result list are
+indistinguishable and an agent reports "this filter returns zero results" and
+means it. Reproduced on the first attempt on `326464A4` by polling every ~150 ms
+after an action and asking two questions at once: what does settle say, and how
+many elements are actually in the content region.
+
+**Before:**
+
+| moment | `settled` | `stableForMs` | content elements |
+| --- | --- | --- | --- |
+| 283 ms after a Settings launch | **yes** | **4427 ms** | **0** — the screen filled at 2579 ms |
+| 408 ms after `tap General` | **yes** | **7753 ms** | **23** — Settings root's, not General's |
+| 1204 ms after `tap About` | yes | 613 ms | 14 of 14, correct |
+
+`stableForMs` of 4427 ms at 283 ms after the action is stillness that began
+**4.1 seconds before the action existed**. The detector is honest about the
+number and wrong about the screen: it reports how long the screen being *left*
+has been quiet, and nothing asks whether that quiet predates what we just did.
+It is the same shape as DEFERRED 184 one layer down — there a recall keyed on a
+pre-action frame, here a settle keys on pre-action stillness.
+
+**The rule, and it needs no threshold:** stillness that can be *shown* to have
+begun before the action is not settlement. It holds on every sample above.
+Missing timestamps mean the previous behaviour — this may only add refusals it
+can demonstrate.
+
+**After, same probes:**
+
+| probe | settled at | content then |
+| --- | --- | --- |
+| Settings launch (cold) | 2731 ms | **13 of 13** |
+| `tap General` | 1627 ms | **10 of 10** |
+| `tap About` | 1218 ms | **14 of 14** |
+
+Zero incomplete reads where there had been two of three.
+
+**Cost, measured rather than assumed.** Both suite flows, before and after:
+
+| flow | before | after | runs |
+| --- | --- | --- | --- |
+| `settings-larger-text` | 10735 ms | **10603 ms** | 6/6 ok |
+| `contacts-kate-bell` | 13394 ms | **13505 ms** | 5/5 ok |
+
+No measurable regression, because every action in those flows changes the
+screen, so stillness restarts and settle fires normally.
+
+**The case that does cost, stated plainly.** An action that changes *nothing* —
+a tap on dead space, a tap on a disabled control — now waits the full settle
+timeout and returns `settled: false`. Measured at **1512 ms**, three times out
+of three. That is bounded by `timeoutMs` and `settled: false` is not a failure
+(callers use the state and decline to persist a map built from it), but it fires
+on a *successful* no-op rather than only on a miss, which is a worse trade than
+184's re-read and should be said rather than waved away.
+
+It is also, for now, irreducible from pixels alone: "nothing has happened yet"
+and "nothing is going to happen" look identical in a framebuffer that has not
+changed, which is the whole reason the old behaviour was wrong. The cheap way
+out is a second opinion that does not go through the framebuffer at all — the
+accessibility tree is read live and in-process — and that is worth trying before
+anyone reaches for a duration threshold here.

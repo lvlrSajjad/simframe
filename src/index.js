@@ -1397,22 +1397,76 @@ export async function getFrameAt(deviceQuery, { msAgo = 0, options } = {}) {
  * Wait, briefly, for a frame that is holding still. Returns whatever the newest
  * frame is once the screen settles or the budget runs out, saying which.
  */
-export async function settledState(udid, { settleMs = MEMORY_SETTLE_MS, timeoutMs = 1500 } = {}) {
+/**
+ * When the stillness a state reports began, or null when that cannot be told.
+ *
+ * `stableForMs` is measured as of the frame's capture, so the quiet period
+ * started `stableForMs` before `capturedAt`. Exported because the rule built on
+ * it below is the interesting part and deserves to be testable without a device.
+ */
+export function stillnessBegan(state) {
+  if (!Number.isFinite(state?.capturedAt) || !Number.isFinite(state?.stableForMs)) return null;
+  return state.capturedAt - state.stableForMs;
+}
+
+/**
+ * Has this screen been still *since we acted*, or was it still before we did?
+ *
+ * The distinction the settle detector was missing. It answers "how long has the
+ * screen been quiet" honestly and has no idea that the quiet it is describing
+ * belongs to the screen the caller has just left.
+ *
+ * Only a stillness we can **prove** predates the action is rejected. When the
+ * timestamps are missing this returns true, which is the previous behaviour —
+ * this may only ever add refusals it can demonstrate, never turn an unknown
+ * into a wait.
+ */
+export function stillSinceActing(state, actedAt) {
+  if (!Number.isFinite(actedAt)) return true;
+  const began = stillnessBegan(state);
+  if (began == null) return true;
+  return began >= actedAt;
+}
+
+export async function settledState(udid, { settleMs = MEMORY_SETTLE_MS, timeoutMs = 1500, since } = {}) {
   const p = store.paths(udid);
   const deadline = Date.now() + timeoutMs;
+  // What we are settling *after*. A caller that knows may say; otherwise it is
+  // the last launch, openUrl or gesture this device was given.
+  const actedAt = since ?? store.lastActionAt(udid);
   let state = store.readJson(p.state);
+  let stale = false;
   while (Date.now() < deadline) {
     state = store.readJson(p.state) ?? state;
-    // The daemon runs a real settle detector that can tell a spinner from a
-    // still screen. Prefer it; the duration check is the fallback for the
-    // simctl engine, which has no such thing.
-    if (state?.settled === true) return { state, settled: true };
-    if (state && state.settled === undefined && state.stableForMs >= settleMs) {
-      return { state, settled: true };
+    // **Stillness from before the action is not settlement.** Measured on the
+    // bench device: 283ms after a Settings launch the state said `settled` with
+    // `stableForMs: 4427` over a screen holding **zero** elements, which filled
+    // 2.3 seconds later; 408ms after `tap General` it said `settled` with
+    // `stableForMs: 7753` over the 23 elements of Settings root. Both readings
+    // were honest about the number and wrong about the screen.
+    //
+    // Field-reported independently as the highest-priority class here: a read
+    // that returns chrome with the content missing and no loading marker is
+    // indistinguishable from a screen that is genuinely empty, so an agent
+    // reports "this filter returns zero results" and means it.
+    const fresh = stillSinceActing(state, actedAt);
+    if (!fresh) stale = true;
+    else {
+      // The daemon runs a real settle detector that can tell a spinner from a
+      // still screen. Prefer it; the duration check is the fallback for the
+      // simctl engine, which has no such thing.
+      if (state?.settled === true) return { state, settled: true, waitedForAction: stale };
+      if (state && state.settled === undefined && state.stableForMs >= settleMs) {
+        return { state, settled: true, waitedForAction: stale };
+      }
     }
     await sleep(40);
   }
-  return { state, settled: false };
+  // `settled: false` is not a failure and never was — callers use the state and
+  // decline to persist a map built from it. What is new is that this can now be
+  // false because the screen has not been seen to move since the action, which
+  // is a different and more honest reason than "it is still moving".
+  return { state, settled: false, ...(stale ? { stillnessPredatesAction: true } : {}) };
 }
 
 /**

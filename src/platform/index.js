@@ -20,6 +20,7 @@
 // function that takes a udid routes on that udid — `ownsUdid` answers that from
 // the id's own shape, because the question is asked from inside a capture loop
 // in a process that never listed anything.
+import * as store from '../store.js';
 import { platform as android } from './android.js';
 import { platform as ios } from './ios.js';
 
@@ -204,9 +205,34 @@ export async function resolveAcross(query, opts, all) {
 // backend a call reaches, never what the call means.
 export const isBootedSync = (udid, ...args) => platformFor(udid).isBootedSync(udid, ...args);
 export const screenshot = (udid, ...args) => platformFor(udid).screenshot(udid, ...args);
-export const launchApp = (udid, ...args) => platformFor(udid).launchApp(udid, ...args);
+/**
+ * Launch and openUrl stamp the action clock; nothing else here does.
+ *
+ * These two change the screen without touching the digitizer, so they are the
+ * only actions a gesture log cannot see — and a settle that cannot see them
+ * measures how long the screen being *left* has been sitting still. Measured:
+ * 283ms after a Settings launch, `settled: true` with `stableForMs: 4427` over
+ * a screen holding zero elements.
+ *
+ * **At the seam rather than in the `launch` step, and that placement is the
+ * point.** It was in the step first, which covered flows and missed everything
+ * else that launches an app — `baseline.resetFor`, `wedge.revive`, the bench,
+ * and the probe that found this. A rule enforced where you noticed it covers a
+ * symptom; this project's handoff has three worked examples of exactly that and
+ * this was very nearly a fourth.
+ *
+ * `terminateApp` is deliberately not stamped: it removes an app rather than
+ * presenting one, and the screen it leaves behind is whatever was underneath.
+ */
+export const launchApp = (udid, ...args) => {
+  store.noteAction(udid);
+  return platformFor(udid).launchApp(udid, ...args);
+};
 export const terminateApp = (udid, ...args) => platformFor(udid).terminateApp(udid, ...args);
-export const openUrl = (udid, ...args) => platformFor(udid).openUrl(udid, ...args);
+export const openUrl = (udid, ...args) => {
+  store.noteAction(udid);
+  return platformFor(udid).openUrl(udid, ...args);
+};
 export const setPermission = (udid, ...args) => platformFor(udid).setPermission(udid, ...args);
 export const setPasteboard = (udid, ...args) => platformFor(udid).setPasteboard(udid, ...args);
 

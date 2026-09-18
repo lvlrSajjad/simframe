@@ -35,6 +35,7 @@ export function paths(udid) {
     // recorded, and a stall is the absence of frames.
     captureHealth: path.join(dir, 'capture-health.json'),
     lastInput: path.join(dir, 'last-input'),
+    lastAction: path.join(dir, 'last-action'),
   };
 }
 
@@ -57,6 +58,44 @@ export function noteInput(udid, at = Date.now()) {
     writeAtomic(paths(udid).lastInput, [...inputTimes(udid), at].slice(-INPUT_MEMORY).join(','));
   } catch {
     /* a timestamp nothing depends on for correctness must not fail an action */
+  }
+  noteAction(udid, at);
+}
+
+/**
+ * When we last did something that ought to change the screen.
+ *
+ * Deliberately separate from the input log above, which answers a different
+ * question — "have several *gestures* landed with no pixel moving" — and would
+ * be wrong to answer it about a launch, since a launch that paints nothing is
+ * not evidence of a dead digitizer.
+ *
+ * This one exists so a settle can tell its own stillness from the *previous*
+ * screen's. Measured on 2026-09-18: 283ms after a Settings launch the state
+ * read `settled: true` with `stableForMs: 4427` and **zero elements** — 4.4
+ * seconds of quiet that began before the launch was issued. 408ms after a
+ * `tap General`, `stableForMs: 7753` and the 23 elements of the screen being
+ * left. In both, the settle detector was honestly reporting how long the screen
+ * we had already abandoned had been sitting still.
+ *
+ * Every gesture writes it (via `noteInput`), and so does every launch and
+ * `openUrl`, because those change the screen without touching the digitizer.
+ */
+export function noteAction(udid, at = Date.now()) {
+  try {
+    writeAtomic(paths(udid).lastAction, String(at));
+  } catch {
+    /* as above: a timestamp may not fail the action it describes */
+  }
+}
+
+/** When the last screen-changing action was issued, or null if none is recorded. */
+export function lastActionAt(udid) {
+  try {
+    const n = Number(fs.readFileSync(paths(udid).lastAction, 'utf8').trim());
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
   }
 }
 

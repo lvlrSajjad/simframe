@@ -2511,6 +2511,75 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+191. **A settled read could describe the screen we had just left.** FIXED,
+   2026-09-18. Field-reported as the highest-priority class — the confident
+   wrong answer — and reproduced on the first attempt.
+
+   The symptom, twice in the field and both confirmed against out-of-band
+   screenshots: `sim_tap` returns `ok`, settles in ~1165 ms, and the content
+   region holds only chrome. No rows, no loading marker. A read that WAS
+   complete took 3544 ms. **An empty list and a zero-result list are
+   indistinguishable in that output**, so an agent reports "this filter returns
+   zero results" and means it.
+
+   **Measured here by polling every ~150 ms after an action:**
+
+   ```
+    283ms after a Settings launch   settled=Y  stableForMs=4427   content=0
+    408ms after `tap General`       settled=Y  stableForMs=7753   content=23  (Settings root's)
+   1204ms after `tap About`         settled=Y  stableForMs= 613   content=14  (correct)
+   ```
+
+   4427 ms of stillness at 283 ms after the action is quiet that began **4.1
+   seconds before the action existed**. The detector is honest about the number
+   and wrong about the screen: it answers "how long has this been still" and has
+   no idea the stillness belongs to the screen the caller has already left.
+
+   **This is 184 one layer down.** There a recall keyed on a pre-action frame;
+   here a settle keys on pre-action stillness. Same family, same fix shape: ask
+   whether the evidence predates the thing it is being used to judge.
+
+   **The rule: stillness that can be shown to have begun before the action is
+   not settlement.** No threshold — `stableForMs` and `capturedAt` give the
+   instant the quiet started, and the action clock gives the instant to compare
+   it against. Missing timestamps mean the previous behaviour, so this can only
+   add refusals it can demonstrate. Zero incomplete reads afterwards where there
+   had been two of three.
+
+   **The action clock is new and deliberately separate from the input log.**
+   That log answers "have several *gestures* landed with no pixel moving", which
+   would be wrong to answer about a launch. And it is stamped **at the platform
+   seam**, not in the `launch` step, which is where it went first — the step
+   covered flows and missed `baseline.resetFor`, `wedge.revive`, the bench and
+   the probe that found this. A fourth instance of "a rule enforced where you
+   noticed it covers a symptom", caught this time by the probe still failing
+   after the fix.
+
+   **What it costs, and this is the honest part.** An action that changes
+   *nothing* now waits the full settle timeout — **1512 ms, three of three** —
+   and returns `settled: false`. Bounded, and `settled: false` is not a failure;
+   but it fires on a *successful* no-op rather than only on a miss, which is a
+   worse trade than 184's re-read. Neither suite flow shows it (10735 -> 10603
+   ms and 13394 -> 13505 ms, 11 of 11 runs ok) because their actions all change
+   the screen.
+
+   **Still open, and the right next move here:** "nothing has happened yet" and
+   "nothing is going to happen" are identical in a framebuffer that has not
+   changed — which is exactly why the old behaviour was wrong, so the ambiguity
+   is real rather than an implementation gap. The way out is a second opinion
+   that does not go through the framebuffer: the accessibility tree is read live
+   and in-process, so a tree unchanged since before the action is independent
+   evidence that nothing is coming. Try that before anyone reaches for a
+   duration threshold.
+
+   **Not yet tested, and it is the larger prize.** A field reporter's hypothesis
+   is that this feeds screen-identity churn — the same physical home screen got
+   four different hashes in one session — because an incomplete read yields a
+   different element set, which yields a different hash, which makes a known
+   screen read as new and loses its learned exits. If that holds, item 174 is
+   partly downstream of this and some of it has just been paid for. Re-measure
+   the hash stability of one screen across many visits before touching 174.
+
 190. **`scrollTo` scrolls away from the target and burns its whole budget.**
    OPEN, reproduced twice on the bench device 2026-09-18, immediately after
    fixing a *different* `scrollTo` fault and while checking that fix had not
