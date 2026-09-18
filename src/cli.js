@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runDaemon, DEFAULTS } from './daemon.js';
-import { bootedDevices, capabilitiesFor, launchApp, listDevices, PLATFORMS, resolveDevice, restartDevice, screenshot, toolchainChecks } from './platform/index.js';
+import { bootedDevices, capabilitiesFor, listDevices, PLATFORMS, resolveDevice, screenshot, toolchainChecks } from './platform/index.js';
 import * as actions from './actions.js';
 import * as analyze from './analyze.js';
 import * as api from './index.js';
@@ -13,37 +13,11 @@ import * as metrics from './metrics.js';
 import * as navigate from './navigate.js';
 import * as wedge from './wedge.js';
 
-/**
- * How hard `revive` looks before calling a device unhealthy.
- *
- * A device seconds out of a boot is still settling, and one reading would make
- * that a false alarm — the failure shape of item 175. Five looks over ~8s is
- * longer than any settle observed after a boot and far shorter than the revive
- * itself.
- */
-const REVIVE_HEALTH_POLLS = 5;
-const REVIVE_HEALTH_WAIT_MS = 2000;
 import { decodePng } from './png.js';
 import * as storage from './storage.js';
 import * as store from './store.js';
 import * as view from './view.js';
 
-/**
- * What a revive launches to bring a silent accessibility tree back, and the one
- * platform it makes sense on.
- *
- * Settings, because it is on every iOS simulator and opening it changes nothing
- * a caller could be relying on. The app is incidental — what clears the tree is
- * that *something* launched; Preferences is simply the one that always exists.
- * Measured with this bundle, so this is the one written down.
- *
- * Android is excluded by name rather than by accident. It has no accessibility
- * tree at all and says so (CLAUDE.md), so `tree-silent` there is the backend's
- * normal state and not a fault — launching an iOS bundle id at it would be the
- * "borrowing the other platform's vocabulary" mistake the boundary exists to
- * prevent.
- */
-const REVIVE_LAUNCH = { ios: 'com.apple.Preferences' };
 
 
 const USAGE = `simframe — always-warm iOS Simulator frames
@@ -450,67 +424,17 @@ async function main() {
     case 'revive': {
       const dev = await resolveDevice(device);
       const say = (line) => { if (!flags.json) console.log(line); };
-      const steps = [];
-      const did = async (what, fn) => {
-        try { await fn(); steps.push({ step: what, ok: true }); say(`  ok   ${what}`); } catch (err) {
-          steps.push({ step: what, ok: false, error: err.message });
-          say(`  ..   ${what} — ${err.message.split('\n')[0]}`);
-        }
-      };
       say(`reviving ${dev.name}`);
-      // Forced: the point of this command is that the device is wedged, so
-      // something is certainly still holding it.
-      await did('stopped the daemon', async () => { api.stopDaemon(dev.udid, { force: true }); });
-      // Through the boundary, which is the whole point of the boundary: the
-      // first version of this shelled out to `xcrun` from here and the test
-      // that forbids it failed immediately, correctly.
-      await did('restarted the device, and waited for the boot to finish',
-        () => restartDevice(dev.udid));
-      await did('started capture', () => api.ensureDaemon(dev.udid));
-      await did('rebuilt the HID session', () => input.resetSession(dev.udid));
-      // **Frames are not the whole device.** This check read `getState().hash`,
-      // which capture alone satisfies — so a revive that restored the
-      // framebuffer and left the accessibility tree dead reported "producing
-      // frames again" and exited 0. Observed on the bench device (item 183):
-      // 0 elements from the tree, 20 from OCR, immediately after a revive that
-      // called itself a success. Every intent on that device was silently
-      // resolving against OCR alone.
-      //
-      // So it asks the question `diagnose` asks, rather than a weaker one of
-      // its own. Polled, because a device seconds out of a boot is legitimately
-      // still settling and one reading would turn that into a false alarm —
-      // the shape of item 175, which this file has had to correct twice.
-      let diag = null;
-      for (let attempt = 0; attempt < REVIVE_HEALTH_POLLS; attempt += 1) {
-        diag = await wedge.diagnose(dev.udid, { options }).catch(() => null);
-        if (diag?.verdict?.state === 'healthy') break;
-        if (attempt < REVIVE_HEALTH_POLLS - 1) await new Promise((r) => setTimeout(r, REVIVE_HEALTH_WAIT_MS));
-      }
-      // **A silent tree does not heal with time, and it does heal with a
-      // launch.** Item 183 asked which, and until 2026-09-18 the file said
-      // plainly that one observation is not causation. Measured on `326464A4`:
-      // six reads over 60 s with nothing touching the device left the tree at
-      // **0 elements** every time, and a single `launch` took it to **14**
-      // immediately. So patience was the wrong remedy and this is the right
-      // one, and the note that used to tell the *caller* "an app launch often
-      // clears a silent tree" is now something the command does itself.
-      //
-      // Only for `tree-silent`, which is the state that was measured. Capture
-      // failures are not touched: launching an app at a device that is not
-      // producing frames buys nothing and hides which fault it was.
-      const reviveLaunch = REVIVE_LAUNCH[dev.platform];
-      if (diag?.verdict?.state === 'tree-silent' && reviveLaunch) {
-        await did('launched an app, which is what brings a silent tree back', async () => {
-          await launchApp(dev.udid, reviveLaunch, { args: [], env: {} });
-          await new Promise((r) => setTimeout(r, REVIVE_HEALTH_WAIT_MS));
-        });
-        diag = await wedge.diagnose(dev.udid, { options }).catch(() => diag);
-      }
-      // Usable, not perfect. Demanding `healthy` here failed a device whose
-      // accessibility tree was briefly silent — a state that survives a revive
-      // and clears on the next app launch, while the device taps and reads by
-      // OCR throughout. Exiting non-zero on that is a false refusal, and the
-      // revive now performs that launch rather than leaving it to the caller.
+      // The sequence itself lives in `wedge.js`, because `bench-hpi` needs the
+      // same recovery between passes and a second copy of it here is how this
+      // project has repeatedly ended up fixing one symptom in three places.
+      const revived = await wedge.revive(dev.udid, {
+        options,
+        device: dev,
+        onStep: ({ step, ok, error }) => say(ok ? `  ok   ${step}` : `  ..   ${step} — ${String(error).split('\n')[0]}`),
+      });
+      const { steps } = revived;
+      const diag = { verdict: revived.verdict };
       const state = diag?.verdict?.state ?? 'read-failed';
       const usable = !wedge.UNUSABLE.has(state);
       const degraded = usable && state !== 'healthy';

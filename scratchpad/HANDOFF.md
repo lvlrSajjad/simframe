@@ -5,14 +5,25 @@
 Work these top down. Each line says why it is where it is and where the detail
 lives. Everything below this section is history, kept for its reasoning.
 
-**0. [OWNER, not the agent] Record the human HPI baseline.** Now unblocked on
-the device side: `settings-larger-text` ran **8 of 8** today with
-`HPI_accuracy 1` and `step_ratio 1`, and `revive` brings a silent tree back by
-itself. The runbook below should now complete rather than wedge. Blocks every HPI
-number in the repo. The committed `docs/research/hpi-baseline.json` is invalid:
-half its time comes from `contacts-kate-bell`, which has `completed: 0`. An
-agent cannot do this — if simframe drives it, HPI is simframe measured against
-itself. Runbook at the end of this section.
+**0. ~~[OWNER] Record the human HPI baseline.~~ DONE — and it was already done.
+This line was wrong, including where I wrote it.** Checked against the files on
+2026-09-18: the human baseline exists for both suite flows, recorded 2026-09-09,
+`N=5` each and committed — `settings-larger-text` p50 **7799 ms** (4 steps, which
+is where the 1.95 s/step figure comes from) and `contacts-kate-bell` p50
+**4300 ms**. `simframe baseline list` says so.
+
+**What `completed: 0` actually meant.** It is a field on the *agent* block of
+`docs/research/hpi-baseline.json`, not the human one: five agent runs of
+`contacts-kate-bell` that never reached Kate Bell, recorded before item 172 was
+fixed, when `HPI_time` still counted failed runs. So the committed reference's
+`agent_ms p50 10570` described runs that never finished, and the humans were
+sound all along. One field read off the wrong half of a file sent this to the
+owner as a twenty-minute task for nine days. **Read the file before filing the
+task.**
+
+Re-recorded 2026-09-18 at the new default cooldown, now that both flows complete
+100% — see the top block. The human half was deliberately *not* re-recorded:
+same OS, same two flows, nothing to change.
 
 **1. Item 174 — screen identity fragments on content-driven screens.** Promoted
 to the top now that the fast failure is closed, and today's work made it *more*
@@ -426,9 +437,20 @@ Two reports, opposite conclusions, and only the second one counted anything.
   fails identically on `main` and on the `v0.16.0` tag, i.e. it predates this
   work. **`bench` does not run on this path, so 0.17.0 carries no HPI
   measurement** — the same as every release since item 148.
-- **The replay measurement has now been skipped by two peers in a row.** It is
-  §3 of the peer prompt, numbered, with a stopwatch, and it is the one number
-  that demonstrates human parity outside this machine. Insist on it.
+- **The replay measurement has now been skipped by two peers in a row**, and the
+  sentence that used to be here over-claimed what it buys. It is **not** "the one
+  number that demonstrates human parity outside this machine": peers run on this
+  laptop and this bench device, so a peer replay is not off-host. What it buys is
+  independence from this project's own instrumentation — a different agent, a
+  different app, an external stopwatch. Worth having, not worth its own session,
+  so as of 2026-09-18 it is **deliverable #1 of the field-round prompt** rather
+  than §3 of it. Two peers skipping the same numbered section is a fact about the
+  prompt, not about the peers.
+
+- **Off-host parity: PARKED, 2026-09-18, by the owner.** No second machine
+  available. The claim stands as measured three times on one laptop and the repo
+  says so wherever it appears. Unpark when a second machine or an outside tester
+  exists; it is five minutes of their time.
 
 ## The lesson this session kept re-teaching
 

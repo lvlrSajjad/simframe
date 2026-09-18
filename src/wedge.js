@@ -21,6 +21,8 @@
 // a job. Nothing here needs a device to be tested.
 import * as api from './index.js';
 import * as frontmost from './frontmost.js';
+import * as input from './input.js';
+import { launchApp, restartDevice } from './platform/index.js';
 
 /**
  * How little agreement between the sensors counts as "these are different
@@ -255,4 +257,83 @@ export const UNUSABLE = new Set(['capture-down', 'nothing-readable', 'read-faile
 export async function diagnose(deviceQuery, { options } = {}) {
   const snap = await snapshot(deviceQuery, { options });
   return { ...snap, verdict: classify(snap) };
+}
+
+
+/**
+ * How hard a revive looks before calling a device unhealthy.
+ *
+ * A device seconds out of a boot is still settling, and one reading would make
+ * that a false alarm — the failure shape of item 175.
+ */
+export const REVIVE_HEALTH_POLLS = 5;
+export const REVIVE_HEALTH_WAIT_MS = 2000;
+
+/**
+ * What a revive launches to bring a silent accessibility tree back, and the one
+ * platform it makes sense on.
+ *
+ * Settings, because it is on every iOS simulator and opening it changes nothing
+ * a caller could be relying on. The app is incidental — what clears the tree is
+ * that *something* launched. Android is excluded by name rather than by
+ * accident: it has no accessibility tree at all and says so, so `tree-silent`
+ * there is the backend's normal state and not a fault.
+ */
+export const REVIVE_LAUNCH = { ios: 'com.apple.Preferences' };
+
+/**
+ * Power-cycle a device and say what state it came back in.
+ *
+ * The order is load bearing and was learned by hand: stop the daemon, shut the
+ * device down, boot it and *wait for the boot to finish*, start capture, rebuild
+ * the HID session. Any other order leaves a daemon holding a dead device.
+ *
+ * Lifted out of `cli.js` on 2026-09-18 so the bench can use it between passes.
+ * That is not tidying: `bench-hpi` runs `passes x runs` consecutively with no
+ * recovery in between, which on this device is 30 runs against a tolerance of
+ * roughly 8-10, so a three-pass suite has never been physically completable and
+ * the gate has never produced a hosted-runner reading. DEFERRED 173 listed a
+ * revive between passes as worth trying and nothing had tried it.
+ *
+ * `onStep` is called with each step's outcome so a CLI can print it live and a
+ * script can stay quiet.
+ */
+export async function revive(deviceQuery, { options, onStep = () => {}, device } = {}) {
+  const dev = device ?? { udid: String(deviceQuery), name: String(deviceQuery), platform: 'ios' };
+  const steps = [];
+  const did = async (what, fn) => {
+    try {
+      await fn();
+      steps.push({ step: what, ok: true });
+      onStep({ step: what, ok: true });
+    } catch (err) {
+      steps.push({ step: what, ok: false, error: err.message });
+      onStep({ step: what, ok: false, error: err.message });
+    }
+  };
+  // Forced: the point of this is that the device is wedged, so something is
+  // certainly still holding it.
+  await did('stopped the daemon', async () => { api.stopDaemon(dev.udid, { force: true }); });
+  await did('restarted the device, and waited for the boot to finish', () => restartDevice(dev.udid));
+  await did('started capture', () => api.ensureDaemon(dev.udid));
+  await did('rebuilt the HID session', () => input.resetSession(dev.udid));
+
+  let verdict = null;
+  for (let attempt = 0; attempt < REVIVE_HEALTH_POLLS; attempt += 1) {
+    verdict = classify(await snapshot(dev.udid, { options }).catch(() => null));
+    if (verdict?.state === 'healthy') break;
+    if (attempt < REVIVE_HEALTH_POLLS - 1) await new Promise((r) => setTimeout(r, REVIVE_HEALTH_WAIT_MS));
+  }
+  // A silent tree does not heal with time and does heal with a launch — six
+  // reads over 60s at 0 elements, then 14 immediately after one launch.
+  const bundle = REVIVE_LAUNCH[dev.platform];
+  if (verdict?.state === 'tree-silent' && bundle) {
+    await did('launched an app, which is what brings a silent tree back', async () => {
+      await launchApp(dev.udid, bundle, { args: [], env: {} });
+      await new Promise((r) => setTimeout(r, REVIVE_HEALTH_WAIT_MS));
+    });
+    verdict = classify(await snapshot(dev.udid, { options }).catch(() => null)) ?? verdict;
+  }
+  const state = verdict?.state ?? 'read-failed';
+  return { device: dev, steps, verdict, state, usable: !UNUSABLE.has(state), healthy: state === 'healthy' };
 }

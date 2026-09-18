@@ -21,6 +21,7 @@ import { runScript } from '../src/actions.js';
 import * as api from '../src/index.js';
 import * as baseline from '../src/baseline.js';
 import * as metrics from '../src/metrics.js';
+import * as wedge from '../src/wedge.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (name, fallback = null) => {
@@ -55,8 +56,22 @@ const passes = Math.max(1, Number(arg('passes', gate ? '3' : '1')));
  * asked to do it degrades and then stops rendering. The suite paces itself so
  * the numbers describe simframe rather than the simulator's tolerance for
  * being hammered.
+ *
+ * **1500 was not enough, and that is measured rather than argued.** Same flow,
+ * same device, same afternoon, varying only this number: at 1500 ms the device
+ * stopped being readable after 4, 4 and 5 runs across three separate attempts;
+ * at 4000-5000 ms a full 8-run pass finished with `diagnose` still saying
+ * `healthy`. That is a large part of item 173 — "the bench suite wedges the
+ * device it measures" — and it means the suite has never once completed a full
+ * pass on a hosted runner.
+ *
+ * Raising it is a measurement change, not a tuning tweak: **every HPI number in
+ * this repo recorded before 2026-09-18 was taken at 1500**, including the
+ * committed reference, so numbers across that line are not comparable. The
+ * reference was re-recorded at the new default for exactly that reason, and
+ * `docs/BENCHMARKS.md` says so.
  */
-const cooldownMs = Math.max(0, Number(arg('cooldown', '1500')));
+const cooldownMs = Math.max(0, Number(arg('cooldown', '4000')));
 
 const suite = baseline.loadSuite(arg('suite', baseline.SUITE_FILE)).filter((f) => !only || f.name === only);
 if (!suite.length) {
@@ -101,6 +116,35 @@ outer: for (let pass = 1; pass <= passes; pass += 1) {
   const thisPass = new Set();
   passSets.push(thisPass);
   if (passes > 1) console.log(`pass ${pass}/${passes}`);
+  // **Recover between passes, not only after a failure.**
+  //
+  // Measured 2026-09-18: this device tolerates roughly 8-10 app launches before
+  // it stops being readable, and it degrades *within* a pass — the suite's own
+  // second flow went 9 s, 18 s, 30 s, then two incompletes, on a device that had
+  // run the same flow five times cleanly minutes earlier. `passes x runs` is 30
+  // runs at the default and 18 in CI, both far past that, with no recovery in
+  // between. So a multi-pass suite has never been physically completable and the
+  // gate has never produced a hosted-runner reading in this whole series.
+  //
+  // DEFERRED 173 listed this as worth trying. Nothing had tried it.
+  //
+  // Diagnosed first, revived only if needed: a revive is ~40 s and paying it
+  // when the device is fine would be spending the budget on superstition. The
+  // diagnosis is also the honest record of what state each pass started in —
+  // without it, a pass that began on a half-dead device is indistinguishable
+  // from one that did not.
+  if (pass > 1) {
+    const before = wedge.classify(await wedge.snapshot(dev.udid).catch(() => null));
+    console.log(`  device before pass ${pass}: ${before?.state ?? 'unreadable'}`);
+    if (before?.state !== 'healthy') {
+      const revived = await wedge.revive(dev.udid, { device: dev });
+      console.log(`  revived between passes — now ${revived.state}`);
+      if (!revived.usable) {
+        abort = { kind: 'the device could not be revived between passes', message: revived.verdict?.detail ?? '' };
+        break outer;
+      }
+    }
+  }
   for (const flow of suite) {
     for (let run = 1; run <= runs; run += 1) {
     // The same start state the human baseline was recorded from: app not
