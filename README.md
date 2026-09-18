@@ -946,9 +946,13 @@ from the tree against 20 from OCR. `doctor` is right about what is configured
 and `diagnose` is right about what is happening. Ask the second one when
 something is behaving oddly.
 
-The `stale-frame` threshold is measured rather than chosen: element fusion on
-five healthy screens ran 0.667–0.929, so the threshold sits at 0.1 — 6.7× below
-the observed floor rather than inside the metric's own noise. Numbers in
+The `stale-frame` threshold is measured rather than chosen: element fusion has
+run 0.667–0.929 on Apple's own screens, 0.567 on a third-party app and 0.471 on
+a content-heavy Settings screen, so the threshold sits at 0.1 — **4.7× below the
+lowest healthy reading yet seen**, rather than inside the metric's own noise.
+Healthy fusion has no fixed band, because it tracks how much of a screen is
+OCR-only and that is a property of the app; `diagnose` prints the reading and
+the threshold and does not print a range the verdict does not use. Numbers in
 [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 `simframe revive` is that restart, in the order that matters — stop the daemon,

@@ -4495,3 +4495,70 @@ paces itself at 1500 ms between runs. Same flow, same device, same afternoon:
 One sample per condition per run, so this is a direction rather than a
 threshold — but it points the same way as the suite's own note about relaunching
 an app as fast as a script can.
+
+## What two peer field rounds measured — 2026-09-18
+
+Two sessions, independently, on different targets. Neither knew about the other.
+
+**The binding constraint on `steps_per_call` may not be simframe.** The iOS
+reporter's harness classifier **denied every `sim_do` and allowed every
+`sim_tap`**, deterministically, keyed on the tool name rather than the content:
+
+```
+sim_do steps=[{"tap":"Open"}]   -> DENIED   ([External System Writes])
+sim_tap sel="Open"              -> ok
+```
+
+Identical action, one tap. `sim_do` is the only batching primitive, so under
+that policy `steps_per_call` is pinned at **1.0** and every batching improvement
+is invisible. The web reporter hit the same wall from the other side: every
+text-entry action refused, and — the part that was not in anyone's model — **a
+batch is authorised as a unit**, so one gated member loses the whole round trip
+including the safe actions in front of it. P(batch survives) therefore falls
+with batch size, which makes aggressive batching *superlinearly* risky on a
+gated host and means an `n` measured on an ungated one overstates the real gain.
+
+Second-order, and it bears on this project's own steering wheel: that session's
+`escalations` reported 87 of 87 avoidable, 87 model turns spent. If a host is
+refusing the batch tool, some of what the escalation log attributes to
+simframe's reasoning gaps is a policy layer nobody has controlled for.
+
+**The replay measurement, taken a fourth time.** Five bottom-tab navigations,
+timed on a clock outside simframe: 5.85 s, 5.35 s, 5.31 s over 5 steps =
+**1.10 s/step**, verified by screenshot that the replay had actually navigated.
+
+The reporter declined to read this as an improvement on the 1.98 s already
+recorded here, and they are right: three of their five steps settled in
+60-125 ms because a tab switch has no push animation, so 1.10 is a floor for
+trivial steps and 1.98 remains the representative figure. Recorded as
+corroboration, not as a better number.
+
+Their more useful number is the ratio: **12 step attempts took ~9 minutes of
+field-round wall clock — ~45 s per attempted step against 1.10 s in replay, a
+factor of forty.** Replay measures the engine, and the engine is about 2% of the
+bill. This is the same conclusion the latency model reached from the other
+direction, now measured on a third-party app by someone else.
+
+**Element fusion has no healthy band, and finding that out took two tries.**
+`diagnose` printed `healthy` at **0.567** and **0.615** beside a stated band of
+0.66-0.93. The verdict was correct — `DISAGREEMENT` is 0.1 and is what decides —
+and the band was wrong: it had been sampled on five Apple system screens, which
+are uniformly well-labelled, and a third-party app fuses lower because more of
+its content is OCR-only.
+
+The first fix widened the band to 0.57-0.93. **The very next device read
+returned 0.471** — Settings, 34 elements, 25 by tree and 17 by OCR — which is
+the identical contradiction one decimal place down, and settles what the
+constant is. Fusion tracks how much of a screen is OCR-only; that is a property
+of the app, so any fixed band is below some real screen.
+
+| screen | fusion |
+| --- | --- |
+| Apple system screens (5, 2026-09-17) | 0.667 - 0.929 |
+| a third-party app (2, 2026-09-18, field) | 0.567, 0.615 |
+| Settings, content-heavy (2026-09-18) | **0.471** |
+| a stale frame, for contrast | ~0.03 |
+
+`diagnose` now prints the reading and the threshold and no band at all on the
+healthy path. The threshold is **4.7x below the lowest healthy reading yet
+seen**, which is the property that was ever load-bearing.

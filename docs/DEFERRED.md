@@ -2511,6 +2511,44 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+190. **`scrollTo` scrolls away from the target and burns its whole budget.**
+   OPEN, reproduced twice on the bench device 2026-09-18, immediately after
+   fixing a *different* `scrollTo` fault and while checking that fix had not
+   regressed anything. This is almost certainly the defect a field reporter
+   measured as **12.6 s and 18.4 s for zero progress — 31 s, which dwarfed every
+   other latency cost they saw**.
+
+   Two runs, both on Settings, both giving up with "the tree does not say where
+   it is", and in both the direction was the opposite of where the target was:
+
+   ```
+   scrollTo "Accessibility"  (above the viewport)  -> "down stopped moving after 2 attempt(s)"
+   scrollTo "Developer"      (bottom of the list)  -> "up stopped moving after 4 attempt(s)"
+   ```
+
+   `offsetSays()` is supposed to prevent exactly this — it reads the tree, takes
+   the sign of the target's `y` and follows it — and the second transcript shows
+   it doing something stranger than failing: `dir` reached `up` for a target at
+   the bottom of the list, which can only have come from the reverse branch,
+   which only runs when `offsetSays()` returned evidence. So the tree answered,
+   and answered in a direction that cannot be right.
+
+   **Do not fix this by reasoning about it.** The first fix to this function
+   today was correct precisely because the failure was reproduced and measured
+   first, and this project's own record is that one symptom here has worn several
+   causes. Print what `offsetSays()` actually resolved and where it thought the
+   target was, on every iteration, and run it on both transcripts above. Two
+   candidates worth separating: `matching.resolve` matching a *different*
+   element whose label contains the query, and the tree carrying a scrolled-away
+   or restored-state copy of the list whose coordinates describe a previous
+   scroll position.
+
+   Note also that the budget is only bounded by `max` when the stall detector
+   never fires — and a rubber-band bounce at the end of a list *changes the
+   frame*, so "did the screen move" answers yes while nothing is being achieved.
+   That would explain 4 attempts where the give-up path expects to throw on the
+   first or second.
+
 188. **`bench-hpi --out` writes the file even when the run has just said the
    result must not be adopted.** OPEN, found 2026-09-18 while re-recording the
    reference, and it would have committed an invalid baseline.

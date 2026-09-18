@@ -54,8 +54,39 @@ import { launchApp, restartDevice } from './platform/index.js';
  */
 export const DISAGREEMENT = 0.1;
 
-/** The range observed on healthy screens, for the report to print honestly. */
-export const HEALTHY_FUSION = '0.66-0.93';
+/**
+ * The range observed on healthy screens, for the report to print honestly.
+ *
+ * **Widened 2026-09-18, because the first sample was too narrow and the output
+ * was contradicting itself.** A field reporter watched `diagnose` print
+ * `healthy` twice at **0.567** and **0.615** on the same line as "measured
+ * healthy 0.66-0.93", and was right to call that out: a verdict and the band
+ * printed beside it should not disagree.
+ *
+ * Neither number was wrong. The verdict is correct — the threshold that decides
+ * it is `DISAGREEMENT`, 0.1, and 0.567 is nowhere near it. The *band* was the
+ * wrong thing: it was sampled on five Apple system screens (Settings, General,
+ * About, springboard, Reminders), which are uniformly well-labelled, and a real
+ * third-party app fuses lower because more of its content is OCR-only. Same
+ * afternoon on this device, on system screens: 0.7, 0.846, 0.857 — consistent
+ * with the original sample. The 0.567 and 0.615 come from an app.
+ *
+ * So it is stated as what it is: a range observed across screens, with the floor
+ * from an app rather than from Apple's own UI.
+ *
+ * **And then it was widened once and immediately contradicted again**: the next
+ * device read after that change returned **0.471** on a Settings screen with 34
+ * elements, 25 by tree and 17 by OCR. Which settles what this constant is for.
+ * It is not a health standard — fusion tracks how much of a screen is OCR-only,
+ * that is a property of the app, and any fixed band will be below some real
+ * screen. `diagnose` no longer prints it on the healthy path for that reason.
+ * It survives in the `stale-frame` message, where a reading of 0.03 wants the
+ * contrast, and in `docs/BENCHMARKS.md` as evidence rather than a threshold.
+ *
+ * The number that decides anything is `DISAGREEMENT`, and it is 4.7x below even
+ * the lowest healthy reading yet seen.
+ */
+export const HEALTHY_FUSION = '0.47-0.93';
 
 /**
  * Both sensors need at least this many elements before their disagreement means

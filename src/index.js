@@ -1460,6 +1460,33 @@ export function offScreenMatch(targets, query, points) {
 }
 
 /**
+ * Which way a target is outside the viewport, and by which measure.
+ *
+ * `offViewport` has checked both axes since it was written; the sentence
+ * reporting it only ever named `y` and the screen *height*. So a tab in a
+ * horizontally-scrolling strip was reported as *"it is at y=143 on a 874pt
+ * screen"* — a coordinate plainly inside the screen, next to a conclusion that
+ * it is not in view, with four of its siblings visible. Field-reported, and the
+ * reporter's summary is the right one: the honest half was right and only the
+ * axis was wrong.
+ *
+ * Vertical is checked first because it is overwhelmingly the common case, and
+ * because `scrollTo` reasons vertically — a caller told "below the fold" and a
+ * caller told "past the right edge" do different things next, which is the
+ * whole reason to say which.
+ */
+export function offScreenAxis(target, points) {
+  const { width, height } = points ?? {};
+  if (Number.isFinite(height) && (target.y < 0 || target.y > height)) {
+    return { axis: 'y', at: Math.round(target.y), extent: Math.round(height), edge: target.y < 0 ? 'above' : 'below' };
+  }
+  if (Number.isFinite(width) && (target.x < 0 || target.x > width)) {
+    return { axis: 'x', at: Math.round(target.x), extent: Math.round(width), edge: target.x < 0 ? 'left of' : 'right of' };
+  }
+  return null;
+}
+
+/**
  * Which sensors a read asks for by default.
  *
  * `full` is the default and what CLAUDE.md fixes: accessibility and OCR fused
@@ -1766,8 +1793,12 @@ async function locateWith(
     if (offScreen) {
       throw metrics.tag(
         new Error(
-          `"${query}" is in the tree but not in view — it is at y=${Math.round(offScreen.y)}`
-          + ` on a ${Math.round(points.height)}pt screen. Scroll to it (sim_scroll_to) rather than waiting;`
+          `"${query}" is in the tree but not in view — ${(() => {
+            const off = offScreenAxis(offScreen, points);
+            if (!off) return `it is at ${Math.round(offScreen.x)},${Math.round(offScreen.y)}`;
+            return `it is ${off.edge} the viewport, at ${off.axis}=${off.at}`
+              + ` on a ${off.extent}pt ${off.axis === 'y' ? 'tall' : 'wide'} screen`;
+          })()}. Scroll to it (sim_scroll_to) rather than waiting;`
           + ' waiting cannot bring it into view.',
         ),
         from === 'memory' ? 'ambiguous_intent' : 'unknown_screen',

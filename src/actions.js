@@ -2983,18 +2983,51 @@ async function runStep(deviceQuery, udid, step, ctx) {
       // rather than the act — reported as "after 1 scroll down" on a request
       // for "up".
       const scrolled = [];
+      const arrivedHow = () => (scrolled.length
+        ? ` after ${scrolled.length} scroll${scrolled.length === 1 ? '' : 's'} `
+          + (new Set(scrolled).size === 1 ? scrolled[0] : scrolled.join(' then '))
+        : ' already');
+      /**
+       * Is it here now? Asked without throwing, so a give-up path can use it.
+       *
+       * **A frame hash is a whole-screen measure and a strip is a small part of
+       * the screen**, so "the frame did not change" is not "nothing moved".
+       * Reported from the field: a horizontally-scrolling tab strip had the
+       * target scrolled into view — the visible tabs demonstrably changed — and
+       * this step reported `not reachable by scrolling` anyway, because the
+       * whole-frame hash barely moved. A confident wrong *failure* after the
+       * action succeeded, which costs what a silent success costs: the caller
+       * is handed a false fact and a round trip.
+       *
+       * Same principle as the recall path (DEFERRED 184): a miss may not be the
+       * final word until something has looked.
+       */
+      const nowInView = async () => {
+        try {
+          const found = await api.locate(deviceQuery, query, { index: step.index, refresh: true });
+          return inViewport(found.target) ? found : null;
+        } catch {
+          return null;
+        }
+      };
+      // What the last look actually established, so the give-up message can say
+      // what it knows instead of guessing. `absent` means the resolver did not
+      // find it; `off-view` means it did and the target sits outside the
+      // viewport — and in that case claiming it may not be in the tree is
+      // flatly contradicted by the tree we just read.
+      let lastMiss = null;
       for (let i = 0; i <= max; i += 1) {
         try {
           const found = await api.locate(deviceQuery, query, { index: step.index, refresh: i > 0 });
-          if (!inViewport(found.target)) throw new Error(
-            `"${query}" is in the tree but not in view (at ${found.target.x},${found.target.y}`
-            + ` on a ${Math.round(points?.width ?? 0)}x${Math.round(points?.height ?? 0)}pt screen)`);
-          const how = scrolled.length
-            ? ` after ${scrolled.length} scroll${scrolled.length === 1 ? '' : 's'} `
-              + (new Set(scrolled).size === 1 ? scrolled[0] : scrolled.join(' then '))
-            : ' already';
-          return `"${found.target.label ?? query}" is in view at ${found.target.x},${found.target.y}${how}`;
+          if (!inViewport(found.target)) {
+            lastMiss = 'off-view';
+            throw new Error(
+              `"${query}" is in the tree but not in view (at ${found.target.x},${found.target.y}`
+              + ` on a ${Math.round(points?.width ?? 0)}x${Math.round(points?.height ?? 0)}pt screen)`);
+          }
+          return `"${found.target.label ?? query}" is in view at ${found.target.x},${found.target.y}${arrivedHow()}`;
         } catch (err) {
+          if (lastMiss !== 'off-view') lastMiss = 'absent';
           if (i === max) {
             throw new Error(`scrolled ${dir} ${max}x without finding ${query}: ${err.message}`);
           }
@@ -3017,6 +3050,15 @@ async function runStep(deviceQuery, udid, step, ctx) {
         // stop rather than thrash.
         const nowAt = await hashNow(deviceQuery, ctx.options);
         if (wasAt && nowAt && wasAt === nowAt) {
+          // Before believing the hash, look. See `nowInView` — an unchanged
+          // whole-frame hash is weak evidence about a strip, and this step has
+          // reported failure on a scroll that worked.
+          const arrived = await nowInView();
+          if (arrived) {
+            return `"${arrived.target.label ?? query}" is in view at ${arrived.target.x},${arrived.target.y}`
+              + `${arrivedHow()} (the frame hash did not register the scroll — looked again rather than`
+              + ' reporting a failure the screen contradicts)';
+          }
           // Reverse only on evidence. Without it we do not know the target is
           // behind us, and scrolling blindly the other way is how a web page
           // gets pulled to refresh.
@@ -3025,7 +3067,16 @@ async function runStep(deviceQuery, udid, step, ctx) {
               `${query} is not reachable by scrolling: ${dir} stopped moving after ${i + 1} attempt(s)`
               + (evidence ? ' and so did the other way.' : ' and the tree does not say where it is,'
                 + ' so there is no direction to try.')
-              + ' It may not be in the accessibility tree at all — read the screen, or aim at a coordinate.',
+              // Say what was established, not what would be convenient. This
+              // used to assert "It may not be in the accessibility tree at all"
+              // in every case — a claim the function never checks, and one the
+              // `off-view` branch has already disproved by reading the element
+              // out of the tree a line earlier.
+              + (lastMiss === 'off-view'
+                ? ' It IS in the tree and outside the viewport, so this is a scrolling problem'
+                  + ' rather than a perception one — try a different container, or aim at a coordinate.'
+                : ' The resolver did not find it here either, so it may not be on this screen at all —'
+                  + ' read the screen (sim_ui), or aim at a coordinate.'),
             );
           }
           reversed = true;

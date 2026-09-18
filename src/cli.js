@@ -464,7 +464,23 @@ async function main() {
         '',
         `  frame      seq ${r.frame?.seq ?? '-'}, ${r.frame?.ageMs ?? '-'}ms old, still for ${r.frame?.stableForMs ?? '-'}ms, ${r.frame?.size ?? '-'}`,
         `  elements   ${r.elements.total} total — ${r.elements.ax} by tree, ${r.elements.ocr} by OCR, ${r.elements.fused} by both`,
-        `  fusion     ${r.agreement ?? 'n/a'} of elements seen by both sensors (measured healthy ${wedge.HEALTHY_FUSION}; at or below ${wedge.DISAGREEMENT} the frame is stale)`,
+        // **No band here, and that is the second version of this fix.**
+        //
+        // A reporter saw `healthy` printed beside "measured healthy 0.66-0.93"
+        // over a reading of 0.567 and asked, reasonably, which to believe. The
+        // first fix widened the band to 0.57-0.93 — and the very next device
+        // read returned **0.471** on an ordinary Settings screen, which is the
+        // same contradiction one decimal place down. Any fixed band will be
+        // contradicted by the next screen, because fusion tracks how much of a
+        // screen's content is OCR-only and that is a property of the app.
+        //
+        // So the line prints the number and the one threshold the verdict
+        // actually turns on. The observed range lives in `docs/BENCHMARKS.md`,
+        // where it is evidence about screens rather than a standard a device is
+        // being held to. `HEALTHY_FUSION` is still printed by the `stale-frame`
+        // verdict, where a reading of 0.03 genuinely wants the contrast.
+        `  fusion     ${r.agreement ?? 'n/a'} of elements seen by both sensors`
+          + ` — stale at or below ${wedge.DISAGREEMENT}, which is what this verdict turns on`,
         `  frontmost  ${r.frontmost?.pid ?? 'unknown'}${r.frontmost?.title ? ` (${r.frontmost.title})` : ''}`,
         ...(r.verdict.revive ? ['', '  `simframe revive` is the recovery. Keep this output — item 173 needs it.'] : []),
       ]);

@@ -6744,3 +6744,63 @@ test('a launch waits out a crashed guest shell instead of reviving the device', 
   assert.ok(clock >= actions.SHELL_PATIENCE_MS, 'and it gave up at the budget');
   assert.ok(actions.SHELL_PATIENCE_MS > 0 && actions.SHELL_PATIENCE_MS <= 30_000);
 });
+
+test('an off-viewport target is reported on the axis it is actually off', async () => {
+  const api = await import('../src/index.js');
+  // A phone screen in points. The field report that prompted this had an 874pt
+  // dimension and a target at y=143, reported as "at y=143 on a 874pt screen" —
+  // a coordinate plainly inside the screen, printed as the reason it was not.
+  const points = { width: 402, height: 874 };
+
+  // Vertical stays vertical: the overwhelmingly common case, and the one
+  // `scrollTo` reasons about.
+  assert.deepEqual(api.offScreenAxis({ x: 200, y: 1200 }, points),
+    { axis: 'y', at: 1200, extent: 874, edge: 'below' });
+  assert.equal(api.offScreenAxis({ x: 200, y: -30 }, points).edge, 'above');
+
+  // The case that was being mis-reported: a tab in a horizontally-scrolling
+  // strip, on screen vertically and past the right edge. It must name x, and it
+  // must quote the screen's WIDTH — quoting the height is what produced a
+  // sentence contradicting its own conclusion.
+  const right = api.offScreenAxis({ x: 900, y: 143 }, points);
+  assert.equal(right.axis, 'x');
+  assert.equal(right.at, 900);
+  assert.equal(right.extent, 402, 'the width, not the height');
+  assert.equal(right.edge, 'right of');
+  assert.equal(api.offScreenAxis({ x: -40, y: 143 }, points).edge, 'left of');
+
+  // Inside is inside, on both axes.
+  assert.equal(api.offScreenAxis({ x: 200, y: 400 }, points), null);
+  // And a screen whose size is unknown cannot be off it.
+  assert.equal(api.offScreenAxis({ x: 900, y: 143 }, {}), null);
+});
+
+test('scrollTo looks before it reports a scroll it just performed as a failure', async () => {
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf("case 'scrollTo': {"), src.indexOf("case 'waitFor': {"));
+
+  // **The give-up path must ask before it gives up.** A whole-frame hash is a
+  // poor witness for a small strip scrolling: field-reported, a tab strip had
+  // the target scrolled into view — the visible tabs demonstrably changed — and
+  // this step reported `not reachable by scrolling` anyway. A confident wrong
+  // failure costs what a silent success costs.
+  const giveUp = body.slice(body.indexOf('wasAt === nowAt'));
+  const look = giveUp.indexOf('await nowInView()');
+  const throwAt = giveUp.indexOf('is not reachable by scrolling');
+  assert.ok(look > -1, 'it looks again');
+  assert.ok(look < throwAt, 'and it looks BEFORE it throws, which is the whole fix');
+
+  // And it must not assert what it never checked. This claimed the element "may
+  // not be in the accessibility tree at all" in every case — including the
+  // branch that had just read the element out of the tree.
+  //
+  // Comments are stripped first, on purpose: the sentence is quoted in one, as
+  // the record of what it used to say, and a guard that cannot tell a comment
+  // from the code would force that history to be deleted to stay green.
+  const code = body.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  assert.doesNotMatch(code, /may not be in the accessibility tree at all/,
+    'a give-up message may not assert a fact the function never established');
+  assert.match(body, /It IS in the tree and outside the viewport/,
+    'when the tree did answer, say so — it picks a different remedy');
+});
