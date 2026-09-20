@@ -5625,6 +5625,29 @@ test('the article and its page are one document, not two', async () => {
     /unhandled inline tag/);
   assert.throws(() => render('<h1>T</h1><p class="kicker">k</p><section><p>&nosuchentity;</p></section>'),
     /unknown entity/);
+
+  // Refusing an unknown *tag* was only half of it. The scanner matched a list
+  // of constructs and stepped over everything between them without looking,
+  // so a text node the page put straight inside a container — no `<p>` around
+  // it — was not unhandled, it was unseen. The colophon's body is one, and the
+  // document ended on a bare **On the numbers** label with its paragraph gone.
+  // The gaps are content now, and an unrecognised tag in one throws like any
+  // other.
+  assert.ok(!/\*\*[^*\n]+\*\*\s*$/.test(md), 'the document ends on a label with no body');
+  assert.match(
+    render('<h1>T</h1><p class="kicker">k</p><section><div class="colophon">'
+      + '<span class="amend-label">On the numbers</span>the body.</div></section>'),
+    /\*\*On the numbers\*\*\n\nthe body\./);
+  assert.throws(() => render('<h1>T</h1><p class="kicker">k</p><section><div><blockquote>b</blockquote></div></section>'),
+    /unhandled inline tag/);
+
+  // And the header is walked, not just mined for two fields. It was mined for
+  // three, one of which — `p.standfirst` — is a class the page has never had,
+  // so the deck, the figure and the provenance line were on the page and in no
+  // generated copy of it.
+  assert.match(md, /Perception as a daemon, not a function/, 'the deck');
+  assert.match(md, /^\*Figure — /m, 'the figure, by its aria-label');
+  assert.match(md, /Every number here is measured/, 'the provenance line');
 });
 
 test('a live loop reading a dead surface is a contradiction we can see (SEV-1)', async () => {

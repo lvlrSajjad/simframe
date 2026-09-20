@@ -10,6 +10,14 @@
 > are in [`BENCHMARKS.md`](BENCHMARKS.md); what we expected before measuring is
 > in [`EXPERIMENTS.md`](EXPERIMENTS.md).
 
+Perception as a daemon, not a function — and what happened when I built one.
+
+*Figure — Two traces compared. The top trace shows a continuous framebuffer damage signal firing about fifty-two times per second while the screen moves, and flat when it is still. The bottom trace shows discrete screenshots, one every two hundred and ten milliseconds, with nothing observed between them.*
+
+The whole argument in one figure. A UI transition finishes inside 700 ms; a loop that samples every 210 ms is blind between samples and busy when there is nothing to see. The daemon is the inverse: dense while the screen moves, silent when it is still.
+
+Every number here is measured — M-series Mac, Xcode 26, iPhone 17 Pro simulator on iOS 26.5, against a real production React Native app. Full tables, with N, median, p95 and the mistakes made getting to each one, are in the repository. Where a figure is an estimate rather than a measurement, it says so.
+
 ---
 
 *The observation*
@@ -566,3 +574,5 @@ If you are building an agent that acts on a screen:
 I built simframe to test a fix faster. What I ended up with was a small argument about what an agent’s senses should be. The code is at [github.com/lvlrSajjad/simframe](https://github.com/lvlrSajjad/simframe); the phases, benchmarks and the private-API corrections are in `docs/`.
 
 **On the numbers**
+
+Every measurement in this piece — with N, median, p95, the machine, and the mistakes made getting to each one — is in the repository’s benchmarks. Three separate times in this project a first measurement agreed with my hypothesis and was wrong: the capture rate, the fingerprint tolerance, and a settle gate I was sure had fixed something. Each was caught only by running it again. If you take one habit from this rather than one idea — treat a measurement that confirms what you expected as unfinished.

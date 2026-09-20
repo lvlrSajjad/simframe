@@ -21,9 +21,17 @@
 // anything it does not recognise rather than dropping it — a converter that
 // silently skips an unfamiliar tag produces a document that looks complete and
 // is not, which is the failure mode this whole file exists to prevent.
+//
+// That promise had a hole in it for as long as it existed, and the hole was
+// not an unfamiliar tag but the space between two familiar ones. The scanner
+// matched a list of constructs and stepped over everything in between without
+// looking, so the colophon's body — a text node the page puts straight inside
+// its container, with no `<p>` around it — was not unhandled, it was unseen,
+// and the document ended on a bare **On the numbers** label. Refusing what you
+// do not recognise is only half of it; you have to look everywhere first.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = path.join(ROOT, 'docs', 'agents-shouldnt-blink.html');
@@ -81,12 +89,36 @@ function table(html) {
   ];
 }
 
-/** Everything inside one `<section>`, in order. */
+/**
+ * Tags that hold blocks without being one. The scanner walks through these; a
+ * tag in a gap that is *not* one of them is content, and `inline` throws on it.
+ */
+const CONTAINER = /<\/?(?:div|ul|ol|section|header|figure)\b[^>]*>/g;
+
+/**
+ * What the scanner stepped over between two blocks. Containers are expected.
+ * Anything left is a text node the page put straight inside a container rather
+ * than in a `<p>` — the colophon's body is one — and it is content like any
+ * other. Nothing looked in the gaps before, so every generated copy of this
+ * document ended on a dangling **On the numbers** label with its paragraph
+ * gone: exactly the silent-drop failure the rest of this file refuses.
+ */
+function gap(html) {
+  return html
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .split(CONTAINER)
+    .map((piece) => piece.trim())
+    .filter(Boolean)
+    .map((text) => ({ kind: 'p', text: inline(text) }));
+}
+
+/** Everything inside one `<section>` (or the `<header>`), in order. */
 function blocks(html) {
   const out = [];
   // One pass over the constructs the article actually uses. `lastIndex`
   // walking rather than nested parsing, because the document is flat inside a
-  // section and a real parser here would be a dependency.
+  // section and a real parser here would be a dependency. What the pass does
+  // *not* match is handed to `gap` rather than skipped.
   const re = new RegExp([
     '<h([123])>([\\s\\S]*?)<\\/h\\1>',
     '<p class="sec-label">([\\s\\S]*?)<\\/p>',
@@ -96,10 +128,15 @@ function blocks(html) {
     '<table>([\\s\\S]*?)<\\/table>',
     '<pre>([\\s\\S]*?)<\\/pre>',
     '<li>([\\s\\S]*?)<\\/li>',
+    '<figcaption>([\\s\\S]*?)<\\/figcaption>',
+    '<svg\\b([^>]*)>[\\s\\S]*?<\\/svg>',
   ].join('|'), 'g');
   let m;
+  let cursor = 0;
   while ((m = re.exec(html)) !== null) {
-    const [, level, heading, sec, panel, amend, para, tbl, pre, li] = m;
+    out.push(...gap(html.slice(cursor, m.index)));
+    cursor = re.lastIndex;
+    const [, level, heading, sec, panel, amend, para, tbl, pre, li, caption, svg] = m;
     if (heading != null) out.push({ kind: 'h', level: Number(level), text: inline(heading) });
     else if (sec != null) out.push({ kind: 'kicker', text: inline(sec) });
     else if (panel != null) out.push({ kind: 'label', text: inline(panel) });
@@ -108,17 +145,65 @@ function blocks(html) {
     else if (tbl != null) out.push({ kind: 'table', lines: table(tbl) });
     else if (pre != null) out.push({ kind: 'pre', text: decode(stripTagsPreserving(pre)) });
     else if (li != null) out.push({ kind: 'li', text: inline(li) });
+    else if (caption != null) out.push({ kind: 'p', text: inline(caption) });
+    // A diagram cannot be projected into Markdown, but its `aria-label` is
+    // already the prose a screen reader gets, so that is what a reader of the
+    // Markdown gets too. An undescribed diagram is content this cannot carry,
+    // so it throws rather than quietly becoming nothing.
+    else if (svg != null) {
+      const label = svg.match(/aria-label="([^"]*)"/);
+      if (!label) throw new Error('<svg> with no aria-label — nothing to project');
+      out.push({ kind: 'figure', text: inline(label[1]) });
+    }
   }
+  out.push(...gap(html.slice(cursor)));
   return out;
 }
 
 /** `<pre>` keeps its newlines; only tags come out. */
 const stripTagsPreserving = (s) => s.replace(/<[^>]+>/g, '').replace(/^\n/, '').replace(/\s+$/, '');
 
+/** One section's or the header's blocks, appended to the document. */
+function emit(lines, bs) {
+  let pendingKicker = null;
+  let inList = false;
+  for (const b of bs) {
+    if (b.kind !== 'li' && inList) { lines.push(''); inList = false; }
+    switch (b.kind) {
+      // The kicker precedes its heading on the page and reads as a label for
+      // it, so it is held until the heading arrives rather than emitted where
+      // it was found.
+      case 'kicker': pendingKicker = b.text; break;
+      case 'h':
+        if (pendingKicker) { lines.push(`*${pendingKicker}*`, ''); pendingKicker = null; }
+        // `<h1>` is the title, already emitted above, so the page's `<h2>`
+        // sections are the document's second level and not its third.
+        lines.push(`${'#'.repeat(b.level)} ${b.text}`, '');
+        break;
+      case 'label': lines.push(`**${b.text}**`, ''); break;
+      case 'p': lines.push(b.text, ''); break;
+      case 'figure': lines.push(`*Figure — ${b.text}*`, ''); break;
+      case 'li': lines.push(`- ${b.text}`); inList = true; break;
+      case 'table': lines.push(...b.lines, ''); break;
+      case 'pre': lines.push('```', b.text, '```', ''); break;
+      default: throw new Error(`unhandled block ${b.kind}`);
+    }
+  }
+  if (inList) lines.push('');
+}
+
 export function render(html) {
   const title = stripTags(html.match(/<h1>([\s\S]*?)<\/h1>/)[1]);
   const kicker = stripTags(html.match(/<p class="kicker">([\s\S]*?)<\/p>/)[1]);
-  const standfirst = html.match(/<p class="standfirst">([\s\S]*?)<\/p>/);
+  // The rest of the header: the deck, the figure, the provenance line. This
+  // used to look for `<p class="standfirst">`, a class the page does not have,
+  // so the match was always null and the branch that emitted it never ran —
+  // the same silent drop as the colophon, arrived at from the other end. The
+  // header is walked with the section machinery now, minus the two blocks
+  // emitted by hand above.
+  const header = (html.match(/<header>([\s\S]*?)<\/header>/)?.[1] ?? '')
+    .replace(/<h1>[\s\S]*?<\/h1>/, '')
+    .replace(/<p class="kicker">[\s\S]*?<\/p>/, '');
 
   const lines = [
     `# ${title}`,
@@ -134,52 +219,33 @@ export function render(html) {
     '> in [`EXPERIMENTS.md`](EXPERIMENTS.md).',
     '',
   ];
-  if (standfirst) lines.push(inline(standfirst[1]), '');
+  emit(lines, blocks(header));
   lines.push('---', '');
 
-  for (const section of html.match(/<section>[\s\S]*?<\/section>/g) ?? []) {
-    let pendingKicker = null;
-    let inList = false;
-    for (const b of blocks(section)) {
-      if (b.kind !== 'li' && inList) { lines.push(''); inList = false; }
-      switch (b.kind) {
-        // The kicker precedes its heading on the page and reads as a label for
-        // it, so it is held until the heading arrives rather than emitted where
-        // it was found.
-        case 'kicker': pendingKicker = b.text; break;
-        case 'h':
-          if (pendingKicker) { lines.push(`*${pendingKicker}*`, ''); pendingKicker = null; }
-          // `<h1>` is the title, already emitted above, so the page's `<h2>`
-          // sections are the document's second level and not its third.
-          lines.push(`${'#'.repeat(b.level)} ${b.text}`, '');
-          break;
-        case 'label': lines.push(`**${b.text}**`, ''); break;
-        case 'p': lines.push(b.text, ''); break;
-        case 'li': lines.push(`- ${b.text}`); inList = true; break;
-        case 'table': lines.push(...b.lines, ''); break;
-        case 'pre': lines.push('```', b.text, '```', ''); break;
-        default: throw new Error(`unhandled block ${b.kind}`);
-      }
-    }
-    if (inList) lines.push('');
-  }
+  for (const section of html.match(/<section>[\s\S]*?<\/section>/g) ?? []) emit(lines, blocks(section));
 
   return `${lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`;
 }
 
-const html = fs.readFileSync(SOURCE, 'utf8');
-const md = render(html);
+// Only as a command. This used to run on import, which meant the test that
+// asserts the page and the Markdown are one document regenerated the Markdown
+// before reading it back and compared the output to itself. It could not fail,
+// and it did not — the colophon's missing paragraph sat under a green suite
+// for as long as it existed. `--check` in CI was the only real gate.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const md = render(fs.readFileSync(SOURCE, 'utf8'));
 
-if (process.argv.includes('--check')) {
-  const current = fs.existsSync(TARGET) ? fs.readFileSync(TARGET, 'utf8') : '';
-  if (current === md) {
-    console.log(`docs/ARTICLE.md is in step with the page (${md.split('\n').length} lines)`);
-    process.exit(0);
+  if (process.argv.includes('--check')) {
+    const current = fs.existsSync(TARGET) ? fs.readFileSync(TARGET, 'utf8') : '';
+    if (current === md) {
+      console.log(`docs/ARTICLE.md is in step with the page (${md.split('\n').length} lines)`);
+      process.exit(0);
+    }
+    console.error('docs/ARTICLE.md is out of date with docs/agents-shouldnt-blink.html.');
+    console.error('Run: node scripts/article-md.mjs');
+    process.exit(1);
   }
-  console.error('docs/ARTICLE.md is out of date with docs/agents-shouldnt-blink.html.');
-  console.error('Run: node scripts/article-md.mjs');
-  process.exit(1);
-}
 
-fs.writeFileSync(TARGET, md);
-console.log(`wrote docs/ARTICLE.md — ${md.split('\n').length} lines from ${SOURCE.split('/').pop()}`);
+  fs.writeFileSync(TARGET, md);
+  console.log(`wrote docs/ARTICLE.md — ${md.split('\n').length} lines from ${SOURCE.split('/').pop()}`);
+}
