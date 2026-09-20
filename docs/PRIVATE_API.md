@@ -15,7 +15,7 @@ than by reading write-ups, including this one.
 | | |
 | --- | --- |
 | macOS | 15.x (Darwin 25.6.0) |
-| Xcode | 26.x, `/Applications/Xcode.app/Contents/Developer` |
+| Xcode | 26.x, `/Applications/Xcode.app/Contents/Developer` (27.0 reported by a contributor, not measured here — see Frameworks) |
 | Devices | iPhone 17 Pro / iOS 26.5 (3x) · iPad Pro 13-inch M5 / iOS 26.5 (2x) |
 | Date | 2026-09 |
 
@@ -24,10 +24,30 @@ than by reading write-ups, including this one.
 | Framework | Path | Notes |
 | --- | --- | --- |
 | CoreSimulator | `/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator` | System path, not inside Xcode |
-| SimulatorKit | `$(xcode-select -p)/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit` | **Not** in `SharedFrameworks` |
+| SimulatorKit | `$(xcode-select -p)/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit` | Xcode 26 and earlier |
+| SimulatorKit | `$(xcode-select -p)/../SharedFrameworks/SimulatorKit.framework/SimulatorKit` | **Xcode 27** — Apple moved it |
 
 Both must be `dlopen`ed before any `NSClassFromString` lookup. Resolve the
 developer directory with `xcode-select -p`, honouring `DEVELOPER_DIR`.
+
+**SimulatorKit has two homes now, and this table said it did not.** It read
+"**Not** in `SharedFrameworks`", which was true when it was written and was
+falsified by Xcode 27.0 (build 27A266a): Apple moved the framework to the
+top-level `Contents/SharedFrameworks` and the old
+`Contents/Developer/Library/PrivateFrameworks` directory is not created at all.
+Reported and fixed by an outside contributor (PR #1), who found it the
+expensive way — `simframed` threw `frameworksUnavailable` before it ever
+attached, and the MCP surface showed that as an opaque 60-second timeout with
+no mention of a framework path. That diagnosis gap is its own item (DEFERRED
+185) and this is independent confirmation of it.
+
+`loadFrameworks()` therefore takes a **list** of candidate paths per framework
+rather than one, tries the old location first so nothing changes on an Xcode
+that still has it, and names every candidate it tried when none exist. Verified
+on 26.6 after the change: capture healthy, 18 elements, fusion 0.857. The
+Xcode 27 half is the contributor's reading, not ours — there is no Xcode 27 on
+the machine this table was measured on, so treat the second row as reported
+rather than verified here, and confirm it before relying on it.
 
 ## Capture: the sequence that works
 
