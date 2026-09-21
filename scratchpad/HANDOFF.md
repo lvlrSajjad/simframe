@@ -579,16 +579,17 @@ did not return it, so it would have passed either way.
 
 ## Repo state — 2026-09-21
 
-- `main` is at **`f8b0b6a`** (the article-generator fix). `v0.18.0` is the last
-  tag; **23 commits on main are unreleased.** A phase end is a peer test, not a
-  release — propose a peer session, do not publish.
-- **One commit is not pushed**: `54479d9`, item 174's half, sitting on the
-  worktree branch `claude/busy-merkle-075530`. Ask the owner whether it goes
-  straight to main or through a PR before pushing it.
+- `main` is at **`181671a`** — everything from 09-20/21 is pushed, nothing is
+  waiting on a branch. `v0.18.0` is the last tag; **25 commits on main are
+  unreleased.** A phase end is a peer test, not a release — propose a peer
+  session, do not publish.
 - **CI on `main` is red and was red before any of this.** `fb2d6c2` failed
-  `integration (fingerprint)`; `f8b0b6a` failed `integration (memory)` — the
+  `integration (fingerprint)` while `integration (memory)` passed; `f8b0b6a`
+  failed `integration (memory)` while `integration (fingerprint)` passed. The
   shards alternate, which is the known hosted-runner flakiness and item 173,
-  not a code regression. `f8b0b6a` was pushed with the `integration` required
-  check bypassed. **Do not read a green local suite as a green CI** and do not
-  publish while this is red.
+  not a code regression — but it also means **a PR would not come back green
+  either**, so "wait for CI" is not currently a usable gate. Both pushes went
+  in with the `integration` required check bypassed, at the owner's direction.
+  **Do not read a green local suite as a green CI** and do not publish while
+  this is red.
 - Unit suite: **226 pass** locally, `node --test test/unit.test.mjs`.
