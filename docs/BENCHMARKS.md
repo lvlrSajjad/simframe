@@ -2308,8 +2308,9 @@ simulator's display failing is not something simframe can fix:
   reset already guarantees the app starts on its root screen, so terminating it
   again bought nothing and cost an extra terminate+launch per run. It is also
   closer to what the human baseline did: they tapped the icon.
-- `bench-hpi` paces itself with `--cooldown` (1.5 s default) between runs.
-  Relaunching an app as fast as a script can is not what this suite measures.
+- `bench-hpi` paces itself with `--cooldown` (4 s default since 2026-09-18,
+  `8c5a189`; 1.5 s before that) between runs. Relaunching an app as fast as a
+  script can is not what this suite measures.
 
 The user watching the simulator was the source of the diagnosis twice over —
 first "the device is blacked out", which is what identified the fault as the

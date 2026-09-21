@@ -2842,8 +2842,28 @@ worth more than the verdict.
    run already wrote") is true and the escalations are not always written.
 
 187. **The bench paces itself faster than the device tolerates, and that is a
-   large part of "the suite wedges the device it measures".** OPEN, measured
-   2026-09-18, not yet acted on.
+   large part of "the suite wedges the device it measures".** FIXED 2026-09-18
+   in `8c5a189` — the default went 1500 -> 4000 ms in the same commit that
+   measured it, and `docs/BENCHMARKS.md` records which side of the line each
+   number is from.
+
+   **This item said "not yet acted on" for three days after it had been acted
+   on**, and `scratchpad/HANDOFF.md` promoted that into a decision waiting on
+   the owner. Nothing was waiting: the commit that measured the table below is
+   the commit that changed the default. Filing the finding and shipping the fix
+   in one motion, then closing only one of them, is how the handoff came to ask
+   for a call that had already been made.
+
+   **And raising it was not sufficient**, which the same week established:
+   pass 2 of the 2026-09-18 re-record started `healthy` at cooldown 4000 and
+   the device still collapsed three runs in. That is item **189** — the device
+   degrades *within* a pass, and a revive attached to the pass boundary cannot
+   catch it. Do not re-open this one; 189 is where the remaining problem is.
+
+   One thing genuinely does still want deciding, and it is not the default: the
+   committed HPI numbers straddle the change, so a comparison across 2026-09-18
+   is a comparison of two paces. The reference has to be re-recorded before any
+   trend across that date means anything — items 188 and 189 first.
 
    Same flow, same device, same afternoon, varying only `--cooldown`:
 

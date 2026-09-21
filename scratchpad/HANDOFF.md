@@ -40,14 +40,20 @@ escalation carrying its cause.
 It is first because it is the cheapest thing that makes every later measurement
 mean what it says. Items 2 and 3 are unmeasurable until it lands.
 
-**2. Item 187 — the bench's cooldown. [OWNER DECISION, not an edit.]** At the
-default 1500 ms the device stops being readable after 4-5 runs; at 4000-5000 ms
-a full 8-run pass finishes `healthy`. Every committed HPI number was taken at
-1500, so changing the default makes new numbers incomparable with old ones.
-**This is the one thing on the list that is genuinely the owner's call** — ask,
-do not pick. Item 189 rides with it: the between-pass revive is attached to the
-wrong boundary, and a pass is 10 runs against a device that tolerates 8-10, so
-the damage lands *inside* a pass more often than at its edge.
+**2. Item 189 — the device degrades *within* a pass.** The between-pass revive
+is attached to the wrong boundary: a pass is 10 runs against a device that
+tolerates 8-10, so the damage lands inside a pass more often than at its edge.
+Pass 2 of the 09-18 re-record started `healthy` and collapsed three runs in.
+
+**~~Item 187, the cooldown — [OWNER DECISION].~~ There was no decision. It was
+made and shipped on 2026-09-18 in `8c5a189`, the same commit that measured it:
+default 1500 -> 4000 ms, with `BENCHMARKS.md` recording which side of the line
+each number is from.** DEFERRED 187 went on saying "not yet acted on" for three
+days, and the 09-21 version of this queue promoted that sentence into a call
+waiting on the owner — who then, reasonably, asked what they were being asked
+to decide. **Nobody re-read the commit that the item's own table came from.**
+Raising it also turned out not to be sufficient, which is why what survives of
+187 is item 189 above.
 
 **3. Re-record the agent half of the HPI reference**, once 1, 2 and 189 are
 done, and not before — item 188 first, because `--out` currently writes the file
