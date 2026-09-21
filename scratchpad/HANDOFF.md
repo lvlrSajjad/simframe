@@ -1,91 +1,108 @@
-# Handoff — 2026-09-18
+# Handoff — 2026-09-21
 
 ## The queue, in priority order
 
 Work these top down. Each line says why it is where it is and where the detail
 lives. Everything below this section is history, kept for its reasoning.
 
-**0. ~~[OWNER] Record the human HPI baseline.~~ DONE — and it was already done.
-This line was wrong, including where I wrote it.** Checked against the files on
-2026-09-18: the human baseline exists for both suite flows, recorded 2026-09-09,
-`N=5` each and committed — `settings-larger-text` p50 **7799 ms** (4 steps, which
-is where the 1.95 s/step figure comes from) and `contacts-kate-bell` p50
-**4300 ms**. `simframe baseline list` says so.
+**Before you take any of this on trust: count it.** The 09-21 session re-counted
+the escalation log before starting item 1 and the item's headline claim turned
+out to be false. Four commands, one sentence of the plan changed, none of the
+work. That is now three phase premises in a row that did not survive being
+counted. `docs/ESCALATIONS.md` has the current breakdown.
 
-**What `completed: 0` actually meant.** It is a field on the *agent* block of
-`docs/research/hpi-baseline.json`, not the human one: five agent runs of
-`contacts-kate-bell` that never reached Kate Bell, recorded before item 172 was
-fixed, when `HPI_time` still counted failed runs. So the committed reference's
-`agent_ms p50 10570` described runs that never finished, and the humans were
-sound all along. One field read off the wrong half of a file sent this to the
-owner as a twenty-minute task for nine days. **Read the file before filing the
-task.**
+**0. ~~[OWNER] Record the human HPI baseline.~~ DONE, and it was never the
+owner's to do.** The human baseline has existed since 2026-09-09, `N=5` on both
+flows — `settings-larger-text` p50 **7799 ms** (4 steps), `contacts-kate-bell`
+p50 **4300 ms**. What put it on the owner's desk was a misread: `completed: 0`
+is a field on the **agent** block of `docs/research/hpi-baseline.json`, not the
+human one. One field read off the wrong half of a file held a twenty-minute task
+open for nine days. **Read the file before filing the task.**
 
-Re-recorded 2026-09-18 at the new default cooldown, now that both flows complete
-100% — see the top block. The human half was deliberately *not* re-recorded:
-same OS, same two flows, nothing to change.
+**Correction to this line's own previous version.** It used to say the agent
+half was "re-recorded 2026-09-18". It was not. That re-record aborted mid-pass
+and was deliberately reverted — see `b207a28` and items 188/189. **The committed
+reference in `docs/research/hpi-baseline.json` is still the invalid 2026-09-09
+one**, and a session that trusts the old sentence will report HPI numbers
+against a reference built from runs that never finished. The human half is
+sound and needs nothing.
 
-**1. Item 174 — screen identity fragments on content-driven screens.** Promoted
-to the top now that the fast failure is closed, and today's work made it *more*
-urgent rather than less. The escalation log nominates it independently:
-`unexpected-screen` is the only verdict in 1022 records that names a faculty. It
-also blocks `saveFlow` on the screens where it misfires, so it throttles the
-zero-model-call path as well as costing batches. Start with the supervisor
-ruling, not a threshold — DEFERRED 174 says why both obvious fixes are wrong.
+**1. Item 186's open half — 41% of recent device losses are still counted
+against the code.** Promoted to the top, and it was measured on 09-21 rather
+than argued: of 46 `could not launch` records in the last four days — every one
+on the bench device, every one `The system shell (SpringBoard:NNNNN) probably
+crashed` — **19 still carry `device_cause: null`**. `HPI_accuracy` is the one
+number CI gates on, and it is currently being charged for the test rig's
+crashes. The missing *signature* half is fixed; this half needs the throw path
+out of `launch` traced, so a run lost to a recognised device death writes an
+escalation carrying its cause.
 
-**And it now owns the other half of 184.** The fast-failure fix makes a stale
-recall's *miss* recoverable; it does not make the recall correct. A recall that
-lands mid-push and finds a same-named control on the previous screen's map still
-taps the wrong place and nothing notices. The structural rule — a recall must not
-return the screen the previous step was just verified to have left — needs the
-graph's `from` plumbed into `locate`, and that is 174's territory.
+It is first because it is the cheapest thing that makes every later measurement
+mean what it says. Items 2 and 3 are unmeasurable until it lands.
 
-**2. Item 187 — the bench's cooldown.** Measured today: at the default 1500 ms
-the device stops being readable after 4-5 runs; at 4000-5000 ms a full 8-run pass
-finishes `healthy`. This is the cheapest remaining thing that would let a pass
-complete, and it is a *decision* rather than an edit, because every committed HPI
-number was taken at 1500.
+**2. Item 187 — the bench's cooldown. [OWNER DECISION, not an edit.]** At the
+default 1500 ms the device stops being readable after 4-5 runs; at 4000-5000 ms
+a full 8-run pass finishes `healthy`. Every committed HPI number was taken at
+1500, so changing the default makes new numbers incomparable with old ones.
+**This is the one thing on the list that is genuinely the owner's call** — ask,
+do not pick. Item 189 rides with it: the between-pass revive is attached to the
+wrong boundary, and a pass is 10 runs against a device that tolerates 8-10, so
+the damage lands *inside* a pass more often than at its edge.
 
-**3. Item 186's open half — a launch that throws leaves `runScript` without
-writing an escalation that carries the device cause**, so a run lost to a
-recognised SpringBoard crash is still recorded `device_cause: null` and counted
-against `HPI_accuracy`. The missing *signature* half is fixed; this half needs
-the throw path traced.
+**3. Re-record the agent half of the HPI reference**, once 1, 2 and 189 are
+done, and not before — item 188 first, because `--out` currently writes the file
+even on a run that has just printed "must not be adopted as a baseline". The
+runbook below is still correct for the mechanics.
 
-**4. Item 185 — `diagnose` asserts "the daemon is stuck attaching" for a device
+**4. Item 174's remaining half — screen identity itself.** The false abort is
+closed (see the 09-21 block); the graph still holds two nodes for one logical
+screen on content-driven screens, and that is the part with no obvious fix.
+DEFERRED 174 says why both tempting ones are wrong: the similarity threshold
+cannot be lowered without collapsing genuinely different screens, and chrome
+anchoring merges the wizard steps it is supposed to distinguish. Do not start
+here without a fixture — this is perception work, and a live page costs 60 s a
+look and confounds the result.
+
+**5. Item 185 — `diagnose` asserts "the daemon is stuck attaching" for a device
 that has no display port**, a cause `simctl` names in one sentence. Cheap, and
-it is the instrument item 173 depends on being honest.
+it is the instrument items 173 and 1 depend on being honest.
 
-**5. Web: the batching experiment (no code).** See `docs/DECISIONS.md` —
+**6. Web: the batching experiment (no code).** See `docs/DECISIONS.md` —
 `web.js` is deferred pending one measurement. Batching lives above the platform
 boundary and is the largest untested term; a peer batching aggressively and
 reporting `n` decides whether the backend is worth two days.
 
-**6. Item 179 — a data-creating flow can never replay cleanly**, so the
+**7. Item 179 — a data-creating flow can never replay cleanly**, so the
 confirmation path is closed to most flows worth recording. Design question, not
 a bug fix: a recorded assert should check the *delta* it caused, not the end
 state.
 
-**7. Item 178 — `sim_find` returns a static label as a "field".** Cheap and
+**8. Item 178 — `sim_find` returns a static label as a "field".** Cheap and
 well-targeted, but record a fixture first: a hard type filter breaks OCR-only
 WebView screens.
 
-**8. The rest** — 170, 181, 182, and the perception group (153, 155, 156, 162,
+**9. The rest** — 170, 181, 182, and the perception group (153, 155, 156, 162,
 163).
 
 ### The number none of this has moved
 
 `steps_per_call` is **1.5-2.0** and the vision needs 8-10. Two releases, a
 diagnostic instrument, a fixed steering wheel, a corrected latency model and a
-CDP client all shipped without touching it. That was defensible while the
-instruments were untrustworthy. It stops being defensible now. **Item 1 is the
-one that moves it** — prefer it over anything that merely measures better.
+CDP client all shipped without touching it.
 
-2026-09-18 is the first day that did move something adjacent: a four-step flow
-that completed 1 time in 9 now completes 8 in 8, and every one of those
-completions is a batch that did not hand control back. That is the shape
-`steps_per_call` is made of, even though the metric itself has not been
-re-measured against a real session yet.
+09-18 moved something adjacent: a four-step flow that completed 1 time in 9 now
+completes 8 in 8, and every completion is a batch that did not hand control
+back. 09-21 removed one class of batch abort. Neither has been re-measured
+against a real session, and **`steps_per_call` is still the number to beat.**
+
+### What the log is currently measuring, which is not what you want
+
+Counted 2026-09-21, corpus now 1,261 records. The last four days are **46
+`could not launch` records out of 124 `verification_failed`** — all on the bench
+device, all SpringBoard crashes. CLAUDE.md makes the reason breakdown decide
+which faculty gets built next; right now that breakdown is mostly reading a
+broken test rig. This is why item 1 is item 1. Full table in
+`docs/ESCALATIONS.md`.
 
 ### Runbook for item 0, so it is five minutes and not a project
 
@@ -107,6 +124,56 @@ The flows, as a person performs them (from `flows/hpi-suite.json`):
 N>=5 because it refuses under 3, and a median of two numbers is one of the two.
 Re-record when the app changes. The device wedges every few dozen launches —
 `simframe revive` between flows if `diagnose` stops saying `healthy`.
+
+---
+
+> **2026-09-21 — one class of batch abort closed, and the steering wheel was
+> found pointing at the test rig. Everything below this block predates it.**
+>
+> **A wrong turn was one read, and the read was taken of a screen still
+> arriving.** `unexpected-screen` halts a batch and discards every step after
+> it. The reported defect was that it is *non-deterministic* — a reporter
+> re-issued the identical call with no state change and it passed — and a gate
+> that fails once and passes on retry is flaky, not protective.
+> `confirmWrongTurn` in `actions.js` is the sibling of `confirmNoChange`, for
+> the more expensive of the two mistakes: settle, read again, re-run the
+> verdict. An agreeing second read changes nothing and the halt stands on two
+> reads; any other second read replaces the verdict and keeps both answers in
+> `disagreed`. The graph learns from the confirmed reading via the existing
+> `lateArrival` contract.
+>
+> **It keeps the verify barrier rather than softening it**, which is what the
+> original request — make the verdict non-fatal — would have done. A halt on
+> one premature read is not confirmed perception either, so both directions pay
+> for a second look now.
+>
+> **Deliberately not gated on a supervisor**, which is what the item proposed.
+> `doctor` reports `local supervisor: none — not requested` on a default
+> install, so a ruling-based fix would have meant "fixed for callers who opted
+> in". A second read needs no model and no opt-in.
+>
+> **Not demonstrated end to end, and this is the honest limit of it.** There is
+> no offline harness that can drive `runScript` against a fake device — the
+> `fake` platform in the tests is a surface-conformance check, not a driveable
+> one — so the decision was split into a pure exported function
+> (`afterSecondLook`) and tested as one, and only the read half is asserted
+> against its own source text. **Nobody has watched this fire on a device.**
+> First person with the bench device free: run a flow that has an edge seen 2x
+> and confirm a `disagreed` field appears rather than a halt.
+>
+> **DEFERRED 174's headline was wrong and has been corrected.**
+> `unexpected-screen` is 32 of 1261 records (2.5%), p50 2814 ms, all failed,
+> all one model turn; it peaked at 12 on 09-10 and has run 0-3 a day since the
+> 14th. It was never "the largest remaining cost on a first traversal". It is
+> still worked first for the reason `ESCALATIONS.md` actually gives — it is the
+> only verdict left that *names* a faculty — and not for its frequency.
+>
+> **The article generator was dropping four blocks of the page**, including the
+> colophon's closing paragraph, and the test that exists to catch that could not
+> fail: the module wrote `ARTICLE.md` at import time, so the test regenerated
+> the file before reading it back and compared the output to itself. The write
+> is behind a direct-invocation guard now. `--check` in CI was the only real
+> gate the whole time.
 
 ---
 
@@ -310,7 +377,7 @@ pre-tag diff was clean. `origin/main` at `f730eed`, nothing held locally. Gates:
 and both obvious fixes are wrong. See below — the reasoning is worth reading
 before touching it.
 
-## Today in one line
+## 2026-09-18 in one line
 
 Two field reports on the same flow, and the whole session turned out to be about
 one number nobody had measured: **model round trips are ~60% of wall clock and
@@ -367,7 +434,7 @@ single-stepping is a latency bug**, worth more as "the batch kept going" than as
 - **A `supervise` brief with no supervisor enabled says so.** Both reports passed
   one on every call and never saw a verdict.
 
-## NEXT: 174 — screen identity fragments on content-driven screens
+## 174 — screen identity (PARTLY FIXED 2026-09-21; see the queue, item 4)
 
 `unexpected-screen` fires on steps that did exactly the right thing, and because
 a failed step discards its batch, one instance killed a **7-step plan at step
@@ -386,11 +453,14 @@ same-screen revisits at ≥0.63 and different screens at ≤0.08 on static scree
 shares its nav title, so chrome alone collapses steps 1–4 into one screen — and
 one of the false alarms was a step correctly *advancing* between two of them.
 
-**The tractable half:** the supervisor is the escape hatch the barrier already
-names ("when in doubt, escalate") and `unexpected-screen` does not consult it.
-That was unavailable in both runs for a separate reason, now fixed. Wiring the
-verdict to a ruling keeps the barrier and removes the false abort without
-touching screen identity.
+**The tractable half — DONE 2026-09-21, and not the way this proposed.** This
+said to wire the verdict to a supervisor ruling. The supervisor is off by
+default (`doctor`: `local supervisor: none — not requested`), so that fix would
+have reached only callers who opted in. What landed instead is a second,
+settled read — `confirmWrongTurn`, the sibling of `confirmNoChange` — which
+needs no model and no opt-in. The false abort is closed; **screen identity
+itself is untouched and is the open half.** Everything above this line about
+thresholds and chrome anchoring still applies to it.
 
 ## 175 — a change that was announced and then cancelled. Do not rebuild it.
 
@@ -415,11 +485,14 @@ Two reports, opposite conclusions, and only the second one counted anything.
   been measured on a hosted runner**. The trustworthy reading is the local one in
   BENCHMARKS. Worth trying: a revive between passes, and one flow per job.
 - **153, 155, 156, 162, 163** — the perception and input defects.
-- **The escalation log has ~1000 entries** on the bench device
-  (`verification_failed` 551, `ambiguous_intent` 207, `unknown_screen` 167,
-  `no_plan` 73). CLAUDE.md makes that breakdown decide what gets built next, and
-  it has been accumulating while CI was chased. That is where to look for a
-  *direction* rather than a defect queue.
+- **The escalation log is now 1,261 entries** across five devices
+  (`verification_failed` 754, `ambiguous_intent` 256, `unknown_screen` 176,
+  `no_plan` 75) — re-counted 2026-09-21, and the old numbers in this bullet
+  were the bench device alone. CLAUDE.md makes that breakdown decide what gets
+  built next, so read `docs/ESCALATIONS.md` for direction rather than counting
+  it again from scratch. **It is not currently trustworthy as a faculty signal:
+  the last four days are mostly the bench crashing its own device.** Queue item
+  1 is what fixes that.
 
 ## Unfinished business
 
@@ -493,7 +566,9 @@ did not return it, so it would have passed either way.
 ## State of the machine
 
 - Bench device `326464A4` (iPhone 17 Pro, iOS 26.5) — the HPI benchmark device.
-  Wedged four times today by the bench suite; `simframe revive` cures it.
+  Wedged four times on 2026-09-18 by the bench suite; `simframe revive` cures
+  it. It has not been driven since — the 09-21 session was code and docs only,
+  so nothing here is a fresh reading of the device.
 - `B55AB0AE` was booted by a peer during their run. **Not ours.** `7B8F8963`
   belongs to another of the owner's projects. Always pass `--device`.
 - Five other MCP sessions hold that device. `simframe stop` will say
@@ -501,3 +576,19 @@ did not return it, so it would have passed either way.
   redirect that command's output, which is how three builds got tested against a
   daemon that had never restarted.
 - Port 8081 is someone else's Metro. Do not kill it.
+
+## Repo state — 2026-09-21
+
+- `main` is at **`f8b0b6a`** (the article-generator fix). `v0.18.0` is the last
+  tag; **23 commits on main are unreleased.** A phase end is a peer test, not a
+  release — propose a peer session, do not publish.
+- **One commit is not pushed**: `54479d9`, item 174's half, sitting on the
+  worktree branch `claude/busy-merkle-075530`. Ask the owner whether it goes
+  straight to main or through a PR before pushing it.
+- **CI on `main` is red and was red before any of this.** `fb2d6c2` failed
+  `integration (fingerprint)`; `f8b0b6a` failed `integration (memory)` — the
+  shards alternate, which is the known hosted-runner flakiness and item 173,
+  not a code regression. `f8b0b6a` was pushed with the `integration` required
+  check bypassed. **Do not read a green local suite as a green CI** and do not
+  publish while this is red.
+- Unit suite: **226 pass** locally, `node --test test/unit.test.mjs`.
