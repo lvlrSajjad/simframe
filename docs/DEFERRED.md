@@ -3147,8 +3147,44 @@ worth more than the verdict.
    the intent.
 
 174. **Screen identity fragments on content-driven screens, and the cost is an
-   aborted batch.** OPEN, and it is the largest remaining cost on a first
-   traversal.
+   aborted batch.** PARTLY FIXED 2026-09-21 — the false abort is closed; screen
+   identity itself is untouched and this stays OPEN for that half.
+
+   **Counted first, and the headline was wrong.** This said "the largest
+   remaining cost on a first traversal" from the day it was filed, and the log
+   does not support it: `unexpected-screen` is **32 of 1261 records (2.5%)**,
+   all `verification_failed`, all `outcome: failed`, all costing exactly one
+   model turn, p50 2814 ms, 119 s in total. It peaked at 12 on 2026-09-10 and
+   has run 0-3 a day since the 14th. The largest cause in the last four days is
+   `could not launch com.apple.Preferences` at 38, which is the bench killing
+   its own device (item 173), not a faculty at all.
+
+   What is true is the narrower claim `docs/ESCALATIONS.md` actually makes, and
+   it is the one that decides the order: `no-visible-change` is deliberately
+   left unnamed because two causes wear it, and device escalations are excluded
+   from faculty naming — so this is the only verdict in the corpus that **names**
+   a faculty. That, and the `saveFlow` coupling below, are why it is worked
+   before more frequent things. Frequency was never the argument; the item
+   should not have claimed it was.
+
+   **The half that is fixed.** `confirmWrongTurn` in `actions.js`, the sibling
+   of `confirmNoChange` and against the same class of mistake: a verdict taken
+   from a screen that was still arriving. A wrong turn now costs a settle and a
+   second reading before it may stop a batch. A second read that agrees leaves
+   everything as it was and the halt stands on two reads; any other second read
+   replaces the verdict and keeps both answers in `disagreed`, because the
+   contradiction is the evidence that this gate is flaky. The graph learns from
+   the confirmed reading via the existing `lateArrival` contract.
+
+   This keeps the verify barrier rather than softening it, which is what the
+   original request to make the verdict non-fatal would have done: a halt on
+   one premature read is not confirmed perception either, so both directions
+   now pay for a second look.
+
+   It is also **not** gated on a supervisor, which is what the "tractable half"
+   below proposed. `doctor` reports `local supervisor: none — not requested` on
+   a default install, so a ruling-based fix would have meant "fixed for callers
+   who opted in". A second read needs no model and no opt-in.
 
    Reported twice. `unexpected-screen` fired on steps that had done exactly the
    right thing:

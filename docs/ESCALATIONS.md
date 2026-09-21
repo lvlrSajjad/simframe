@@ -1,5 +1,44 @@
 # Escalations — where simframe still needs a model
 
+## The steering wheel is currently reading the test rig — 2026-09-21
+
+Re-counted before starting item 174, because the corpus has grown from 1,022 to
+**1,261** since the 09-17 pass and the order was about to be taken on trust.
+
+**The last four days are mostly the bench dying.** Of 124 `verification_failed`
+records since 09-15, **46 are `could not launch`** — 38 Preferences, 8
+MobileAddressBook — every one of them on `326464A4`, the HPI bench device, and
+every one carrying `The system shell (SpringBoard:NNNNN) probably crashed`.
+Those are the two bench flows and that is item 173's signature. The breakdown
+CLAUDE.md makes the steering wheel is, right now, pointed mostly at a broken
+test rig rather than at a faculty.
+
+**19 of those 46 still carry `device_cause: null`.** That is item 186's open
+half, measured: 41% of recent device-caused losses are still counted against
+the code in `HPI_accuracy` — the one number CI gates on. 186 was filed as
+"partly fixed"; this is the size of the remaining part.
+
+**What the verdict split says, unchanged in shape.** `unexpected-screen` is 32
+records all-time (2.5%), p50 2814 ms, all `outcome: failed`, all one model
+turn; it peaked at 12 on 09-10 and has run 0-3 a day since the 14th. So it is
+**not** "the largest remaining cost", which is what DEFERRED 174 claimed and
+has now stopped claiming. It is still the item worked first, for the reason the
+09-17 table gives and not for its frequency: `no-visible-change` (251) is
+deliberately unnamed, device escalations are excluded, and this is the only
+verdict left that names a faculty.
+
+| reason | all 1,261 | since 09-15 |
+| --- | --- | --- |
+| `verification_failed` | 754 | 124 |
+| `ambiguous_intent` | 256 | 49 |
+| `unknown_screen` | 176 | 10 |
+| `no_plan` | 75 | 3 |
+| **total** | **1,261** | **186** |
+
+**The habit this is an instance of.** Two phase premises in a row have turned
+out to be false when counted, and this is the third. Counting took four
+commands and changed one sentence of the plan and none of the work.
+
 ## What the log could not say, and now can — 2026-09-17
 
 **1,022 records, and 20 of them carried a reason that had been read.** The rest

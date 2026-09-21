@@ -6722,6 +6722,63 @@ test('the escape hatch from a wrong-turn verdict settles before it gives up', as
   assert.equal(actions.haltDecision({ verification: wrong, continueOnError: true }).halt, false);
 });
 
+test('a wrong turn is not a wrong turn until something has looked twice (item 174)', async () => {
+  // `unexpected-screen` halts the batch, and the reported defect is that it is
+  // NON-DETERMINISTIC: a reporter re-issued the identical call with no state
+  // change and it passed. A gate that fails once and passes on retry is flaky
+  // rather than protective. Measured against the escalation log it is 32 of
+  // 1261 records, all `outcome: failed`, all costing exactly one model turn —
+  // and each one throws away the rest of its batch, which is what a field
+  // report paid for at step 5 of a 7-step plan.
+  //
+  // `confirmNoChange` already does exactly this for the sibling verdict. This
+  // is that, for the more expensive of the two mistakes.
+  const actions = await import('../src/actions.js');
+  const first = {
+    verdict: 'unexpected-screen',
+    detail: 'expected the screen this action reached 4x before, and landed somewhere else',
+    observed: { to: 'aaaaaaaa' },
+  };
+
+  // A second read that agrees confirms the first, and the halt now stands on
+  // two reads instead of one. Nothing is softened.
+  const agreed = actions.afterSecondLook(first, { verdict: 'unexpected-screen', detail: 'still elsewhere' }, { hash: 'aaaaaaaa' });
+  assert.equal(agreed, first, 'an agreeing second look changes nothing at all');
+  assert.equal(actions.haltDecision({ verification: agreed }).halt, true);
+
+  // A second read that lands on the predicted screen replaces the verdict, and
+  // the batch survives.
+  const settled = actions.afterSecondLook(first, { verdict: 'ok', detail: 'matches the outcome seen 4x before' }, { hash: 'bbbbbbbb' });
+  assert.equal(settled.verdict, 'ok');
+  assert.equal(actions.haltDecision({ verification: settled }).halt, false);
+  // Both answers are kept. The disagreement is the finding — it is what says
+  // this gate is flaky — so it may not be dropped just because the run lived.
+  assert.deepEqual(settled.disagreed, { first: 'unexpected-screen', second: 'ok', from: 'aaaaaaaa', to: 'bbbbbbbb' });
+  assert.match(settled.detail, /read again after settling/);
+  assert.match(settled.detail, /aaaaaaaa → bbbbbbbb/);
+  // And the graph learns from the confirmed reading, not the premature one —
+  // the same contract `confirmNoChange` uses for its late arrival.
+  assert.deepEqual(settled.lateArrival, { hash: 'bbbbbbbb' });
+
+  // It adopts the second answer rather than inventing a safe one: a second
+  // look saying the screen never moved is still escalating, and still says so.
+  const inert = actions.afterSecondLook(first, { verdict: 'no-visible-change', detail: 'the screen did not change' }, { hash: 'aaaaaaaa' });
+  assert.equal(inert.verdict, 'no-visible-change');
+
+  // A second look that did not happen establishes nothing. A failed read may
+  // never be read as agreement — that is the whole shape of this class of bug,
+  // one function over.
+  assert.equal(actions.afterSecondLook(first, null, null), first);
+
+  // The read half, which needs a device, asserted against its own source.
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('async function confirmWrongTurn'));
+  const body = fn.slice(0, fn.indexOf('\n}\n'));
+  assert.match(body, /mode: 'settle'/, 'it must let the screen arrive before looking');
+  assert.match(body, /if \(!again\?\.hash\) return verification;/, 'and a read that failed is not agreement');
+  assert.doesNotMatch(body, /supervisor/, 'not gated on a supervisor: doctor reports none on a default install');
+});
+
 test('a miss that came out of screen memory is not the final word', async () => {
   const api = await import('../src/index.js');
   const metrics = await import('../src/metrics.js');

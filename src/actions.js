@@ -794,6 +794,11 @@ export async function runScript(
         verification = await confirmNoChange(deviceQuery, verification, {
           beforeScreen, options, stableMs, timeoutMs,
         });
+        // And the same courtesy before a wrong turn throws away the rest of
+        // the batch, which is the more expensive of the two mistakes.
+        verification = await confirmWrongTurn(deviceQuery, verification, {
+          udid, prediction, beforeScreen, step, options, stableMs, timeoutMs,
+        });
         if (verification.lateArrival) {
           // The reading the verdict was taken from is now known to be stale, so
           // nothing downstream may learn a screen or an edge from it.
@@ -1827,6 +1832,77 @@ async function confirmNoChange(deviceQuery, verification, { beforeScreen, option
       + ' — a web view or a slow list can render after a settle has reported it still',
     lateArrival: again,
   };
+}
+
+/**
+ * What a second look at a wrong turn establishes.
+ *
+ * Pure, and separate from the read that feeds it, because the read needs a
+ * device and this needs to be provable without one. `stillOnPlan` is tested by
+ * asserting against its own source text, which is what you write when the
+ * decision cannot be reached in a test, and it checks that the code says what
+ * it says rather than that it decides what it should.
+ *
+ * The rule: a second reading that *also* says wrong turn confirms the first,
+ * and the halt stands on two reads instead of one. Any other second reading
+ * replaces it, because the first was taken of a screen that had not finished
+ * being itself. The disagreement is kept either way — it is the evidence that
+ * this gate is flaky rather than protective, and it is what a supervisor would
+ * be asked to rule on.
+ */
+export function afterSecondLook(verification, second, again) {
+  if (!second?.verdict || second.verdict === 'unexpected-screen') return verification;
+  const was = String(verification?.observed?.to ?? '').slice(0, 8);
+  const now = String(again?.hash ?? '').slice(0, 8);
+  return {
+    ...verification,
+    verdict: second.verdict,
+    detail: `${second.detail} — read again after settling, because the first read said`
+      + ` "${verification.detail}"${was && now && was !== now ? ` (${was} → ${now})` : ''}`,
+    // Both answers, so the log can count how often perception contradicts
+    // itself here rather than only how often it halted a run.
+    disagreed: { first: verification.verdict, second: second.verdict, from: was || null, to: now || null },
+    lateArrival: again,
+  };
+}
+
+/**
+ * One more look before a wrong turn is allowed to stop the batch.
+ *
+ * The sibling of `confirmNoChange`, for the same reason and against the same
+ * class of mistake: a verdict taken from a screen that was still arriving. The
+ * reported symptom is that the gate is **non-deterministic** — a reporter
+ * re-issued the identical call with no state change and it passed — and a gate
+ * that fails once and passes on retry is flaky, not protective. Asked twice,
+ * the perception disagrees with itself, and the first answer was never
+ * evidence.
+ *
+ * This keeps the verify barrier rather than softening it. The barrier asks for
+ * confirmed perception before acting on a screen an `unexpected-*` verdict has
+ * touched; a halt on one premature read is not confirmed perception either.
+ * Both directions now cost a second, settled read, and a wrong turn that is
+ * real still halts — on better evidence than before.
+ *
+ * Deliberately not gated on a supervisor being configured. The escape hatch the
+ * item proposed was a supervisor ruling, which `doctor` reports as
+ * `none — not requested` on a default install, so that fix would have reached
+ * only callers who opted in. A second read needs no model and no opt-in; a
+ * supervisor, when there is one, still gets asked about what survives it.
+ */
+async function confirmWrongTurn(deviceQuery, verification, { udid, prediction, beforeScreen, step, options, stableMs, timeoutMs }) {
+  if (verification?.verdict !== 'unexpected-screen' || !prediction || !beforeScreen?.hash) return verification;
+  await api.waitFor(deviceQuery, {
+    mode: 'settle', stableMs: 250, timeoutMs: LATE_CHANGE_MS, options,
+  }).catch(() => null);
+  const again = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs }).catch(() => null);
+  // Nothing looked, so nothing was established and the first answer stands.
+  // A failed read may never be read as agreement.
+  if (!again?.hash) return verification;
+  // `kind` is deliberately not passed: the transition classifier's reading
+  // belongs to the moment of the first look, and it only ever decorates an
+  // `ok`. Re-using it here would date-stamp this answer with that one.
+  const second = graph.verdict({ udid, prediction, before: beforeScreen, after: again, action: step.action });
+  return afterSecondLook(verification, second, again);
 }
 
 /**
