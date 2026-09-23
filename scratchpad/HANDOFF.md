@@ -34,13 +34,28 @@ on the device"*. Details and the exact output are in **Repo state** at the
 bottom — read that before anything else, because the previous version of this
 queue was written on the assumption those runs were noise.
 
-Start with the **one-word diagnostic fix** at `scripts/ci-memory.mjs:704`: the
-failing branch prints `${entry?.provisional}`, so `undefined` covers both "the
-entry lost the field" and "the entry is gone", and its sibling five lines up
-already prints `?? 'gone'`. That one word decides which of two bugs you are
-chasing, and it is the cheapest thing on this whole list. Then the two faults
-behind it — one is item 174's open half (screen identity) showing up in CI
-rather than in a field report, the other is item 176 territory.
+**Half of it is closed (2026-09-23), and it was neither of the two faults this
+line predicted.** The `provisional=undefined` failure had nothing to do with
+item 176 and the entry was not gone: the flow was confirmed before the replay
+even ran. The `provisional=true` in the log came from the first save attempt;
+the `--force` save is another traversal of a loop the graph has already
+learned, so it saves confirmed. On the bench device the runs went
+true → false → false. The check asserted a precondition it never set up. The
+fix is in the harness, not the product: it reads whether the flow was
+provisional before the replay, prints why a replay stopped, and reports
+`NOT TESTED` when there is nothing to promote. DEFERRED 176 has the addendum.
+One more finding: **CI has never actually tested promotion end to end.** The
+positive check passed on flows that were never provisional. That is still open.
+
+Note on the "one-word" fix: `?? 'gone'` would have been the wrong word. It
+prints "gone" for an entry that exists without the field, which is exactly the
+case in question. The harness now uses `entry ? entry.provisional : 'gone'`.
+
+**What remains of item 1 is item 174's open half**: `staleKind:
+"unknown-screen"` on "Welcome to Reminders" at `ci-memory.mjs:395`. It hit the
+memory shard at `f8b0b6a` and in scheduled run `35610506147`. The fingerprint
+shard in that same scheduled run also failed: *"settings" never arrived*, with
+the home screen still up after 8 s. Not yet read.
 
 **2. Item 186's open half — 41% of recent device losses are still counted
 against the code.** Promoted to the top, and it was measured on 09-21 rather
@@ -635,6 +650,9 @@ Two *different* real failures, not one flake:
   this branch prints `${entry?.provisional}` raw while its sibling five lines up
   prints `?? 'gone'`. `scripts/ci-memory.mjs:704`. Fix that diagnostic first; it
   is one word and it decides which of two bugs this is. Item 176 territory.
+  **Resolved 2026-09-23: it was neither.** The flow was confirmed before the
+  replay (the forced save is a warm traversal), so the check had no
+  precondition. The harness is fixed; see queue item 1 and DEFERRED 176.
 
 The scheduled run `35610506147` also failed **both** shards, so the "shards
 alternate" reading in the previous version of this section does not hold either.

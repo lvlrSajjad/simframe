@@ -678,23 +678,50 @@ if (contradicted) {
 // --force is the deliberate override, and it is what lets the replay machinery
 // be tested without waiting on a screen that may never settle into one shape.
 const forced = await jsonRetry(['do', LOOP, `--save=${FLOW_NAME}`, '--force'], { allowFail: true });
-if (check(forced.saved?.ok === true, 'and --force saves it anyway', `${forced.saved?.steps} steps`)) {
+if (check(forced.saved?.ok === true, 'and --force saves it anyway',
+  `${forced.saved?.steps} steps, provisional=${forced.saved?.provisional}`)) {
   const listed = await jsonRetry(['flow', 'list']);
-  check(listed.some((f) => f.name === FLOW_NAME), 'the saved flow is listed');
+  const before = listed.find((f) => f.name === FLOW_NAME);
+  check(Boolean(before), 'the saved flow is listed');
+  // Whether there is anything to promote is a fact about *this* save, not the
+  // first attempt's. The forced save is another traversal of the same loop,
+  // and by then the graph has seen every edge in it: measured on the bench
+  // device, the first run saved `provisional=true` and every run after it
+  // saved confirmed outright. Both checks below used to assume a provisional
+  // flow — so the positive one passed on a flow that had never been
+  // provisional, and the negative one failed CI on it — main was red on a
+  // precondition the harness never established, while the product did exactly
+  // what it should.
+  const wasProvisional = before?.provisional === true;
   const replayed = await jsonRetry(['flow', 'run', FLOW_NAME], { allowFail: true });
+  // A replay that stopped early says which step stopped it and why. 1dcce18's
+  // red run printed `1/2 steps` and nothing else, so the one fact that would
+  // say whether the replay itself is broken was never on the page.
+  const stoppedAt = (replayed.results ?? []).find((r) => !r.ok);
   check(replayed.ranSteps >= 1 && Array.isArray(replayed.results),
     'and replays from disk with no model in the loop',
-    `${replayed.ranSteps}/${replayed.totalSteps} steps`);
+    `${replayed.ranSteps}/${replayed.totalSteps} steps`
+      + (stoppedAt ? `; stopped at [${stoppedAt.index}] ${stoppedAt.action}: ${String(stoppedAt.detail ?? '').slice(0, 160)}` : ''));
   // The other half of the bootstrap, and the reason "provisional" is not a
   // state nothing ever leaves: a clean replay is the confirmation a first
   // traversal could not give. Only asserted when the replay actually ran to
   // the end — a partial replay promotes nothing, deliberately.
   const after = await jsonRetry(['flow', 'list']);
   const entry = after.find((f) => f.name === FLOW_NAME);
-  if (replayed.ok) {
+  // Whatever the replay did, it must not lose the flow. Neither branch below
+  // could say this: an entry that vanished and an entry without the field both
+  // read `undefined`.
+  check(Boolean(entry), 'a replay leaves the flow it replayed on disk',
+    entry ? '' : 'the entry is gone from the listing');
+  if (!wasProvisional) {
+    skip(replayed.ok
+      ? 'and a clean replay confirms a provisional flow'
+      : 'and a replay that failed does NOT confirm the flow it just disproved',
+    'the forced save verified every step, so the flow was confirmed before the replay and there was nothing to promote');
+  } else if (replayed.ok) {
     check(entry && !entry.provisional,
       'and a clean replay confirms a provisional flow',
-      `provisional=${entry?.provisional ?? 'gone'}`);
+      `provisional=${entry ? entry.provisional : 'gone'}`);
   } else {
     // The other direction, and it is the one that was silently wrong: promotion
     // keyed on `ranSteps === steps.length`, which a failure on the *last* step
@@ -703,7 +730,7 @@ if (check(forced.saved?.ok === true, 'and --force saves it anyway', `${forced.sa
     // confirmation, so the negative case has to be checked too.
     check(entry?.provisional === true,
       'and a replay that failed does NOT confirm the flow it just disproved',
-      `ok=${replayed.ok}, provisional=${entry?.provisional}`);
+      `ok=${replayed.ok}, provisional=${entry ? entry.provisional : 'gone'}`);
   }
   const unknown = await cli(['flow', 'run', 'no-such-flow'], { expectFail: true });
   check(/no flow/i.test(unknown), 'an unknown flow name is refused with what is known');

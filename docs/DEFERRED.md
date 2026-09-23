@@ -3142,6 +3142,26 @@ worth more than the verdict.
    reason now names its own remedy, because `incomplete-run` and `failed-steps`
    ask for opposite things from the caller.
 
+   **2026-09-23 — the negative check added here turned `main` red, and the
+   product was right.** `1dcce18`'s memory shard failed on *"a replay that failed
+   does NOT confirm the flow — ok=false, provisional=undefined"*, and the handoff
+   read that as a 176 regression. It was not. Both promotion checks assumed the
+   `--force` save was provisional, and nothing checked. The `provisional=true`
+   in that log came from the **first** attempt; the forced save is another
+   traversal of the same loop, and by then the graph has seen every edge. On the
+   bench device, three runs in a row went `["ok","unverified"] provisional=true`,
+   then `["ok","ok"] false`, then `["ok","ok"] false`. The flow was confirmed
+   before the replay, a failed replay correctly left it alone, and the check
+   called that a failure. The positive check had the same hole the other way
+   round: on a clean replay it passed on a flow that had never been provisional,
+   **so CI has not actually tested promotion end to end since it was added.**
+   The harness now reads whether the flow was provisional before the replay,
+   asserts that a replay never removes the flow, prints why a replay stopped,
+   and reports both promotion checks as `NOT TESTED` when there was nothing to
+   promote. Promotion itself is still covered by the unit tests. Getting a
+   provisional flow in CI on purpose is open: the loop is warm by the time
+   this section runs.
+
 175. **The overlap warning fires on most screens and is ignored by the fourth
    one.** OPEN, and it **cancels a fix the previous report asked for.**
 
