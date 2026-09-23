@@ -27,7 +27,22 @@ one**, and a session that trusts the old sentence will report HPI numbers
 against a reference built from runs that never finished. The human half is
 sound and needs nothing.
 
-**1. Item 186's open half — 41% of recent device losses are still counted
+**1. `main`'s CI is red on two real code failures, and this file used to say it
+was flake.** Audited 2026-09-23. `integration (memory)` has failed every run
+since `f8b0b6a` and the job itself prints *"this step failed on its merits, not
+on the device"*. Details and the exact output are in **Repo state** at the
+bottom — read that before anything else, because the previous version of this
+queue was written on the assumption those runs were noise.
+
+Start with the **one-word diagnostic fix** at `scripts/ci-memory.mjs:704`: the
+failing branch prints `${entry?.provisional}`, so `undefined` covers both "the
+entry lost the field" and "the entry is gone", and its sibling five lines up
+already prints `?? 'gone'`. That one word decides which of two bugs you are
+chasing, and it is the cheapest thing on this whole list. Then the two faults
+behind it — one is item 174's open half (screen identity) showing up in CI
+rather than in a field report, the other is item 176 territory.
+
+**2. Item 186's open half — 41% of recent device losses are still counted
 against the code.** Promoted to the top, and it was measured on 09-21 rather
 than argued: of 46 `could not launch` records in the last four days — every one
 on the bench device, every one `The system shell (SpringBoard:NNNNN) probably
@@ -37,10 +52,10 @@ crashes. The missing *signature* half is fixed; this half needs the throw path
 out of `launch` traced, so a run lost to a recognised device death writes an
 escalation carrying its cause.
 
-It is first because it is the cheapest thing that makes every later measurement
-mean what it says. Items 2 and 3 are unmeasurable until it lands.
+It is high because it is the cheapest thing that makes every later measurement
+mean what it says. Items 3 and 4 are unmeasurable until it lands.
 
-**2. Item 189 — the device degrades *within* a pass.** The between-pass revive
+**3. Item 189 — the device degrades *within* a pass.** The between-pass revive
 is attached to the wrong boundary: a pass is 10 runs against a device that
 tolerates 8-10, so the damage lands inside a pass more often than at its edge.
 Pass 2 of the 09-18 re-record started `healthy` and collapsed three runs in.
@@ -55,12 +70,12 @@ to decide. **Nobody re-read the commit that the item's own table came from.**
 Raising it also turned out not to be sufficient, which is why what survives of
 187 is item 189 above.
 
-**3. Re-record the agent half of the HPI reference**, once 1, 2 and 189 are
+**4. Re-record the agent half of the HPI reference**, once items 2 and 3 are
 done, and not before — item 188 first, because `--out` currently writes the file
 even on a run that has just printed "must not be adopted as a baseline". The
 runbook below is still correct for the mechanics.
 
-**4. Item 174's remaining half — screen identity itself.** The false abort is
+**5. Item 174's remaining half — screen identity itself.** The false abort is
 closed (see the 09-21 block); the graph still holds two nodes for one logical
 screen on content-driven screens, and that is the part with no obvious fix.
 DEFERRED 174 says why both tempting ones are wrong: the similarity threshold
@@ -69,25 +84,25 @@ anchoring merges the wizard steps it is supposed to distinguish. Do not start
 here without a fixture — this is perception work, and a live page costs 60 s a
 look and confounds the result.
 
-**5. Item 185 — `diagnose` asserts "the daemon is stuck attaching" for a device
+**6. Item 185 — `diagnose` asserts "the daemon is stuck attaching" for a device
 that has no display port**, a cause `simctl` names in one sentence. Cheap, and
 it is the instrument items 173 and 1 depend on being honest.
 
-**6. Web: the batching experiment (no code).** See `docs/DECISIONS.md` —
+**7. Web: the batching experiment (no code).** See `docs/DECISIONS.md` —
 `web.js` is deferred pending one measurement. Batching lives above the platform
 boundary and is the largest untested term; a peer batching aggressively and
 reporting `n` decides whether the backend is worth two days.
 
-**7. Item 179 — a data-creating flow can never replay cleanly**, so the
+**8. Item 179 — a data-creating flow can never replay cleanly**, so the
 confirmation path is closed to most flows worth recording. Design question, not
 a bug fix: a recorded assert should check the *delta* it caused, not the end
 state.
 
-**8. Item 178 — `sim_find` returns a static label as a "field".** Cheap and
+**9. Item 178 — `sim_find` returns a static label as a "field".** Cheap and
 well-targeted, but record a fixture first: a hard type filter breaks OCR-only
 WebView screens.
 
-**9. The rest** — 170, 181, 182, and the perception group (153, 155, 156, 162,
+**10. The rest** — 170, 181, 182, and the perception group (153, 155, 156, 162,
 163).
 
 ### The number none of this has moved
@@ -583,19 +598,55 @@ did not return it, so it would have passed either way.
   daemon that had never restarted.
 - Port 8081 is someone else's Metro. Do not kill it.
 
-## Repo state — 2026-09-21
+## Repo state — 2026-09-23
 
-- `main` is at **`181671a`** — everything from 09-20/21 is pushed, nothing is
-  waiting on a branch. `v0.18.0` is the last tag; **25 commits on main are
-  unreleased.** A phase end is a peer test, not a release — propose a peer
+- `main` is at **`1dcce18`**, local and remote in step, nothing waiting on a
+  branch, working tree clean. `v0.18.0` is the last tag; **27 commits on main
+  are unreleased.** A phase end is a peer test, not a release — propose a peer
   session, do not publish.
-- **CI on `main` is red and was red before any of this.** `fb2d6c2` failed
-  `integration (fingerprint)` while `integration (memory)` passed; `f8b0b6a`
-  failed `integration (memory)` while `integration (fingerprint)` passed. The
-  shards alternate, which is the known hosted-runner flakiness and item 173,
-  not a code regression — but it also means **a PR would not come back green
-  either**, so "wait for CI" is not currently a usable gate. Both pushes went
-  in with the `integration` required check bypassed, at the owner's direction.
-  **Do not read a green local suite as a green CI** and do not publish while
-  this is red.
-- Unit suite: **226 pass** locally, `node --test test/unit.test.mjs`.
+- Local: **226 pass** (`npm test`), `node scripts/article-md.mjs --check` in
+  step at 579 lines.
+
+### CI is red on `main`, and it is NOT what this file said it was
+
+The 09-21 version of this section called it "known hosted-runner flakiness and
+item 173, not a code regression". **That was wrong, and it was wrong in the
+direction that costs most** — it told the next session to ignore a red build.
+Read before trusting it again.
+
+`integration (memory)` has failed on every run since `f8b0b6a`, and the job
+prints its own verdict on the question:
+
+```
+     (this step failed on its merits, not on the device — not retrying)
+```
+
+Two *different* real failures, not one flake:
+
+- **`f8b0b6a`** — `#1 cannot be trusted here — refs were numbered 1s ago;
+  simframe does not recognise this screen`, `staleKind: "unknown-screen"`,
+  `staleLabel: "Welcome to Reminders"`. That is **item 174's open half**, screen
+  identity, failing in CI rather than in a field report.
+- **`1dcce18`** — `FAIL and a replay that failed does NOT confirm the flow it
+  just disproved — ok=false, provisional=undefined`. The flow saved
+  `provisional=true` and was listed; after a replay that ran **1 of 2 steps**
+  and failed, the second `flow list` reads `undefined`. So the entry lost the
+  field, or the entry is gone — **and the check cannot tell you which**, because
+  this branch prints `${entry?.provisional}` raw while its sibling five lines up
+  prints `?? 'gone'`. `scripts/ci-memory.mjs:704`. Fix that diagnostic first; it
+  is one word and it decides which of two bugs this is. Item 176 territory.
+
+The scheduled run `35610506147` also failed **both** shards, so the "shards
+alternate" reading in the previous version of this section does not hold either.
+What holds is narrower: at least one `integration` shard has failed on every run
+since 09-20, so **"wait for CI" is not a usable gate**, and every push since has
+gone in with the required check bypassed at the owner's direction.
+
+**Is `54479d9` (item 174's `confirmWrongTurn`) the cause of the newer one?**
+Not on the evidence, and do not assume either way. It is inert unless a verdict
+is `unexpected-screen`; its effect would push a replay toward *succeeding*, not
+failing; and the observed fault is a listing losing a field. But the memory
+shard was already red at `f8b0b6a` for a different reason, so that run never
+reached this check — **nobody has seen this check pass or fail with item 174's
+change isolated.** Cheapest way to settle it: `git stash` nothing, just run
+`scripts/ci-memory.mjs` locally against `54479d9^` and `54479d9`.
