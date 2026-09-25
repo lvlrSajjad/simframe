@@ -1072,6 +1072,18 @@ test('a ref numbered on one screen refuses to resolve on another', () => {
 
   // A screen nothing recognises cannot vouch for the numbers either.
   assert.throws(() => resolveRef(udid, 1, { screenKnown: false }), /does not recognise this screen/);
+
+  // Unless the refs table recognises it. A read that never settled numbers the
+  // elements and remembers no map, and the next call refused refs issued one
+  // second earlier on the same screen — red twice running in CI on an
+  // unchanged tree. The table's own layout hash is the evidence memory lacked.
+  assert.equal(resolveRef(udid, 1, { screenKnown: false, layoutHash }).label, 'Save');
+  // Only within the tolerance memory itself would have used...
+  const elsewhere = (() => {
+    try { resolveRef(udid, 1, { screenKnown: false, layoutHash: '5'.repeat(72) }); return null; } catch (e) { return e; }
+  })();
+  assert.equal(elsewhere?.staleRef, true, 'a screen that is not the table\'s still refuses');
+  assert.equal(elsewhere?.staleKind, 'unknown-screen');
 });
 
 test('a degenerate layout hash is not evidence that the screen is the same', () => {
@@ -1101,6 +1113,12 @@ test('a degenerate layout hash is not evidence that the screen is the same', () 
       () => resolveRef(udid, 1, { layoutHash: blank, structuralHash: 'ffff9999' }),
       /different screen/,
       'a degenerate pixel hash must not let a stale ref through',
+    );
+    // Nor may it vouch for a screen memory does not know.
+    assert.throws(
+      () => resolveRef(udid, 1, { layoutHash: blank, screenKnown: false }),
+      /does not recognise this screen/,
+      'a degenerate table hash is not recognition',
     );
   } finally {
     fs.rmSync(home, { recursive: true, force: true });

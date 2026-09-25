@@ -145,10 +145,27 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
     throw staleError(`this is a different screen (${table.structuralHash.slice(0, 8)}`
       + ` → ${structuralHash.slice(0, 8)})`, 'identity');
   }
+  // Computed before the recognition check, because it is also the evidence that
+  // check was missing. See the drift refusal below for what it measures.
+  const drift = layoutHash && table.layoutHash && informative(table.layoutHash) && informative(layoutHash)
+    ? hashDistance(table.layoutHash, layoutHash)
+    : null;
   // Nothing recognises the screen we are on, so nothing can vouch for the
   // numbers. Refusing costs a re-read; guessing taps whatever is at those
   // coordinates now.
-  if (screenKnown === false) {
+  //
+  // Except the refs table itself. A read that never settled numbers the
+  // elements and persists no map (`persist: settled`), so the very next call
+  // found screen memory empty and refused refs issued one second earlier on
+  // the same screen — `integration (memory)` went red on that twice running on
+  // an unchanged tree, a runner slow enough to miss the settle timeout being
+  // all it took. Screen memory recalls by the same layout distance and the same
+  // tolerance, so an informative hash this close to the table's is the test
+  // memory would have passed had it been allowed to remember; when the table's
+  // screen *was* remembered, recall would already have found it, and this
+  // changes nothing.
+  const vouchedByTable = drift != null && drift <= tolerance;
+  if (screenKnown === false && !vouchedByTable) {
     // Flagged, like every other refusal in this function, and it was the one
     // that was not.
     //
@@ -178,9 +195,6 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
   // routinely while the hashes differ. So this says the distance, and says that
   // it is pixels rather than identity — a different thing from the branch above,
   // which had been wearing the same sentence.
-  const drift = layoutHash && table.layoutHash && informative(table.layoutHash) && informative(layoutHash)
-    ? hashDistance(table.layoutHash, layoutHash)
-    : null;
   if (drift != null && drift > tolerance) {
     throw staleError(`the screen has moved too far from where these refs were numbered`
       + ` (layout distance ${drift}, tolerance ${tolerance}) — the identity may be unchanged;`
