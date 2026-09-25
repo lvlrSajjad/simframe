@@ -70,7 +70,10 @@ const manifest = {
 fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
 const out = path.join(root, `simframe-${pkg.version}.mcpb`);
-fs.rmSync(out, { force: true });
+// One bundle at a time. A stale one from the previous version sitting next to
+// the new one got published in its place once, by a command line that named
+// the old file.
+for (const f of fs.readdirSync(root)) if (/^simframe-.*\.mcpb$/.test(f)) fs.rmSync(path.join(root, f), { force: true });
 execFileSync('zip', ['-qr', out, '.', '-x', '*.DS_Store'], { cwd: dir });
 fs.rmSync(work, { recursive: true, force: true });
 console.log(`${path.relative(root, out)}: ${tools.length} tools, ${(fs.statSync(out).size / 1e6).toFixed(1)} MB`);
