@@ -1162,13 +1162,57 @@ because the agent chose it and then asked for it by name.
 
 ## Roadmap
 
-- **Extend the confirm vocabulary beyond English.**
-- **Region bands from clustering**, replacing the positional bands. They have
-  produced three bugs in three phases, and on Android they put a URL bar in the
-  nav bar and its URL into the screen's identity.
-- **Phase 8b, conditionally:** an instrumentation APK for the Android
-  accessibility tree, with the criteria for doing it stated in
-  `docs/DEFERRED.md` rather than left to enthusiasm.
+Updated 2026-09-25. Ordered by what it costs to leave undone. The working
+detail, with evidence, is in [`docs/DEFERRED.md`](docs/DEFERRED.md); item
+numbers below refer to it.
+
+**Now**
+
+- **Never describe a screen that is no longer there.** A read that reports
+  the previous screen with confidence is worse than a refusal, because every
+  decision after it rests on it. Two fixes for this are on `main` and **not
+  yet in a release**: a settled read that could describe the screen just left
+  (191), and a wrong-turn read taken of a screen still arriving. If you
+  install from npm (0.18.0), you do not have them. A later report of the same
+  symptom is open (192) until it is traced to a build.
+- **Screens it has not seen before.** On a fresh simulator, first-launch sheets
+  ("Welcome to Reminders", Safari's tips) are read as an unknown screen, and a
+  run can stop there. Content-driven screens can also split into two
+  identities for one logical screen (174). This is perception work, and it
+  is done offline against recorded fixtures.
+- **Fewer model round trips per action.** A step runs in milliseconds, but an
+  agent still hands control back to the model every 1.5–2 actions
+  (`steps_per_call`), and the model's thinking dominates the session. The target
+  is 8–10. Small questions such as how far to scroll or which row matches
+  should be answered locally, and saved flows should replay with no model at
+  all. Phase 18's local supervisor is partly built (`--supervisor=apple`: wait,
+  retry or stop); its larger form is still a proposal.
+- **A benchmark that measures the code, not the rig.** The benchmark simulator
+  degrades after 8–10 runs, and some of its crashes are still counted as code
+  failures (186, 189). The agent half of the HPI reference is re-recorded after
+  that, not before.
+
+**Next**
+
+- **Replays for flows that create data** (179). A recorded assert should check
+  the change it caused, not the end state, or a flow that adds a row can never
+  replay cleanly.
+- **The web as a third target** (Phase 19). Deferred until one batching
+  measurement says whether the backend is worth building
+  ([`docs/DECISIONS.md`](docs/DECISIONS.md)).
+
+**Later, or only if measured to be worth it**
+
+- **The confirm vocabulary beyond English.**
+- **Phase 8b:** an instrumentation APK for the Android accessibility tree,
+  with the criteria for doing it stated in `docs/DEFERRED.md` rather than left
+  to enthusiasm.
+- **Phase 9:** a small local model for the cases that accessibility and OCR
+  together leave ambiguous. Behind a flag, and no weights shipped.
+
+**Done since the last version of this list:** region bands from clustering,
+replacing the positional bands that had produced three bugs in three phases
+(`eda9ac2`).
 
 ## Releasing
 
