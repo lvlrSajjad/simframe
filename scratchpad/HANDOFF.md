@@ -1,4 +1,52 @@
-# Handoff — 2026-09-21
+# Handoff — 2026-09-25
+
+## Read this first — what the owner said on 2026-09-25
+
+The session paused on purpose so the docs could be brought up to date. Nothing
+in this block has been investigated yet. It is what the owner reported, plus
+the checks that took one command each.
+
+**A. Stale screens: peers report the wrong screen. This is the new top item.**
+The owner says peer agents sometimes report being on the login screen while
+actually on the main screen — *"looks like sometimes old screenshots hang
+around"*. They last saw it **"a few days ago"**, which puts it around
+09-21 to 09-23. That is the confident wrong answer, the class this project
+treats as the priority finding. Filed as **DEFERRED 192**. What is known:
+
+- Two fixes aimed at exactly this exist: `2922e13` (09-18, DEFERRED 191) and
+  `54479d9` (09-21 12:58). **Neither is in any release**: v0.18.0 was tagged
+  09-17.
+- The **global `simframe` on this machine is 0.16.0**, two releases behind
+  npm. Anything that shells out to the global binary runs code older than both
+  fixes.
+- The MCP servers (global config and `ecotrak-mobile`) run
+  `node <repo>/src/cli.js mcp` straight from this checkout. A Node process
+  keeps the code it loaded at startup, so a session is only as new as its MCP
+  process. The two running on 09-25 started 09-24 23:57 and 09-25 10:36, after
+  both fixes.
+- So "a few days ago" might be before `54479d9` or after it. **The first step
+  is identity, not logic**: find the session (search transcripts for the
+  mismatch), get its timestamp and its MCP process's start time, and see
+  whether it ran a build containing both fixes. Then reproduce offline from a
+  recorded fixture, not live.
+
+**B. Speed: the owner's verdict is "much slower than a person".** In their
+words, Claude's thinking at each step ("which option to choose, how far should
+it scroll") takes much longer than a human's. That is the same finding Phase 18
+was redesigned around: 75% of round 6's run A was thinking and round trips. It
+is also the `steps_per_call` gap below. The owner reads it as a ceiling. The
+counter-argument, **inferred and not measured**: scroll distance and option
+choice are meant to be local (`sim_scroll_to`, `sim_find`), so when Claude
+deliberates over them, either the tool was not used or it failed. The
+escalation log and transcripts can say which. Also: a first run will probably
+never beat a human, and replayed flows cost zero model calls, so the realistic
+win is repeated, unattended regression runs, not first-time exploration.
+Measure which case is happening before building anything.
+
+**C. A real app is available.** `/Users/mohatami/Coding/ET/ecotrak-mobile`
+already has simframe configured as an MCP server. Recording 3–5 real flows
+there would test A and B on an app that matters, instead of Settings and
+Contacts. Proposed to the owner; not yet agreed.
 
 ## The queue, in priority order
 
@@ -56,6 +104,21 @@ case in question. The harness now uses `entry ? entry.provisional : 'gone'`.
 memory shard at `f8b0b6a` and in scheduled run `35610506147`. The fingerprint
 shard in that same scheduled run also failed: *"settings" never arrived*, with
 the home screen still up after 8 s. Not yet read.
+
+**After `0e6ee63`, both runs on it failed on first-run system sheets**
+(`35841329365` scheduled, `35862568219` push):
+- memory shard: the same "Welcome to Reminders" `unknown-screen`, both times;
+- fingerprint shard: *"browser" never arrived — waited 20000ms for Address*,
+  with a Safari tips sheet on screen (`You can now view these i…`, `Close`).
+
+The hosted runner boots a **fresh** simulator every time, so every app's
+onboarding sheet appears on first launch there, and almost never on a warm
+local device. That is a hypothesis from two logs, not a measurement. If it
+holds, it explains why this failure shows up in CI and not locally, and it
+matters beyond CI: every real app on a fresh install has sheets like these.
+Cheap test: dismiss the onboarding sheets in the CI setup step, or pre-launch
+each app once, and see whether both shards go green. If they do, the product
+question left is item 174 itself.
 
 **2. Item 186's open half — 41% of recent device losses are still counted
 against the code.** Promoted to the top, and it was measured on 09-21 rather
@@ -603,8 +666,16 @@ did not return it, so it would have passed either way.
 
 - Bench device `326464A4` (iPhone 17 Pro, iOS 26.5) — the HPI benchmark device.
   Wedged four times on 2026-09-18 by the bench suite; `simframe revive` cures
-  it. It has not been driven since — the 09-21 session was code and docs only,
-  so nothing here is a fresh reading of the device.
+  it. **Booted and driven on 2026-09-23**: a three-run repro of the CI loop
+  and one full `scripts/ci-memory.mjs` pass (exit 0, one check NOT TESTED). It
+  did not wedge. The repro flow `ci-repro` was deleted afterwards.
+- **The global `simframe` binary is 0.16.0** (`~/.nvm/.../node_modules/simframe`),
+  two releases behind npm and older than every fix since 09-17. The MCP servers
+  do not use it; they run `src/cli.js` from this checkout. Anything that calls
+  `simframe` from a shell does use it. Use `node src/cli.js`, or reinstall.
+- MCP processes hold the code they loaded at startup. Before testing a fix
+  through MCP, check the process start time (`ps -o lstart -p <pid>`) against
+  the commit time.
 - `B55AB0AE` was booted by a peer during their run. **Not ours.** `7B8F8963`
   belongs to another of the owner's projects. Always pass `--device`.
 - Five other MCP sessions hold that device. `simframe stop` will say
@@ -613,14 +684,19 @@ did not return it, so it would have passed either way.
   daemon that had never restarted.
 - Port 8081 is someone else's Metro. Do not kill it.
 
-## Repo state — 2026-09-23
+## Repo state — 2026-09-25
 
-- `main` is at **`1dcce18`**, local and remote in step, nothing waiting on a
-  branch, working tree clean. `v0.18.0` is the last tag; **27 commits on main
-  are unreleased.** A phase end is a peer test, not a release — propose a peer
-  session, do not publish.
+- `main` is at the commit that added this line: docs only on top of
+  **`0e6ee63`** (the ci-memory harness fix). Local and remote in step, working
+  tree clean. `v0.18.0` is the last tag; **30 commits on main are unreleased**,
+  including both stale-screen fixes (see A at the top). A phase end is a peer
+  test, not a release — propose a peer session, do not publish.
 - Local: **226 pass** (`npm test`), `node scripts/article-md.mjs --check` in
   step at 579 lines.
+- CI on `0e6ee63`: **red, both runs, on first-run system sheets**; see queue
+  item 1. The harness fix for the `provisional` check has **not yet been
+  observed in CI**, because both memory-shard runs died earlier, at
+  `ci-memory.mjs:395`. It has only been seen passing locally.
 
 ### CI is red on `main`, and it is NOT what this file said it was
 

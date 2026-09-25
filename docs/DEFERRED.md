@@ -2511,6 +2511,30 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+192. **Peers still report the wrong screen: "on the login screen" while on the
+   main screen.** OPEN, reported by the owner 2026-09-25, not reproduced. In
+   their words: *"looks like sometimes old screenshots hang around"*. Last seen
+   "a few days ago", so around 09-21 to 09-23. This is the confident wrong
+   answer, the class the project treats as the priority finding, and it is
+   worse than a refusal: every decision after it is built on it.
+
+   **It may already be fixed, and the first thing to settle is which build
+   saw it.** 191 (`2922e13`, 09-18) fixed a settled read describing the
+   previous screen. `54479d9` (09-21 12:58) fixed a wrong-turn read taken of a
+   screen still arriving. Neither is in a release (v0.18.0 is 09-17). The
+   global `simframe` binary on the owner's machine is 0.16.0. The MCP servers run
+   `src/cli.js` from the checkout, but only at the code they loaded at startup,
+   so a long-lived MCP process can run code days older than `main`.
+
+   **Next step, in order.** Find the session: search the transcripts for a
+   reported screen that contradicts the next action's result. Get its time and
+   the start time of its MCP process. If it ran without both fixes, verify
+   against a current build before calling it fixed. If it ran with both, it is
+   a live bug: record the fixture from that session and reproduce it offline.
+   The words "old screenshots" point at the frame store (`~/.simframe/<udid>/`,
+   atomic-rename layout) or the fingerprint cache, not at perception. That
+   last point is inference.
+
 191. **A settled read could describe the screen we had just left.** FIXED,
    2026-09-18. Field-reported as the highest-priority class — the confident
    wrong answer — and reproduced on the first attempt.
@@ -3295,6 +3319,20 @@ worth more than the verdict.
    (`doctor` says `local supervisor: none — not requested`). If the ruling only
    exists when one is configured, the default install keeps the false abort, and
    "fixed" would mean "fixed for callers who opted in".
+
+   **2026-09-25 — in CI, this item now shows up as first-run sheets.** Both
+   runs on `0e6ee63` failed on it. The memory shard failed at
+   `ci-memory.mjs:395` with `staleKind: "unknown-screen"`, `staleLabel:
+   "Welcome to Reminders"`, as it did at `f8b0b6a` and in scheduled run
+   `35610506147`. The fingerprint shard failed on a Safari tips sheet over
+   the address bar: *"browser" never arrived*. That is the step 144 already
+   calls the remaining known-fragile one. Hosted runners boot a fresh
+   simulator each time, so each app's onboarding sheet appears on its first
+   launch, and a warm local device almost never shows one. **Hypothesis from two
+   logs, not measured.** The cheap test: dismiss or pre-launch in the CI setup
+   step, and see whether both shards go green. If they do, what is left is this
+   item proper, and it matters in the field too: every fresh install of a real
+   app opens with a sheet like these.
 
 183. **A revive can bring the device back with the accessibility tree silent,
    and `doctor` cannot see it.** OPEN, observed 2026-09-17.

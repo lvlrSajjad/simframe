@@ -473,6 +473,15 @@ what remains. That document plus BENCHMARKS.md is the evidence for the article.
 
 ## Phase 18 — The local supervisor: Claude plans, the local model drives and watches
 
+> **2026-09-25, the owner on current use:** *much slower than a person*,
+> because Claude deliberates at every small step ("which option to choose, how
+> far should it scroll"). This is this phase's premise, restated from use
+> rather than from round 6. Status is unchanged: `DECISIONS.md` still lists it
+> as PROPOSED, and `steps_per_call` is still 1.5–2.0. Before building it,
+> count how often those small choices reach Claude at all, when `sim_scroll_to`
+> and `sim_find` are meant to answer them locally. See HANDOFF, "Read this
+> first", B.
+
 > **Redesigned 2026-09-10 on the owner's proposal, which is better than what this
 > phase said.** Their words:
 >
