@@ -1177,11 +1177,11 @@ numbers below refer to it.
 
 - **Never describe a screen that is no longer there.** A read that reports
   the previous screen with confidence is worse than a refusal, because every
-  decision after it rests on it. Two fixes for this are on `main` and **not
-  yet in a release**: a settled read that could describe the screen just left
-  (191), and a wrong-turn read taken of a screen still arriving. If you
-  install from npm (0.18.0), you do not have them. A later report of the same
-  symptom is open (192) until it is traced to a build.
+  decision after it rests on it. Two fixes for this ship in **0.19.0**: a
+  settled read that could describe the screen just left (191), and a
+  wrong-turn read taken of a screen still arriving. 0.18.0 and earlier do not
+  have them. A later report of the same symptom is open (192) until it is
+  traced to a build.
 - **Screens it has not seen before.** On a fresh simulator, first-launch sheets
   ("Welcome to Reminders", Safari's tips) are read as an unknown screen, and a
   run can stop there. Content-driven screens can also split into two
