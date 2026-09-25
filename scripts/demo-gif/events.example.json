@@ -1,0 +1,74 @@
+{
+ "startMs": 1790339118840,
+ "endMs": 1790339128578,
+ "fps": 10,
+ "videoEndEpochMs": 1790339127378,
+ "title": "iPhone 17 Pro \u00b7 iOS 26.5 \u00b7 one call from the agent",
+ "lines": [
+  {
+   "t": 1790339119740,
+   "text": "$ simframe do flow.json",
+   "color": "accent"
+  },
+  {
+   "t": 1790339122213,
+   "text": "ok   [0] tap: tapped \"Accessibility\" at 201,380",
+   "color": "ok"
+  },
+  {
+   "t": 1790339123369,
+   "text": "ok   [1] tap: tapped \"Display & Text Size\" at 201,504",
+   "color": "ok"
+  },
+  {
+   "t": 1790339124840,
+   "text": "ok   [2] tap: tapped \"Larger Text\" at 201,216",
+   "color": "ok"
+  },
+  {
+   "t": 1790339125080,
+   "text": "ok   [3] assert: Larger Text is on screen at 201,84",
+   "color": "ok"
+  },
+  {
+   "t": 1790339125528,
+   "text": "flow completed \u2014 4/4 steps in 4645ms",
+   "color": "fg"
+  },
+  {
+   "t": 1790339125878,
+   "text": "iPhone 17 Pro \u00b7 402x874pt \u00b7 screen f0509d55 (known)",
+   "color": "dim"
+  },
+  {
+   "t": 1790339125938,
+   "text": "content:",
+   "color": "fg"
+  },
+  {
+   "t": 1790339125998,
+   "text": "\u00a0\u00a0#1 button    38,84      Display & Text Size",
+   "color": "fg"
+  },
+  {
+   "t": 1790339126058,
+   "text": "\u00a0\u00a0#2 heading   201,84     Larger Text",
+   "color": "fg"
+  },
+  {
+   "t": 1790339126118,
+   "text": "\u00a0\u00a0#3 switch    337,161    Larger Accessibility Sizes = 0",
+   "color": "fg"
+  },
+  {
+   "t": 1790339126178,
+   "text": "\u00a0\u00a0#5 slider    200,783    DYNAMIC_TYPE_SLIDER = 50%",
+   "color": "fg"
+  },
+  {
+   "t": 1790339126238,
+   "text": "next: settled; nothing ambiguous \u2014 chain the next steps in one call",
+   "color": "dim"
+  }
+ ]
+}

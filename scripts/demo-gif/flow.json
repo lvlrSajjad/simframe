@@ -1,0 +1,6 @@
+[
+  { "tap": "Accessibility" },
+  { "tap": "Display & Text Size" },
+  { "tap": "Larger Text" },
+  { "assert": { "value": "Larger Text" } }
+]
