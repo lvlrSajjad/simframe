@@ -10,3 +10,6 @@ native/simframed/.swiftpm/
 
 # Strings that must not enter this repo — see scripts/check-private.mjs
 .private-strings
+
+# Smithery bundles are build artifacts: scripts/smithery-bundle.mjs makes one per release
+*.mcpb
