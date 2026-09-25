@@ -1,0 +1,12 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+# simframe is a local stdio server: it needs a Mac with Xcode and a booted
+# simulator, so it cannot be hosted. This file only tells Smithery how to
+# start it on the user's machine.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties: {}
+  commandFunction:
+    |-
+    config => ({ command: 'npx', args: ['-y', 'simframe', 'mcp'] })
