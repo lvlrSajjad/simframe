@@ -18,6 +18,13 @@ and CV alone. Tapping by label works; screen recognition is thinner, so prefer
 naming a device explicitly and re-reading the screen after a step you are unsure
 about.
 
+Commands are written here as the CLI (`simframe ui`, `simframe do`), which is
+the cheapest path. If `simframe` is not on your PATH — installed as a Claude Code
+plugin, say — the MCP server is already connected and the screen and flow
+commands are its tools under the same names (`sim_ui`, `sim_do`, `sim_state`,
+`sim_goto`…). Use those; for `doctor` and the other diagnostics, ask the user
+to run `npm install -g simframe`.
+
 ## The protocol: plan once, execute once, think only when told to
 
 The expensive thing in a simulator session is not the tapping. It is you —

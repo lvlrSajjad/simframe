@@ -17,11 +17,22 @@ a screenshot, a model round trip and a re-read for every single step.
 You need a Mac with Xcode (you have one if you have a simulator) and Node 18+.
 Nothing else — no idb, no Appium, no Python.
 
-**Claude Code**
+**Claude Code** — as a plugin, which brings the MCP server and the
+[skill](skills/simframe/SKILL.md) that teaches the protocol in one install:
+
+```bash
+claude plugin marketplace add lvlrSajjad/simframe
+claude plugin install simframe@simframe
+```
+
+or the MCP server alone:
 
 ```bash
 claude mcp add --scope user simframe -- npx -y simframe mcp
 ```
+
+Pick one, not both: two installs mean two servers driving the same device. If
+you added it with `claude mcp add` before, `claude mcp remove simframe` first.
 
 **Claude Desktop** — Settings → Developer → Edit Config, then add:
 

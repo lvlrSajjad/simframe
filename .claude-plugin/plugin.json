@@ -1,0 +1,19 @@
+{
+  "name": "simframe",
+  "version": "0.19.0",
+  "description": "Eyes, hands and memory for the iOS Simulator and Android emulators: the screen as text with tap points in ~20 ms, whole flows in one call, and a screen graph that replays known flows with zero model calls. The MCP server plus the skill that teaches the protocol.",
+  "author": {
+    "name": "Sadjad Asadi",
+    "url": "https://github.com/lvlrSajjad"
+  },
+  "homepage": "https://github.com/lvlrSajjad/simframe#readme",
+  "repository": "https://github.com/lvlrSajjad/simframe",
+  "license": "MIT",
+  "keywords": ["ios", "simulator", "android", "emulator", "xcode", "testing", "mcp"],
+  "mcpServers": {
+    "simframe": {
+      "command": "npx",
+      "args": ["-y", "simframe", "mcp"]
+    }
+  }
+}

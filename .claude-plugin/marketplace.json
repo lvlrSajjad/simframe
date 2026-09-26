@@ -1,0 +1,16 @@
+{
+  "name": "simframe",
+  "description": "simframe: drive the iOS Simulator and Android emulators from Claude Code.",
+  "owner": {
+    "name": "Sadjad Asadi",
+    "url": "https://github.com/lvlrSajjad"
+  },
+  "plugins": [
+    {
+      "name": "simframe",
+      "source": "./",
+      "description": "The iOS Simulator and Android emulator as text with tap points, whole flows in one call, and known flows replayed with zero model calls.",
+      "category": "development"
+    }
+  ]
+}

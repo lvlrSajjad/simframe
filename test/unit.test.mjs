@@ -344,6 +344,25 @@ test('the MCP server reports the real package version', async () => {
   assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);
 });
 
+test('the Claude Code plugin carries the package version, and the marketplace lists it', async () => {
+  const fs = await import('node:fs');
+  const read = (rel) => JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), 'utf8'));
+  const pkg = read('../package.json');
+  const plugin = read('../.claude-plugin/plugin.json');
+  const market = read('../.claude-plugin/marketplace.json');
+
+  // A `version` in plugin.json pins every installed copy, so a manifest one
+  // release behind holds plugin users on the old skill with nothing failing.
+  // The `version` hook bumps it; this catches a hand edit that skipped the hook.
+  assert.equal(plugin.version, pkg.version);
+  // The install id is `<entry name>@<marketplace name>`, and an entry name that
+  // differs from the manifest's fails the install with "not found".
+  assert.equal(market.plugins.length, 1);
+  assert.equal(market.plugins[0].name, plugin.name);
+  assert.equal(market.plugins[0].source, './');
+  assert.deepEqual(plugin.mcpServers.simframe.args, ['-y', 'simframe', 'mcp']);
+});
+
 // --- intent matching: the rules that keep a wrong tap from happening ---
 import { editDistance, nameScore, rank as rankIntent, resolve } from '../src/matching.js';
 import { detectKeyboardTop, navSlot, regionFor } from '../src/regions.js';
