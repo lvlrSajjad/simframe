@@ -1181,7 +1181,10 @@ numbers below refer to it.
   settled read that could describe the screen just left (191), and a
   wrong-turn read taken of a screen still arriving. 0.18.0 and earlier do not
   have them. A later report of the same symptom is open (192) until it is
-  traced to a build.
+  traced to a build. **0.19.1** stops a finished screen reading as
+  `STILL MOVING` for up to four seconds after a change with no animation, and
+  prints a tap that moved nothing as `WARN`, not `ok` (193). The taps in
+  that report that did not land at all are open and unreproduced (193).
 - **Screens it has not seen before.** On a fresh simulator, first-launch sheets
   ("Welcome to Reminders", Safari's tips) are read as an unknown screen, and a
   run can stop there. Content-driven screens can also split into two
