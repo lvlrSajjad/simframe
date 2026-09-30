@@ -1989,7 +1989,7 @@ export async function screenIdentity(deviceQuery, { options, confirmNovel = true
     // calling a screen unsettled while the flow was still happily waiting for
     // it — and an unsettled screen records no edge, so the graph learned
     // nothing and every later step read `unverified`.
-    const { state: settledFrame, settled } = await settledState(udid, {
+    const { state: settledFrame, settled, stillnessPredatesAction } = await settledState(udid, {
       settleMs,
       timeoutMs: Math.min(timeoutMs ?? IDENTITY_SETTLE_TIMEOUT_MS, IDENTITY_SETTLE_TIMEOUT_MS),
     });
@@ -2012,6 +2012,10 @@ export async function screenIdentity(deviceQuery, { options, confirmNovel = true
       keyboard: Boolean(entry.keyboard),
       layoutHash: current.layoutHash,
       settled,
+      // Unsettled for the opposite reason to moving: nothing has changed since
+      // the action at all. Both used to render as `STILL MOVING`, which told an
+      // agent to wait for a screen that a missed tap had left perfectly still.
+      unmoved: !settled && Boolean(stillnessPredatesAction),
       // Settled and incomplete are different states and used to render
       // identically. A screen awaiting a network call is perfectly still; a
       // person sees a spinner and knows to wait. The classifier already says

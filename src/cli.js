@@ -268,7 +268,7 @@ async function lineReader() {
 const stepLine = (r) => {
   const settle = r.settled ? (r.settled.ok ? ` (settled ${r.settled.waitedMs}ms)` : ' (never settled)') : '';
   const verdict = r.verification && r.verification.verdict !== 'ok' ? ` [${r.verification.verdict}]` : '';
-  return `${r.ok ? 'ok  ' : 'FAIL'} [${r.index}] ${r.action}: ${r.ok ? r.detail : r.error}${settle}${verdict}`;
+  return `${actions.stepMark(r)} [${r.index}] ${r.action}: ${r.ok ? r.detail : r.error}${settle}${verdict}`;
 };
 
 async function main() {

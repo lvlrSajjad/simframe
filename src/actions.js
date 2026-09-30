@@ -939,6 +939,10 @@ export async function runScript(
         action: step.action,
         verification,
         ok: true,
+        // Either sensor saying nothing moved, and no state change explaining
+        // it. The verdict alone missed the case where only the settle
+        // detector saw it: `ok … [no visible change] (never settled)`.
+        unconfirmed: wentNowhere,
         ms: Date.now() - stepStart,
         detail: `${detail}${note}${wrongTurn ? ` [${verification.verdict}: ${verification.detail}]` : ''}`,
         settled,
@@ -3034,6 +3038,9 @@ async function runStep(deviceQuery, udid, step, ctx) {
       const points = { width: geo.pointWidth, height: geo.pointHeight };
       let dir = asked ?? 'down';
       let reversed = false;
+      // Whether any scroll in this step changed what was showing. A step whose
+      // every scroll moved nothing is not evidence about the target at all.
+      let movedOnce = false;
       // Where the target is, when the tree knows. `null` means no evidence, and
       // that distinction is load bearing: guessing "up" without it scrolls to
       // the top of a web page, which **triggers pull-to-refresh**, reloads the
@@ -3155,7 +3162,12 @@ async function runStep(deviceQuery, udid, step, ctx) {
           }
         }
         const { says: evidence, signature: wasShowing } = await lookAround();
-        if (evidence) dir = evidence;
+        // Not after a reversal. The stall that caused it is a measurement that
+        // this direction is exhausted, and letting the tree's hint overrule it
+        // sent the step back the way it had just failed — reported on 0.19.0 as
+        // `it stopped moving both ways (down, down)`, a message naming two
+        // attempts in one direction and claiming both.
+        if (evidence && !reversed) dir = evidence;
         scrolled.push(dir);
         await runStep(deviceQuery, udid, { action: 'scroll', value: dir }, ctx);
         // A scroll either moves immediately or not at all, so it does not need a
@@ -3181,6 +3193,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
         // a scroll as before it, the scroll achieved nothing, whatever the
         // framebuffer did.
         const { signature: nowShowing } = await lookAround();
+        if (wasShowing && nowShowing && wasShowing !== nowShowing) movedOnce = true;
         if (wasShowing && nowShowing && wasShowing === nowShowing) {
           // Before believing the hash, look. See `nowInView` — an unchanged
           // whole-frame hash is weak evidence about a strip, and this step has
@@ -3215,8 +3228,14 @@ async function runStep(deviceQuery, udid, step, ctx) {
               // reversal, so "there is no direction to try" (which it used to
               // say when the tree was silent) is no longer true and would be
               // the same kind of unchecked assertion as the sentence below it.
-              `${query} is not reachable by scrolling: it stopped moving both ways`
+              `${query} is not reachable by scrolling: it stopped moving`
+              + (new Set(scrolled).size > 1 ? ' both ways' : ` scrolling ${scrolled[0]}`)
               + ` (${scrolled.join(', ')}) after ${i + 1} attempt(s).`
+              // Reported on 0.19.0: a React Native ScrollView that a plain swipe
+              // from another tool scrolled at once, and that none of these moved.
+              + (movedOnce ? '' : ' No scroll moved the screen at all, so this says nothing about'
+                + ' where the target is — if this view does scroll, the gesture is not reaching it'
+                + ' (try sim_do with a swipe that starts inside the list, or check input with sim_state).')
               // Say what was established, not what would be convenient. This
               // used to assert "It may not be in the accessibility tree at all"
               // in every case — a claim the function never checks, and one the
@@ -3598,6 +3617,25 @@ export function settleEvidence(w) {
 }
 
 /**
+ * The mark a step result is printed under: `ok  `, `WARN` or `FAIL`.
+ *
+ * `ok` used to mean only "nothing threw". A tap whose own verdict was
+ * `no-visible-change` printed `ok … [no visible change]`, and a field report
+ * (0.19.0) counted three such taps in a row that had not landed, each caught
+ * only by an outside screenshot, while the escalation log recorded every one
+ * of them as a mis-tap. The verdict was right and the mark contradicted it.
+ *
+ * WARN rather than FAIL, and no automatic retry. `no-visible-change` also
+ * fires on changes too small to register — a field gaining focus was measured
+ * reading as no change on 2026-10-01 — and retrying on a false one is how a
+ * tap fires twice, which the verify barrier forbids.
+ */
+export function stepMark(r) {
+  if (!r?.ok) return 'FAIL';
+  return r.unconfirmed || metrics.ESCALATING_VERDICTS.has(r.verification?.verdict) ? 'WARN' : 'ok  ';
+}
+
+/**
  * The one-line flow summary, so `ok` and `FAIL` each mean exactly one thing.
  *
  * `FLOW FAILED — 3/3 steps` was reported from the field as reading like a
@@ -3621,7 +3659,15 @@ export function flowSummary(res, { withTime = true } = {}) {
   const skips = skipped
     ? ` (${skipped} optional step${skipped === 1 ? '' : 's'} skipped as absent)`
     : '';
-  if (res.ok) return `flow completed — ${res.ranSteps}/${res.totalSteps} steps${time}${skips}`;
+  if (res.ok) {
+    // "Completed" over a step that did nothing visible is the same one word
+    // arguing with its numbers that the failure branch below was fixed for.
+    const unconfirmed = (res.results ?? []).filter((r) => stepMark(r) === 'WARN').length;
+    if (unconfirmed) {
+      return `flow ran — ${res.ranSteps}/${res.totalSteps} steps, ${unconfirmed} not confirmed to have landed${time}${skips}`;
+    }
+    return `flow completed — ${res.ranSteps}/${res.totalSteps} steps${time}${skips}`;
+  }
   const failed = (res.results ?? []).filter((r) => r.ok === false).length || 1;
   const worked = Math.max(0, res.ranSteps - failed);
   const unattempted = Math.max(0, res.totalSteps - res.ranSteps);

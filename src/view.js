@@ -628,7 +628,7 @@ export async function screenMap(deviceQuery, {
  * cheerfully says "carry on" into an unknown screen would be worse than no hint
  * at all.
  */
-export function nextHint({ ok, escalated, settled, loading, known, hash, exits, elements, ambiguous, filtered, exitList, staleExits } = {}) {
+export function nextHint({ ok, escalated, settled, unmoved, loading, known, hash, exits, elements, ambiguous, filtered, exitList, staleExits } = {}) {
   if (ok === false) {
     return 'next: the flow stopped here — this is the moment to think. sim_recall shows how you got here; sim_ui re-reads the screen.';
   }
@@ -653,6 +653,9 @@ export function nextHint({ ok, escalated, settled, loading, known, hash, exits, 
   // still-loading one produced identical output. A person sees a spinner.
   if (loading) {
     return 'next: settled, but the transition classifier still sees loading — an empty-looking region may be a list that has not arrived. waitFor a string you expect rather than acting on this.';
+  }
+  if (settled === false && unmoved) {
+    return 'next: nothing on the screen has changed since the last action. If that action should have changed it, it did not land — re-read with sim_ui before acting again, and do not assume the step worked.';
   }
   if (settled === false) {
     return 'next: the screen is still moving. sim_state polls it for a fraction of a map; do not act on this reading yet.';
@@ -706,6 +709,7 @@ export function hintFor(map, { flowOk = true, escalated = false } = {}) {
     escalated: Boolean(escalated),
     filtered: map?.filtered === true,
     settled: map?.identity?.settled !== false,
+    unmoved: map?.identity?.unmoved === true,
     loading: map?.identity?.loading === true,
     known: map?.exits != null,
     hash: map?.identity?.hash ?? null,
@@ -795,7 +799,7 @@ export function render({ device, identity, rows, truncated, collapsed, screen, n
         (exits == null ? ' (new to simframe)' : ` (known, ${exits} known exit${exits === 1 ? '' : 's'})`)
       : 'screen unidentified',
     identity?.keyboard ? 'keyboard up' : null,
-    identity?.settled === false ? 'STILL MOVING' : null,
+    identity?.settled === false ? (identity?.unmoved ? 'NOT MOVED SINCE THE ACTION' : 'STILL MOVING') : null,
     // Still and finished are not the same thing.
     identity?.loading === true ? 'STILL LOADING' : null,
     // How old the *frame* this map was read from is.

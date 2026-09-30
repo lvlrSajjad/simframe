@@ -1010,7 +1010,7 @@ function stepLines(res) {
         : ` · WARNING: ${r.settled.stalled ? 'capture stalled' : 'never settled'} after ${r.settled.waitedMs}ms`
       : '';
     lines.push(
-      `  ${r.ok ? 'ok  ' : 'FAIL'} [${r.index}] ${r.action}: ${r.ok ? r.detail : r.error}${settle}`,
+      `  ${actions.stepMark(r)} [${r.index}] ${r.action}: ${r.ok ? r.detail : r.error}${settle}`,
     );
   }
   if (!res.ok) lines.push('later steps were not run; the screen is left wherever the failing step stopped');
@@ -1153,7 +1153,7 @@ async function goto(target, args, options) {
     ? [`already on "${res.screen}"`]
     : [
         `${res.ok ? 'arrived at' : 'DID NOT REACH'} "${res.screen}" in ${res.ranSteps}/${res.steps.length} remembered steps`,
-        ...(res.results ?? []).map((r) => `  ${r.ok ? 'ok  ' : 'FAIL'} [${r.index}] ${r.action}: ${r.ok ? r.detail : r.error}`),
+        ...(res.results ?? []).map((r) => `  ${actions.stepMark(r)} [${r.index}] ${r.action}: ${r.ok ? r.detail : r.error}`),
       ];
   lines.push('', await mapFrom(target, options, null));
   return { content: [text(lines.join('\n'))], isError: !res.ok };
