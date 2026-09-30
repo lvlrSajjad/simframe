@@ -2511,6 +2511,66 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+193. **A peer's report on 0.19.0: taps that missed and said `ok`, a map
+   called moving over an old frame, and a scroll that claimed both ways.**
+   2026-10-01, a peer session on `B55AB0AE` (a colleague's device, driven from
+   this laptop) running the Ecotrak RN debug app. Four parts, three fixed.
+
+   **Fixed — a step that did nothing printed `ok`.** The escalation log had all
+   three misses as `no-visible-change` mis-taps, and the flow record said
+   `completed: true` over them. The mark came from `r.ok`, which only means
+   nothing threw. It now comes from `actions.stepMark`: `WARN` when either
+   sensor saw nothing move and no state change explains it, and the summary
+   reads `flow ran — 1/1 steps, 1 not confirmed to have landed`. It does **not**
+   halt the flow or retry the tap. A false `no-visible-change` was measured the
+   same day (an RN text field gaining focus), and retrying on a false one fires
+   a tap twice.
+
+   **Fixed — `STILL MOVING · frame 2.4s old`.** There were two causes, and the
+   first was measured. (a) The daemon only called a screen settled after two
+   still frames, and a still screen makes no damage, so those frames came from
+   the 2 s idle cadence. A one-frame change with no animation after it, like an
+   RN tab switch, read as unsettled for **4.0 s** (Dynamic Type toggle, bench
+   device, 6/6). With a 150 ms confirmation probe while unsettled
+   (`--settle-probe-ms`) it takes **0.31 s** (6/6). (b) A screen that had not
+   moved at all since the action went unsettled via `stillnessPredatesAction`
+   and printed as `STILL MOVING`. It now prints `NOT MOVED SINCE THE ACTION`,
+   and the hint says the action probably did not land. Cause (a) may explain
+   some of 192's "old screenshots hang around". That is inference.
+
+   **Fixed — `stopped moving both ways (down, down)`.** After a stall the step
+   reversed `dir`, and the tree's evidence at the top of the next iteration
+   reversed it straight back. Evidence no longer overrides a reversal. The
+   message now names only the directions tried, and it says so when no scroll
+   moved the screen at all.
+
+   **OPEN — the taps themselves did not land.** Not reproduced. On `326464A4`,
+   9/9 simframe taps landed, each checked with `simctl io screenshot`: after
+   `simctl terminate` + `launch` (Settings, and the Ecotrak app's login field),
+   as the first input to a freshly spawned daemon, with the Claude Code
+   simulator panel attached, and on a bottom tab bar at y=835. The reporter's
+   guess, a cache tied to the app process, has nothing to hold: the HID client
+   is per device (`IndigoHID(device:)`) and nothing in the tap path names a
+   process, window or AX element.
+
+   What the logs do show: the daemon serving the misses (pid 46122) started at
+   22:54:59.525Z, and the first missed tap's flow began 89 ms later. The
+   previous daemon had idled out, so that tap spawned it. **Every** simframe
+   input to that instance failed, including the 23:03 scroll from the report's
+   Bug 4. The other tool's input to the same device worked, and the taps that
+   worked earlier went to the previous instance. That points at one dead HID
+   session in that daemon, not at the app. A cold daemon on the bench device
+   did not reproduce it (3/3 landed), so why it died is unknown.
+
+   **Next step.** Test the live instance before it goes: one `simframe tapAt`
+   on a known control on `B55AB0AE`. Then `simframe input reset` and tap again,
+   then `stop --force` + `start` and tap again. Which of those three fixes it
+   says whether the client, the session or the process was dead. It needs the
+   device owner's agreement. If the reset fixes it, a stuck session can be
+   detected: consecutive unconfirmed taps where the tree says the point is a
+   control. Rebuilding the session *before the next action* is safe in a way a
+   retry is not.
+
 192. **Peers still report the wrong screen: "on the login screen" while on the
    main screen.** OPEN, reported by the owner 2026-09-25, not reproduced. In
    their words: *"looks like sometimes old screenshots hang around"*. Last seen

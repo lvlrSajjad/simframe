@@ -3875,7 +3875,7 @@ test('round 7: a type never sends a selector, and scrollTo follows the offset', 
   // of a web page, which triggers pull-to-refresh — reloading the page, changing
   // the screen hash, and defeating the end-detection below it. Observed live:
   // six attempts and 38s, reading from outside as an endless loop.
-  assert.match(step, /if \(evidence\) dir = evidence/);
+  assert.match(step, /if \(evidence && !reversed\) dir = evidence/);
   assert.match(step, /let dir = asked \?\? 'down'/, 'it never opens with an unfounded "up"');
   assert.match(step, /pull-to-refresh/, 'and the reason is kept where the next reader will find it');
 
@@ -7019,4 +7019,59 @@ test('launch and openUrl stamp the action clock at the seam, not in the step', a
   // The step must not stamp it a second time; one clock, one writer.
   const actions = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
   assert.doesNotMatch(actions, /noteAction/);
+});
+
+test('a step whose verdict says nothing happened is not printed as ok (0.19.0 field report)', async () => {
+  const { stepMark, flowSummary } = await import('../src/actions.js');
+  // Three taps in a row returned `ok … [no visible change]` and none had
+  // landed; the escalation log had every one of them as a mis-tap.
+  const missed = { ok: true, index: 0, action: 'tap', verification: { verdict: 'no-visible-change' } };
+  assert.equal(stepMark(missed), 'WARN');
+  assert.equal(stepMark({ ok: true, verification: { verdict: 'unexpected-screen' } }), 'WARN');
+  assert.equal(stepMark({ ok: true, verification: { verdict: 'ok' } }), 'ok  ');
+  assert.equal(stepMark({ ok: true, verification: { verdict: 'unverified' } }), 'ok  ');
+  assert.equal(stepMark({ ok: false }), 'FAIL');
+  // The settle detector saw nothing move while the verdict stayed quiet.
+  assert.equal(stepMark({ ok: true, unconfirmed: true, verification: { verdict: 'unverified' } }), 'WARN');
+  // And the flow does not call itself completed over it.
+  assert.equal(
+    flowSummary({ ok: true, ranSteps: 1, totalSteps: 1, totalMs: 9, results: [missed] }),
+    'flow ran — 1/1 steps, 1 not confirmed to have landed in 9ms');
+  assert.equal(
+    flowSummary({ ok: true, ranSteps: 2, totalSteps: 2, totalMs: 9, results: [{ ok: true, verification: { verdict: 'ok' } }, { ok: true }] }),
+    'flow completed — 2/2 steps in 9ms');
+  // Every front end prints the same mark.
+  for (const f of ['../src/mcp.js', '../src/cli.js']) {
+    const src = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /r\.ok \? 'ok  ' : 'FAIL'/, `${f} must use stepMark`);
+  }
+});
+
+test('a screen that has not moved since the action is not reported as still moving (0.19.0)', async () => {
+  const v = await import('../src/view.js');
+  const idle = v.render({ device: { name: 'iPhone' }, identity: { hash: 'abcdef012345', settled: false, unmoved: true }, rows: [] });
+  assert.match(idle, /NOT MOVED SINCE THE ACTION/);
+  assert.doesNotMatch(idle, /STILL MOVING/);
+  const moving = v.render({ device: { name: 'iPhone' }, identity: { hash: 'abcdef012345', settled: false }, rows: [] });
+  assert.match(moving, /STILL MOVING/);
+  assert.match(v.nextHint({ ok: true, settled: false, unmoved: true }), /did not land/);
+  assert.match(v.nextHint({ ok: true, settled: false }), /still moving/);
+  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(src, /unmoved: !settled && Boolean\(stillnessPredatesAction\)/);
+});
+
+test('the daemon looks again soon while the last frame was unsettled (0.19.0)', () => {
+  // Measured 2026-10-01 on the bench device: a one-frame change (Dynamic Type)
+  // read as unsettled for 4.0s, 6 of 6, because the confirming frames came from
+  // the 2s idle cadence. With a probe at 150ms: 0.31s, 6 of 6.
+  const src = fs.readFileSync(new URL('../native/simframed/Sources/simframed/main.swift', import.meta.url), 'utf8');
+  assert.match(src, /!lastSettled && now - lastCapture >= settleProbeInterval/);
+  assert.match(src, /lastSettled = \(recorded\["settled"\] as\? Bool\) \?\? true/);
+});
+
+test('scrollTo does not claim both ways when it tried one (0.19.0)', () => {
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(evidence && !reversed\) dir = evidence/);
+  assert.match(src, /new Set\(scrolled\)\.size > 1 \? ' both ways'/);
+  assert.match(src, /No scroll moved the screen at all/);
 });
