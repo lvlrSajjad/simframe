@@ -4671,3 +4671,22 @@ because its own helper called `inViewport` and threw the same ReferenceError.
 A correct fix can look like a failed one when the thing it calls is broken, and
 the only reason this was untangled is that the instrument printed the exception
 text instead of the loop's interpretation of it.
+
+## Settle latency after a one-frame change — 2026-10-01
+
+Apple M2 Pro, Xcode 27.0 (27A266a), iOS 26.5, iPhone 17 Pro
+(`326464A4`), Settings foreground. The change is `simctl ui content_size`
+toggled between `extra-large` and `medium`: it relayouts in one frame with no
+trailing animation, like an RN tab switch. Measured from the state's
+`lastChangeAt` to the first `settled: true` frame after it, N=6 each.
+
+| daemon | runs (ms) | median |
+| --- | --- | --- |
+| before (idle-cadence confirmation) | 4014, 4026, 4030, 4019, 4030, 4022 | **4024 ms** |
+| after (`--settle-probe-ms=150`) | 316, 322, 316, 303, 317, 320 | **317 ms** |
+
+A crossfading change (`appearance dark/light`) was unaffected: 259–524 ms both
+ways, because its own trailing damage frames already confirm the settle. The
+post-action settle gives up at 1.5 s, so the old 4 s window is what printed
+`STILL MOVING · frame 2.4s old` in the field (DEFERRED 193).
+

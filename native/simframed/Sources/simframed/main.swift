@@ -186,6 +186,18 @@ case "run":
 
         let minInterval = Double(flag("min-interval-ms") ?? "") ?? 80      // coalesce bursts
         let idleInterval = Double(flag("idle-interval-ms") ?? "") ?? 2000  // keep state fresh
+        // How soon to look again while the last frame said "not settled".
+        //
+        // Settling needs two still frames after the last change, and a still
+        // screen produces no damage, so those frames used to come from the idle
+        // cadence: a change that landed in one frame with nothing after it — a
+        // React Native tab switch, which does not animate — read as moving for
+        // up to two idle intervals, four seconds, on a screen that had stopped.
+        // Reported from the field as `STILL MOVING · frame 2.4s old` over a map
+        // of a screen that had finished. Two probes at this spacing clear
+        // `Motion.stillDurationRequired`, so a finished screen settles ~300ms
+        // after its last change instead.
+        let settleProbeInterval = Double(flag("settle-probe-ms") ?? "") ?? 150
         let idleExitMs = Double(flag("idle-exit-ms") ?? "") ?? 15 * 60_000
 
         let lock = NSLock()
@@ -195,6 +207,7 @@ case "run":
         /// Said once per stall episode, not once per failed read.
         var announcedExhausted = false
         var lastCapture = 0.0
+        var lastSettled = true
         var frames = 0
         var lastReport = Date().timeIntervalSince1970
         var latencies: [Double] = []
@@ -465,7 +478,9 @@ case "run":
             let isDirty = dirty
             lock.unlock()
 
-            let due = (isDirty && now - lastCapture >= minInterval) || (now - lastCapture >= idleInterval)
+            let due = (isDirty && now - lastCapture >= minInterval)
+                || (!lastSettled && now - lastCapture >= settleProbeInterval)
+                || (now - lastCapture >= idleInterval)
             if due {
                 lock.lock(); dirty = false; lock.unlock()
                 let t0 = DispatchTime.now().uptimeNanoseconds
@@ -495,7 +510,8 @@ case "run":
                             return (scaled, native)
                         }
                         let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6
-                        try store.record(bmp, fullBitmap: full, captureMs: ms)
+                        let recorded = try store.record(bmp, fullBitmap: full, captureMs: ms)
+                        lastSettled = (recorded["settled"] as? Bool) ?? true
                         latencies.append(Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6)
                         frames += 1
                         lastCapture = now
