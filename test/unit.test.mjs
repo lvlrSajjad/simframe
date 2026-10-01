@@ -7312,3 +7312,60 @@ test('the write journal never keeps a secure field, and drops what has expired',
   assert.ok(typedmod.isSecureField('Passcode') && typedmod.isSecureField('Enter your PIN'));
   assert.ok(!typedmod.isSecureField('Spinner') && !typedmod.isSecureField('Passenger name') && !typedmod.isSecureField('Pinned'));
 });
+
+test('memory from older fingerprint rules is carried forward, and what cannot be carried is reported', async () => {
+  const carry = await import('../src/carry.js');
+  const screenmapmod = await import('../src/screenmap.js');
+  const fpmod = await import('../src/fingerprint.js');
+  const regions = await import('../src/regions.js');
+  const udid = `TEST-carry-${process.pid}`;
+  const dir = store.deviceDir(udid);
+  fs.rmSync(dir, { recursive: true, force: true });
+  const screen = { width: 402, height: 874 };
+  const row = (label, y) => ({ label, type: 'button', x: 201, y, frame: { x: 16, y: y - 22, width: 370, height: 44 } });
+  const title = (label) => ({ label, type: 'heading', x: 201, y: 100, frame: { x: 120, y: 88, width: 160, height: 24 } });
+  const readingA = [title('Assets'), row('Fryer', 200), row('Ceiling', 260), row('HVAC', 320)];
+  const readingB = [title('Asset Detail'), row('Attachments', 300)];
+  const fpA = fpmod.fingerprint(regions.annotate(structuredClone(readingA), screen), screen);
+  const fpB = fpmod.fingerprint(regions.annotate(structuredClone(readingB), screen), screen);
+  const OLD = fpmod.TOKEN_RULES_VERSION - 4;
+  // Old screen maps, keyed by pixel hash, holding their full element lists.
+  fs.mkdirSync(path.join(dir, 'screens'), { recursive: true });
+  for (const [px, fp, targets] of [['1'.repeat(32), fpA, readingA], ['2'.repeat(32), fpB, readingB]]) {
+    fs.writeFileSync(path.join(dir, 'screens', `${px}.json`), JSON.stringify({
+      version: screenmapmod.MAP_VERSION, fingerprintVersion: OLD, hash: px, layoutHash: '0'.repeat(72),
+      structuralHash: fp.hash, structuralTokens: fp.tokens, keyboard: false, at: 1, sources: ['ax'], targets,
+    }));
+  }
+  // Old graph: A --tap Fryer--> B, plus a node with no reading left anywhere.
+  const node = (hash, edges) => ({ version: graphmod.GRAPH_VERSION, fingerprintVersion: OLD, hash, tokens: [], layoutHash: null, variants: [], edges });
+  const edge = (action, to) => ({ action, step: { action: action.split(':')[0], value: action.split(':')[1] }, to, count: 3, lastSeen: 1, settles: [400], quietGaps: [0], focuses: [] });
+  fs.mkdirSync(path.join(dir, 'graph'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'graph', `${fpA.hash}.json`), JSON.stringify(node(fpA.hash, [edge('tap:fryer', fpB.hash), edge('tap:gone', 'f'.repeat(32))])));
+  fs.writeFileSync(path.join(dir, 'graph', `${'e'.repeat(32)}.json`), JSON.stringify(node('e'.repeat(32), [edge('tap:x', fpA.hash)])));
+
+  // Before: nothing is in use, and doctor's line says why.
+  assert.equal(graphmod.allNodes(udid).length, 0);
+  assert.match(carry.memoryLine(udid), /2 screen\(s\) and 3 step\(s\) are under older fingerprint rules and not in use/);
+
+  const r = carry.carryForward(udid, { screen });
+  assert.equal(r.graph.carried, 1);
+  assert.equal(r.graph.edgesCarried, 1);
+  assert.equal(r.graph.edgesLost, 1, 'an edge into a screen with no reading is lost, not guessed');
+  assert.equal(r.graph.lost, 1);
+  assert.equal(r.screens.carried, 2);
+
+  // After: the path is usable again, and the carried edge says where it came from.
+  const route = graphmod.route(udid, fpA.hash, fpB.hash);
+  assert.equal(route?.length, 1);
+  assert.equal(route[0].carriedFrom, OLD);
+  assert.equal(graphmod.allNodes(udid).find((n) => n.hash === fpA.hash).tokens.length > 0, true);
+  assert.ok(fs.existsSync(path.join(dir, 'graph', 'retired', `${'e'.repeat(32)}.v${OLD}.json`)), 'a lost node is retired, not deleted');
+  // And what was lost is said, persistently.
+  assert.match(carry.memoryLine(udid), /1 screen\(s\) and 1 step\(s\) learned under older fingerprint rules could not be carried over/);
+  assert.match(carry.headerNote(udid), /1 screen\(s\) learned under older fingerprint rules are not in memory/);
+  // Idempotent: a second pass finds nothing stale.
+  const again = carry.carryForward(udid, { screen });
+  assert.equal(again.graph.carried + again.graph.lost + again.screens.carried, 0);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

@@ -4805,3 +4805,21 @@ larger there.
 - **Ref taps are stored as edges.** Edges such as `tap:#14` and `tap:#21`
   name a number that is only valid for one round trip. Whether `goto` replays one
   or refuses it has not been checked.
+
+## Memory carried across a fingerprint-rule change — 2026-10-01
+
+Apple M2 Pro, Xcode 27.0, iOS 26.5, iPhone 17 Pro (`326464A4`), offline, N=1
+(one store). Screen size 402x874 pt.
+
+| | before | after |
+| --- | --- | --- |
+| graph screens in use | 55 | **128** |
+| graph steps in use | 160 | **271** |
+| old screen maps re-fingerprinted | — | 307 (285 same identity, 22 new) |
+| old screen maps with an unreadable schema | — | 25 |
+| old graph screens lost, no reading to rebuild from | — | 36 screens, 122 steps |
+
+The Ecotrak home screen's routes to "Create a service request" and "Assets" are
+among the carried edges. None of this has been driven live yet, so a carried
+route is a prediction until it is walked. A wrong one stops a flow as
+`unexpected-screen`.

@@ -2511,6 +2511,31 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+196. **A change to the fingerprint rules erased the graph, and nothing said so.**
+   FIXED, 2026-10-01. `allNodes` and `screenmap.usable` read only records of the
+   current `TOKEN_RULES_VERSION`, so each bump made everything older invisible.
+   The agent was then told "new to simframe" on screens it had driven dozens of
+   times. On the bench device, 109 of 164 graph files and 332 of 495 screen maps
+   were not in use, including the Ecotrak create-service-request path.
+
+   **Most of it had never changed identity.** A screen map keeps its full element
+   list, so its identity can be recomputed under today's rules: 285 of 307
+   readable old maps got the same hash back. `src/carry.js` re-fingerprints old
+   maps the way a live read would, re-points old graph nodes and their edges to
+   the identities those readings get today, and retires what has no reading to
+   recompute from. It runs once per device per process, before the first read.
+   An old identity that now maps to two screens is a split and is not guessed at.
+   Carried edges are marked `carriedFrom`.
+
+   **It says so.** What could not be carried is counted in `memory-carry.json`.
+   `doctor` grades memory `warn` with the counts, `simframe screens` prints the
+   same line, and the screen header on an unknown screen adds how many learned
+   screens are missing.
+
+   **Bench device, carried:** 73 screens and 114 steps back in use. Lost: 36
+   screens and 122 steps, kept in `graph/retired/`. The next rule change costs
+   whatever has no stored reading, not everything.
+
 195. **Usernames and email addresses still reached disk after 194.** FIXED,
    2026-10-01. The owner's rule is that no username or password is kept, and
    194 only covered secrets. Three paths were left. Saved flows and the write

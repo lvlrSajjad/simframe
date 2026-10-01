@@ -14,7 +14,7 @@ import * as matching from './matching.js';
 import * as store from './store.js';
 import * as typed from './typed.js';
 
-const GRAPH_VERSION = 3;
+export const GRAPH_VERSION = 3;
 
 /**
  * How many observed settle durations an edge remembers. Research §7.
@@ -139,7 +139,7 @@ export const MAX_VARIANTS = 4;
 /** Only for the legacy pixel path, kept so old graphs still load. */
 export const TOLERANCE = 20;
 
-function graphDir(udid) {
+export function graphDir(udid) {
   return path.join(store.deviceDir(udid), 'graph');
 }
 
@@ -226,6 +226,8 @@ function noteLayout(node, reading) {
   if (now && informative(now)) node.layoutHash = now;
   return node;
 }
+
+export function saveNode(udid, node) { return save(udid, node); }
 
 function save(udid, node) {
   // Every write is a scrub. A node learned before text was kept off edges is

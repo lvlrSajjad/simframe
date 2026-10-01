@@ -15,6 +15,7 @@ import * as api from './index.js';
 import * as regions from './regions.js';
 import * as wrote from './wrote.js';
 import * as graph from './graph.js';
+import * as carry from './carry.js';
 import { writeRefs } from './refs.js';
 import * as matching from './matching.js';
 
@@ -603,7 +604,10 @@ export async function screenMap(deviceQuery, {
     cleared,
     overlay,
     unnamed,
-    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, cleared, overlay, unnamed }),
+    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, cleared, overlay, unnamed,
+      // An unknown screen may be one simframe learned and could not carry over a
+      // fingerprint change. Say so rather than calling it new without comment.
+      memoryNote: exits == null ? carry.headerNote(udid) : null }),
   };
 }
 
@@ -790,13 +794,15 @@ export function ambiguousLabels(rows) {
   return [...seen.values()].filter((n) => n > 1).length;
 }
 
-export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, verdictLine, ambiguities, cleared, overlay, unnamed }) {
+export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, verdictLine, ambiguities, cleared, overlay, unnamed, memoryNote = null }) {
   const head = [
     device?.name,
     screen?.width ? `${screen.width}x${screen.height}pt` : null,
     identity?.hash
       ? `screen ${identity.hash.slice(0, 8)}${name ? ` "${name}"` : ''}` +
-        (exits == null ? ' (new to simframe)' : ` (known, ${exits} known exit${exits === 1 ? '' : 's'})`)
+        (exits == null
+          ? ` (new to simframe${memoryNote ? ` — ${memoryNote}` : ''})`
+          : ` (known, ${exits} known exit${exits === 1 ? '' : 's'})`)
       : 'screen unidentified',
     identity?.keyboard ? 'keyboard up' : null,
     identity?.settled === false ? (identity?.unmoved ? 'NOT MOVED SINCE THE ACTION' : 'STILL MOVING') : null,

@@ -656,6 +656,13 @@ screen shows its username, so every email address in it is stored as
 `<email>`. What the agent is shown live is not masked. Why, and what each store
 under `~/.simframe/<udid>/` does keep, is in [DEFERRED 194 and 195](DEFERRED.md).
 
+**Memory survives a change to the fingerprint rules.** A screen's identity is
+a hash under versioned rules, and records from older rules used to be ignored
+without a word. They are now re-fingerprinted from their stored readings on the
+first read and kept. Whatever had no reading to rebuild from is reported by
+`simframe doctor` as `memory … warn` with counts, and by `simframe screens`. See
+[DEFERRED 196](DEFERRED.md).
+
 ### What the memory is worth, isolated
 
 Three agent sessions drove the same task family on the same production app. The

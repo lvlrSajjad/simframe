@@ -18,7 +18,7 @@ import { informative } from './refs.js';
 import * as store from './store.js';
 import { maskCredentials } from './typed.js';
 
-const MAP_VERSION = 9; // ax targets carry value, selected and focused
+export const MAP_VERSION = 9; // ax targets carry value, selected and focused
 
 /**
  * A stored map also holds a `structuralHash`, which the *fingerprint* rules
@@ -33,7 +33,7 @@ const usable = (e) => Boolean(e)
   && e.version === MAP_VERSION
   && e.fingerprintVersion === fingerprint.TOKEN_RULES_VERSION;
 
-function mapDir(udid) {
+export function mapDir(udid) {
   return path.join(store.deviceDir(udid), 'screens');
 }
 
@@ -244,6 +244,9 @@ export async function build(udid, {
   persist = true,
   screen,
 } = {}) {
+  // Memory from older fingerprint rules is carried forward before the first
+  // read, so this read can recognise it. Once per device per process; see carry.js.
+  if (persist && screen?.width) (await import('./carry.js')).ensureCarried(udid, screen);
   const targets = [];
   const sources = [];
   // Why a layer is missing, kept rather than swallowed.

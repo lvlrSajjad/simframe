@@ -999,12 +999,16 @@ async function main() {
       // things it already knew.
       const device = await resolveDevice(flags.device);
       const known = navigate.knownScreens(device.udid);
+      const memory = (await import('./carry.js')).memoryLine(device.udid);
       emit(
         flags,
         known,
-        known.length
-          ? known.map((k) => `${k.hash}  ${k.edges} edges  ${k.name}`)
-          : 'no screens known yet — run a flow first',
+        [
+          ...(known.length
+            ? known.map((k) => `${k.hash}  ${k.edges} edges  ${k.name}`)
+            : ['no screens known yet — run a flow first']),
+          ...(memory ? [memory] : []),
+        ],
       );
       return;
     }
@@ -1768,6 +1772,18 @@ async function doctor({ json = false, strict = false, device, options = {} } = {
       const captureEngine = engineModule.runningEngine(d.udid) ?? bestEngine;
       const daemon = captureEngine === 'simframed';
       const why = captureEngine === bestEngine ? null : api.fallbackReason(d.udid);
+      // Memory written under older fingerprint rules is not read. It used to
+      // vanish without a word; now it is carried forward on the first read, and
+      // whatever could not be carried is a warn with a count.
+      {
+        const carry = await import('./carry.js');
+        const line = carry.memoryLine(d.udid);
+        const r = carry.lastReport(d.udid);
+        add(`memory (${d.name})`, line ? 'warn' : 'ok',
+          line ? line.replace(/^memory: /, '')
+            : (r ? `carried ${r.graph.carried} screen(s) and ${r.graph.edgesCarried} step(s) to fingerprint v${r.toVersion}; nothing lost` : 'every screen is under the current fingerprint rules'),
+          { key: 'memory.carried', value: r ? { carried: r.graph.carried, lost: r.graph.lost + r.graph.split } : null });
+      }
       add(`capture engine (${d.name})`, captureEngine === bestEngine ? 'ok' : 'warn',
         captureEngine === bestEngine
           ? captureEngine
