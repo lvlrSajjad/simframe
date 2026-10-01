@@ -4710,3 +4710,98 @@ Before the fix, the bench device `326464A4` took 15/15 legacy taps on most
 boots and 0/3 on one. That is the "unreliable, not dead" pattern idb documents
 for this CoreSimulator.
 
+
+## Goal mode and cartographer, Phase 0: the size of the prize — 2026-10-01
+
+Apple M2 Pro, Xcode 27.0. Offline: nothing was driven. Three corpora, each
+biased differently. **Measured** means counted from records; **inferred** means
+a judgement on a sample.
+
+**Corpus A, the real hand-backs (measured).** Every simframe MCP call in the 24
+Claude Code sessions in the Ecotrak mobile repo (2026-09-08 to 09-30). Each call
+returns control to the model, so each is one hand-back.
+
+| | |
+| --- | --- |
+| simframe calls (model turns spent driving) | 876 |
+| actions in them | 1002 |
+| actions per call, pooled | **1.14** |
+| actions per call, per-session median (p25–p75) | **0.94** (0.74–1.27) |
+| `sim_do` batch size, median (mean) | 1 action (1.73) |
+| fixed `pause` steps written by agents inside batches | 335 |
+| calls whose result carried a soft verdict (`unverified`, `STILL MOVING`, "loading") | 336 (38%) |
+
+What came after each call, by rule over the transcript:
+
+| after the call | calls | share |
+| --- | --- | --- |
+| it succeeded, and the next call was another action | 430 | 49% |
+| it succeeded, and the next call only read or waited | 87 | 10% |
+| an image look, before or after | 133 | 15% |
+| it failed | 155 | 18% |
+| the agent went to other work (code, Jira, a question) — a real milestone | 47 | 5% |
+| end of session | 24 | 3% |
+
+So the real figure is about one action per model call, below the 1.5–2 that
+`hpi` reports from bench flows. The bench flows are written in advance and the
+field is not.
+
+**Corpus A, hand-labelled (inferred).** 59 hand-backs drawn at random, each
+read with its call, its result and the next call, and labelled by what would
+have been needed to continue without the model.
+
+| would have been absorbed by | n |
+| --- | --- |
+| a known navigation path (tab, back, wizard NEXT, a named screen) | 10 |
+| the intent resolver (pick a row by name, re-resolve a stale ref, a scroll) | 17 |
+| wait or retry (re-read after an action, a tap that did not land, a slow list) | 12 |
+| bounded exploration (find a control not yet seen) | 5 |
+| tool friction (a wrong argument name) | 2 |
+| **total a goal runner could have absorbed** | **46 of 59 (78%; 95% CI ~66–87%)** |
+| genuinely needed the model (judge app behaviour, identity in doubt, dev environment broken) | 11 |
+| needed a human or the host (sign-in, an auto-mode classifier denial) | 2 |
+
+The labels assume the goal could have been stated up front. In bug-fix
+sessions the next step often depends on what the app did, so 78% is an upper
+bound.
+
+**Corpus B, the escalation log (measured, rule-classified).** MCP-client records
+on `326464A4` and `7B8F8963`, synthetic test intents removed: 137.
+
+| class | n |
+| --- | --- |
+| wait or retry (`no-visible-change`, timed-out waits, text that did not land) | 78 |
+| resolvable locally (stale ref, duplicate label, in the tree but off screen) | 27 |
+| exploration (absent label, unknown screen, no plan) | 13 |
+| model or human (identity, a disabled button that needs a decision, a typo) | 17 |
+| device | 2 |
+
+"Wait or retry would have worked" is an inference. Some `no-visible-change`
+verdicts are real app bugs, which is what a QA session is looking for.
+
+**Corpus C, the Ecotrak app in the graph (measured).**
+
+| store | live screens (fingerprint v9) | live edges | path from launch |
+| --- | --- | --- | --- |
+| `326464A4`, the bench device | 1 | 1 (tap Attachments) | none |
+| `7B8F8963` (`ecotrak-simframe`) | 10 | 18 | none: the launch edge lands on a screen with no node |
+
+The create-service-request path was learned on `326464A4`: 35 edges, recorded
+under fingerprint versions 4–6. All of them stopped counting when the token
+rules moved to version 9 (02eaff7, 2026-09-13), because a node of any other
+version is ignored. No real task — creating a service request, assets, work
+orders, time sheets, the map — is covered by a graph path on either store.
+
+Of the 876 real calls, 366 targeted `B55AB0AE`, listed as a colleague's device,
+and 297 named no device. That store was not read, so the Ecotrak graph may be
+larger there.
+
+**Two things found on the way.**
+
+- **The graph stored typed text verbatim, passwords included.** A stored edge
+  held a password typed into a field named "Password", in both `step` and the
+  edge's signature. A cartographer recording every edge on a signed-in app
+  would make this worse, so it is fixed first.
+- **Ref taps are stored as edges.** Edges such as `tap:#14` and `tap:#21`
+  name a number that is only valid for one round trip. Whether `goto` replays one
+  or refuses it has not been checked.
