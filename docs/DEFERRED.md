@@ -2571,6 +2571,18 @@ worth more than the verdict.
    control. Rebuilding the session *before the next action* is safe in a way a
    retry is not.
 
+   **Tried 2026-10-01, with the owner's go-ahead, and half-done.** pid 46122
+   had idled out by then. Reproducing the original condition instead (a tap
+   that spawns the daemon, on this device): `tapAt 245,224` on the Ecotrak home
+   screen icon at 01:34 started daemon 63849 and **missed**, with capture
+   healthy and the home screen unchanged in `simctl io screenshot`. The same
+   cold-daemon tap landed 3/3 on `326464A4`. So on this device a fresh
+   daemon's first tap missed twice out of two tries. About a minute later
+   capture began failing, and the device was later found **Shutdown**, from
+   outside this session. Steps 2 and 3 (`input reset`, then restart) never ran.
+   A tap at 16:44 went to the shut-down device (idb: "Mach port not
+   connected") and is not evidence.
+
 192. **Peers still report the wrong screen: "on the login screen" while on the
    main screen.** OPEN, reported by the owner 2026-09-25, not reproduced. In
    their words: *"looks like sometimes old screenshots hang around"*. Last seen
