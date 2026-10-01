@@ -141,7 +141,9 @@
       "download",
       "update now",
       "install now",
-      "erase"
+      "erase",
+      "dictate",
+      "dictation"
     ],
     "neverOpenPatterns": [
       "^yes[,. ]",
@@ -213,7 +215,11 @@
       "checkbox",
       "stepper",
       "picker",
-      "datepicker"
+      "datepicker",
+      "popupbutton",
+      "menubutton",
+      "combobox",
+      "toggle"
     ],
     "didNotStart": [
       "No script URL provided",

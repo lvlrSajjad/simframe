@@ -83,7 +83,13 @@ export function deviceDriver(udid, bundle, { options = {} } = {}) {
       const res = await run([step]);
       return { acted: res.ranSteps > 0, via: affordance ? `"${affordance.label}"` : 'edge swipe' };
     },
-    route: (from, to) => graph.route(udid, from, to),
+    // By reading, not by bare hash: the graph files an edge under the stored
+    // screen a reading resembles, which may carry a different hash than this
+    // reading, and a bare hash only ever matches exactly.
+    route: (from, to) => {
+      const target = graph.nearestScreen(udid, to)?.node?.hash ?? to.hash;
+      return graph.route(udid, from, target);
+    },
     async walk(route) {
       const steps = route.map(navigate.stepFor);
       // A route that would type is not walked by a crawl: it has no text to

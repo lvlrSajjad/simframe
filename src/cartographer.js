@@ -42,7 +42,9 @@ export const STATE_VERSION = 1;
  * the test. `LIST_CAP` stops a list whose rows each split into a new identity
  * (DEFERRED 174) from eating the budget.
  */
-export const LIST_CAP = 6;
+export const LIST_CAP = 24;
+/** Two destinations whose structure is this alike are the same kind of screen. */
+export const ALIKE = 0.8;
 
 const alnum = (s) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
@@ -74,9 +76,13 @@ export function isBackAffordance(row, { locale } = {}) {
   const w = words(locale);
   const label = String(row?.label ?? '').trim();
   if (w.rawBack.includes(label) || w.back.includes(alnum(label))) return true;
-  // A nav bar's leading button is a back button whatever it is called — RN
-  // apps name theirs after a testID ("screen-toolbar-back-button").
-  if (row?.region === 'nav-bar' && row?.navSlot === 'leading' && /back|close|dismiss/i.test(label)) return true;
+  // A nav bar's leading button is a back button whatever it is called. iOS
+  // labels it with the previous screen's title — "Settings" on every screen
+  // under Settings — and RN apps name theirs after a testID
+  // ("screen-toolbar-back-button"). Measured: before this, a crawl of Settings
+  // took every screen's "Settings" button for a door and backed straight out
+  // of each screen after one tap.
+  if (row?.region === 'nav-bar' && row?.navSlot === 'leading' && label) return true;
   return /(^|[-_ ])back([-_ ]|$)|header-back|toolbar-back/i.test(label);
 }
 
@@ -94,6 +100,8 @@ export function classify(row, { allowCreate = false, locale } = {}) {
   if (!label || /^\(icon-only\)$/i.test(label)) return { open: false, reason: 'unlabeled', kind: 'skipped' };
   if (row.region === 'status-bar' || row.region === 'keyboard') return { open: false, reason: 'system chrome', kind: 'skipped' };
   if (isBackAffordance(row, { locale })) return { open: false, reason: 'back affordance', kind: 'skipped' };
+  if (row.region === 'nav-bar' && row.navSlot === 'title') return { open: false, reason: 'screen title', kind: 'skipped' };
+  if (/^heading$/i.test(String(row.type ?? ''))) return { open: false, reason: 'heading', kind: 'skipped' };
   const barrier = vocabulary.mayActLocally(label, { locale, purpose: 'explore' });
   if (!barrier.allowed) return { open: false, reason: `${barrier.reason} ("${barrier.matched}")`, kind: 'barrier' };
   const w = words(locale);
@@ -116,18 +124,28 @@ export function classify(row, { allowCreate = false, locale } = {}) {
 export function doorsOf(rows, { allowCreate = false, locale } = {}) {
   const doors = [];
   const refused = [];
+  const skipped = [];
   const seenKeys = new Set();
   const ordered = [...(rows ?? [])].sort((a, b) => (a.y - b.y) || (a.x - b.x));
   // A row that is selected marks a selection list, and choosing another of its
   // options changes a setting by itself — no Save, no write word on the label.
   const optionShapes = new Set(ordered.filter((r) => r.selected === true).map(shapeOf).filter(Boolean));
+  // The accessibility tree is authoritative when it is describing this screen's
+  // controls (CLAUDE.md's perception order). Then what it calls static text is
+  // static, and tapping it costs a full no-change verification — 13-22 s each,
+  // measured on Settings. Where the tree says nothing about controls (many RN
+  // screens), text is all there is and stays a candidate.
+  const treeKnowsControls = ordered.some((r) => /ax/.test(String(r.source ?? '')) && /button|cell|link|switch|tab/i.test(String(r.type ?? '')));
   for (const row of ordered) {
     const key = controlKey(row);
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
-    const verdict = classify(row, { allowCreate, locale });
+    const verdict = treeKnowsControls && /ax/.test(String(row.source ?? '')) && /^(statictext|text|image)$/i.test(String(row.type ?? ''))
+      ? { open: false, reason: 'static text', kind: 'skipped' }
+      : classify(row, { allowCreate, locale });
     if (!verdict.open) {
       if (verdict.kind !== 'skipped' || verdict.reason === 'unlabeled') refused.push({ key, label: row.label ?? null, reason: verdict.reason, kind: verdict.kind });
+      else skipped.push(key);
       continue;
     }
     const shape = shapeOf(row);
@@ -137,7 +155,7 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
     }
     doors.push({ key, label: row.label, region: row.region ?? 'content', x: row.x, y: row.y, type: row.type ?? null, shape });
   }
-  return { doors, refused };
+  return { doors, refused, skipped };
 }
 
 /** What a row looks like, ignoring where it is in a column: its list identity. */
@@ -187,8 +205,15 @@ function jaccard(a, b) {
   return union ? inter / union : 1;
 }
 
+/** The last tokens seen for each screen, so a route can be asked by reading, not by bare hash. */
+const seenTokens = new WeakMap();
+const tokensFor = (state, hash) => seenTokens.get(state)?.get(hash) ?? [];
+const asReading = (state, hash) => ({ hash, tokens: tokensFor(state, hash) });
+
 function register(state, reading, { allowCreate, locale, via = null }) {
   if (!reading?.hash) return null;
+  if (!seenTokens.has(state)) seenTokens.set(state, new Map());
+  if (reading.tokens?.length) seenTokens.get(state).set(reading.hash, reading.tokens);
   let s = state.screens[reading.hash];
   if (!s) {
     s = state.screens[reading.hash] = { name: reading.name ?? null, firstSeen: Date.now(), via, samples: [], controls: {} };
@@ -196,7 +221,8 @@ function register(state, reading, { allowCreate, locale, via = null }) {
   if (!s.name && reading.name) s.name = reading.name;
   const sig = labelSig(reading.rows);
   if (s.samples.length < 4 && !s.samples.some((x) => jaccard(x, sig) > 0.9)) s.samples.push(sig);
-  const { doors, refused } = doorsOf(reading.rows, { allowCreate, locale });
+  const { doors, refused, skipped } = doorsOf(reading.rows, { allowCreate, locale });
+  for (const k of skipped) if (s.controls[k]?.status === 'pending') s.controls[k].status = 'skipped';
   for (const d of doors) {
     if (d.region === 'tab-bar') {
       // A tab is the same door on every screen that shows the bar.
@@ -206,6 +232,8 @@ function register(state, reading, { allowCreate, locale, via = null }) {
     if (!s.controls[d.key]) s.controls[d.key] = { label: d.label, region: d.region, status: 'pending', ...(d.shape ? { shape: d.shape } : {}) };
   }
   for (const r of refused) {
+    // A door saved by an earlier run, refused by today's rules: refused.
+    if (s.controls[r.key]?.status === 'pending') s.controls[r.key].status = 'refused';
     const k = `${r.label ?? '(unlabeled)'}|${r.reason}`;
     state.refused[k] ??= { label: r.label, reason: r.reason, kind: r.kind, screens: [] };
     if (!state.refused[k].screens.includes(reading.hash)) state.refused[k].screens.push(reading.hash);
@@ -236,7 +264,11 @@ function sampleList(state, hash, key) {
   const opened = same.filter((c) => c.status === 'explored');
   const dests = opened.map((c) => c.to);
   const names = opened.map((c) => c.toName).filter(Boolean).map(alnum);
-  const repeat = new Set(dests).size < dests.length || new Set(names).size < names.length;
+  // Alike by structure too: a list's detail screens may each get an identity
+  // of their own (DEFERRED 174), and a name is not always there to say so.
+  const alike = dests.some((a, i) => dests.some((b, j) => j > i && a !== b
+    && tokensFor(state, a).length && jaccard(tokensFor(state, a), tokensFor(state, b)) >= ALIKE));
+  const repeat = new Set(dests).size < dests.length || new Set(names).size < names.length || alike;
   if (!repeat && opened.length < LIST_CAP) return;
   for (const c of same) if (c.status === 'pending') { c.status = 'sampled'; }
 }
@@ -300,8 +332,8 @@ export async function crawl(driver, {
   // 2026-10-01, by this crawler, before this existed.
   const recover = async (here) => {
     if (root && here?.hash && here.hash !== root) {
-      const r = driver.route(here.hash, root);
-      if (r?.length && r.every((e) => !e.changedOutcomes)) {
+      const r = driver.route(here, asReading(state, root));
+      if (r?.length) {
         const walked = await driver.walk(r);
         for (let i = 0; i < (walked?.steps ?? 0); i += 1) act();
         const after = walked?.after ?? await driver.read();
@@ -348,7 +380,13 @@ export async function crawl(driver, {
 
     if (door) {
       const before = here;
-      const res = await driver.tap(door, before);
+      // Where the control is now, not where it was when it was first seen.
+      const row = (here.rows ?? []).find((r) => controlKey(r) === door.key);
+      if (!row) {
+        mark(state, here.hash, door.key, { status: 'not-on-screen' });
+        continue;
+      }
+      const res = await driver.tap({ ...door, x: row.x, y: row.y }, before);
       act();
       if (!(await driver.inApp())) {
         mark(state, before.hash, door.key, { status: 'left-app' });
@@ -387,15 +425,17 @@ export async function crawl(driver, {
         continue;
       }
       if (!/^unexpected/.test(res?.verdict ?? '')) mark(state, before.hash, door.key, { status: 'explored', to: reading.hash, toName: reading.name ?? null });
-      sampleList(state, before.hash, door.key);
       const fresh = !state.screens[reading.hash];
       register(state, reading, { allowCreate, locale, via: { from: before.hash, label: door.label } });
+      sampleList(state, before.hash, door.key);
       if (fresh) run.newScreens += 1;
       continue;
     }
 
-    // Nothing left here. Back out, the app's own way first.
-    const back = await driver.back(here);
+    // Nothing left here. Back out, the app's own way first — except from the
+    // start screen, where there is nowhere to go back to and a "back" is a
+    // wasted tap on whatever sits in the nav bar's leading slot.
+    const back = here.hash === root ? null : await driver.back(here);
     if (back?.acted) {
       act();
       const after = back.after ?? await driver.read();
@@ -408,11 +448,22 @@ export async function crawl(driver, {
     // Then the graph's own path to the nearest screen that still has doors.
     const targets = Object.keys(state.screens).filter((h) => h !== here.hash && pendingOn(state, h) && (unreachable.get(h) ?? 0) < 2);
     let best = null;
+    // A walk is verified step by step and stops on a wrong turn, like `goto`.
+    // What the barrier forbids is acting again on what went wrong before, so
+    // a route through any edge this crawl saw land somewhere unexpected is not
+    // taken. An edge whose destination merely drifted (`changedOutcomes`) is
+    // identity churn, not a wrong turn, and refusing those stranded a crawl of
+    // Settings in a relaunch loop: 28 relaunches, nothing opened.
+    const tainted = new Set(state.unexpected.map((u) => `${u.from}|${alnum(u.label)}`));
+    const clean = (route) => route.every((e, i) => {
+      const from = i === 0 ? here.hash : route[i - 1].to;
+      return !tainted.has(`${from}|${alnum(String(e.action ?? '').split(':').slice(1).join(':'))}`);
+    });
     for (const h of targets) {
-      const r = driver.route(here.hash, h);
-      if (r && r.length && (!best || r.length < best.route.length)) best = { hash: h, route: r };
+      const r = driver.route(here, asReading(state, h));
+      if (r && r.length && clean(r) && (!best || r.length < best.route.length)) best = { hash: h, route: r };
     }
-    if (best && best.route.every((e) => !e.changedOutcomes)) {
+    if (best) {
       const walked = await driver.walk(best.route);
       for (let i = 0; i < (walked?.steps ?? best.route.length); i += 1) act();
       const after = walked?.after ?? await driver.read();
@@ -436,8 +487,11 @@ export async function crawl(driver, {
       break;
     }
     register(state, home, { allowCreate, locale });
-    if (!pendingOn(state, home.hash) && !targets.some((h) => driver.route(home.hash, h)?.length)) {
-      run.stoppedBecause = 'nothing reachable left to open';
+    if (!pendingOn(state, home.hash) && !targets.some((h) => driver.route(home, asReading(state, h))?.length)) {
+      const left = Object.values(state.screens).reduce((n, sc) => n + Object.values(sc.controls).filter((c) => c.status === 'pending').length, 0);
+      run.stoppedBecause = left
+        ? `${left} door(s) are left on screens no known path reaches from the start screen`
+        : 'nothing reachable left to open';
       reading = home;
       break;
     }

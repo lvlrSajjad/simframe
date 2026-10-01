@@ -7420,7 +7420,8 @@ function fakeApp() {
         stack.pop();
         return { acted: true, after: read() };
       },
-      route: (from, to) => {
+      route: (fromR, toR) => {
+        const from = fromR?.hash ?? fromR; const to = toR?.hash ?? toR;
         const q = [[from, []]]; const seen = new Set([from]);
         while (q.length) {
           const [h, p] = q.shift();

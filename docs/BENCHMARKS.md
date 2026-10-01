@@ -4823,3 +4823,48 @@ The Ecotrak home screen's routes to "Create a service request" and "Assets" are
 among the carried edges. None of this has been driven live yet, so a carried
 route is a prediction until it is walked. A wrong one stops a flow as
 `unexpected-screen`.
+
+## The cartographer, first live runs — 2026-10-01
+
+Apple M2 Pro, Xcode 27.0 (CoreSimulator 1174.9.2), iOS 26.5. N=1 per row:
+these are the first runs, not a distribution.
+
+**Ecotrak (`com.ecotrak.etm2`, `7B8F8963`, signed in): FAILED, and the failure
+was the crawler's.** The first run relaunched the app. It is a React Native
+debug build with no embedded bundle, its packager had stopped, and it came
+back on "No script URL provided" with the signed-in session unusable. That run
+reported *"stopped: nothing reachable left to open"*, which is a success-shaped
+line over a broken app. Fixed in 89e1265: the first launch only brings the app
+forward, a restart is checked first (`platform.relaunchNeeds`), and an app on a
+did-not-start screen is reported `FAILED` with nothing tapped. Measured after
+the fix, against the same broken app: `FAILED — the app is not running`, 1
+action, 0 taps, 12 s. No Ecotrak map exists yet.
+
+**Settings (`com.apple.Preferences`, `326464A4`), read-only.** Appearance, text
+size, languages and the Settings defaults domain were compared before and
+after every run, and none changed.
+
+| run | screens | transitions | actions | wall | relaunches | stopped |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1, before the back-button fix | 8 | 12 | 24 | 163 s | 1 | "nothing reachable" with 52 doors left |
+| 2, resumed | 8 | 12 | 57 | 492 s | **28** | relaunch loop, nothing opened |
+| 3, fresh, after the fixes | **25** | **36** | 67 | 361 s | 2 | wall-time budget |
+
+What runs 1 and 2 found, each fixed before run 3:
+
+- **iOS labels the back button with the parent's title** ("Settings"), so every
+  sub-screen's back button was taken for a door. A nav bar's leading button is
+  now a back affordance whatever it says.
+- **A route asked by bare hash finds nothing** when the graph filed the edges
+  under a similar stored screen. Routes are now asked by reading, tokens
+  included.
+- **Edges whose destination had drifted were refused as "unexpected"**, which
+  stranded the crawl in a relaunch loop. Drift is identity churn. The barrier
+  now refuses only edges this crawl saw land unexpectedly, and every walk is
+  verified and stops on a wrong turn.
+- **Static text cost 13–22 s a tap** in no-change verification. Text the
+  accessibility tree calls static is skipped when the tree is describing the
+  screen's controls.
+
+Run 3 is about 5.4 s per action. It recorded three suspected splits ("settings"
+×3, "display mode" ×2, "colors spectrum" ×2), the kind DEFERRED 174 describes.
