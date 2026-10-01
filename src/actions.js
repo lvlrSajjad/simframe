@@ -10,6 +10,7 @@ import * as intent from './intent.js';
 import * as matching from './matching.js';
 import * as vocabulary from './vocabulary.js';
 import * as wrote from './wrote.js';
+import * as typed from './typed.js';
 import * as supervisor from './supervisor.js';
 import * as view from './view.js';
 import * as planner from './planner.js';
@@ -237,6 +238,10 @@ export function wrongTurnFrom(verification) {
  * one of them not at all.
  */
 export function goalOf(step = {}) {
+  // A text step that names no field carries its *text* in `value`, and that is
+  // not a goal — it went into every escalation's `intent` and the supervisor's
+  // situation, both written to disk. See typed.js.
+  if (typed.isTextStep(step) && step.into == null) return null;
   return step.value ?? step.target ?? step.label ?? step.into ?? null;
 }
 
@@ -1489,7 +1494,7 @@ async function superviseFailure(deviceQuery, { goal, step, expected, err, option
     // can be asked, on identical inputs.
     const situation = {
       goal: goal ?? null,
-      step: `${step.action} ${JSON.stringify(String(step.value ?? step.target ?? step.into ?? step.seek ?? '').slice(0, 60))}`,
+      step: `${step.action} ${JSON.stringify(String(goalOf(step) ?? step.seek ?? '').slice(0, 60))}`,
       expected: expected ?? null,
       failure: err.message,
       screen: (map.rows ?? []).filter((r) => r.label).map((r) => r.label),
@@ -2692,6 +2697,14 @@ function holdForContent(found, limit) {
 }
 
 async function runStep(deviceQuery, udid, step, ctx) {
+  // A step remembered without its text and replayed without being given any.
+  // `goto` and `flow run` refuse before this, so reaching here means a caller
+  // assembled steps by hand from a graph edge — and typing "undefined" into a
+  // field is a wrong write, which is worse than a failure.
+  if (typed.needsText(step)) {
+    throw new Error(`${step.action} into ${JSON.stringify(typed.fieldOf(step))} was stored without its text`
+      + ' and none was supplied — pass it with `text: {"<field>": "..."}`.');
+  }
   switch (step.action) {
     case 'tap': {
       const query = step.value ?? step.target ?? step.label;

@@ -7103,3 +7103,174 @@ test('paste never sends Cmd-V over dtuhidd, because it pastes the host clipboard
   assert.match(paste, /if hid is DTUHID \{[\s\S]*try type\(text\)\n\s*return\n\s*\}/);
   assert.match(paste, /cannot type/, 'an unproducible character is an error, not a silent skip');
 });
+
+// --- Typed text never reaches the graph, and a secure field never reaches disk ---
+import * as typedmod from '../src/typed.js';
+import * as wrotemod from '../src/wrote.js';
+import { goalOf } from '../src/actions.js';
+import { listFlows } from '../src/navigate.js';
+
+/** Every file under a device directory, read as text. */
+const filesUnder = (dir) => {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    return e.isDirectory() ? filesUnder(p) : [[p, fs.readFileSync(p, 'utf8')]];
+  });
+};
+
+test('a type step into a field named like Password, Passcode or PIN never reaches disk', async () => {
+  // Found on a working device: a password typed into a field named "Password",
+  // in plain JSON in a graph file — in the edge key and again in the stored step.
+  const metrics = await import('../src/metrics.js');
+  const udid = freshDevice('secure-field');
+  const fields = ['Password', 'Passcode', 'PIN', 'Confirm password', 'Enter PIN', 'One-time code'];
+  const secrets = fields.map((_, i) => `s3cret-${i}-xq7`);
+  const A = { hash: 'a'.repeat(32), tokens: tok(6, 'a') };
+  const B = { hash: 'b'.repeat(32), tokens: tok(6, 'b') };
+  fields.forEach((into, i) => {
+    // Both shapes a step arrives in: normalized, and the caller's shorthand.
+    const step = normalizeStep({ type: { into, text: secrets[i] } });
+    graphmod.record(udid, { from: A, action: step, to: A, kind: 'none' });
+    graphmod.record(udid, { from: A, action: { paste: { into, text: secrets[i] } }, to: B, kind: 'none' });
+    wrotemod.record(udid, { selector: into, value: secrets[i], screen: null });
+    metrics.recordEscalation(udid, { reason: 'verification_failed', intent: goalOf(step), detail: 'x' });
+    metrics.recordSupervision(udid, { index: i, step: graphmod.actionSignature(step), decision: 'stop', outcome: 'stopped' });
+  });
+  // An explicit save may keep ordinary text, but never a secure field's —
+  // whether it was typed one step at a time or filled by a sweep.
+  const saved = saveFlow(udid, 'login', {
+    steps: [
+      { type: { into: 'Email', text: 'kate@example.com' } },
+      ...fields.map((into, i) => ({ type: { into, text: secrets[i] } })),
+      { action: 'paste', into: 'Password', text: secrets[0] },
+      { sweep: 'all', fill: { Name: 'Kate', Password: secrets[0], PIN: secrets[2] } },
+    ],
+    ranSteps: fields.length + 3,
+    results: Array.from({ length: fields.length + 3 }, (_, i) => ({ index: i, ok: true, verification: { verdict: 'ok' } })),
+  });
+  assert.equal(saved.ok, true);
+
+  const files = filesUnder(store.deviceDir(udid));
+  assert.ok(files.some(([p]) => p.includes(`${path.sep}graph${path.sep}`)), 'the graph was written at all');
+  assert.ok(files.some(([p]) => p.includes(`${path.sep}flows${path.sep}`)), 'and so was the flow');
+  for (const [p, body] of files) {
+    for (const s of secrets) assert.ok(!body.includes(s), `a secure field's text reached ${path.relative(store.deviceDir(udid), p)}`);
+  }
+  // What the flow keeps instead, and that it says so in a listing.
+  const flow = loadFlow(udid, 'login');
+  assert.equal(flow.steps[0].type.text, 'kate@example.com', 'ordinary text in a saved flow is the caller\'s to keep');
+  assert.equal(flow.steps[1].needsText, true);
+  assert.deepEqual(flow.steps.at(-1).fill.Password, { needsText: true });
+  assert.equal(flow.steps.at(-1).fill.Name, 'Kate');
+  assert.deepEqual(listFlows(udid).find((f) => f.name === 'login').needsText.sort(),
+    [...fields, 'Password', 'PIN'].filter((f, i, a) => a.indexOf(f) === i).sort());
+  graphmod.forget(udid);
+});
+
+test('no typed text reaches a graph file at all, and replay asks the caller for it', () => {
+  const udid = freshDevice('no-typed-text');
+  const A = { hash: 'c'.repeat(32), tokens: tok(6, 'c') };
+  const B = { hash: 'd'.repeat(32), tokens: tok(6, 'd') };
+  const C = { hash: 'e'.repeat(32), tokens: tok(6, 'e') };
+  const texts = ['hello world 1', 'search for this 2', 'free text no field 3', 'pasted paragraph 4'];
+  graphmod.record(udid, { from: A, action: normalizeStep({ type: { into: 'Search', text: texts[0] } }), to: A });
+  graphmod.record(udid, { from: A, action: normalizeStep({ type: { into: 'Search', text: texts[1] } }), to: A });
+  graphmod.record(udid, { from: A, action: normalizeStep({ type: texts[2] }), to: A });
+  graphmod.record(udid, { from: A, action: normalizeStep({ paste: { into: 'Notes', text: texts[3] } }), to: A });
+  graphmod.record(udid, { from: A, action: normalizeStep({ tap: 'Next' }), to: B, kind: 'push' });
+  // Typing changed the fingerprint here — the field now shows its contents —
+  // which is how a text step ends up on a route at all.
+  const Bfilled = { hash: '9'.repeat(32), tokens: tok(6, '9') };
+  graphmod.record(udid, { from: B, action: normalizeStep({ type: { into: 'Email', text: 'kate@example.com' } }), to: Bfilled });
+  graphmod.record(udid, { from: Bfilled, action: normalizeStep({ tap: 'Continue' }), to: C, kind: 'push' });
+
+  const graphFiles = filesUnder(path.join(store.deviceDir(udid), 'graph'));
+  for (const [, body] of graphFiles) {
+    for (const t of [...texts, 'kate@example.com']) assert.ok(!body.includes(t), 'typed text reached a graph file');
+  }
+  // Keyed by the field alone, so typing different text into one field is one
+  // edge rather than one per string typed.
+  const node = graphmod.allNodes(udid).find((n) => n.hash === A.hash);
+  const keys = node.edges.map((e) => e.action).sort();
+  assert.deepEqual(keys, ['paste:notes', 'tap:next', 'type:(focused)', 'type:search']);
+  assert.equal(node.edges.find((e) => e.action === 'type:search').count, 2);
+  assert.ok(node.edges.filter((e) => e.action !== 'tap:next').every((e) => e.step.needsText === true));
+  // The map's exits name the field, never the text.
+  assert.ok(!graphmod.exitsOf(node).some((e) => texts.includes(e.label)));
+
+  // A route through a text field comes back without its text, and supplying it
+  // is the caller's job: missing fields are named, not guessed or skipped.
+  const route = graphmod.route(udid, A, C.hash);
+  const stored = route.map(stepFor);
+  assert.equal(stored.length, 3);
+  assert.equal(stored[1].needsText, true);
+  assert.equal(stored[1].text, undefined);
+  assert.deepEqual(typedmod.supplyText(stored, {}).missing, ['Email']);
+  const { steps, missing } = typedmod.supplyText(stored, { email: 'today@example.com' });
+  assert.deepEqual(missing, []);
+  assert.equal(steps[1].text, 'today@example.com');
+  assert.equal(steps[1].needsText, undefined);
+  assert.equal(normalizeStep(steps[1]).into, 'Email', 'a supplied step replays through the ordinary path');
+
+  // The signature is the field for every shape a text step arrives in.
+  assert.equal(actionSignature({ type: { into: 'Password', text: 'x' } }), 'type:password');
+  assert.equal(actionSignature(normalizeStep({ type: 'x' })), 'type:(focused)');
+  assert.equal(actionSignature({ action: 'paste', into: 'Notes', text: 'x', needsText: undefined }), 'paste:notes');
+  // And a text step with no field has no goal to write into an escalation.
+  assert.equal(goalOf(normalizeStep({ type: 'free text' })), null);
+  assert.equal(goalOf(normalizeStep({ type: { into: 'Email', text: 'x' } })), 'Email');
+  graphmod.forget(udid);
+});
+
+test('a graph file written before the fix is scrubbed, merging edges that only differed by text', () => {
+  const udid = freshDevice('scrub-legacy');
+  const dir = path.join(store.deviceDir(udid), 'graph');
+  fs.mkdirSync(dir, { recursive: true });
+  const leaked = ['old-secret-1', 'old-secret-2', 'old-free-3'];
+  // The shape the old code wrote: the step's JSON, truncated, as the key; the
+  // whole step as the body. An older fingerprint version on purpose — the leak
+  // that started this was in a node nothing else would load.
+  const legacy = {
+    version: 3, fingerprintVersion: 4, hash: 'f'.repeat(32), tokens: [], variants: [],
+    edges: [
+      { action: `type:{"into":"Password","text":"${leaked[0]}"}`.slice(0, 45), step: { action: 'type', into: 'Password', text: leaked[0] }, to: 'x', count: 2, lastSeen: 1, settles: [100] },
+      { action: `type:{"into":"Password","text":"${leaked[1]}"}`.slice(0, 45), step: { action: 'type', into: 'Password', text: leaked[1] }, to: 'y', count: 1, lastSeen: 2, settles: [200] },
+      { action: `type:${leaked[2]}`, step: { action: 'type', value: leaked[2] }, to: 'x', count: 1, lastSeen: 3 },
+      { action: 'tap:sign in', step: { action: 'tap', value: 'Sign in' }, to: 'z', count: 4, lastSeen: 4 },
+    ],
+  };
+  fs.writeFileSync(path.join(dir, `${legacy.hash}.json`), JSON.stringify(legacy));
+  const dry = graphmod.scrubGraph(udid, { dryRun: true });
+  assert.equal(dry.edges, 3);
+  assert.ok(fs.readFileSync(path.join(dir, `${legacy.hash}.json`), 'utf8').includes(leaked[0]), 'a dry run writes nothing');
+
+  const report = graphmod.scrubGraph(udid);
+  assert.deepEqual({ rewritten: report.rewritten, edges: report.edges }, { rewritten: 1, edges: 3 });
+  const body = fs.readFileSync(path.join(dir, `${legacy.hash}.json`), 'utf8');
+  for (const t of leaked) assert.ok(!body.includes(t), 'scrubbed text is gone from the file');
+  const node = JSON.parse(body);
+  assert.equal(node.fingerprintVersion, 4, 'a scrub does not migrate what it cleans');
+  assert.deepEqual(node.edges.map((e) => e.action), ['type:password', 'type:(focused)', 'tap:sign in']);
+  const pw = node.edges[0];
+  assert.deepEqual({ count: pw.count, to: pw.to, settles: pw.settles }, { count: 3, to: 'y', settles: [100, 200] },
+    'two edges that only differed by text pool into one, keeping the most recent destination');
+  assert.equal(graphmod.scrubGraph(udid).edges, 0, 'and a second scrub finds nothing');
+  graphmod.forget(udid);
+});
+
+test('the write journal never keeps a secure field, and drops what has expired', () => {
+  const udid = freshDevice('wrote-secure');
+  assert.equal(wrotemod.record(udid, { selector: 'Password', value: 'hunter2-zz' }), null);
+  assert.equal(wrotemod.record(udid, { selector: 'PIN', value: '4821' }), null);
+  assert.ok(wrotemod.record(udid, { selector: 'Email', value: 'kate@example.com' }));
+  const file = path.join(store.deviceDir(udid), 'wrote.json');
+  const stale = [...wrotemod.read(udid), { selector: 'Name', value: 'Old', at: Date.now() - wrotemod.MAX_AGE_MS - 1 }];
+  fs.writeFileSync(file, JSON.stringify(stale));
+  wrotemod.record(udid, { selector: 'City', value: 'Irvine' });
+  const kept = wrotemod.read(udid).map((e) => e.selector).sort();
+  assert.deepEqual(kept, ['City', 'Email']);
+  assert.ok(!fs.readFileSync(file, 'utf8').includes('hunter2-zz'));
+  assert.ok(typedmod.isSecureField('Passcode') && typedmod.isSecureField('Enter your PIN'));
+  assert.ok(!typedmod.isSecureField('Spinner') && !typedmod.isSecureField('Passenger name') && !typedmod.isSecureField('Pinned'));
+});

@@ -2511,6 +2511,60 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+194. **A password typed into a field named "Password" was in a graph file, in
+   plain JSON.** FIXED, 2026-10-01. Found on a working device, in a node from an
+   older fingerprint version — one nothing else would load, so nothing would
+   ever have cleaned it either.
+
+   **Cause.** `graph.record()` kept the whole step on every edge so a route
+   could replay it exactly, and `actionSignature()` built the edge key from the
+   first 40 characters of the step's JSON. For a `type` or `paste` step the step
+   *is* the text, so it was on disk twice — in the key and in `step.text` — and
+   `goto` would have replayed it into whatever field the route led to.
+
+   **Fix — the rule is structural, not a list of fields to be careful with**
+   (`src/typed.js`). A text step is remembered by where it typed, never by what:
+   the key is `type:<field>` (`type:(focused)` when it named none), the stored
+   step carries `needsText: true` instead of the text, and `goto` and
+   `flow run` take the text from the caller — `text: {"Password": "..."}` on the
+   MCP tools, `--text '{...}'` on the CLI — and refuse as `needs-text`, naming
+   the fields, when it is missing. A route that types nothing into a login form
+   lands on the login error and looks like a wrong edge, which is why that is a
+   refusal rather than an empty write. `stepFor` strips again on the way out,
+   `runStep` refuses a step that still needs text, and `save()` scrubs every
+   node it writes, so an old file is cleaned the first time anything touches it.
+
+   **Per store, because they are not the same kind of thing:**
+
+   - **graph/** — no typed text, ever. Edges that only differed by their text
+     are pooled into one when a node is scrubbed.
+   - **flows/** (saved flows) — an explicit artifact, so ordinary text stays: a
+     flow that fills a search box is worth keeping whole. Text into a field
+     named like a secret (Password, Passcode, PIN, one-time code, CVV…) is
+     replaced by `needsText`, including a `sweep` fill entry; `flow list` says
+     which fields a replay will ask for. **Limit:** this goes by the field's
+     *name*, because the step is all a saved flow has. A type with no `into`,
+     or a secure field labelled something else, is not caught. The graph has no
+     such limit, because it keeps no text at all.
+   - **wrote.json** (the write journal) — keeps ordinary values in the clear,
+     because the disappearance check is a substring match against OCR and a hash
+     cannot do that. Never a secure field (it renders as bullets, so the check
+     could not work for one anyway), and expired entries are now dropped at the
+     next write instead of lingering until 24 newer ones push them out.
+   - **escalations.jsonl / supervisions.jsonl** — leaked through two side doors,
+     both closed: `goalOf()` returned a field-less type step's *text* as its
+     intent, and the supervisor's situation and the supervision record both
+     used the old signature. Not rewritten — they are measurement logs — and the
+     audit found no secure-field text in either on any device it covered.
+   - **refs.json, screens/** — hold what was *on screen*, read by perception,
+     not what was typed. A typed value the app then displays appears there the
+     way any label does; a secure field shows bullets. Left alone.
+   - **flows.jsonl** — counts and verdicts only. Never held step content.
+
+   **Audit, values never printed:** every device's graph text compared against
+   every other text file under its directory, reporting file and JSON key path
+   only. The secure-field text was in `graph/` and nowhere else.
+
 193. **A peer's report on 0.19.0: taps that missed and said `ok`, a map
    called moving over an old frame, and a scroll that claimed both ways.**
    2026-10-01, a peer session on `B55AB0AE` (a colleague's device, driven from

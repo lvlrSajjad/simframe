@@ -10,6 +10,7 @@ import * as metrics from './metrics.js';
 import * as screenmap from './screenmap.js';
 import * as api from './index.js';
 import * as store from './store.js';
+import * as typed from './typed.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -17,7 +18,10 @@ const flowDir = (udid) => path.join(store.deviceDir(udid), 'flows');
 
 /** The signature is lossy; older edges predate `step` and have to be reconstructed. */
 export function stepFor(edge) {
-  if (edge.step) return edge.step;
+  // Stripped again on the way out, not only on the way in: a graph file written
+  // before text was kept off edges may still hold some, and a replay must never
+  // type what a past session typed. The caller supplies it — see `supplyText`.
+  if (edge.step) return typed.withoutText(edge.step);
   const [kind, rest] = [edge.action.slice(0, edge.action.indexOf(':')), edge.action.slice(edge.action.indexOf(':') + 1)];
   if (kind === 'tap') return { tap: rest };
   if (kind === 'scroll') return { scroll: rest };
@@ -78,7 +82,7 @@ function refuse(udid, result, { detail = null, flowName = null } = {}) {
  * query fits two screens equally, or no path of known edges reaches it, that is
  * reported. A wrong route is worse than no route, because it taps things.
  */
-export async function goto(deviceQuery, target, { options, ...runOptions } = {}) {
+export async function goto(deviceQuery, target, { options, text, ...runOptions } = {}) {
   const { device } = await api.ensureDaemon(deviceQuery, options);
   const udid = device.udid;
 
@@ -101,8 +105,19 @@ export async function goto(deviceQuery, target, { options, ...runOptions } = {})
   const path_ = graph.route(udid, { hash: here.hash, tokens: here.tokens }, found.node.hash);
   if (!path_) return refuse(udid, { ok: false, reason: 'no-route', from: here.hash.slice(0, 8), to: found.name }, { flowName: `goto:${target}` });
 
-  const steps = path_.map(stepFor);
-  if (steps.some((s) => !s)) return refuse(udid, { ok: false, reason: 'unreplayable-edge', to: found.name }, { flowName: `goto:${target}` });
+  const stored = path_.map(stepFor);
+  if (stored.some((s) => !s)) return refuse(udid, { ok: false, reason: 'unreplayable-edge', to: found.name }, { flowName: `goto:${target}` });
+  // A route through a text field needs the text from whoever is walking it,
+  // because the graph no longer keeps any. Refused by name, with the fields
+  // listed, rather than walked with nothing typed — a login route that types
+  // nothing lands on the login error and looks like a wrong edge.
+  const { steps, missing } = typed.supplyText(stored, text);
+  if (missing.length) {
+    return refuse(udid, { ok: false, reason: 'needs-text', to: found.name, fields: missing }, {
+      detail: `route to "${found.name}" types into ${missing.map((f) => JSON.stringify(f)).join(', ')} and no text was supplied`,
+      flowName: `goto:${target}`,
+    });
+  }
 
   const result = await runScript(udid, { steps, stopOnUnexpected: true, ...runOptions });
   const arrived = await api.screenIdentity(udid, {});
@@ -217,7 +232,9 @@ export function saveFlow(udid, name, script, { force = false } = {}) {
   const body = {
     name,
     savedAt: Date.now(),
-    steps: script.steps ?? (script.results ?? []).map((r) => r.step).filter(Boolean),
+    // Text into a secure field is held back even here, where an explicit save
+    // may otherwise keep what was typed — see `typed.forSavedFlow`.
+    steps: (script.steps ?? (script.results ?? []).map((r) => r.step).filter(Boolean)).map(typed.forSavedFlow),
     startScreen: script.startScreen ?? null,
     ...(provisional ? { provisional: verdicts.filter(Boolean) } : {}),
   };
@@ -264,14 +281,28 @@ export function listFlows(udid) {
       name: f.name,
       steps: f.steps?.length ?? 0,
       savedAt: f.savedAt,
+      // Which fields a replay will ask for, so a caller can bring the text
+      // before the run refuses for want of it.
+      ...(() => {
+        const { missing } = typed.supplyText(f.steps ?? [], {});
+        return missing.length ? { needsText: missing } : {};
+      })(),
       ...(f.provisional ? { provisional: true } : {}),
     }));
 }
 
-export async function runFlow(deviceQuery, name, { options, ...runOptions } = {}) {
+export async function runFlow(deviceQuery, name, { options, text, ...runOptions } = {}) {
   const { device } = await api.ensureDaemon(deviceQuery, options);
   const flow = loadFlow(device.udid, name);
   if (!flow) return refuse(device.udid, { ok: false, reason: 'unknown-flow', known: listFlows(device.udid).map((f) => f.name) }, { detail: `no saved flow "${name}"`, flowName: name });
+  // A secure field was saved without its text, so the caller brings it.
+  const supplied = typed.supplyText(flow.steps ?? [], text);
+  if (supplied.missing.length) {
+    return refuse(device.udid, { ok: false, reason: 'needs-text', name, fields: supplied.missing }, {
+      detail: `flow "${name}" types into ${supplied.missing.map((f) => JSON.stringify(f)).join(', ')} and no text was supplied`,
+      flowName: name,
+    });
+  }
   // A replayed flow knows its own name, so its record can be compared against
   // a human doing the same thing. `minSteps` comes from the flow definition or
   // stays null — the step count of a recorded route is not a claim about the
@@ -299,7 +330,7 @@ export async function runFlow(deviceQuery, name, { options, ...runOptions } = {}
     }
   }
   const result = await runScript(device.udid, {
-    steps: flow.steps,
+    steps: supplied.steps,
     stopOnUnexpected: true,
     flowName: name,
     minSteps: flow.minSteps ?? null,

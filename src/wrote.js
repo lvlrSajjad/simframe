@@ -23,6 +23,7 @@
  */
 import path from 'node:path';
 import * as store from './store.js';
+import { isSecureField } from './typed.js';
 
 const FILE = 'wrote.json';
 
@@ -59,6 +60,12 @@ export function read(udid) {
  */
 export function record(udid, { selector, value, screen }) {
   if (!udid || !selector || !alnum(value)) return null;
+  // Never a secure field. This journal keeps values in the clear because the
+  // disappearance check is a substring match against OCR, which a hash cannot
+  // do — so the only safe journal entry for a password is no entry. It would
+  // not help anyway: a secure field renders as bullets, so its value can never
+  // be seen on a later screen to be missed.
+  if (isSecureField(selector)) return null;
   // A selector with no letters in it is not a label: "(125,325)", "@120,400",
   // "#3". There is nothing to look for on a later screen, and its digits would
   // happily match some unrelated number — so it is never journalled at all,
@@ -66,7 +73,11 @@ export function record(udid, { selector, value, screen }) {
   if (!hasLetters(selector)) return null;
   const now = Date.now();
   const key = alnum(selector);
-  const kept = read(udid).filter((e) => alnum(e.selector) !== key);
+  // Expired entries go at the next write rather than lingering until 24 newer
+  // ones push them out: past MAX_AGE_MS nothing reads them, and a typed value
+  // nobody reads has no reason to be on disk.
+  const kept = read(udid).filter((e) => alnum(e.selector) !== key
+    && Number.isFinite(e.at) && now - e.at <= MAX_AGE_MS && !isSecureField(e.selector));
   const next = [{ selector: String(selector), value: String(value), screen: screen ?? null, at: now }, ...kept]
     .slice(0, KEEP);
   try {

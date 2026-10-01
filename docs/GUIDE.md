@@ -418,7 +418,7 @@ steer the model is a tool surface the model uses wrong.
 | `sim_ui` | **Start here.** The screen as a numbered text map: region, type, label, state, tap point, source. A tenth the cost of a screenshot and strictly more useful. |
 | `sim_do` | **The main tool.** A whole flow in one call — tap, type, scroll, wait, assert — each step settling before the next and verified against what it did last time. |
 | `sim_state` | The cheapest question there is: has anything changed **since your last look**, and which regions moved. |
-| `sim_goto` | Walk to a screen simframe has been to before, planning the route through remembered transitions. |
+| `sim_goto` | Walk to a screen simframe has been to before, planning the route through remembered transitions. A route that types asks for the text in `text: {"<field>": "..."}` — the graph keeps none. |
 | `sim_flow_run` | Replay a saved flow — **zero model calls**, which is the only path to human wall clock. A first traversal saves as *provisional*; one replay in which every step passed confirms it. A run with a contradicted step, a failed step, or one that never reached its last step is refused and says which. |
 | `sim_find` | Resolve an intent to one control, without acting on it. |
 | `sim_tap` · `sim_type_into` · `sim_scroll_to` · `sim_wait_for` · `sim_assert` | Single actions, for when you genuinely only have one step. Each is one `sim_do` step underneath. |
@@ -633,6 +633,21 @@ doubt.
 simframe flow save checkout ./checkout.json
 simframe flow run checkout
 ```
+
+**The graph never keeps what was typed.** A `type` or `paste` edge is
+remembered by the field it typed into — `type:email`, never the text — so a
+route through a form needs the text from whoever walks it. `goto` refuses as
+`needs-text`, naming the fields, until it is given:
+
+```bash
+simframe goto "home" --text '{"Email": "kate@example.com", "Password": "..."}'
+```
+
+Saved flows are the caller's own artifact and keep ordinary text, but never
+text typed into a field named like a secret (Password, Passcode, PIN, one-time
+code…); `flow run` asks for those the same way. The MCP tools take the same
+`text` object. Why, and what each store under `~/.simframe/<udid>/` does keep,
+is in [DEFERRED 194](DEFERRED.md).
 
 ### What the memory is worth, isolated
 

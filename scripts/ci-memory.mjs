@@ -629,8 +629,10 @@ const walked = await jsonRetry(['goto', target.hash], { allowFail: true });
 // land used to return `{ok: false}` with no reason at all, which failed this
 // very check with an empty detail. It was the one outcome here nobody had
 // named, and the check found it.
+// `needs-text`: the graph keeps no typed text, so a route through a text field
+// is refused unless the caller supplies it — a named refusal, not a failure.
 const outcomes = ['no-route', 'unreplayable-edge', 'ambiguous', 'unknown-screen', 'no-identity',
-  'route-halted', 'arrived-elsewhere'];
+  'route-halted', 'arrived-elsewhere', 'needs-text'];
 check(walked.ok === true || outcomes.includes(walked.reason),
   'and asked for a screen it knows, it either walks there or names why it cannot',
   walked.ok ? (walked.already ? 'already there' : `walked ${walked.ranSteps} step(s)`) : walked.reason);

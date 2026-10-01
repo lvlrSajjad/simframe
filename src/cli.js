@@ -40,8 +40,9 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe screens [device]          list screens this device has learned
   simframe storage [bundle-id] [--device=<name|udid>]   what the app saved (no boot needed)
   simframe goto    <screen>          walk to a known screen through known steps
+                   --text '{"Password":"..."}'  text for fields on the route (the graph keeps none)
   simframe flow    save <name> <script.json>   run a flow and save it if every step verifies
-  simframe flow    run  <name>       replay a saved flow
+  simframe flow    run  <name>       replay a saved flow (--text as for goto, for secure fields)
   simframe flow    list              list saved flows
   simframe tapAt   <x> <y>           tap at a point, in points
   simframe swipe   <x1> <y1> <x2> <y2>   swipe between two points
@@ -169,6 +170,21 @@ function parseArgs(argv) {
 }
 
 const num = (v, fallback) => (v == null ? fallback : Number(v));
+
+/**
+ * `--text '{"Password":"..."}'`: what to type into each field a replayed route
+ * or flow passes through, since neither keeps the text it typed. A bare string
+ * is the text for a step that named no field.
+ */
+function textsFrom(flags) {
+  if (flags.text == null || flags.text === true) return undefined;
+  const raw = String(flags.text);
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch { /* not JSON: the text for the focused field */ }
+  return { '(focused)': raw };
+}
 
 /**
  * Print one thing, two ways.
@@ -873,6 +889,7 @@ async function main() {
       const res = await navigate.goto(flags.device, target, {
         stableMs: num(flags.stableMs, 500),
         timeoutMs: num(flags.timeoutMs, 8000),
+        text: textsFrom(flags),
         options,
       });
       const refusal = {
@@ -890,6 +907,8 @@ async function main() {
           ...(res.results ?? []).map(stepLine),
           `stopped after ${res.ranSteps} of ${res.steps?.length} step(s) on the way to ${res.screen}`,
         ],
+        'needs-text': () => `the route to ${res.to} types into ${(res.fields ?? []).map((f) => JSON.stringify(f)).join(', ')}`
+          + ' and simframe keeps no typed text — pass it: --text \'{"<field>": "..."}\'',
         'arrived-elsewhere': () => [
           ...(res.results ?? []).map(stepLine),
           `ended at ${res.arrived}, wanted ${res.screen} — every step ran, so an edge the graph`
@@ -1024,10 +1043,17 @@ async function main() {
         const res = await navigate.runFlow(flags.device, name, {
           stableMs: num(flags.stableMs, 500),
           timeoutMs: num(flags.timeoutMs, 8000),
+          text: textsFrom(flags),
           options,
         });
         if (res.reason === 'unknown-flow') {
           emit(flags, res, `no flow "${name}". known: ${res.known.join(', ') || '(none)'}`);
+          process.exitCode = 1;
+          return;
+        }
+        if (res.reason === 'needs-text') {
+          emit(flags, res, `flow "${name}" types into ${(res.fields ?? []).map((f) => JSON.stringify(f)).join(', ')},`
+            + ' which was saved without its text — pass it: --text \'{"<field>": "..."}\'');
           process.exitCode = 1;
           return;
         }

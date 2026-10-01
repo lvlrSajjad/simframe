@@ -235,7 +235,7 @@ const TOOLS = [
       'Walk to a screen simframe already knows, over edges it has already verified, with no model call per step. Names come from sim_recall or a previous map. Refuses rather than guesses when the route is unknown or the name is ambiguous — a refusal is cheap and a wrong walk is not.',
     inputSchema: {
       type: 'object',
-      properties: { ...deviceProp, ...modeProps, screen: { type: 'string', description: 'What the screen is called, e.g. "Settings" or an 8-character screen hash. Omit to list what is known.' } },
+      properties: { ...deviceProp, ...modeProps, screen: { type: 'string', description: 'What the screen is called, e.g. "Settings" or an 8-character screen hash. Omit to list what is known.' }, text: { type: 'object', additionalProperties: { type: 'string' }, description: 'Text to type into each field the replay passes through, keyed by field name, e.g. {"Email": "a@b.co", "Password": "..."}. simframe never stores typed text, so a step that types asks for it here and the call refuses, naming the fields, when it is missing. "(focused)" is the key for a step that named no field.' } },
     },
   },
   {
@@ -243,7 +243,7 @@ const TOOLS = [
     description: 'Replay a saved flow by name, verifying each step. Omit `name` to list the saved flows. Save one with sim_do\'s `saveAs`.',
     inputSchema: {
       type: 'object',
-      properties: { ...deviceProp, ...modeProps, name: { type: 'string', description: 'Flow to run. Omit to list.' } },
+      properties: { ...deviceProp, ...modeProps, name: { type: 'string', description: 'Flow to run. Omit to list.' }, text: { type: 'object', additionalProperties: { type: 'string' }, description: 'Text to type into each field the replay passes through, keyed by field name, e.g. {"Email": "a@b.co", "Password": "..."}. A saved flow never keeps text typed into a secure field (Password, Passcode, PIN…), so such a step asks for it here and the call refuses, naming the fields, when it is missing. "(focused)" is the key for a step that named no field.' } },
     },
   },
   {
@@ -1138,13 +1138,14 @@ async function goto(target, args, options) {
     };
   }
 
-  const res = await navigate.goto(target, args.screen, { options });
+  const res = await navigate.goto(target, args.screen, { options, text: args.text });
   if (!res.ok && res.reason) {
     const why = {
       'unknown-screen': `no remembered screen matches "${args.screen}". Known: ${(res.known ?? []).map((k) => k.name).join(', ') || 'none'}`,
       ambiguous: `"${args.screen}" fits ${(res.candidates ?? []).length} screens equally: ${(res.candidates ?? []).map((c) => c.name).join(', ')} — say which`,
       'no-route': `"${res.to}" is known, but no remembered path reaches it from where you are (${res.from})`,
       'unreplayable-edge': `the route to "${res.to}" includes a step simframe cannot replay exactly`,
+      'needs-text': `the route to "${res.to}" types into ${(res.fields ?? []).map((f) => JSON.stringify(f)).join(', ')}, and simframe keeps no typed text — call again with text: {"<field>": "..."}`,
     }[res.reason] ?? res.reason;
     return { isError: true, content: [text(`sim_goto refused rather than guess: ${why}`)] };
   }
@@ -1167,17 +1168,25 @@ async function flowRun(target, args, options) {
       content: [
         text(
           flows.length
-            ? `saved flows:\n${flows.map((f) => `  ${f.name} (${f.steps} steps)`).join('\n')}`
+            ? `saved flows:\n${flows.map((f) => `  ${f.name} (${f.steps} steps`
+              + `${f.needsText ? `; needs text for ${f.needsText.map((x) => JSON.stringify(x)).join(', ')}` : ''})`).join('\n')}`
             : 'no saved flows — run one with sim_do and pass saveAs',
         ),
       ],
     };
   }
-  const res = await navigate.runFlow(target, args.name, { options });
+  const res = await navigate.runFlow(target, args.name, { options, text: args.text });
   if (res.reason === 'unknown-flow') {
     return {
       isError: true,
       content: [text(`no flow called "${args.name}". Saved: ${(res.known ?? []).join(', ') || 'none'}`)],
+    };
+  }
+  if (res.reason === 'needs-text') {
+    return {
+      isError: true,
+      content: [text(`flow "${args.name}" types into ${(res.fields ?? []).map((f) => JSON.stringify(f)).join(', ')},`
+        + ' which was saved without its text — call again with text: {"<field>": "..."}')],
     };
   }
   const lines = [`flow "${args.name}"`, ...stepLines(res)];

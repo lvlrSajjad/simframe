@@ -413,6 +413,10 @@ export const PLAN_REASONS = {
   'no-route': 'no_plan',
   'unreplayable-edge': 'no_plan',
   'unknown-flow': 'no_plan',
+  // A route or flow that types into a field, walked without the text for it.
+  // The plan exists and cannot be executed as given — the graph keeps no typed
+  // text, so the caller has to bring it.
+  'needs-text': 'no_plan',
   // A route that ran and did not land. Not `no_plan`: there *was* a plan and it
   // was followed — what could not be confirmed is that it worked, which is what
   // `verification_failed` means everywhere else in this file.

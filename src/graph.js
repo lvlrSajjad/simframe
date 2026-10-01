@@ -12,6 +12,7 @@ import * as fingerprint from './fingerprint.js';
 import * as metrics from './metrics.js';
 import * as matching from './matching.js';
 import * as store from './store.js';
+import * as typed from './typed.js';
 
 const GRAPH_VERSION = 3;
 
@@ -145,6 +146,14 @@ function graphDir(udid) {
 /** A stable name for an action, so the same step matches its own history. */
 export function actionSignature(step) {
   if (!step || typeof step !== 'object') return String(step ?? '');
+  // A text step is named by the field it typed into and nothing else. Its text
+  // reached this key through the generic tail below — the first 40 characters
+  // of `{"into":"Password","text":"…"}` — and from here into a file on disk.
+  // See typed.js.
+  if (typed.isTextStep(step)) {
+    const action = step.action ?? (Object.keys(step)[0] === 'paste' ? 'paste' : 'type');
+    return `${action}:${typed.fieldOf(step).toLowerCase()}`;
+  }
   // Normalized steps carry `{action, value}`, not `{tap: "..."}`, and every
   // step reaching the graph has been normalized. Without this the shorthand
   // branches below never matched and everything fell to the generic tail, so a
@@ -219,6 +228,10 @@ function noteLayout(node, reading) {
 }
 
 function save(udid, node) {
+  // Every write is a scrub. A node learned before text was kept off edges is
+  // cleaned the first time anything touches it, without waiting for somebody
+  // to remember to run `scripts/scrub-graph-text.mjs` on that device.
+  scrubNode(node);
   const dir = graphDir(udid);
   fs.mkdirSync(dir, { recursive: true });
   store.writeAtomic(path.join(dir, `${node.hash}.json`), JSON.stringify(node));
@@ -336,10 +349,67 @@ function addVariant(node, reading) {
   return true;
 }
 
-/** Only actions worth replaying — a launch or a URL open is a flow's start, not a step within it. */
+/**
+ * Only actions worth replaying — a launch or a URL open is a flow's start, not a
+ * step within it. A text step is kept without its text: where it typed is part
+ * of the route, what it typed belongs to whoever walks the route next.
+ */
 function replayable(step) {
   if (!step || typeof step !== 'object') return null;
-  return step.launch != null || step.openUrl != null ? null : step;
+  if (step.launch != null || step.openUrl != null) return null;
+  return typed.withoutText(step);
+}
+
+/** The field an old step-less text edge typed into, if its truncated key still says. */
+function fieldFromOldKey(action) {
+  const m = /"into":"((?:[^"\\]|\\.)*)"/.exec(String(action ?? ''));
+  return m ? m[1] : null;
+}
+
+/**
+ * Take any typed text off a node's edges, merging edges that only differed by it.
+ *
+ * Two edges that typed different text into the same field were two keys and are
+ * now one, so their observations are pooled: counts add, the timing windows are
+ * concatenated and trimmed, and the destination is the most recently seen one.
+ * Idempotent — a node already clean comes back unchanged — and returns how many
+ * edges it rewrote so the scrub script can say what it did.
+ */
+export function scrubNode(node) {
+  if (!Array.isArray(node?.edges)) return 0;
+  let rewritten = 0;
+  const byKey = new Map();
+  for (const edge of node.edges) {
+    const kind = String(edge.action ?? '').split(':')[0];
+    const textEdge = typed.isTextStep(edge.step) || (!edge.step && typed.TEXT_ACTIONS.has(kind));
+    let clean = edge;
+    if (textEdge) {
+      const step = edge.step
+        ? typed.withoutText(edge.step)
+        : { action: kind, ...(fieldFromOldKey(edge.action) != null ? { into: fieldFromOldKey(edge.action) } : {}), needsText: true };
+      const action = actionSignature(step);
+      if (action !== edge.action || JSON.stringify(step) !== JSON.stringify(edge.step)) {
+        clean = { ...edge, action, step };
+        rewritten += 1;
+      }
+    }
+    const seen = byKey.get(clean.action);
+    if (!seen) { byKey.set(clean.action, clean); continue; }
+    const [older, newer] = (seen.lastSeen ?? 0) <= (clean.lastSeen ?? 0) ? [seen, clean] : [clean, seen];
+    const pooled = (k) => [...(older[k] ?? []), ...(newer[k] ?? [])].slice(-TIMING_WINDOW);
+    byKey.set(clean.action, {
+      ...older,
+      ...newer,
+      count: (older.count ?? 0) + (newer.count ?? 0),
+      changedOutcomes: (older.changedOutcomes ?? 0) + (newer.changedOutcomes ?? 0) || undefined,
+      settles: pooled('settles'),
+      quietGaps: pooled('quietGaps'),
+      focuses: pooled('focuses'),
+      ...(older.trueGaps || newer.trueGaps ? { trueGaps: pooled('trueGaps') } : {}),
+    });
+  }
+  node.edges = [...byKey.values()];
+  return rewritten;
 }
 
 /**
@@ -768,6 +838,34 @@ export function predict(udid, from, action) {
 export function stats(udid) {
   const nodes = allNodes(udid);
   return { screens: nodes.length, edges: nodes.reduce((n, s) => n + s.edges.length, 0) };
+}
+
+/**
+ * Take typed text off every edge in a device's graph, whatever version wrote it.
+ *
+ * Reads the raw files rather than going through `allNodes`, because a node
+ * from an older fingerprint version is ignored by everything else here and
+ * still holds whatever it held — the leak that started this was in one. Each
+ * file is rewritten in place with its own version fields untouched, and only
+ * when something changed. Reports counts, never content.
+ */
+export function scrubGraph(udid, { dryRun = false } = {}) {
+  const dir = graphDir(udid);
+  const report = { files: 0, rewritten: 0, edges: 0, unreadable: 0 };
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.json')); } catch { return report; }
+  for (const name of names) {
+    const file = path.join(dir, name);
+    let node;
+    try { node = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { report.unreadable += 1; continue; }
+    report.files += 1;
+    const edges = scrubNode(node);
+    if (!edges) continue;
+    report.rewritten += 1;
+    report.edges += edges;
+    if (!dryRun) store.writeAtomic(file, JSON.stringify(node));
+  }
+  return report;
 }
 
 export function forget(udid) {
