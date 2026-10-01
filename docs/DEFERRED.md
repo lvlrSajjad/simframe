@@ -2583,6 +2583,49 @@ worth more than the verdict.
    A tap at 16:44 went to the shut-down device (idb: "Mach port not
    connected") and is not evidence.
 
+   **Finished the same day, after the owner booted it back in.** On
+   `B55AB0AE`, every simframe input fails, and it is not one dead daemon. Each
+   result below was checked with `launchctl list`, looking for Settings'
+   process, not with a screenshot:
+
+   | condition | result |
+   | --- | --- |
+   | cold daemon (first tap) | miss |
+   | same daemon, second tap | miss |
+   | after `input reset` | miss |
+   | after `stop --force` + `start` | miss |
+   | holds of 150, 300 and 600 ms | miss, miss, miss |
+   | swipe across pages; `press lock` | nothing moved; did not lock |
+   | after a second reboot, cold tap | miss |
+   | the Claude Code simulator tool's tap, same point | **opened Settings** |
+
+   Ruled out: geometry (402x874 @3x, correct); the device record
+   (`device.plist` identical to `326464A4` apart from timestamps); touch
+   accommodations (none set); and input landing on the other booted simulator
+   (Settings never started there). The Claude Code simulator panel, tested on
+   `326464A4`, did not break input attached before the daemon, attached after
+   it, or across a reboot. The one miss on `326464A4` came on its first boot
+   after 15 hours shut down: it stayed broken through a panel detach and a
+   daemon restart, and cleared on the next reboot. A second boot did **not**
+   clear `B55AB0AE`.
+
+   **The one difference measured.** `backboardd` on `B55AB0AE` logs
+   `Connection to com.apple.GameController.gamecontrollerd.driver interrupted`
+   about twice a second (12 in 8 s, 11 in 6 s with no simframe daemon
+   running). On `326464A4` it logs 0 in 6 s. `gamecontrollerd` itself is
+   running. The GameController files under the device's `data/` are the same
+   on both. That is a correlation on two devices, not a cause. The loop is in
+   a HID service filter inside the process that routes touches, which makes it
+   the lead, and nothing more.
+
+   **Next.** (1) Stream `backboardd` and `SpringBoard` at debug level during a
+   simframe tap and during the other tool's tap, and diff what arrives. That
+   shows whether simframe's Indigo messages reach the device at all. (2) Find
+   out which path the other tool injects through, since it survives whatever
+   this is. (3) Erase a *copy* of the device (`simctl clone`, then `erase`) to
+   test whether its data is the cause, without touching the colleague's
+   device.
+
 192. **Peers still report the wrong screen: "on the login screen" while on the
    main screen.** OPEN, reported by the owner 2026-09-25, not reproduced. In
    their words: *"looks like sometimes old screenshots hang around"*. Last seen
