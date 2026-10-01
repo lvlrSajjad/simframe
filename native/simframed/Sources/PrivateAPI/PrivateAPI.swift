@@ -112,6 +112,10 @@ public protocol SimulatorPlatform: AnyObject {
 
     /// Whether input is available, and why not when it is not.
     func inputStatus() -> (available: Bool, detail: String)
+    /// Why input that reports itself available may still not land, or nil.
+    /// Separate from `inputStatus` because "available" was true the whole time
+    /// input was silently dropped, and doctor graded that `ok`.
+    func inputDegraded() -> String?
     /// A press and release at one point.
     func tap(at point: CGPoint, durationMs: Double) throws
     /// A deliberate hold. Named separately from `tap` because callers mean
@@ -187,4 +191,8 @@ public protocol SimulatorPlatform: AnyObject {
     func openURL(_ url: String) throws
     /// `action` is grant/revoke/reset, `service` one of simctl's privacy services.
     func permission(action: String, service: String, bundleId: String?) throws
+}
+
+public extension SimulatorPlatform {
+    func inputDegraded() -> String? { nil }
 }

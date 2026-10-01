@@ -23,7 +23,12 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
     private var changeCallback: Any?
     private var changeUUID: NSUUID?
     private var device: NSObject?
-    private var hid: IndigoHID?
+    private var hid: HIDTransport?
+    /// Why the transport in use is not the one this CoreSimulator wants, when it
+    /// is not. Shown by doctor, because a fallback nobody can see is how input
+    /// failed silently for a whole field round.
+    private var transportNote: String?
+    private var lastDTUHIDAttempt: Date?
     // Built on first use, not at attach: reading the tree is optional, and a
     // machine where the translation framework is missing must still capture.
     private var accessibility: AccessibilityBridge?
@@ -254,7 +259,7 @@ public final class CoreSimulatorPlatform: SimulatorPlatform {
             if warmInput {
                 // Warm the HID session once, so the first gesture is not slower
                 // than the rest. Input being unavailable must not stop capture.
-                hid = try? IndigoHID(device: device, simulatorKit: Self.simulatorKitHandles)
+                hid = makeTransport(for: device)
                 cachedKeyboardWarning = nonEnglishKeyboards()
             }
             return resolved
@@ -437,13 +442,19 @@ extension CoreSimulatorPlatform {
     }
 
     public func inputStatus() -> (available: Bool, detail: String) {
-        if hid != nil {
-            var detail = "Indigo HID (SimDeviceLegacyHIDClient)"
+        if let hid {
+            var detail = hid.transportName
+            if let transportNote { detail += "; WARNING: \(transportNote)" }
             if let layouts = cachedKeyboardWarning, !layouts.isEmpty {
                 // Silent wrong text is the worst failure this layer has, so say
                 // so up front rather than letting it surface as odd characters.
                 detail += "; WARNING: \(layouts.joined(separator: ", ")) keyboard(s) installed — "
-                    + "key events follow the active layout, so use paste for exact text"
+                    + (hid is DTUHID
+                        // On dtuhidd paste is key events too (see `paste`), so
+                        // "use paste" would send the reader to the same path.
+                        ? "key events follow the active layout, and on this CoreSimulator paste types key events "
+                            + "too, so text is exact only while an English keyboard is active"
+                        : "key events follow the active layout, so use paste for exact text")
             }
             return (true, detail)
         }
@@ -477,7 +488,37 @@ extension CoreSimulatorPlatform {
             }
     }
 
-    private func requireHID() throws -> (IndigoHID, CGSize) {
+    public func inputDegraded() -> String? { hid == nil ? nil : transportNote }
+
+    /// DTUHID where this CoreSimulator drops legacy input, the legacy client
+    /// otherwise — or as the fallback, said out loud.
+    private func makeTransport(for device: NSObject) -> HIDTransport? {
+        let version = DTUHID.loadedCoreSimulatorVersion
+        if DTUHID.suppressesLegacyInput(coreSimulatorVersion: version) {
+            lastDTUHIDAttempt = Date()
+            do {
+                let t = try DTUHID(device: device)
+                transportNote = nil
+                return t
+            } catch {
+                transportNote = "CoreSimulator \(version ?? "?") drops legacy input on some boots, and dtuhidd "
+                    + "could not be reached (\(error)) — taps may report success and do nothing; "
+                    + "retrying dtuhidd on later input"
+            }
+        } else {
+            transportNote = nil
+        }
+        return try? IndigoHID(device: device, simulatorKit: Self.simulatorKitHandles)
+    }
+
+    private func requireHID() throws -> (HIDTransport, CGSize) {
+        // A fallback is not a resting state. dtuhidd is demand-launched and can
+        // be throttled early in a boot, so a failed first attempt is retried on
+        // later input, at most every ten seconds.
+        if transportNote != nil, let device, !(hid is DTUHID),
+           Date().timeIntervalSince(lastDTUHIDAttempt ?? .distantPast) > 10 {
+            hid = makeTransport(for: device)
+        }
         guard let hid, let info = attached else {
             throw PrivateAPIError.hidUnavailable(inputStatus().detail)
         }
@@ -486,9 +527,10 @@ extension CoreSimulatorPlatform {
 
     public func tap(at point: CGPoint, durationMs: Double = Timing.tapMs) throws {
         let (hid, screen) = try requireHID()
-        hid.mouse(at: point, event: .down, screen: screen)
+        try hid.touch(at: point, phase: .began, screen: screen)
         Thread.sleep(forTimeInterval: max(0.01, durationMs / 1000))
-        hid.mouse(at: point, event: .up, screen: screen)
+        try hid.touch(at: point, phase: .ended, screen: screen)
+        hid.flush()
     }
 
     public func longPress(at point: CGPoint, durationMs: Double = 600) throws {
@@ -497,7 +539,7 @@ extension CoreSimulatorPlatform {
 
     public func drag(from: CGPoint, to: CGPoint, holdMs: Double = 500, durationMs: Double = 400) throws {
         let (hid, screen) = try requireHID()
-        hid.mouse(at: from, event: .down, screen: screen)
+        try hid.touch(at: from, phase: .began, screen: screen)
         // Hold still first: without it the UI reads a swipe, and a reorderable
         // list never enters drag mode at all.
         Thread.sleep(forTimeInterval: holdMs / 1000)
@@ -505,20 +547,21 @@ extension CoreSimulatorPlatform {
         for i in 1...steps {
             let t = Double(i) / Double(steps)
             let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
-            hid.mouse(at: CGPoint(x: from.x + (to.x - from.x) * eased,
+            try hid.touch(at: CGPoint(x: from.x + (to.x - from.x) * eased,
                                   y: from.y + (to.y - from.y) * eased),
-                      event: .dragged, screen: screen)
+                      phase: .moved, screen: screen)
             Thread.sleep(forTimeInterval: Timing.stepMs / 1000)
         }
         // Settle at the destination before lifting, so the drop lands there.
         Thread.sleep(forTimeInterval: 0.08)
-        hid.mouse(at: to, event: .up, screen: screen)
+        try hid.touch(at: to, phase: .ended, screen: screen)
+        hid.flush()
     }
 
     public func swipe(from: CGPoint, to: CGPoint, durationMs: Double = 300) throws {
         let (hid, screen) = try requireHID()
         let steps = max(2, Int(durationMs / Timing.stepMs))
-        hid.mouse(at: from, event: .down, screen: screen)
+        try hid.touch(at: from, phase: .began, screen: screen)
         for i in 1...steps {
             // Ease in and out, so the gesture accelerates and settles the way a
             // finger does rather than moving at a constant machine speed.
@@ -526,10 +569,11 @@ extension CoreSimulatorPlatform {
             let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
             let p = CGPoint(x: from.x + (to.x - from.x) * eased,
                             y: from.y + (to.y - from.y) * eased)
-            hid.mouse(at: p, event: .dragged, screen: screen)
+            try hid.touch(at: p, phase: .moved, screen: screen)
             Thread.sleep(forTimeInterval: Timing.stepMs / 1000)
         }
-        hid.mouse(at: to, event: .up, screen: screen)
+        try hid.touch(at: to, phase: .ended, screen: screen)
+        hid.flush()
     }
 
     public func type(_ text: String) throws {
@@ -540,17 +584,37 @@ extension CoreSimulatorPlatform {
         // anything that must be exact goes through paste() instead.
         for character in text.unicodeScalars {
             guard let usage = HIDKeyboard.usage(for: character) else { continue }
-            if usage.shift { hid.key(usage: HIDKeyboard.leftShift, op: .down) }
-            hid.key(usage: usage.code, op: .down)
+            if usage.shift { try hid.key(usage: HIDKeyboard.leftShift, op: .down) }
+            try hid.key(usage: usage.code, op: .down)
             Thread.sleep(forTimeInterval: Timing.keyStrokeMs / 1000)
-            hid.key(usage: usage.code, op: .up)
-            if usage.shift { hid.key(usage: HIDKeyboard.leftShift, op: .up) }
+            try hid.key(usage: usage.code, op: .up)
+            if usage.shift { try hid.key(usage: HIDKeyboard.leftShift, op: .up) }
             Thread.sleep(forTimeInterval: Timing.keyStrokeMs / 1000)
         }
+        hid.flush()
     }
 
     public func paste(_ text: String) throws {
         let (hid, _) = try requireHID()
+        // **Never Cmd-V over dtuhidd.** On that CoreSimulator the guest's paste
+        // is served by `dtpasteboardd` from the host side, not from what
+        // `simctl pbcopy` just wrote: measured 2026-10-01, `type "Wallpaper"`
+        // put the Mac's own clipboard (a link copied in another app) into
+        // Settings' search field, behind an "Allow Paste" prompt. That is the
+        // operator's private data typed into the app under test. Key events
+        // carry no clipboard, so the text goes that way, and a character they
+        // cannot produce is an error rather than a silent skip.
+        if hid is DTUHID {
+            let missing = text.unicodeScalars.filter { HIDKeyboard.usage(for: $0) == nil }
+            guard missing.isEmpty else {
+                let shown = String(String.UnicodeScalarView(missing.prefix(5)))
+                throw PrivateAPIError.hidUnavailable(
+                    "cannot type \"\(shown)\" on this CoreSimulator: key events cannot produce it, and its paste "
+                        + "path pastes the host's clipboard rather than this text")
+            }
+            try type(text)
+            return
+        }
         guard let info = attached else { throw PrivateAPIError.hidUnavailable("not attached") }
 
         let copy = Process()
@@ -568,11 +632,12 @@ extension CoreSimulatorPlatform {
         }
 
         // Command-V. Modifiers are ordinary key usages held around the keystroke.
-        hid.key(usage: HIDKeyboard.leftGUI, op: .down)
-        hid.key(usage: HIDKeyboard.vKey, op: .down)
+        try hid.key(usage: HIDKeyboard.leftGUI, op: .down)
+        try hid.key(usage: HIDKeyboard.vKey, op: .down)
         Thread.sleep(forTimeInterval: 0.04)
-        hid.key(usage: HIDKeyboard.vKey, op: .up)
-        hid.key(usage: HIDKeyboard.leftGUI, op: .up)
+        try hid.key(usage: HIDKeyboard.vKey, op: .up)
+        try hid.key(usage: HIDKeyboard.leftGUI, op: .up)
+        hid.flush()
     }
 
     /// simctl, run against the attached device.
@@ -633,31 +698,32 @@ extension CoreSimulatorPlatform {
     public func resetInput() throws {
         guard let device else { throw PrivateAPIError.hidUnavailable("not attached to a device") }
         hid?.resetSession()
-        hid = try? IndigoHID(device: device, simulatorKit: Self.simulatorKitHandles)
+        hid = makeTransport(for: device)
         guard hid != nil else { throw PrivateAPIError.hidUnavailable("could not rebuild the HID client") }
     }
 
     public func pressKey(usage: UInt32, modifiers: [UInt32]) throws {
         let (hid, _) = try requireHID()
-        for m in modifiers { hid.key(usage: m, op: .down) }
-        defer { for m in modifiers.reversed() { hid.key(usage: m, op: .up) } }
+        for m in modifiers { try hid.key(usage: m, op: .down) }
+        defer {
+            for m in modifiers.reversed() { try? hid.key(usage: m, op: .up) }
+            hid.flush()
+        }
         // The usage-code path, not the character path. `type` sends characters
         // and is therefore at the mercy of whichever keyboard layout iOS has
         // active — which is why this device's own doctor warns about the fa and
         // hy layouts. A usage code names a key *position* and is not translated,
         // so Return is Return whatever is installed.
-        hid.key(usage: usage, op: .down)
+        try hid.key(usage: usage, op: .down)
         Thread.sleep(forTimeInterval: 0.06)
-        hid.key(usage: usage, op: .up)
+        try hid.key(usage: usage, op: .up)
     }
 
     public func press(_ button: HardwareButton) throws {
         let (hid, _) = try requireHID()
-        guard let code = HIDKeyboard.buttonCode(button) else {
-            throw PrivateAPIError.hidUnavailable("no key code for \(button.rawValue)")
-        }
-        hid.button(keyCode: code, op: .down)
+        try hid.press(button, op: .down)
         Thread.sleep(forTimeInterval: 0.06)
-        hid.button(keyCode: code, op: .up)
+        try hid.press(button, op: .up)
+        hid.flush()
     }
 }

@@ -2514,7 +2514,8 @@ worth more than the verdict.
 193. **A peer's report on 0.19.0: taps that missed and said `ok`, a map
    called moving over an old frame, and a scroll that claimed both ways.**
    2026-10-01, a peer session on `B55AB0AE` (a colleague's device, driven from
-   this laptop) running the Ecotrak RN debug app. Four parts, three fixed.
+   this laptop) running the Ecotrak RN debug app. Four parts, **all four fixed** (the taps last, in
+   0.20.0; see the end of this item).
 
    **Fixed — a step that did nothing printed `ok`.** The escalation log had all
    three misses as `no-visible-change` mis-taps, and the flow record said
@@ -2625,6 +2626,34 @@ worth more than the verdict.
    this is. (3) Erase a *copy* of the device (`simctl clone`, then `erase`) to
    test whether its data is the cause, without touching the colleague's
    device.
+
+   **FIXED — the cause was Xcode 27, not the device.** The Claude Code
+   simulator helper's own strings name it: *"CoreSimulator-1155.4 (Xcode 27)
+   and later hand the legacy keyboard service over to dtuhidd for the lifetime
+   of the boot."* This Mac runs CoreSimulator 1174.9.2. Once anything connects
+   to `dtuhidd`, `backboardd` tears down the legacy digitizer, button and
+   keyboard services for the rest of the boot, and legacy messages are
+   accepted and dropped. That accounts for all of it: one device dead on every
+   boot, the bench device dead on one boot out of five, a daemon restart and
+   `input reset` never helping, and the other tool, which speaks `dtuhidd`,
+   always working. It is filed across the ecosystem (baguette #77, argent
+   #932, idb's DTUHID transport). The `gamecontrollerd` loop was a bystander.
+
+   simframed now speaks `dtuhidd` on CoreSimulator ≥ 1155.4 (`DTUHID.swift`,
+   wire format from idb, MIT). It proves liveness with a barrier reply before
+   trusting the connection, and falls back to legacy only when `dtuhidd`
+   cannot be reached. `doctor` grades that fallback `warn` via a new
+   `input.degraded` field. On `B55AB0AE`, before → after: taps 0/9 → **10/10**
+   (5 cold, 5 warm), swipe dead → works, home and lock dead → home works.
+   `settings-larger-text` on `326464A4`: 3/3 completed.
+
+   **A second finding the fix exposed, and worse than the first.** With keys
+   flowing again, `type` (pbcopy + Cmd-V) pasted **the Mac's own clipboard**
+   into the app, behind an iOS "Allow Paste" prompt, because on this
+   CoreSimulator the guest's paste is served by `dtpasteboardd` from the host.
+   On the DTUHID transport `paste` now types key events, and a character they
+   cannot produce is an error. Verified: `type "Wallpaper"` gives "Wallpaper",
+   with no prompt.
 
 192. **Peers still report the wrong screen: "on the login screen" while on the
    main screen.** OPEN, reported by the owner 2026-09-25, not reproduced. In

@@ -241,7 +241,8 @@ case "run":
                     let input = platform.inputStatus()
                     let ax = platform.accessibilityStatus()
                     return done([
-                        "input": ["available": input.available, "detail": input.detail],
+                        "input": ["available": input.available, "detail": input.detail,
+                                  "degraded": platform.inputDegraded() as Any? ?? NSNull()],
                         "accessibility": ["available": ax.available, "detail": ax.detail],
                         "device": ["name": device.name, "udid": device.udid,
                                    "pointWidth": device.pointWidth, "pointHeight": device.pointHeight,

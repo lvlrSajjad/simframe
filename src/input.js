@@ -34,7 +34,13 @@ export async function driverFor(udid) {
     try {
       const status = await control.status(udid);
       if (status.input?.available) {
-        return { name: 'simframed', available: true, version: status.input.detail, reason: null, viaSocket: true };
+        // `degraded` is the daemon saying input reports itself available and
+        // may still not land — the legacy fallback on a CoreSimulator that
+        // drops legacy input. It was graded `ok` the whole time that happened.
+        return {
+          name: 'simframed', available: true, version: status.input.detail, reason: null, viaSocket: true,
+          degraded: status.input.degraded ?? null,
+        };
       }
       return { name: 'simframed', available: false, version: null, reason: status.input?.detail ?? 'input unavailable', viaSocket: true };
     } catch {

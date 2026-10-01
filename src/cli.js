@@ -1758,7 +1758,7 @@ async function doctor({ json = false, strict = false, device, options = {} } = {
         // input path there is, and grading it a downgrade made `--strict` fail
         // on a device that was working perfectly.
         const best = driver.name === 'simframed' || driver.name === caps.input.via;
-        add(`input driver (${d.name})`, driver.available ? (best ? 'ok' : 'warn') : 'warn',
+        add(`input driver (${d.name})`, driver.available && !driver.degraded ? (best ? 'ok' : 'warn') : 'warn',
           driver.available ? `${driver.name}: ${driver.version}` : driver.reason,
           { key: 'input.driver', value: driver.available ? driver.name : null });
       }

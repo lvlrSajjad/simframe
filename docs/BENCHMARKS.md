@@ -4690,3 +4690,23 @@ ways, because its own trailing damage frames already confirm the settle. The
 post-action settle gives up at 1.5 s, so the old 4 s window is what printed
 `STILL MOVING · frame 2.4s old` in the field (DEFERRED 193).
 
+## Input over `dtuhidd` on Xcode 27 — 2026-10-01
+
+Apple M2 Pro, Xcode 27.0 (27A266a), CoreSimulator 1174.9.2, iOS 26.5, iPhone 17
+Pro. Each input was checked independently of simframe: `launchctl list` for
+Settings' process for taps, a `simctl io` screenshot for gestures and buttons,
+and the accessibility tree for typed text.
+
+| device · input | legacy Indigo | DTUHID |
+| --- | --- | --- |
+| `B55AB0AE` · tap on the Settings icon, cold daemon | 0/5 (over 2 boots) | **5/5** |
+| `B55AB0AE` · tap, warm daemon | 0/4 (incl. after `input reset`, restart) | **5/5** |
+| `B55AB0AE` · swipe between home pages | 0/1 | 1/1 |
+| `B55AB0AE` · home button / lock | lock 0/1 | home 1/1 |
+| `B55AB0AE` · `type "Wallpaper"` | — | exact, no prompt (key events) |
+| `326464A4` · `settings-larger-text`, 4 steps | — | **3/3 completed**, 7.1–9.8 s |
+
+Before the fix, the bench device `326464A4` took 15/15 legacy taps on most
+boots and 0/3 on one. That is the "unreliable, not dead" pattern idb documents
+for this CoreSimulator.
+

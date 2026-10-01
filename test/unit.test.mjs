@@ -7075,3 +7075,31 @@ test('scrollTo does not claim both ways when it tried one (0.19.0)', () => {
   assert.match(src, /new Set\(scrolled\)\.size > 1 \? ' both ways'/);
   assert.match(src, /No scroll moved the screen at all/);
 });
+
+test('input goes through dtuhidd where CoreSimulator drops legacy input (DEFERRED 193)', () => {
+  // Measured 2026-10-01 on the reporter's device: every legacy tap, swipe and
+  // button press dropped across two boots, a fresh daemon and a session reset,
+  // while another tool speaking dtuhidd landed first time. Over dtuhidd: 10/10.
+  const dtu = fs.readFileSync(new URL('../native/simframed/Sources/PrivateAPI/DTUHID.swift', import.meta.url), 'utf8');
+  const plat = fs.readFileSync(new URL('../native/simframed/Sources/PrivateAPI/CoreSimulatorPlatform.swift', import.meta.url), 'utf8');
+  assert.match(dtu, /firstCoreSimulatorVersion = "1155\.4"/);
+  assert.match(dtu, /compare\(firstCoreSimulatorVersion, options: \.numeric\)/, 'versions compare numerically, 1155.10 > 1155.4');
+  assert.match(dtu, /com\.apple\.coredevice\.feature\.remote\.hid\.digitizer/);
+  assert.match(dtu, /xpc_connection_enable_sim2host_4sim/, 'without sim2host the service never sees a payload');
+  // A dead dtuhidd accepts sends silently, so liveness is proven by a reply.
+  assert.match(dtu, /xpc_connection_send_message_with_reply/);
+  assert.match(plat, /DTUHID\.suppressesLegacyInput\(coreSimulatorVersion: version\)/);
+  // The fallback is said out loud and graded, not left as `available: true`.
+  assert.match(plat, /public func inputDegraded\(\) -> String\? \{ hid == nil \? nil : transportNote \}/);
+  const cli = fs.readFileSync(new URL('../src/cli.js', import.meta.url), 'utf8');
+  assert.match(cli, /driver\.available && !driver\.degraded \? \(best \? 'ok' : 'warn'\) : 'warn'/);
+});
+
+test('paste never sends Cmd-V over dtuhidd, because it pastes the host clipboard (DEFERRED 193)', () => {
+  // `type "Wallpaper"` put the operator's own clipboard into Settings' search
+  // field behind an "Allow Paste" prompt.
+  const plat = fs.readFileSync(new URL('../native/simframed/Sources/PrivateAPI/CoreSimulatorPlatform.swift', import.meta.url), 'utf8');
+  const paste = plat.slice(plat.indexOf('public func paste('), plat.indexOf('// Command-V.'));
+  assert.match(paste, /if hid is DTUHID \{[\s\S]*try type\(text\)\n\s*return\n\s*\}/);
+  assert.match(paste, /cannot type/, 'an unproducible character is an error, not a silent skip');
+});

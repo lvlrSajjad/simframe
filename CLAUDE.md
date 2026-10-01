@@ -33,7 +33,10 @@ says **six** arguments on this Xcode, not the nine this file used to assert —
 the binary states its own prototype as a string, which is how that was settled.
 The 5-argument path used by idb/AXe is broken on iOS 26 — never use it.
 Gestures are real down→move→up sequences with realistic timing, never
-teleporting taps. Warm the HID session once per device.
+teleporting taps. Warm the HID session once per device. On CoreSimulator 1155.4+ (Xcode 27) the
+guest drops legacy Indigo input, silently: input goes through `dtuhidd` there,
+liveness-probed, with the legacy client as a fallback that `doctor` grades
+`warn`. Never Cmd-V on that transport, because it pastes the host's clipboard.
 
 **Perception order (strict).**
 1. Accessibility tree via `AXPTranslator` — read host-side, in-process, since

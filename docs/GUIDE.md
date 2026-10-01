@@ -1184,7 +1184,9 @@ numbers below refer to it.
   traced to a build. **0.19.1** stops a finished screen reading as
   `STILL MOVING` for up to four seconds after a change with no animation, and
   prints a tap that moved nothing as `WARN`, not `ok` (193). The taps in
-  that report that did not land at all are open and unreproduced (193).
+  that report that did not land at all are fixed in **0.20.0**: on Xcode 27
+  the simulator silently drops the legacy input path, and simframe now sends
+  input through `dtuhidd` there (193).
 - **Screens it has not seen before.** On a fresh simulator, first-launch sheets
   ("Welcome to Reminders", Safari's tips) are read as an unknown screen, and a
   run can stop there. Content-driven screens can also split into two

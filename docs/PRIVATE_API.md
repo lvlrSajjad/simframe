@@ -15,7 +15,7 @@ than by reading write-ups, including this one.
 | | |
 | --- | --- |
 | macOS | 15.x (Darwin 25.6.0) |
-| Xcode | 26.x, `/Applications/Xcode.app/Contents/Developer` (27.0 reported by a contributor, not measured here — see Frameworks) |
+| Xcode | 26.x, `/Applications/Xcode.app/Contents/Developer`; 27.0 (27A266a, CoreSimulator 1174.9.2) measured for input on 2026-10-01 |
 | Devices | iPhone 17 Pro / iOS 26.5 (3x) · iPad Pro 13-inch M5 / iOS 26.5 (2x) |
 | Date | 2026-09 |
 
@@ -137,6 +137,61 @@ registered.
 | (implied) any port conforming to the renderable protocol will do | Several conform; only the one with non-zero `displaySize` vends a surface. Picking the first match yields a permanently nil `framebufferSurface`, which looks exactly like the API being broken. |
 | `IndigoHIDMessageForMouseNSEvent` takes **9 arguments** on iOS 26 | It takes **six** on this Xcode: `(CGPoint *, CGPoint *, IndigoHIDTarget, NSEventType, NSSize, IndigoHIDEdge)`. The binary states its own prototype as a string, so this needs no guessing. The digitizer target `0x32` was correct. |
 | The HID client is reached through the `SimLegacyHIDDescriptor` IO port | It is constructed directly from the `SimDevice` with `initWithDevice:error:`. The port exists but is not on the path used here. |
+
+## Input on Xcode 27: `dtuhidd`, and why the legacy path goes quiet
+
+Measured 2026-10-01, Xcode 27.0 (27A266a), CoreSimulator **1174.9.2**, iPhone 17
+Pro / iOS 26.5, on two devices.
+
+**From CoreSimulator 1155.4 the legacy path below is unreliable, and it fails
+silently.** The guest runs a new HID daemon, `dtuhidd`. The first time anything
+connects to it, the guest sets `com.apple.coredevice.dtuhidd.active` and
+`backboardd` tears down the legacy digitizer, button and keyboard services for
+the rest of that boot. Legacy messages are still accepted, and they reach
+nothing. Buttons and keys are always dropped. Touch is dropped on some boots and
+intermittently within one. On one device, every legacy input failed across two
+boots, a fresh daemon and `resetHIDSession`: 0 of 9 taps, a swipe, and the lock
+button. The same device took 10 of 10 taps over `dtuhidd`.
+
+```
+SimDevice -lookup:error:  ("com.apple.coredevice.feature.remote.hid.digitizer")  -> mach_port_t
+xpc_endpoint_create_mach_port_4sim(port, 0, 0)    -> xpc_endpoint (+1, consumes the send right)   dlsym
+xpc_connection_create_from_endpoint(endpoint)     -> xpc_connection (+1, unresumed)
+xpc_connection_enable_sim2host_4sim(connection)   required: without it the peer is seen, payloads never are   dlsym
+```
+
+Messages are plain XPC dictionaries, with the wire format taken from facebook/idb's
+`SimulatorDTUHIDTransport` (MIT):
+
+| key | type | value |
+| --- | --- | --- |
+| `messageType` | string | `IndigoDigitizerEvent` · `IndigoKeyboardButtonEvent` · `IndigoButtonEvent` |
+| `isBarrier` | bool | true only on the liveness probe |
+| `featureIdentifier` | string | the looked-up service name |
+| `payload` | dictionary | per type, below |
+
+- **Digitizer:** `pointOne {x, y}` as doubles normalised to 0–1 from the top
+  left, then `eventType` (uint64: 0 start, 1 position, 2 end), `edge` 0 and
+  `target` 0.
+- **Keyboard:** `usageCode` (uint64, the same HID usage the legacy path sends)
+  and `state` (uint64, **1 down, 2 up**; 0 is rejected at decode).
+- **Button:** `usagePage` 0x0C plus `usageCode` (home 0x40, lock 0x30, Siri
+  0xCF, volume 0xE9/0xEA) and `state`.
+
+**Liveness must be proven, not assumed.** Every step above succeeds against a
+`dtuhidd` that cannot run, because launchd vends the port for a demand-launched
+job either way, and a send to it reports no error. A barrier keyboard event
+with usage 0, sent with `xpc_connection_send_message_with_reply`, is the only
+evidence. Allow 4 s for the reply, then 200 ms for the device to open.
+
+**Paste reads the host's clipboard.** On this CoreSimulator the guest's paste is
+served by `dtpasteboardd`, not from what `simctl pbcopy` wrote.
+`pbcopy "Wallpaper"` + Cmd-V put the Mac's own clipboard into the field, behind
+an "Allow Paste" prompt. On this transport `paste` types key events instead.
+
+The legacy section below is still how input works before 1155.4, and it is the
+fallback when `dtuhidd` cannot be reached. `doctor` reports that fallback as
+`warn`.
 
 ## Input: the sequence that works
 
