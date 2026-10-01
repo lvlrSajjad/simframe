@@ -17,8 +17,14 @@
 //     stays — a saved flow is an artifact somebody asked for.
 //   - the write journal (`wrote.json`): secure-field entries and expired ones
 //     are dropped.
-//   - `escalations.jsonl` and `supervisions.jsonl` are measurement logs and are
-//     NOT rewritten. New records no longer carry typed text.
+//   - `escalations.jsonl` and `supervisions.jsonl` keep every measured field;
+//     only typed text is gone from new records.
+//   - every email address in what simframe read off a screen is masked as
+//     `<email>`: the screen map (`screens/*.json`), the graph, `refs.json` and
+//     the three JSONL logs. A sign-in screen shows its username, and the
+//     owner's rule is that no username or password is kept. Frames
+//     (`latest.png`, `ring/`) are pictures of the screen and are not touched;
+//     they are overwritten as capture runs.
 //
 // Devices are named explicitly, or `--all` with an explicit `--skip` list, so
 // nobody scrubs a device that is not theirs by running it bare. Prints counts
@@ -62,7 +68,7 @@ function scrubFlows(udid) {
     const flow = store.readJson(file);
     if (!Array.isArray(flow?.steps)) continue;
     out.files += 1;
-    const steps = flow.steps.map(typed.forSavedFlow);
+    const steps = typed.forSavedFlowSteps(flow.steps);
     if (JSON.stringify(steps) === JSON.stringify(flow.steps)) continue;
     out.rewritten += 1;
     if (!dryRun) store.writeAtomic(file, JSON.stringify({ ...flow, steps }, null, 2));
@@ -73,10 +79,41 @@ function scrubFlows(udid) {
 function scrubJournal(udid) {
   const entries = wrote.read(udid);
   const now = Date.now();
-  const kept = entries.filter((e) => !typed.isSecureField(e.selector) && Number.isFinite(e.at) && now - e.at <= wrote.MAX_AGE_MS);
+  const kept = entries.filter((e) => !typed.isCredentialField(e.selector) && !typed.looksLikeCredential(e.value) && Number.isFinite(e.at) && now - e.at <= wrote.MAX_AGE_MS);
   const dropped = entries.length - kept.length;
   if (dropped && !dryRun) store.writeAtomic(path.join(store.deviceDir(udid), 'wrote.json'), JSON.stringify(kept));
   return { dropped };
+}
+
+function maskFile(file, { jsonl = false } = {}) {
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return 0; }
+  if (!raw.includes('@')) return 0;
+  let out;
+  if (jsonl) {
+    out = raw.split('\n').map((line) => {
+      if (!line.includes('@')) return line;
+      try { return JSON.stringify(typed.maskCredentials(JSON.parse(line))); } catch { return typed.maskCredentials(line); }
+    }).join('\n');
+  } else {
+    try { out = JSON.stringify(typed.maskCredentials(JSON.parse(raw))); } catch { return 0; }
+  }
+  if (out === raw) return 0;
+  if (!dryRun) store.writeAtomic(file, out);
+  return 1;
+}
+
+function scrubReadings(udid) {
+  const dir = store.deviceDir(udid);
+  let files = 0;
+  for (const sub of ['screens', 'graph']) {
+    let names = [];
+    try { names = fs.readdirSync(path.join(dir, sub)).filter((f) => f.endsWith('.json')); } catch { continue; }
+    for (const name of names) files += maskFile(path.join(dir, sub, name));
+  }
+  files += maskFile(path.join(dir, 'refs.json'));
+  for (const log of ['escalations.jsonl', 'flows.jsonl', 'supervisions.jsonl']) files += maskFile(path.join(dir, log), { jsonl: true });
+  return { files };
 }
 
 for (const udid of udids) {
@@ -91,8 +128,9 @@ for (const udid of udids) {
   const g = graph.scrubGraph(udid, { dryRun });
   const f = scrubFlows(udid);
   const j = scrubJournal(udid);
+  const r = scrubReadings(udid);
   console.log(`${udid.slice(0, 8)}  graph: ${g.edges} edge(s) in ${g.rewritten}/${g.files} file(s)`
     + `${g.unreadable ? `, ${g.unreadable} unreadable` : ''}`
-    + `  flows: ${f.rewritten}/${f.files}  journal: ${j.dropped} dropped`
+    + `  flows: ${f.rewritten}/${f.files}  journal: ${j.dropped} dropped  emails masked in ${r.files} file(s)`
     + (dryRun ? '  (dry run — nothing written)' : ''));
 }

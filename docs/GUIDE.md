@@ -643,11 +643,18 @@ route through a form needs the text from whoever walks it. `goto` refuses as
 simframe goto "home" --text '{"Email": "kate@example.com", "Password": "..."}'
 ```
 
-Saved flows are the caller's own artifact and keep ordinary text, but never
-text typed into a field named like a secret (Password, Passcode, PIN, one-time
-code…); `flow run` asks for those the same way. The MCP tools take the same
-`text` object. Why, and what each store under `~/.simframe/<udid>/` does keep,
-is in [DEFERRED 194](DEFERRED.md).
+Saved flows are the caller's own artifact and keep ordinary text, but never a
+credential: text typed into a field named like a secret (Password, Passcode,
+PIN, one-time code…) or like a sign-in name (Email, Username, Login…), any text
+shaped like an email address, and text typed into a field named only by a ref
+or a point. `flow run` asks for those the same way. The MCP tools take the same
+`text` object.
+
+**No email address is written down at all.** What simframe reads off a screen
+is kept as memory (the screen map, refs, the graph, the logs), and a sign-in
+screen shows its username, so every email address in it is stored as
+`<email>`. What the agent is shown live is not masked. Why, and what each store
+under `~/.simframe/<udid>/` does keep, is in [DEFERRED 194 and 195](DEFERRED.md).
 
 ### What the memory is worth, isolated
 

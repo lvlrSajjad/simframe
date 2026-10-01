@@ -234,7 +234,7 @@ function save(udid, node) {
   scrubNode(node);
   const dir = graphDir(udid);
   fs.mkdirSync(dir, { recursive: true });
-  store.writeAtomic(path.join(dir, `${node.hash}.json`), JSON.stringify(node));
+  store.writeAtomic(path.join(dir, `${node.hash}.json`), JSON.stringify(typed.maskCredentials(node)));
 }
 
 export function allNodes(udid) {

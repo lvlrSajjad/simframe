@@ -4828,10 +4828,12 @@ test('a value simframe wrote and can no longer see is reported, and nothing else
   // first field run after this shipped matched a journalled "Email" against the
   // page footer's newsletter box, "Enter your email address", and announced a
   // value gone that was simply elsewhere on the page.
-  wrote.record(udid, { selector: 'Email', value: 'sadjad@example.com' });
-  assert.deepEqual(wrote.missing(udid, [{ label: 'Enter your email address' }, { label: 'Subscribe Now' }]), []);
+  // (The field in that report was "Email"; a sign-in address is never
+  // journalled now, so the rule is shown on an ordinary field.)
+  wrote.record(udid, { selector: 'Company', value: 'Acme Rentals' });
+  assert.deepEqual(wrote.missing(udid, [{ label: 'Enter your company name' }, { label: 'Subscribe Now' }]), []);
   // ...while the field's own row, which begins with the label, still counts.
-  assert.equal(wrote.missing(udid, [{ label: 'Email' }, { label: 'Your email address' }]).length, 1);
+  assert.equal(wrote.missing(udid, [{ label: 'Company' }, { label: 'Your company name' }]).length, 1);
 
   // Somewhere else entirely says nothing. Without the label there is no way to
   // tell "the field was cleared" from "we navigated away", and guessing would
@@ -7141,7 +7143,7 @@ test('a type step into a field named like Password, Passcode or PIN never reache
   // whether it was typed one step at a time or filled by a sweep.
   const saved = saveFlow(udid, 'login', {
     steps: [
-      { type: { into: 'Email', text: 'kate@example.com' } },
+      { type: { into: 'Search', text: 'Fryer 3' } },
       ...fields.map((into, i) => ({ type: { into, text: secrets[i] } })),
       { action: 'paste', into: 'Password', text: secrets[0] },
       { sweep: 'all', fill: { Name: 'Kate', Password: secrets[0], PIN: secrets[2] } },
@@ -7159,7 +7161,7 @@ test('a type step into a field named like Password, Passcode or PIN never reache
   }
   // What the flow keeps instead, and that it says so in a listing.
   const flow = loadFlow(udid, 'login');
-  assert.equal(flow.steps[0].type.text, 'kate@example.com', 'ordinary text in a saved flow is the caller\'s to keep');
+  assert.equal(flow.steps[0].type.text, 'Fryer 3', 'ordinary text in a saved flow is the caller\'s to keep');
   assert.equal(flow.steps[1].needsText, true);
   assert.deepEqual(flow.steps.at(-1).fill.Password, { needsText: true });
   assert.equal(flow.steps.at(-1).fill.Name, 'Kate');
@@ -7259,18 +7261,54 @@ test('a graph file written before the fix is scrubbed, merging edges that only d
   graphmod.forget(udid);
 });
 
+test('no email address that simframe read off a screen reaches disk', async () => {
+  const metrics = await import('../src/metrics.js');
+  const screenmapmod = await import('../src/screenmap.js');
+  const udid = freshDevice('mask-email');
+  const addr = 'dave.burgers@example-fm.com';
+  screenmapmod.remember(udid, { hash: 'c'.repeat(32), layoutHash: '0'.repeat(72), targets: [{ label: `Email = ${addr}`, x: 1, y: 2 }] });
+  metrics.recordEscalation(udid, { reason: 'unknown_screen', detail: `Visible: Email, ${addr}, NEXT`, candidates: [{ label: addr, x: 1, y: 2 }] });
+  for (const [p, body] of filesUnder(store.deviceDir(udid))) assert.ok(!body.includes(addr), `an address reached ${p}`);
+  const masked = typedmod.maskCredentials({ a: [`to ${addr}.`, 'no address'], n: 3, b: null });
+  assert.deepEqual(masked, { a: ['to <email>.', 'no address'], n: 3, b: null });
+});
+
+test('a saved flow never keeps a username, an email or a password, however it was typed', () => {
+  const steps = typedmod.forSavedFlowSteps([
+    { type: { into: 'Email', text: 'kate@example.com' } },
+    { type: { into: 'User name', text: 'kbell' } },
+    { tap: 'Password' },
+    { type: { text: 'hunter2-zz' } },
+    { type: { into: '#3', text: 'whatever' } },
+    { type: { into: 'Notes', text: 'call kate@example.com first' } },
+    { type: { into: 'Search', text: 'Fryer' } },
+    { sweep: 'all', fill: { 'Requested By': 'Mo', 'Login': 'kbell' } },
+  ]);
+  const disk = JSON.stringify(steps);
+  for (const secret of ['kate@example.com', 'kbell', 'hunter2-zz', 'whatever']) assert.ok(!disk.includes(secret), secret);
+  assert.ok(disk.includes('Fryer') && disk.includes('"Requested By":"Mo"'));
+  assert.equal(steps.filter((s) => s.needsText === true).length, 5);
+  assert.ok(typedmod.isCredentialField('Sign-in ID') && typedmod.isCredentialField('E-mail address'));
+  assert.ok(!typedmod.isCredentialField('Mailing list') && !typedmod.isCredentialField('Logistics'));
+});
+
 test('the write journal never keeps a secure field, and drops what has expired', () => {
   const udid = freshDevice('wrote-secure');
   assert.equal(wrotemod.record(udid, { selector: 'Password', value: 'hunter2-zz' }), null);
   assert.equal(wrotemod.record(udid, { selector: 'PIN', value: '4821' }), null);
-  assert.ok(wrotemod.record(udid, { selector: 'Email', value: 'kate@example.com' }));
+  // A sign-in name is half a credential: kept off disk by field and by shape.
+  assert.equal(wrotemod.record(udid, { selector: 'Email', value: 'kate@example.com' }), null);
+  assert.equal(wrotemod.record(udid, { selector: 'Requester', value: 'kate@example.com' }), null);
+  assert.equal(wrotemod.record(udid, { selector: 'Username', value: 'kbell' }), null);
   const file = path.join(store.deviceDir(udid), 'wrote.json');
+  store.ensureDirs(udid);
   const stale = [...wrotemod.read(udid), { selector: 'Name', value: 'Old', at: Date.now() - wrotemod.MAX_AGE_MS - 1 }];
   fs.writeFileSync(file, JSON.stringify(stale));
   wrotemod.record(udid, { selector: 'City', value: 'Irvine' });
   const kept = wrotemod.read(udid).map((e) => e.selector).sort();
-  assert.deepEqual(kept, ['City', 'Email']);
+  assert.deepEqual(kept, ['City']);
   assert.ok(!fs.readFileSync(file, 'utf8').includes('hunter2-zz'));
+  assert.ok(!fs.readFileSync(file, 'utf8').includes('kate@example.com'));
   assert.ok(typedmod.isSecureField('Passcode') && typedmod.isSecureField('Enter your PIN'));
   assert.ok(!typedmod.isSecureField('Spinner') && !typedmod.isSecureField('Passenger name') && !typedmod.isSecureField('Pinned'));
 });

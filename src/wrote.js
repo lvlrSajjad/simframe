@@ -23,7 +23,7 @@
  */
 import path from 'node:path';
 import * as store from './store.js';
-import { isSecureField } from './typed.js';
+import { isCredentialField, looksLikeCredential } from './typed.js';
 
 const FILE = 'wrote.json';
 
@@ -65,7 +65,7 @@ export function record(udid, { selector, value, screen }) {
   // do — so the only safe journal entry for a password is no entry. It would
   // not help anyway: a secure field renders as bullets, so its value can never
   // be seen on a later screen to be missed.
-  if (isSecureField(selector)) return null;
+  if (isCredentialField(selector) || looksLikeCredential(value)) return null;
   // A selector with no letters in it is not a label: "(125,325)", "@120,400",
   // "#3". There is nothing to look for on a later screen, and its digits would
   // happily match some unrelated number — so it is never journalled at all,
@@ -77,7 +77,8 @@ export function record(udid, { selector, value, screen }) {
   // ones push them out: past MAX_AGE_MS nothing reads them, and a typed value
   // nobody reads has no reason to be on disk.
   const kept = read(udid).filter((e) => alnum(e.selector) !== key
-    && Number.isFinite(e.at) && now - e.at <= MAX_AGE_MS && !isSecureField(e.selector));
+    && Number.isFinite(e.at) && now - e.at <= MAX_AGE_MS
+    && !isCredentialField(e.selector) && !looksLikeCredential(e.value));
   const next = [{ selector: String(selector), value: String(value), screen: screen ?? null, at: now }, ...kept]
     .slice(0, KEEP);
   try {

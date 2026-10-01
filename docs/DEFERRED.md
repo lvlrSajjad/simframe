@@ -2511,6 +2511,34 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+195. **Usernames and email addresses still reached disk after 194.** FIXED,
+   2026-10-01. The owner's rule is that no username or password is kept, and
+   194 only covered secrets. Three paths were left. Saved flows and the write
+   journal kept text typed into an ordinary field, and "Email" is an ordinary
+   field by name. The screen map and the escalation log kept what OCR read, and
+   a sign-in screen shows the address it was given: a test account's sign-in
+   address was in 46 screen files and 11 escalation records across two devices.
+
+   **Fix.** `typed.isCredentialField` adds sign-in names (Email, Username,
+   User ID, Login, Sign-in, Account ID) to the secrets, and
+   `typed.looksLikeCredential` catches an email-shaped value in any field.
+   Saved flows hold both back as `needsText`, as they do a password, and also
+   text typed into a field named only by a ref or a point, which says nothing
+   about what the field is. A text step that named no field is judged by the
+   control the step before it tapped. The journal keeps neither. Every write of
+   a screen reading (`screens/`, `graph/`, `refs.json`) and every JSONL log
+   line passes through `typed.maskCredentials`, which writes any email address
+   as `<email>`. Live output is not masked.
+
+   **What is still on disk.** Frames (`latest.png`, `ring/`, `full/`) are
+   pictures of the screen and show whatever it showed. They are overwritten as
+   capture runs. A long-lived MCP server runs the code it started with, so it
+   keeps writing unmasked readings until restarted.
+
+   **Scrubbed** with `scripts/scrub-graph-text.mjs --all --skip
+   B55AB0AE,CDB00FD6`: emails masked in 48 files on two devices. The colleagues'
+   two devices were not touched and may hold the same.
+
 194. **A password typed into a field named "Password" was in a graph file, in
    plain JSON.** FIXED, 2026-10-01. Found on a working device, in a node from an
    older fingerprint version — one nothing else would load, so nothing would

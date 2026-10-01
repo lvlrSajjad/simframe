@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as store from './store.js';
+import { maskCredentials } from './typed.js';
 import { deviceCause } from './device-state.js';
 
 /** The five reasons, from docs/research/03-human-parity.md §8. Nothing else is a reason. */
@@ -137,7 +138,8 @@ export const writeError = () => lastWriteError;
 export function appendJsonl(file, record) {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, `${JSON.stringify(record)}\n`);
+    // No username reaches a log: an escalation's detail lists what was visible.
+    fs.appendFileSync(file, `${JSON.stringify(maskCredentials(record))}\n`);
     return true;
   } catch (err) {
     lastWriteError = `${file}: ${err.message}`;

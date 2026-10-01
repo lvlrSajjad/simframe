@@ -43,6 +43,30 @@ export function isSecureField(label) {
   return label != null && SECURE_FIELD.test(String(label));
 }
 
+/**
+ * Labels that name who is signing in. A username is half a credential, and the
+ * owner's rule is that no username or password reaches disk, so these are kept
+ * off saved flows and the write journal the same way a password is.
+ *
+ * Wider than strictly needed on purpose: an "Email" field on an ordinary form
+ * is stripped too, and its replay then asks for the text. Asking costs one
+ * argument; keeping a sign-in address in a file costs the address.
+ */
+export const IDENTITY_FIELD = /\be-?mail\b|\buser\s*-?\s*(name|id)\b|\busername\b|\blog\s*-?\s*in\b|\bsign[\s-]*in\b|\baccount\s*(id|name|number)\b/i;
+
+/** A value that is an email address, whatever field it went into. */
+const EMAIL_VALUE = /[^\s@]+@[^\s@]+\.[^\s@]{2,}/;
+
+/** A field whose contents are a credential: a secret, or the name it belongs to. */
+export function isCredentialField(label) {
+  return label != null && (isSecureField(label) || IDENTITY_FIELD.test(String(label)));
+}
+
+/** Text that is a credential by its own shape, wherever it was typed. */
+export function looksLikeCredential(text) {
+  return text != null && EMAIL_VALUE.test(String(text));
+}
+
 /** The action of a step in either shape, `{action: 'type'}` or `{type: …}`. */
 function actionOf(step) {
   if (!step || typeof step !== 'object') return null;
@@ -143,17 +167,75 @@ export function supplyText(steps, texts) {
  * fill entry for one. A step that named no field cannot be judged by name and
  * is kept; say so where it matters rather than pretend otherwise.
  */
-export function forSavedFlow(step) {
+export function forSavedFlow(step, { focusedField = null } = {}) {
   if (!step || typeof step !== 'object') return step;
   if (isTextStep(step)) {
     const s = flat(step);
-    return s.into != null && isSecureField(s.into) ? withoutText(step) : step;
+    const field = s.into ?? focusedField;
+    const text = s.into != null ? (s.text ?? s.value2 ?? s.with) : (s.text ?? s.value);
+    // A field named by a ref or a point ("#3", "@201,481") says nothing about
+    // what it is, so it gets the cautious answer: the flow asks for the text.
+    const unnamed = s.into != null && !/[a-z]/i.test(String(s.into).replace(/^#\d+$/, ''));
+    return isCredentialField(field) || looksLikeCredential(text) || unnamed ? withoutText(step) : step;
   }
   const inner = step.fill ? step : (step.sweep && typeof step.sweep === 'object' ? step.sweep : null);
   if (!inner?.fill || typeof inner.fill !== 'object') return step;
-  const secure = Object.keys(inner.fill).filter(isSecureField);
+  const secure = Object.keys(inner.fill).filter((label) => isCredentialField(label) || looksLikeCredential(inner.fill[label]));
   if (!secure.length) return step;
   const fill = { ...inner.fill };
   for (const label of secure) fill[label] = { needsText: true };
   return step.fill ? { ...step, fill } : { ...step, sweep: { ...step.sweep, fill } };
+}
+
+/** The label a step tapped, if it was a tap on a named control. */
+function tappedLabel(step) {
+  if (!step || typeof step !== 'object') return null;
+  if (step.action === 'tap') return step.value ?? step.target ?? null;
+  if (typeof step.tap === 'string') return step.tap;
+  if (step.tap && typeof step.tap === 'object') return step.tap.value ?? step.tap.sel ?? null;
+  return null;
+}
+
+/**
+ * A whole flow as it may be saved. A text step that named no field typed into
+ * whatever had focus, which is usually the field the step before it tapped — so
+ * "tap Password, then type" is judged as typing into Password.
+ */
+export function forSavedFlowSteps(steps) {
+  let focusedField = null;
+  return (steps ?? []).map((step) => {
+    const out = forSavedFlow(step, { focusedField });
+    const label = tappedLabel(step);
+    if (label != null) focusedField = label;
+    else if (!isTextStep(step)) focusedField = null;
+    return out;
+  });
+}
+
+/** An email address inside any text, for masking. Never spans a quote or a backslash. */
+const EMAIL_IN_TEXT = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
+
+/** What an email address is written down as. */
+export const MASKED_EMAIL = '<email>';
+
+/**
+ * A value as it may be written to disk: every email address in every string
+ * replaced by `<email>`, at any depth.
+ *
+ * simframe keeps what it read off a screen (the screen map, refs, the
+ * escalation log), and a sign-in screen shows the username it was given. The
+ * owner's rule is that no username reaches disk, so the memory of a screen
+ * keeps its shape and forgets the address. What the agent is shown live is not
+ * masked: this is for what is written down, nothing else. A recall that misses
+ * because of the mask is a miss, and a miss out of memory earns a fresh read.
+ */
+export function maskCredentials(value) {
+  if (typeof value === 'string') return value.includes('@') ? value.replace(EMAIL_IN_TEXT, MASKED_EMAIL) : value;
+  if (Array.isArray(value)) return value.map(maskCredentials);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = maskCredentials(v);
+    return out;
+  }
+  return value;
 }

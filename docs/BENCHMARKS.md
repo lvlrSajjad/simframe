@@ -4800,8 +4800,8 @@ larger there.
 
 - **The graph stored typed text verbatim, passwords included.** A stored edge
   held a password typed into a field named "Password", in both `step` and the
-  edge's signature. A cartographer recording every edge on a signed-in app
-  would make this worse, so it is fixed first.
+  edge's signature. Fixed and scrubbed the same day (DEFERRED 194), and widened
+  to usernames and email addresses (DEFERRED 195) before any crawl ran.
 - **Ref taps are stored as edges.** Edges such as `tap:#14` and `tap:#21`
   name a number that is only valid for one round trip. Whether `goto` replays one
   or refuses it has not been checked.

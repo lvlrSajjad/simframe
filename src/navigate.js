@@ -232,9 +232,10 @@ export function saveFlow(udid, name, script, { force = false } = {}) {
   const body = {
     name,
     savedAt: Date.now(),
-    // Text into a secure field is held back even here, where an explicit save
-    // may otherwise keep what was typed — see `typed.forSavedFlow`.
-    steps: (script.steps ?? (script.results ?? []).map((r) => r.step).filter(Boolean)).map(typed.forSavedFlow),
+    // A credential is held back even here, where an explicit save may otherwise
+    // keep what was typed: a password, a username or an email address, by field
+    // or by the shape of the text — see `typed.forSavedFlowSteps`.
+    steps: typed.forSavedFlowSteps(script.steps ?? (script.results ?? []).map((r) => r.step).filter(Boolean)),
     startScreen: script.startScreen ?? null,
     ...(provisional ? { provisional: verdicts.filter(Boolean) } : {}),
   };

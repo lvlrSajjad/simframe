@@ -16,6 +16,7 @@ import * as matching from './matching.js';
 import * as regions from './regions.js';
 import { informative } from './refs.js';
 import * as store from './store.js';
+import { maskCredentials } from './typed.js';
 
 const MAP_VERSION = 9; // ax targets carry value, selected and focused
 
@@ -124,7 +125,8 @@ export function recallNearest(udid, layoutHash, { tolerance = DEFAULT_TOLERANCE 
 export function remember(udid, entry) {
   const dir = mapDir(udid);
   fs.mkdirSync(dir, { recursive: true });
-  store.writeAtomic(path.join(dir, `${entry.hash}.json`), JSON.stringify(entry));
+  // Masked on the way to disk only: a sign-in screen shows its username. See typed.js.
+  store.writeAtomic(path.join(dir, `${entry.hash}.json`), JSON.stringify(maskCredentials(entry)));
   return entry;
 }
 

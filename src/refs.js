@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { hashDistance } from './analyze.js';
 import * as store from './store.js';
+import { maskCredentials } from './typed.js';
 
 /**
  * How far the pixel layout may drift before a ref is no longer trustworthy.
@@ -68,7 +69,7 @@ export function writeRefs(udid, { structuralHash, layoutHash, rows }) {
   };
   try {
     fs.mkdirSync(path.dirname(refsFile(udid)), { recursive: true });
-    store.writeAtomic(refsFile(udid), JSON.stringify(body));
+    store.writeAtomic(refsFile(udid), JSON.stringify(maskCredentials(body)));
   } catch {
     /* refs are a convenience; failing to cache them must not fail the call */
   }
