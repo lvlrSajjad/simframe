@@ -898,6 +898,10 @@ async function main() {
         fresh: Boolean(flags.fresh),
       });
       emit(flags, res.coverage, res.text);
+      // A crawl that could not run, or that changed something in place, is not
+      // a success, whatever else it recorded.
+      const last = res.state.runs.at(-1) ?? {};
+      if (last.failed || (res.coverage.changedState ?? []).length) process.exitCode = 1;
       return;
     }
 

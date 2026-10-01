@@ -589,6 +589,66 @@ function capabilities() {
   };
 }
 
+/**
+ * Does relaunching this app depend on something running on the host?
+ *
+ * A React Native debug build carries no JavaScript: it fetches it from a
+ * packager on the Mac at launch. While the app is running it keeps what it
+ * fetched, so a session can work for hours after the packager stopped — and a
+ * relaunch then lands on "No script URL provided" with the signed-in session
+ * unusable until somebody starts the packager again. A crawl did exactly that
+ * on 2026-10-01. So a relaunch is asked about first.
+ *
+ * Read off disk: the `.app` holds a React framework or Hermes, and no
+ * `*.jsbundle`. Then the packager is probed on its usual port. `null` means
+ * nothing on the host is needed, or this cannot tell.
+ */
+async function relaunchNeeds(udid, bundleId) {
+  const root = path.join(deviceRoot(udid), 'data/Containers/Bundle/Application');
+  let app = null;
+  for (const dir of safeReaddir(root)) {
+    for (const name of safeReaddir(path.join(root, dir)).filter((n) => n.endsWith('.app'))) {
+      const info = path.join(root, dir, name, 'Info.plist');
+      try {
+        const { stdout } = await run('plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', info]);
+        if (stdout.trim() === bundleId) app = path.join(root, dir, name);
+      } catch { /* not readable; not this one */ }
+      if (app) break;
+    }
+    if (app) break;
+  }
+  if (!app) return null;
+  const entries = safeReaddir(app);
+  const frameworks = safeReaddir(path.join(app, 'Frameworks'));
+  const reactNative = frameworks.some((f) => /^(React|hermes|hermesvm|React-Core)[\w-]*\.framework$/i.test(f))
+    || entries.some((f) => /^RCT|^React/.test(f));
+  const bundled = entries.some((f) => f.endsWith('.jsbundle'));
+  if (!reactNative || bundled) return null;
+  const packager = await probePackager();
+  return {
+    what: 'a JavaScript packager',
+    running: packager,
+    detail: packager
+      ? 'a React Native debug build with no embedded bundle; a packager answers on :8081'
+      : 'a React Native debug build with no embedded bundle, and no packager answers on :8081 — a relaunch would leave it on "No script URL provided"',
+  };
+}
+
+function safeReaddir(dir) {
+  try { return fs.readdirSync(dir); } catch { return []; }
+}
+
+async function probePackager(port = 8081) {
+  const net = await import('node:net');
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port, timeout: 400 });
+    const done = (ok) => { socket.destroy(); resolve(ok); };
+    socket.on('connect', () => done(true));
+    socket.on('timeout', () => done(false));
+    socket.on('error', () => done(false));
+  });
+}
+
 /** @type {import('./index.js').Platform} */
 export const platform = {
   id: 'ios',
@@ -609,6 +669,7 @@ export const platform = {
   listApps,
   appContainer,
   readPropertyList,
+  relaunchNeeds,
   setPermission,
   setPasteboard,
   permissionServices: () => PERMISSION_SERVICES,

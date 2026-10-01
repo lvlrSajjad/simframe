@@ -1542,6 +1542,8 @@ test('the platform surface is satisfiable by something that is not a simulator',
       ax: { supported: false, note: 'nor an accessibility tree' },
     }),
     toolchain: () => [{ name: 'nothing', level: 'ok', detail: 'no tools needed' }],
+    // A relaunch of a fake app needs nothing on the host.
+    relaunchNeeds: async () => null,
     // Reading what an app persisted. A fake device stores nothing, and the
     // honest implementation of that is a refusal in its own vocabulary — the
     // same shape Android uses, for the same reason.
@@ -7503,4 +7505,56 @@ test('the cartographer classifies controls by data, and back affordances are nev
   assert.equal(carto.classify({ label: 'Save' }, { allowCreate: true }).kind, 'barrier', 'nothing ever commits');
   assert.equal(carto.classify({ label: 'screen-toolbar-back-button', region: 'nav-bar', navSlot: 'leading' }).reason, 'back affordance');
   assert.equal(carto.classify({ label: '(icon-only)' }).reason, 'unlabeled');
+});
+
+test('a crawl never restarts an app whose restart is unsafe, and an app that did not start is a failure, not a map', async () => {
+  const carto = await import('../src/cartographer.js');
+  // Dead end on a screen with no back and no route: the crawl must stop rather
+  // than restart a build that would come back on an error screen.
+  const app = fakeApp();
+  const launches = [];
+  const launch = app.driver.launch;
+  app.driver.launch = async (o) => { launches.push(o?.relaunch ? 'relaunch' : 'front'); return launch(o); };
+  app.driver.back = async () => ({ acted: false });
+  app.driver.route = () => null;
+  app.driver.relaunchBlocked = async () => 'it is a debug build and its packager is not running';
+  const state = await carto.crawl(app.driver, { bundle: 'com.example.fake', maxActions: 200 });
+  assert.ok(!launches.includes('relaunch'), launches.join(','));
+  assert.equal(state.runs[0].blocked, true);
+  assert.match(carto.renderReport(carto.coverage(state)), /^STOPPED EARLY — stuck on "[^"]+", and relaunching is not safe: it is a debug build/);
+
+  // An app showing a React Native red screen is reported as not running.
+  const dead = fakeApp();
+  dead.driver.launch = async () => ({ hash: 'red', name: null, tokens: [], rows: [{ label: 'No script URL provided. Make sure the packager is running', x: 100, y: 100, region: 'content' }] });
+  const s2 = await carto.crawl(dead.driver, { bundle: 'com.example.fake' });
+  assert.equal(s2.runs[0].failed, true);
+  const text = carto.renderReport(carto.coverage(s2));
+  assert.match(text, /^FAILED — the app is not running: "No script URL provided/);
+  assert.equal(dead.taps.length, 0, 'nothing was tapped on an error screen');
+});
+
+test('a read-only crawl refuses options in a selection list and contact links, and reports any in-place change first', async () => {
+  const carto = await import('../src/cartographer.js');
+  const opt = (label, y, selected = false) => ({ label, x: 200, y, type: 'button', region: 'content', selected, frame: { x: 16, y: y - 20, width: 370, height: 40 } });
+  const { doors, refused } = carto.doorsOf([opt('English', 200, true), opt('Deutsch', 250), opt('Français', 300),
+    { label: '(555) 564-8583', x: 200, y: 400, region: 'content' }, { label: 'kate-bell@mac.com', x: 200, y: 450, region: 'content' }]);
+  assert.deepEqual(doors.map((d) => d.label), []);
+  assert.ok(refused.filter((r) => /selection list/.test(r.reason)).length === 3, JSON.stringify(refused));
+  assert.ok(refused.filter((r) => /calls, mails or leaves/.test(r.reason)).length === 2);
+  assert.equal(carto.classify({ label: 'Shut Down' }).kind, 'barrier');
+
+  // An unselected list cannot be seen as one in advance; the first tap that
+  // changes something in place stops the rest of that list.
+  const row = (label, y) => ({ label, x: 200, y, type: 'button', region: 'content', frame: { x: 16, y: y - 20, width: 370, height: 40 } });
+  let picked = null;
+  const read = () => ({ hash: 'pick', name: 'Sound', tokens: [], rows: ['Chime', 'Bell', 'Horn'].map((l, i) => ({ ...row(l, 200 + i * 50), selected: picked === l })) });
+  const driver = {
+    launch: async () => read(), read: async () => read(), inApp: async () => true,
+    tap: async (door) => { picked = door.label; return { ok: true, verdict: 'no-visible-change' }; },
+    back: async () => ({ acted: false }), route: () => null, walk: async () => ({ steps: 0 }),
+    sameScreen: async (a, b) => a.hash === b.hash, relaunchBlocked: async () => 'test',
+  };
+  const state = await carto.crawl(driver, { bundle: 'x' });
+  assert.equal(picked, 'Chime', 'one tap, then the rest of the list is refused');
+  assert.match(carto.renderReport(carto.coverage(state)), /^CHANGED STATE 1x — a tap changed something in place.*"Chime" on Sound/m);
 });

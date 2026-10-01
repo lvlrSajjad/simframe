@@ -64,7 +64,7 @@ export const PLATFORM_SURFACE = Object.freeze([
   'geometry', 'inputDriver',
   'screenshot', 'launchApp', 'terminateApp', 'openUrl', 'restartDevice',
   'setPermission', 'setPasteboard', 'permissionServices', 'capabilities', 'toolchain',
-  'listApps', 'appContainer', 'readPropertyList',
+  'listApps', 'appContainer', 'readPropertyList', 'relaunchNeeds',
   'bootedAt',
 ]);
 
@@ -241,6 +241,8 @@ export const setPasteboard = (udid, ...args) => platformFor(udid).setPasteboard(
 export const listApps = (udid, ...args) => platformFor(udid).listApps(udid, ...args);
 export const appContainer = (udid, ...args) => platformFor(udid).appContainer(udid, ...args);
 export const readPropertyList = (udid, file) => platformFor(udid).readPropertyList(file);
+/** What a relaunch of this app depends on, on the host, or null. */
+export const relaunchNeeds = (udid, bundleId) => platformFor(udid).relaunchNeeds(udid, bundleId);
 
 /**
  * The permission services a device understands, or every service any backend

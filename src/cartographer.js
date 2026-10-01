@@ -59,6 +59,16 @@ function words(locale) {
 
 const says = (label, phrase) => ` ${alnum(label)} `.includes(` ${alnum(phrase)} `);
 
+/** The text that says the app did not start, if this reading shows one. */
+export function didNotStart(reading, { locale } = {}) {
+  const pats = vocabulary.load(locale).cartographer?.didNotStart ?? [];
+  for (const r of reading?.rows ?? []) {
+    const label = String(r.label ?? '');
+    if (pats.some((p) => label.toLowerCase().includes(p.toLowerCase()))) return label.split('\n')[0].slice(0, 120);
+  }
+  return null;
+}
+
 /** Is this row how a screen is left, rather than a door out of it? */
 export function isBackAffordance(row, { locale } = {}) {
   const w = words(locale);
@@ -87,6 +97,8 @@ export function classify(row, { allowCreate = false, locale } = {}) {
   const barrier = vocabulary.mayActLocally(label, { locale, purpose: 'explore' });
   if (!barrier.allowed) return { open: false, reason: `${barrier.reason} ("${barrier.matched}")`, kind: 'barrier' };
   const w = words(locale);
+  const links = vocabulary.load(locale).cartographer?.contactLinkPatterns ?? [];
+  if (links.some((p) => new RegExp(p, 'i').test(label))) return { open: false, reason: 'a phone number, email or web address — it calls, mails or leaves', kind: 'barrier' };
   if (w.stateTypes.test(String(row.type ?? ''))) return { open: false, reason: `changes state (${row.type})`, kind: 'read-only' };
   if (row.enabled === false) return { open: false, reason: 'disabled', kind: 'skipped' };
   if (!allowCreate) {
@@ -106,6 +118,9 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
   const refused = [];
   const seenKeys = new Set();
   const ordered = [...(rows ?? [])].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  // A row that is selected marks a selection list, and choosing another of its
+  // options changes a setting by itself — no Save, no write word on the label.
+  const optionShapes = new Set(ordered.filter((r) => r.selected === true).map(shapeOf).filter(Boolean));
   for (const row of ordered) {
     const key = controlKey(row);
     if (seenKeys.has(key)) continue;
@@ -115,15 +130,30 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
       if (verdict.kind !== 'skipped' || verdict.reason === 'unlabeled') refused.push({ key, label: row.label ?? null, reason: verdict.reason, kind: verdict.kind });
       continue;
     }
-    let shape = null;
-    if ((row.region ?? 'content') === 'content' && row.frame?.width > 0) {
-      const w = Math.round(row.frame.width / 8);
-      const h = Math.round((row.frame.height ?? 0) / 4);
-      shape = `${row.type ?? ''}|${w}|${h}|${Math.round((row.x ?? 0) / 16)}`;
+    const shape = shapeOf(row);
+    if (shape && optionShapes.has(shape)) {
+      refused.push({ key, label: row.label ?? null, reason: 'an option in a selection list — choosing it changes a setting', kind: 'read-only' });
+      continue;
     }
     doors.push({ key, label: row.label, region: row.region ?? 'content', x: row.x, y: row.y, type: row.type ?? null, shape });
   }
   return { doors, refused };
+}
+
+/** What a row looks like, ignoring where it is in a column: its list identity. */
+export function shapeOf(row) {
+  if ((row?.region ?? 'content') !== 'content' || !(row?.frame?.width > 0)) return null;
+  const w = Math.round(row.frame.width / 8);
+  const h = Math.round((row.frame.height ?? 0) / 4);
+  return `${row.type ?? ''}|${w}|${h}|${Math.round((row.x ?? 0) / 16)}`;
+}
+
+/** Rows whose selection or value differs between two readings of one screen. */
+export function stateDiff(before, after) {
+  const sig = (rows) => new Map((rows ?? []).filter((r) => r.label).map((r) => [`${r.region ?? ''}|${alnum(r.label)}`, `${r.selected === true}|${r.value ?? ''}`]));
+  const a = sig(before?.rows);
+  const b = sig(after?.rows);
+  return [...a.entries()].filter(([k, v]) => b.has(k) && b.get(k) !== v).map(([k]) => k.split('|').slice(1).join('|'));
 }
 
 // ── state ────────────────────────────────────────────────────────────────
@@ -258,14 +288,49 @@ export async function crawl(driver, {
   };
   const knownBefore = new Set(Object.keys(state.screens));
 
-  const relaunch = async () => {
+  // Back in front without restarting: what leaving the app needs.
+  const foreground = async () => {
+    act();
+    return driver.launch({ relaunch: false });
+  };
+  // Out of a dead end: the graph's own way home first, a restart last, and a
+  // restart only when it is safe. A restart of a debug build whose JavaScript
+  // came from a packager that has since stopped leaves the app on an error
+  // screen with the signed-in session unusable — measured on a real device on
+  // 2026-10-01, by this crawler, before this existed.
+  const recover = async (here) => {
+    if (root && here?.hash && here.hash !== root) {
+      const r = driver.route(here.hash, root);
+      if (r?.length && r.every((e) => !e.changedOutcomes)) {
+        const walked = await driver.walk(r);
+        for (let i = 0; i < (walked?.steps ?? 0); i += 1) act();
+        const after = walked?.after ?? await driver.read();
+        if (after?.hash && (after.hash === root || await driver.sameScreen({ hash: root, tokens: [] }, after))) return after;
+      }
+    }
+    const blocked = await driver.relaunchBlocked?.();
+    if (blocked) return { stop: `stuck${here?.name ? ` on "${here.name}"` : ''}, and relaunching is not safe: ${blocked}`, blocked: true };
     run.relaunches += 1;
     act();
-    return driver.launch();
+    const r = await driver.launch({ relaunch: true });
+    const dead = didNotStart(r, { locale });
+    if (dead) return { stop: `the app did not start after a relaunch: "${dead}"`, failed: true };
+    return r;
   };
 
-  let reading = await driver.launch();
+  let reading = await driver.launch({ relaunch: false });
   act();
+  {
+    const dead = didNotStart(reading, { locale });
+    if (dead) {
+      run.stoppedBecause = `the app is not running: "${dead}"`;
+      run.failed = true;
+      run.endedAt = now();
+      persist(state);
+      return state;
+    }
+  }
+  const root = reading?.hash ?? null;
   register(state, reading, { allowCreate, locale });
 
   while (true) {
@@ -274,7 +339,7 @@ export async function crawl(driver, {
     boundary();
     if (!(await driver.inApp())) {
       state.leftApp.push({ at: now(), from: reading?.hash ?? null, note: 'found outside the app at an attempt boundary' });
-      reading = await relaunch();
+      reading = await foreground();
       register(state, reading, { allowCreate, locale });
       continue;
     }
@@ -288,7 +353,7 @@ export async function crawl(driver, {
       if (!(await driver.inApp())) {
         mark(state, before.hash, door.key, { status: 'left-app' });
         state.leftApp.push({ at: now(), from: before.hash, label: door.label });
-        reading = await relaunch();
+        reading = await foreground();
         register(state, reading, { allowCreate, locale });
         continue;
       }
@@ -306,7 +371,18 @@ export async function crawl(driver, {
       reading = res?.after ?? await driver.read();
       run.explored += 1;
       if (!reading?.hash || (await driver.sameScreen(before, reading))) {
-        if (!/^unexpected/.test(res?.verdict ?? '')) mark(state, before.hash, door.key, { status: 'no-change' });
+        const changed = reading?.hash ? stateDiff(before, reading) : [];
+        if (changed.length) {
+          // The tap changed something in place: a selection, a value. A
+          // read-only crawl must not do that twice, so every control of the same
+          // shape here is refused from now on, and the change is reported first.
+          mark(state, before.hash, door.key, { status: 'changed-state', changed });
+          (state.changedState ??= []).push({ at: now(), screen: before.name ?? before.hash, label: door.label, changed });
+          const shape = state.screens[before.hash]?.controls?.[door.key]?.shape;
+          for (const c of Object.values(state.screens[before.hash]?.controls ?? {})) {
+            if (shape && c.shape === shape && c.status === 'pending') c.status = 'refused-after-change';
+          }
+        } else if (!/^unexpected/.test(res?.verdict ?? '')) mark(state, before.hash, door.key, { status: 'no-change' });
         reading = reading?.hash ? reading : before;
         continue;
       }
@@ -350,16 +426,22 @@ export async function crawl(driver, {
       register(state, reading, { allowCreate, locale });
       continue;
     }
-    // No back and no path. Relaunch once from here; if the root has nothing
-    // either, the reachable map is done.
-    const root = await relaunch();
-    register(state, root, { allowCreate, locale });
-    if (!pendingOn(state, root.hash) && !targets.some((h) => driver.route(root.hash, h)?.length)) {
-      run.stoppedBecause = 'nothing reachable left to open';
-      reading = root;
+    // No back and no path. Home, by the graph or a safe restart; if home has
+    // nothing either, the reachable map is done.
+    const home = await recover(here);
+    if (home?.stop) {
+      run.stoppedBecause = home.stop;
+      if (home.failed) run.failed = true;
+      if (home.blocked) run.blocked = true;
       break;
     }
-    reading = root;
+    register(state, home, { allowCreate, locale });
+    if (!pendingOn(state, home.hash) && !targets.some((h) => driver.route(home.hash, h)?.length)) {
+      run.stoppedBecause = 'nothing reachable left to open';
+      reading = home;
+      break;
+    }
+    reading = home;
   }
   run.attempts += inAttempt ? 1 : 0;
   run.endedAt = now();
@@ -403,6 +485,7 @@ export function coverage(state) {
     failed: by('failed').map((c) => ({ screen: c.screen ?? c.hash.slice(0, 8), label: c.label, detail: c.detail })),
     refused: Object.values(state.refused).map((r) => ({ label: r.label, reason: r.reason, kind: r.kind, screens: r.screens.length })),
     leftApp: state.leftApp,
+    changedState: state.changedState ?? [],
     unexpected: state.unexpected,
     splits,
     merges,
@@ -416,6 +499,9 @@ export function renderReport(cov, { limit = 12 } = {}) {
   const r = cov.lastRun ?? {};
   const secs = r.endedAt && r.startedAt ? Math.round((r.endedAt - r.startedAt) / 1000) : null;
   const lines = [
+    ...(r.failed ? [`FAILED — ${r.stoppedBecause}. Nothing below is a map of the app.`] : []),
+    ...(r.blocked ? [`STOPPED EARLY — ${r.stoppedBecause}`] : []),
+    ...((cov.changedState ?? []).length ? [`CHANGED STATE ${cov.changedState.length}x — a tap changed something in place, which a read-only crawl must not do; check it: ${cov.changedState.map((x) => `"${x.label}" on ${x.screen} (${x.changed.join(', ')})`).join('; ')}`] : []),
     `map of ${cov.bundle}: ${cov.screens} screen(s) (${cov.named} named), ${cov.edges} transition(s) recorded, ${cov.frontier.length} door(s) not yet opened`,
     `this run: ${r.actions ?? 0} action(s) in ${r.attempts ?? 0} attempt(s) of ≤${ATTEMPT_ACTIONS}${secs != null ? `, ${secs}s` : ''}, ${r.newScreens ?? 0} new screen(s), ${r.relaunches ?? 0} relaunch(es); stopped: ${r.stoppedBecause ?? '—'}${cov.runs > 1 ? ` (run ${cov.runs}, resumed)` : ''}`,
   ];

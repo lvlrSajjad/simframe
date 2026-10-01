@@ -132,7 +132,16 @@
       "disable",
       "turn on",
       "turn off",
-      "reset"
+      "reset",
+      "shut down",
+      "power off",
+      "restart",
+      "reboot",
+      "install",
+      "download",
+      "update now",
+      "install now",
+      "erase"
     ],
     "neverOpenPatterns": [
       "^yes[,. ]",
@@ -146,7 +155,7 @@
     ]
   },
   "cartographer": {
-    "note": "What `simframe map` reads. A crawl of a signed-in app touches real data, so it defaults to read-only navigation: it opens doors, never writes. `opensWrite` are controls that start creating or changing something; a run opens them only when it is given --allow-create, and even then the destructive list and exploration.neverOpen (save, submit, apply, confirm...) still bar every commit. `back` are the controls a crawl uses to back out of a screen it opened; they are never explored as doors.",
+    "note": "What `simframe map` reads. A crawl of a signed-in app touches real data, so it defaults to read-only navigation: it opens doors, never writes. `opensWrite` are controls that start creating or changing something; a run opens them only when it is given --allow-create, and even then the destructive list and exploration.neverOpen (save, submit, apply, confirm...) still bar every commit. `back` are the controls a crawl uses to back out of a screen it opened; they are never explored as doors. `didNotStart` are texts on a screen that says the app itself did not start (a React Native red screen); a crawl that meets one stops and says so first, rather than mapping the error screen. `contactLinkPatterns` are labels that are a phone number, an email address or a web address: tapping one calls, mails or leaves, so a crawl never opens it.",
     "opensWrite": [
       "create",
       "add",
@@ -205,6 +214,20 @@
       "stepper",
       "picker",
       "datepicker"
+    ],
+    "didNotStart": [
+      "No script URL provided",
+      "Unable to load script",
+      "Could not connect to development server",
+      "Unable to resolve module",
+      "Metro has encountered an error",
+      "Runtime is not ready for debugging"
+    ],
+    "contactLinkPatterns": [
+      "^\\+?[\\d\\s().-]{7,}$",
+      "^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$",
+      "^(https?://|www\\.)",
+      "\\.(com|org|net|io|co)(/|$)"
     ]
   }
 }

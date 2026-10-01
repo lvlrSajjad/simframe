@@ -13,6 +13,7 @@ import * as cartographer from './cartographer.js';
 import * as frontmost from './frontmost.js';
 import * as graph from './graph.js';
 import * as navigate from './navigate.js';
+import * as platform from './platform/index.js';
 import * as typed from './typed.js';
 import * as view from './view.js';
 
@@ -44,10 +45,14 @@ export function deviceDriver(udid, bundle, { options = {} } = {}) {
 
   return {
     read,
-    async launch() {
-      await run([{ launch: { value: bundle, relaunch: true } }]);
+    async launch({ relaunch = false } = {}) {
+      await run([{ launch: { value: bundle, relaunch } }]);
       appPid = (await frontmost.read(udid)).pid;
       return read();
+    },
+    async relaunchBlocked() {
+      const needs = await platform.relaunchNeeds(udid, bundle).catch(() => null);
+      return needs && !needs.running ? `it is ${needs.detail}` : null;
     },
     async inApp() {
       const { pid } = await frontmost.read(udid);

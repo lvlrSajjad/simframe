@@ -1058,6 +1058,8 @@ async function appContainer(serial) { return noStorage(serial, "an app's data co
 async function readPropertyList() {
   throw new Error('property lists are an iOS format; Android has no equivalent to read');
 }
+/** Not known on Android yet: a relaunch is assumed to need nothing on the host. */
+async function relaunchNeeds() { return null; }
 
 /** @type {import('./index.js').Platform} */
 export const platform = {
@@ -1078,6 +1080,7 @@ export const platform = {
   listApps,
   appContainer,
   readPropertyList,
+  relaunchNeeds,
   setPermission,
   setPasteboard,
   getPasteboard,
