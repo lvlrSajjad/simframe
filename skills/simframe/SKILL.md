@@ -359,6 +359,14 @@ simframe flow run checkout       # replay it
 screens equally, no remembered path — each is reported, with what it does know.
 A wrong route is worse than no route, because it taps things.
 
+When the app is new to simframe and `screens` is nearly empty, map it first,
+once, if the user agrees to the minutes it takes. The crawl is read-only and
+never crosses the destructive vocabulary, and afterwards `goto` has routes:
+
+```bash
+simframe map com.example.app --minutes=10   # or the sim_map tool
+```
+
 ## It refuses rather than guesses
 
 When two controls answer a query equally well, simframe lists them and asks

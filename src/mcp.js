@@ -239,6 +239,23 @@ const TOOLS = [
     },
   },
   {
+    name: 'sim_map',
+    description: 'Crawl an app unattended and record every screen and transition into the graph, so later goals and sim_goto are served from memory with no model calls. Opt-in and slow on purpose: minutes, not seconds. Read-only by default — it opens doors and never types, toggles, or opens a write flow; the verify barrier (Delete, Pay, Send, Sign out, Submit, Save…) and leaving the app are never crossed. Resumes a saved crawl. Returns a text coverage report: screens, transitions, unopened frontier, what the barrier refused and why, suspected merges and splits.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...deviceProp,
+        ...modeProps,
+        bundleId: { type: 'string', description: 'The app to map. It must already be signed in if it needs an account — the crawl never types.' },
+        minutes: { type: 'number', description: 'Wall-time budget for this run (default 10).' },
+        maxActions: { type: 'number', description: 'Action budget for this run (default 200).' },
+        allowCreate: { type: 'boolean', description: 'Open controls that start creating or changing data (Add, New, Edit…). Nothing is ever committed either way.' },
+        fresh: { type: 'boolean', description: 'Forget the saved crawl for this app and start again.' },
+      },
+      required: ['bundleId'],
+    },
+  },
+  {
     name: 'sim_flow_run',
     description: 'Replay a saved flow by name, verifying each step. Omit `name` to list the saved flows. Save one with sim_do\'s `saveAs`.',
     inputSchema: {
@@ -628,6 +645,17 @@ export async function serve({ device: defaultDevice, options: baseOptions = {} }
           );
         case 'sim_goto':
           return await goto(target, args, options);
+        case 'sim_map': {
+          const { map } = await import('./map.js');
+          const res = await map(target, args.bundleId, {
+            options,
+            minutes: args.minutes ?? 10,
+            maxActions: args.maxActions ?? 200,
+            allowCreate: Boolean(args.allowCreate),
+            fresh: Boolean(args.fresh),
+          });
+          return { content: [text(res.text)] };
+        }
         case 'sim_flow_run':
           return await flowRun(target, args, options);
         case 'sim_capture':

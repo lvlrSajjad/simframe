@@ -12,6 +12,9 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 
 | date | decision | verdict | what settled it |
 |---|---|---|---|
+| 2026-10-01 | Web testing belongs in another tool | **ADOPTED** | The owner: simframe's job is mobile QA at human parity |
+| 2026-10-01 | The cartographer as many bounded attempts | **ADOPTED** | It satisfies "six actions per attempt" as written |
+| 2026-10-01 | Goal mode and the cartographer | **GO** | ~1.1 actions per model call in the field; 78% of hand-backs absorbable |
 | 2026-09-10 | Phase 12 next, per the default order | **REORDERED** | `novel_dialog`: 0 of 173, ever |
 | 2026-09-10 | Phase 15 — exploration, and the first real local-model job | **PROMOTED** | Semantic ranking is beyond a matcher |
 | 2026-09-10 | Phase 18 — local triage, not local planning | **PROPOSED** | The recovery class cannot be enumerated |
@@ -29,6 +32,38 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 | earlier | Phase 9 — tier-2 local model | **DEFERRED, gate unmet** | Cheaper tool for the same gap, unbuilt |
 
 ---
+
+## 2026-10-01 — mobile QA is the job; the web goes elsewhere
+
+**The owner's direction:** *"since the lib's name is simframe we may pursue web
+testing elsewhere, maybe another tool… our focus is to respect the tool's title
+and make Claude agents able to QA mobile apps with near-human performance and
+quality."* Phase 19 (the web as a third target) leaves the roadmap. The
+Platform boundary stays, because Android is its second backend and is real.
+
+## 2026-10-01 — the cartographer, and how it keeps the exploration rule
+
+CLAUDE.md: *"Exploration is bounded. Six actions per attempt, then escalate with
+the partial map attached. Never explore when a graph path exists."* A crawl of a
+whole app is many explorations, so the question was whether to change the rule
+or express the crawl inside it. Inside it, and no rule changed:
+
+- A crawl is a sequence of **attempts of at most six actions**, each starting
+  from a screen the graph already holds. Budget, barrier and saved state are
+  checked at every attempt boundary, so a run stops and resumes there.
+- **Escalation is to the owner, not to a model.** `simframe map` is explicit and
+  opt-in, with a wall-time and action budget the owner sets. Its report is the
+  partial map the rule asks for: screens, transitions, the unopened frontier and
+  what the barrier refused.
+- **Never explore when a path exists** holds by construction. A control is
+  opened only when no edge for it exists, and moving between screens with
+  unopened controls walks the graph's own path.
+
+**Read-only by default.** A signed-in app holds real data. A crawl opens doors
+and never types, toggles a switch, or opens anything on the
+`cartographer.opensWrite` list (Add, New, Edit, Assign…). `--allow-create` lifts
+that list for one run. Save, submit, apply and confirm stay barred either way,
+so nothing is ever committed.
 
 ## 2026-09-10 — the local model should supervise the plan, not choose the steps
 

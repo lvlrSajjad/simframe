@@ -7369,3 +7369,138 @@ test('memory from older fingerprint rules is carried forward, and what cannot be
   assert.equal(again.graph.carried + again.graph.lost + again.screens.carried, 0);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// ── the cartographer, against a fake app ─────────────────────────────────
+
+function fakeApp() {
+  const row = (label, y, extra = {}) => ({ label, x: 200, y, type: 'button', region: 'content', frame: { x: 16, y: y - 20, width: 370, height: 40 }, ...extra });
+  const tab = (label, x) => ({ label, x, y: 836, type: 'button', region: 'tab-bar', frame: { x: x - 40, y: 816, width: 80, height: 40 } });
+  const tabs = [tab('Home', 60), tab('Assets', 200), tab('More', 340)];
+  const S = {
+    home: { name: 'Home', rows: [...tabs, row('Work Orders', 200), row('Create Work Order', 260), row('Open in Safari', 320)] },
+    wos: { name: 'Work Orders', rows: [...tabs, row('screen-toolbar-back-button', 90, { region: 'nav-bar', navSlot: 'leading' }), ...[1, 2, 3, 4, 5].map((i) => row(`WO-${i}`, 200 + i * 50))] },
+    wo: { name: 'Work Order', rows: [row('Back', 90, { region: 'nav-bar', navSlot: 'leading' }), row('Delete', 300), row('Comments', 360)] },
+    comments: { name: 'Comments', rows: [row('Back', 90, { region: 'nav-bar', navSlot: 'leading' }), { label: 'Notify me', x: 300, y: 200, type: 'switch', region: 'content', frame: { x: 250, y: 180, width: 60, height: 30 } }] },
+    assets: { name: 'Assets', rows: [...tabs, row('Fryer', 200), row('External Docs', 300)] },
+    asset: { name: 'Asset', rows: [row('Back', 90, { region: 'nav-bar', navSlot: 'leading' }), row('Edit', 200)] },
+    more: { name: 'More', rows: [...tabs, row('Sign Out', 300), row('Time Sheets', 200)] },
+    sheets: { name: 'Time Sheets', rows: [row('Back', 90, { region: 'nav-bar', navSlot: 'leading' })] },
+  };
+  const T = {
+    'home|Work Orders': 'wos', 'home|Create Work Order': 'never', 'wos|WO-1': 'wo', 'wos|WO-2': 'wo', 'wo|Comments': 'comments',
+    'assets|Fryer': 'asset', 'more|Time Sheets': 'sheets', 'assets|External Docs': 'LEAVE',
+  };
+  const tabTo = { Home: 'home', Assets: 'assets', More: 'more' };
+  const taps = [];
+  const edges = {};
+  let stack = ['home'];
+  let inApp = true;
+  const read = () => ({ hash: stack.at(-1), name: S[stack.at(-1)].name, rows: S[stack.at(-1)].rows, tokens: [] });
+  const doTap = (label) => {
+    const top = stack.at(-1);
+    taps.push(`${top}|${label}`);
+    const to = tabTo[label] ?? T[`${top}|${label}`];
+    if (to === 'LEAVE') { inApp = false; return; }
+    if (!to || to === 'never') return;
+    (edges[top] ??= {})[label] = to;
+    if (tabTo[label]) stack = [to]; else stack.push(to);
+  };
+  return {
+    taps,
+    driver: {
+      launch: async () => { stack = ['home']; inApp = true; return read(); },
+      read: async () => read(),
+      inApp: async () => inApp,
+      tap: async (door) => { doTap(door.label); return { ok: true, verdict: 'ok', after: inApp ? read() : null }; },
+      back: async () => {
+        if (stack.length < 2) return { acted: false };
+        taps.push(`${stack.at(-1)}|<back>`);
+        stack.pop();
+        return { acted: true, after: read() };
+      },
+      route: (from, to) => {
+        const q = [[from, []]]; const seen = new Set([from]);
+        while (q.length) {
+          const [h, p] = q.shift();
+          for (const [label, t] of Object.entries(edges[h] ?? {})) {
+            if (seen.has(t)) continue;
+            const np = [...p, { action: `tap:${label}`, label, to: t }];
+            if (t === to) return np;
+            seen.add(t); q.push([t, np]);
+          }
+        }
+        return null;
+      },
+      walk: async (route) => { for (const e of route) doTap(e.label); return { steps: route.length, after: read() }; },
+      sameScreen: async (a, b) => a?.hash === b?.hash,
+    },
+  };
+}
+
+test('the cartographer maps what it may open and never opens what the barrier forbids', async () => {
+  const carto = await import('../src/cartographer.js');
+  const app = fakeApp();
+  const state = await carto.crawl(app.driver, { bundle: 'com.example.fake', maxActions: 200 });
+  const cov = carto.coverage(state);
+  // Reached every screen a read-only crawl may reach…
+  for (const h of ['home', 'wos', 'wo', 'comments', 'assets', 'asset', 'more', 'sheets']) assert.ok(state.screens[h], `reached ${h}`);
+  // …and never touched what it must not.
+  for (const forbidden of ['Delete', 'Sign Out', 'Create Work Order', 'Notify me', 'Edit', 'Open in Safari']) {
+    assert.ok(!app.taps.some((t) => t.endsWith(`|${forbidden}`)), `tapped ${forbidden}`);
+  }
+  // A list is sampled, not walked row by row.
+  assert.ok(app.taps.includes('wos|WO-1') && app.taps.includes('wos|WO-2'));
+  assert.ok(!app.taps.some((t) => /\|WO-[3-5]$/.test(t)), 'two rows reached the same screen, so the rest are a list');
+  assert.equal(cov.sampled, 3);
+  // Leaving the app is recorded and recovered from.
+  assert.equal(cov.leftApp.length, 1);
+  assert.equal(cov.leftApp[0].label, 'External Docs');
+  const reasons = cov.refused.map((r) => `${r.label}: ${r.kind}`);
+  for (const want of ['Delete: barrier', 'Sign Out: barrier', 'Open in Safari: barrier', 'Create Work Order: read-only', 'Notify me: read-only', 'Edit: read-only']) {
+    assert.ok(reasons.includes(want), `${want} in ${reasons.join(', ')}`);
+  }
+  assert.equal(cov.frontier.length, 0);
+  assert.equal(state.runs[0].stoppedBecause, 'nothing reachable left to open');
+  const text = carto.renderReport(cov);
+  assert.match(text, /refused by the verify barrier/);
+  assert.match(text, /left the app 1x: "External Docs"/);
+  // Six actions per attempt, as CLAUDE.md bounds exploration.
+  assert.ok(state.runs[0].attempts >= Math.ceil(state.runs[0].actions / carto.ATTEMPT_ACTIONS));
+});
+
+test('a cartographer run stops on its budget and the next run resumes where it stopped', async () => {
+  const carto = await import('../src/cartographer.js');
+  const app = fakeApp();
+  let saved = null;
+  const first = await carto.crawl(app.driver, { bundle: 'com.example.fake', maxActions: 6, persist: (s) => { saved = structuredClone(s); } });
+  assert.equal(first.runs[0].stoppedBecause, 'action budget spent');
+  assert.ok(carto.coverage(first).frontier.length > 0);
+  assert.ok(saved, 'state saved at the attempt boundary');
+  const second = await carto.crawl(app.driver, { bundle: 'com.example.fake', state: saved, maxActions: 200 });
+  assert.equal(second.runs.length, 2);
+  assert.equal(carto.coverage(second).frontier.length, 0);
+});
+
+test('a control whose tap landed somewhere unexpected is never tapped again', async () => {
+  const carto = await import('../src/cartographer.js');
+  const app = fakeApp();
+  const tap = app.driver.tap;
+  app.driver.tap = async (door, before) => {
+    const r = await tap(door, before);
+    return door.label === 'Work Orders' ? { ...r, verdict: 'unexpected-screen' } : r;
+  };
+  const state = await carto.crawl(app.driver, { bundle: 'com.example.fake', maxActions: 200 });
+  assert.equal(app.taps.filter((t) => t === 'home|Work Orders').length, 1);
+  assert.equal(carto.coverage(state).unexpected.length, 1);
+});
+
+test('the cartographer classifies controls by data, and back affordances are never doors', async () => {
+  const carto = await import('../src/cartographer.js');
+  assert.equal(carto.classify({ label: 'Work Orders', region: 'tab-bar' }).open, true);
+  assert.equal(carto.classify({ label: 'SUBMIT SERVICE REQUEST' }).kind, 'barrier');
+  assert.equal(carto.classify({ label: 'Add Asset' }).kind, 'read-only');
+  assert.equal(carto.classify({ label: 'Add Asset' }, { allowCreate: true }).open, true);
+  assert.equal(carto.classify({ label: 'Save' }, { allowCreate: true }).kind, 'barrier', 'nothing ever commits');
+  assert.equal(carto.classify({ label: 'screen-toolbar-back-button', region: 'nav-bar', navSlot: 'leading' }).reason, 'back affordance');
+  assert.equal(carto.classify({ label: '(icon-only)' }).reason, 'unlabeled');
+});

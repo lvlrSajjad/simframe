@@ -418,6 +418,7 @@ steer the model is a tool surface the model uses wrong.
 | `sim_ui` | **Start here.** The screen as a numbered text map: region, type, label, state, tap point, source. A tenth the cost of a screenshot and strictly more useful. |
 | `sim_do` | **The main tool.** A whole flow in one call — tap, type, scroll, wait, assert — each step settling before the next and verified against what it did last time. |
 | `sim_state` | The cheapest question there is: has anything changed **since your last look**, and which regions moved. |
+| `sim_map` | Crawl an app unattended, read-only by default, and record every screen and transition so later goals run from memory. Opt-in; minutes, not seconds. |
 | `sim_goto` | Walk to a screen simframe has been to before, planning the route through remembered transitions. A route that types asks for the text in `text: {"<field>": "..."}` — the graph keeps none. |
 | `sim_flow_run` | Replay a saved flow — **zero model calls**, which is the only path to human wall clock. A first traversal saves as *provisional*; one replay in which every step passed confirms it. A run with a contradicted step, a failed step, or one that never reached its last step is refused and says which. |
 | `sim_find` | Resolve an intent to one control, without acting on it. |
@@ -662,6 +663,46 @@ without a word. They are now re-fingerprinted from their stored readings on the
 first read and kept. Whatever had no reading to rebuild from is reported by
 `simframe doctor` as `memory … warn` with counts, and by `simframe screens`. See
 [DEFERRED 196](DEFERRED.md).
+
+### Mapping an app on purpose
+
+The graph fills itself as flows run, which means a new app starts empty and the
+first session pays for every screen. `simframe map` pays that once, unattended:
+
+```bash
+simframe map com.example.app --device=<udid> --minutes=10
+```
+
+It crawls the app in attempts of at most six actions, opening each control the
+graph has no edge for, backing out with the app's own back affordances, and
+relaunching from dead ends. Every tap is an ordinary verified step, so the graph
+it leaves behind is the same graph `goto` and flows already use. It resumes a
+saved crawl unless given `--fresh`. The MCP tool is `sim_map`.
+
+**What it will not do.** It never opens a control the verify barrier forbids
+(Delete, Pay, Send, Sign out, Submit, Save…). It never follows a control that
+leaves the app, and relaunches if one does. It never taps again a control that
+once landed somewhere unexpected. By default it is read-only. It does not type,
+toggle switches, or open write flows such as Add, New or Edit; `--allow-create`
+opens those, and nothing is committed either way. A list is sampled: rows are
+opened until two land on the same screen. An app that needs an account must
+already be signed in.
+
+**What it reports**, as text:
+
+```
+map of com.example.app: 41 screen(s) (33 named), 58 transition(s) recorded, 6 door(s) not yet opened
+this run: 200 action(s) in 34 attempt(s) of ≤6, 412s, 19 new screen(s), 3 relaunch(es); stopped: action budget spent
+refused by the verify barrier (5): "Sign Out" — destructive vocabulary ("sign out"); …
+not opened, read-only run (9): "Add Asset" — opens a write flow ("add"); …
+suspected splits — one name, several identities (2): "work order" ×3; …
+```
+
+A *suspected split* is one screen name with several identities, and a *suspected
+merge* is one identity whose contents were unlike each other on different
+visits. Both are leads for screen-identity work (DEFERRED 174), not verdicts.
+Crawl failures are logged as resolved locally with no model turns, so a crawl
+does not distort `simframe escalations`.
 
 ### What the memory is worth, isolated
 
@@ -1238,9 +1279,12 @@ numbers below refer to it.
 - **Replays for flows that create data** (179). A recorded assert should check
   the change it caused, not the end state, or a flow that adds a row can never
   replay cleanly.
-- **The web as a third target** (Phase 19). Deferred until one batching
-  measurement says whether the backend is worth building
-  ([`DECISIONS.md`](DECISIONS.md)).
+- **Goal mode** (`sim_goal`). Hand simframe a goal in words. It drives to a
+  milestone locally from the graph, the intent resolver, the supervisor and
+  bounded exploration, and returns only when it is done, blocked by the
+  barrier, ambiguous, or out of budget.
+- **The web is out of scope.** Web testing will be a separate tool; simframe
+  stays a mobile QA tool ([`DECISIONS.md`](DECISIONS.md)).
 
 **Later, or only if measured to be worth it**
 

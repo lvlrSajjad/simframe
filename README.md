@@ -120,6 +120,7 @@ is the point.
 | `sim_do` | **The main tool.** A whole flow in one call — tap, type, scroll, wait, assert — each step settling before the next and verified against what it did last time. Fallback selectors, optional steps, and a bounded `seek` let a batch survive a surprise instead of handing it back. |
 | `sim_state` | Has anything changed since your last look, and which regions moved. |
 | `sim_goto` · `sim_flow_run` | Walk to a screen simframe has been to before; replay a saved flow with **zero model calls**. |
+| `sim_map` | Crawl an app unattended, read-only by default, and record every screen and transition so later work runs from memory. Never crosses the verify barrier or leaves the app. |
 | `sim_find` · `sim_tap` · `sim_type_into` · `sim_scroll_to` · `sim_wait_for` · `sim_assert` | Single actions, for when you genuinely only have one step. |
 | `sim_launch` · `sim_open_url` · `sim_permission` | Launch (confirmed to have reached the front), open a deep link, grant a privacy permission without tapping the alert. |
 | `sim_look` | **The only tool that returns an image**, capped at 1024 px — for layout, colour and spacing. |

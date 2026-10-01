@@ -521,6 +521,9 @@ const CLIENT = clientKind();
 export const sessionId = () => SESSION_ID;
 export const clientName = () => CLIENT;
 
+/** A run that is a cartographer crawl, by the flow name `simframe map` gives it. */
+export const isCrawl = (flowName) => /^map /.test(String(flowName ?? ''));
+
 export function recordEscalation(udid, {
   flowId = null,
   flowName = null,
@@ -549,6 +552,14 @@ export function recordEscalation(udid, {
 } = {}) {
   if (!REASONS.includes(reason)) throw new Error(`not an escalation reason: ${reason}`);
   if (!OUTCOMES.includes(outcome)) throw new Error(`not an escalation outcome: ${outcome}`);
+  // A cartographer crawl handles its own failures — it marks the control and
+  // moves on — so nothing it hits is handed to a model. Counting those as
+  // hand-backs would let one crawl outweigh a week of real sessions in the
+  // breakdown that decides what gets built next.
+  if (isCrawl(flowName)) {
+    outcome = 'resolved_locally';
+    modelTurns = 0;
+  }
   const record = {
     timestamp: new Date().toISOString(),
     // Added after the log turned out to pool two agents' work invisibly. Both
@@ -621,7 +632,7 @@ export function flowRecordFrom({
     total_steps: totalSteps,
     min_steps: minSteps,
     step_ratio: minSteps ? Number((stepsTaken / minSteps).toFixed(3)) : null,
-    model_turns: 1 + escalations.filter((e) => e.outcome !== 'resolved_locally').length,
+    model_turns: isCrawl(flowName) ? 0 : 1 + escalations.filter((e) => e.outcome !== 'resolved_locally').length,
     images_sent: imagesSent,
     input_tokens: null,
     output_tokens: null,

@@ -1,0 +1,120 @@
+/**
+ * `simframe map <bundle-id>`: the cartographer on a real device.
+ *
+ * The crawl itself is in cartographer.js and knows nothing about devices. This
+ * is the driver it is handed: every action goes through `runScript` with
+ * verification on, exactly as a `sim_do` step does, so each transition is
+ * checked against the graph and recorded by it. Nothing here writes the graph
+ * directly. The map is a by-product of ordinary verified steps.
+ */
+import * as actions from './actions.js';
+import * as api from './index.js';
+import * as cartographer from './cartographer.js';
+import * as frontmost from './frontmost.js';
+import * as graph from './graph.js';
+import * as navigate from './navigate.js';
+import * as typed from './typed.js';
+import * as view from './view.js';
+
+const READ_LIMIT = 400;
+
+function selectorFor(door, before) {
+  const same = (before?.rows ?? []).filter((r) => String(r.label ?? '').trim() === String(door.label).trim());
+  // A label that names one thing is the replayable selector. Two things wearing
+  // it means the label is not an address; the point is.
+  return same.length <= 1 ? { tap: door.label } : { tapAt: { x: Math.round(door.x), y: Math.round(door.y) } };
+}
+
+/** The driver the crawl is handed, for one device and one app. */
+export function deviceDriver(udid, bundle, { options = {} } = {}) {
+  let appPid = null;
+  const flowName = `map ${bundle}`;
+  const run = (steps, extra = {}) => actions.runScript(udid, { steps, options, flowName, stopOnUnexpected: true, ...extra });
+
+  const read = async () => {
+    const m = await view.screenMap(udid, { options, limit: READ_LIMIT });
+    return {
+      hash: m.identity?.hash ?? null,
+      tokens: m.identity?.tokens ?? [],
+      name: m.name ?? null,
+      rows: m.rows ?? [],
+      keyboard: Boolean(m.identity?.keyboard),
+    };
+  };
+
+  return {
+    read,
+    async launch() {
+      await run([{ launch: { value: bundle, relaunch: true } }]);
+      appPid = (await frontmost.read(udid)).pid;
+      return read();
+    },
+    async inApp() {
+      const { pid } = await frontmost.read(udid);
+      // "Cannot say" is not "somewhere else". A missing sensor must not turn
+      // every step into a relaunch.
+      return pid == null || appPid == null || pid === appPid;
+    },
+    async tap(door, before) {
+      const res = await run([selectorFor(door, before)]);
+      const r = res.results?.[0] ?? {};
+      // A wrong turn with stopOnUnexpected arrives as a failed step whose error
+      // names the verdict, not as a verification object.
+      const named = /\b(unexpected-[a-z-]+)/.exec(String(r.error ?? ''))?.[1] ?? null;
+      return {
+        ok: res.ok,
+        verdict: r.verification?.verdict ?? named,
+        detail: r.error ?? r.note ?? null,
+      };
+    },
+    async back(here) {
+      const rows = here?.rows ?? [];
+      const affordance = rows.find((r) => r.region === 'nav-bar' && cartographer.isBackAffordance(r))
+        ?? rows.find((r) => cartographer.isBackAffordance(r));
+      const step = affordance
+        ? selectorFor({ label: affordance.label, x: affordance.x, y: affordance.y }, here)
+        // The system's own back gesture, from the leading edge.
+        : { swipe: { from: [6, 420], to: [320, 420] } };
+      const res = await run([step]);
+      return { acted: res.ranSteps > 0, via: affordance ? `"${affordance.label}"` : 'edge swipe' };
+    },
+    route: (from, to) => graph.route(udid, from, to),
+    async walk(route) {
+      const steps = route.map(navigate.stepFor);
+      // A route that would type is not walked by a crawl: it has no text to
+      // give, and the read-only rule says it would not type it anyway.
+      if (steps.some((s) => !s || typed.needsText(s))) return { steps: 0, after: null };
+      const res = await run(steps);
+      return { steps: res.ranSteps ?? 0, after: null };
+    },
+    sameScreen: async (a, b) => graph.sameScreen(udid, a, b),
+  };
+}
+
+/**
+ * Map an app: resume its saved state, crawl within the budget, save, report.
+ * Returns `{ state, coverage, text }`.
+ */
+export async function map(deviceQuery, bundle, {
+  options = {},
+  minutes = 10,
+  maxActions = 200,
+  allowCreate = false,
+  fresh = false,
+} = {}) {
+  if (!bundle) throw new Error('usage: simframe map <bundle-id> [--minutes=10] [--actions=200] [--allow-create] [--fresh]');
+  const { device } = await api.ensureDaemon(deviceQuery, options);
+  const udid = device.udid;
+  const state = fresh ? null : cartographer.loadState(udid, bundle);
+  const result = await cartographer.crawl(deviceDriver(udid, bundle, { options }), {
+    bundle,
+    budgetMs: Math.max(1, Number(minutes)) * 60 * 1000,
+    maxActions: Math.max(1, Number(maxActions)),
+    allowCreate,
+    state: state && Object.keys(state.screens).length ? state : null,
+    persist: (s) => cartographer.saveState(udid, s),
+  });
+  cartographer.saveState(udid, result);
+  const coverage = cartographer.coverage(result);
+  return { device, state: result, coverage, text: cartographer.renderReport(coverage) };
+}

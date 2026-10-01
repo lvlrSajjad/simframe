@@ -40,6 +40,10 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe screens [device]          list screens this device has learned
   simframe storage [bundle-id] [--device=<name|udid>]   what the app saved (no boot needed)
   simframe goto    <screen>          walk to a known screen through known steps
+  simframe map     <bundle-id>       crawl an app on purpose and record every screen and transition
+                                     (read-only by default; --minutes=10 --actions=200
+                                      --allow-create opens write flows but never commits;
+                                      --fresh forgets the saved crawl; resumes otherwise)
                    --text '{"Password":"..."}'  text for fields on the route (the graph keeps none)
   simframe flow    save <name> <script.json>   run a flow and save it if every step verifies
   simframe flow    run  <name>       replay a saved flow (--text as for goto, for secure fields)
@@ -880,6 +884,20 @@ async function main() {
         ],
       );
       process.exitCode = res.ok ? 0 : 1;
+      return;
+    }
+
+    case 'map': {
+      const bundle = positional[0];
+      const { map } = await import('./map.js');
+      const res = await map(flags.device, bundle, {
+        options,
+        minutes: num(flags.minutes, 10),
+        maxActions: num(flags.actions, 200),
+        allowCreate: Boolean(flags['allow-create'] ?? flags.allowCreate),
+        fresh: Boolean(flags.fresh),
+      });
+      emit(flags, res.coverage, res.text);
       return;
     }
 
