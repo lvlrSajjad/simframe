@@ -2537,7 +2537,15 @@ worth more than the verdict.
    **Per store, because they are not the same kind of thing:**
 
    - **graph/** — no typed text, ever. Edges that only differed by their text
-     are pooled into one when a node is scrubbed.
+     are pooled into one when a node is scrubbed. One-off cleanup for files
+     written before the fix: `node scripts/scrub-graph-text.mjs <udid> […]`, or
+     `--all` with a mandatory `--skip`, plus `--dry-run`; it prints counts, never
+     values. Run 2026-10-01 on every device directory on this laptop **except
+     `B55AB0AE` and `CDB00FD6`, which are colleagues' and were not touched**:
+     74 text edges in 39 files (`326464A4` 61, `7B8F8963` 9, `A0C6E123` 2, the
+     emulator 2), pooled to 64; 7 expired journal entries dropped on
+     `326464A4`; no saved flow needed rewriting. A re-audit found no typed text
+     left in any of their graphs.
    - **flows/** (saved flows) — an explicit artifact, so ordinary text stays: a
      flow that fills a search box is worth keeping whole. Text into a field
      named like a secret (Password, Passcode, PIN, one-time code, CVV…) is
