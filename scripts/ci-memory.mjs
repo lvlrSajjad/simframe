@@ -501,7 +501,8 @@ for (let pass = 1; pass <= CONVERGE_PASSES; pass += 1) {
 // Two things have to be true for this to mean anything, and getting either
 // wrong makes the check lie rather than fail.
 //
-// The device must not already be on example.com. The URL is novel only in its
+// The device must not already be on the fixture page (it was example.com
+// until that page began animating, 2026-09-28). The URL is novel only in its
 // query string, and that page renders identically whatever you put there, so
 // from there the verdict is `no-visible-change` — the honest answer to what
 // happened, and not the question being asked.
@@ -512,7 +513,7 @@ for (let pass = 1; pass <= CONVERGE_PASSES; pass += 1) {
 // than one that fails, because nothing ever tells you.
 await jsonRetry(['do', AT_HOME_SCREEN], { allowFail: true });
 const NOVEL = writeFlow('simframe-ci-novel.json', [
-  { openUrl: `https://example.com/?simframe-ci=${Date.now()}` },
+  { openUrl: `https://lvlrsajjad.github.io/simframe/fixtures/static-page.html?simframe-ci=${Date.now()}` },
 ]);
 const novel = await jsonRetry(['do', NOVEL], { allowFail: true });
 const novelSteps = Array.isArray(novel?.results) ? novel.results : [];

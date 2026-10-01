@@ -21,14 +21,14 @@
   },
   {
     "name": "browser",
-    "note": "A static page, so its structure should be identical on every visit. Arrival is asserted on a CHROME control and not only on the page text: \"Example Domain\" is page content that OCR alone can satisfy, so the tour used to proceed while Safari's accessibility tree was still empty on a cold first launch. Measured — sharding CI removed the memory-layer step that had been warming Safari, and round 1 then read e00725fce7 with 0 named elements where rounds 2 and 3 read 9589eb2471 with 5. Waiting for \"Address\", which only the tree can name, makes arrival mean addressable rather than merely drawn.",
+    "note": "A static page the project hosts (docs/fixtures/static-page.html). It was https://example.com until that page started animating its text through languages on 2026-09-28, which turned the fingerprint shard red on unchanged code. A static page, so its structure should be identical on every visit. Arrival is asserted on a CHROME control and not only on the page text: \"Static Fixture\" is page content that OCR alone can satisfy, so the tour used to proceed while Safari's accessibility tree was still empty on a cold first launch. Measured — sharding CI removed the memory-layer step that had been warming Safari, and round 1 then read e00725fce7 with 0 named elements where rounds 2 and 3 read 9589eb2471 with 5. Waiting for \"Address\", which only the tree can name, makes arrival mean addressable rather than merely drawn.",
     "steps": [
       {
-        "openUrl": "https://example.com"
+        "openUrl": "https://lvlrsajjad.github.io/simframe/fixtures/static-page.html"
       },
       {
         "waitFor": {
-          "value": "Example Domain",
+          "value": "Static Fixture",
           "timeoutMs": 20000
         }
       },
@@ -45,7 +45,7 @@
       }
     ],
     "intents": [
-      "Example Domain",
+      "Static Fixture",
       "refresh",
       "Address"
     ]

@@ -65,7 +65,7 @@ if (!tourFile) {
 A tour is a JSON array of screens to visit in a cycle:
 
   [{"name": "home",     "steps": [{"button": "home"}]},
-   {"name": "browser",  "steps": [{"openUrl": "https://example.com"}]}]
+   {"name": "browser",  "steps": [{"openUrl": "https://lvlrsajjad.github.io/simframe/fixtures/static-page.html"}]}]
 
 Each round walks the whole cycle, so every screen is left and re-arrived at
 between readings — which is what makes "the same screen, revisited" a real

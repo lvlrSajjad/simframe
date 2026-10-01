@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Static Fixture</title>
+<!--
+  A page for simframe's device tours to visit. It must never change: the
+  fingerprint shard measures whether the same screen reads the same on every
+  visit, so a page that moves measures the page instead of simframe.
+
+  It replaced https://example.com, which on 2026-09-28 dropped its heading for a
+  sentence that animates through languages, and asks not to be used for testing.
+  No script, no external resources, no animation. Shaped like the old
+  example.com (a heading, a paragraph, a link) so its regions read the same way.
+-->
+<style>
+  body { font: 16px/1.5 -apple-system, system-ui, sans-serif; max-width: 36em; margin: 4em auto; padding: 0 1.5em; color: #222; background: #f0f0f2; }
+  h1 { font-size: 2em; margin: 0 0 .5em; }
+  a { color: #38488f; }
+</style>
+</head>
+<body>
+<h1>Static Fixture</h1>
+<p>This page is a fixed target for simframe's device tests. Its content does not change.</p>
+<p><a href="https://github.com/lvlrSajjad/simframe">simframe on GitHub</a></p>
+</body>
+</html>
