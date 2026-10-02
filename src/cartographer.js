@@ -190,12 +190,20 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
   // `selected` trait to warn by.
   const commits = vocabulary.load(locale).cartographer?.formCommit ?? [];
   const commit = allowCreate ? null : ordered.find((r) => /button/i.test(String(r.type ?? '')) && commits.some((w) => alnum(r.label) === alnum(w)));
+  const lowest = Math.max(0, ...ordered.map((r) => (r.frame?.y ?? r.y ?? 0) + (r.frame?.height ?? 0)));
+  const bottomBand = lowest * 0.88;
   const treeKnowsControls = ordered.some((r) => /ax/.test(String(r.source ?? '')) && /button|cell|link|switch|tab/i.test(String(r.type ?? '')));
   for (const row of ordered) {
     const key = controlKey(row);
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
-    const verdict = treeKnowsControls && /ax/.test(String(row.source ?? '')) && /^(statictext|text|image)$/i.test(String(row.type ?? ''))
+    // Text that only OCR sees, mid-screen, where the tree is describing the
+    // controls: drawn text — a map's place names, a chart's labels. Ecotrak's
+    // map put "Los Angeles" and street names in the door list at ~22 s a
+    // no-change tap. The bottom band is spared: that app's tab bar is OCR-only.
+    const ocrOnly = !/ax/.test(String(row.source ?? '')) && /^(text|statictext)?$/i.test(String(row.type ?? ''));
+    const midScreen = (row.y ?? 0) < bottomBand;
+    const verdict = treeKnowsControls && ((/ax/.test(String(row.source ?? '')) && /^(statictext|text|image)$/i.test(String(row.type ?? ''))) || (ocrOnly && midScreen))
       ? { open: false, reason: 'static text', kind: 'skipped' }
       : classify(row, { allowCreate, locale });
     if (!verdict.open) {
@@ -214,6 +222,9 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
     }
     doors.push({ key, label: row.label, region: row.region ?? 'content', x: row.x, y: row.y, type: row.type ?? null, shape, strip: stripOf(row) });
   }
+  // What the tree knows to be a control goes first; what only OCR saw, after.
+  const known = (d) => (/button|cell|link|tab|genericelement|other/i.test(String(d.type ?? '')) ? 0 : 1);
+  doors.sort((a, b) => known(a) - known(b));
   return { doors, refused, skipped };
 }
 

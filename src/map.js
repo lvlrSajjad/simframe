@@ -32,7 +32,24 @@ function selectorFor(door, before) {
 export function deviceDriver(udid, bundle, { options = {} } = {}) {
   let appPid = null;
   const flowName = `map ${bundle}`;
-  const run = (steps, extra = {}) => actions.runScript(udid, { steps, options, flowName, stopOnUnexpected: true, ...extra });
+  // Waiting is learned, not fixed. A crawl opens edges nobody has seen, which
+  // runScript times out at its cold default — and a tap that changes nothing
+  // then pays that default several times over: 13-22 s each, measured on
+  // Ecotrak. So the crawl learns this app's own settle time from the
+  // transitions it records (p95 + 1 s, at least 2.5 s, never above the
+  // default) and hands that to every new edge once it has four samples.
+  const settles = [];
+  const learnedTimeout = () => {
+    if (settles.length < 4) return undefined;
+    const sorted = [...settles].sort((a, b) => a - b);
+    const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
+    return Math.max(2500, Math.min(8000, p95 + 1000));
+  };
+  const run = (steps, extra = {}) => actions.runScript(udid, {
+    steps, options, flowName, stopOnUnexpected: true,
+    ...(learnedTimeout() ? { timeoutMs: learnedTimeout() } : {}),
+    ...extra,
+  });
 
   const read = async () => {
     const m = await view.screenMap(udid, { options, limit: READ_LIMIT });
@@ -70,6 +87,7 @@ export function deviceDriver(udid, bundle, { options = {} } = {}) {
     async tap(door, before) {
       const res = await run([selectorFor(door, before)]);
       const r = res.results?.[0] ?? {};
+      if (r.ok && r.verification?.verdict && r.verification.verdict !== 'no-visible-change' && Number.isFinite(r.ms)) settles.push(r.ms);
       // A wrong turn with stopOnUnexpected arrives as a failed step whose error
       // names the verdict, not as a verification object.
       const named = /\b(unexpected-[a-z-]+)/.exec(String(r.error ?? ''))?.[1] ?? null;
