@@ -7686,3 +7686,24 @@ test('while a dialog is up nothing behind it is a door, and backing out dismisse
   assert.equal(carto.dialogDismiss(rows).label, 'CANCEL');
   assert.equal(carto.dialogDismiss([b('Cancel', 90, 470)]), null, 'a lone Cancel is not a dialog');
 });
+
+test('a crawl that starts under a dialog dismisses it and maps the app, and a crawl that opens nothing is a failure', async () => {
+  const carto = await import('../src/cartographer.js');
+  const app = fakeApp();
+  let dialog = true;
+  const b = (label, x, y) => ({ label, x, y, type: 'Button', region: 'content', frame: { x: x - 50, y: y - 20, width: 100, height: 40 } });
+  const read = app.driver.read; const back = app.driver.back;
+  const withDialog = async () => (dialog ? { hash: 'dlg', name: null, tokens: [], rows: [b('CANCEL', 90, 470), b('OPEN SETTINGS', 290, 470)] } : read());
+  app.driver.read = withDialog;
+  app.driver.launch = async () => withDialog();
+  app.driver.back = async (here) => { if (dialog) { dialog = false; return { acted: true, after: await read() }; } return back(here); };
+  const state = await carto.crawl(app.driver, { bundle: 'x', maxActions: 60 });
+  assert.ok(state.screens.wos, 'mapped the app behind the dialog');
+  assert.notEqual(state.runs[0].failed, true);
+
+  const stuck = { launch: async () => ({ hash: 's', tokens: [], rows: [b('NEXT', 200, 500)] }), read: async () => ({ hash: 's', tokens: [], rows: [b('NEXT', 200, 500)] }),
+    inApp: async () => true, tap: async () => ({}), back: async () => ({ acted: false }), route: () => null, walk: async () => ({}), sameScreen: async (a, c) => a.hash === c.hash };
+  const s2 = await carto.crawl(stuck, { bundle: 'x' });
+  assert.equal(s2.runs[0].failed, true);
+  assert.match(carto.renderReport(carto.coverage(s2)), /^FAILED — no transition was recorded/);
+});

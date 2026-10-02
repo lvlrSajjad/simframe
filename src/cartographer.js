@@ -517,7 +517,7 @@ export async function crawl(driver, {
       return state;
     }
   }
-  const root = reading?.hash ?? null;
+  let root = reading?.hash ?? null;
   register(state, reading, { allowCreate, locale });
 
   while (true) {
@@ -637,11 +637,16 @@ export async function crawl(driver, {
     // Nothing left here. Back out, the app's own way first — except from the
     // start screen, where there is nowhere to go back to and a "back" is a
     // wasted tap on whatever sits in the nav bar's leading slot.
-    const back = canon(state, here.hash) === root ? null : await driver.back(here);
+    // A dialog is dismissed wherever it is, the start screen included — a crawl
+    // that began under one called the dialog the app and stopped.
+    const underDialog = Boolean(dialogDismiss(here.rows, { locale }));
+    const back = canon(state, here.hash) === root && !underDialog ? null : await driver.back(here);
     if (back?.acted) {
       act();
       const after = back.after ?? await driver.read();
       if (after?.hash && !(await driver.sameScreen(here, after))) {
+        // The start screen was a dialog over the app: the app is the start.
+        if (underDialog && canon(state, here.hash) === root) root = canon(state, after.hash);
         reading = after;
         register(state, reading, { allowCreate, locale });
         continue;
@@ -705,10 +710,14 @@ export async function crawl(driver, {
     reading = home;
   }
   run.attempts += inAttempt ? 1 : 0;
-  // A crawl that mapped nothing did not succeed, whatever stopped it.
-  if (!Object.keys(state.screens).length && !run.failed) {
+  // A crawl that mapped nothing did not succeed, whatever stopped it — and a
+  // start screen with no transition out of it is nothing mapped.
+  const transitions = Object.values(state.screens).reduce((n, sc) => n + Object.values(sc.controls).filter((c) => c.status === 'explored').length, 0);
+  if (!run.failed && (!Object.keys(state.screens).length || (!transitions && !run.blocked))) {
     run.failed = true;
-    run.stoppedBecause = `no screen was identified (${run.stoppedBecause ?? 'stopped'})`;
+    run.stoppedBecause = Object.keys(state.screens).length
+      ? `no transition was recorded: nothing on the start screen could be opened (${run.stoppedBecause ?? 'stopped'})`
+      : `no screen was identified (${run.stoppedBecause ?? 'stopped'})`;
   }
   run.endedAt = now();
   run.screensBefore = knownBefore.size;
