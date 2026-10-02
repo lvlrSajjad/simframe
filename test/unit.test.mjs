@@ -7615,3 +7615,21 @@ test('a row that returns to the screen it was opened from is a picked option, an
   assert.deepEqual(taps, ['Service Provider', 'Acme']);
   assert.match(carto.renderReport(carto.coverage(state)), /picked an option 1x/);
 });
+
+test('a crawl waits through an unidentified screen after launch, and a crawl that maps nothing is a failure', async () => {
+  const carto = await import('../src/cartographer.js');
+  const app = fakeApp();
+  let n = 0;
+  const read = app.driver.read; const launch = app.driver.launch;
+  app.driver.launch = async (o) => { await launch(o); n = 0; return { hash: null, rows: [], tokens: [] }; };
+  app.driver.read = async () => (++n < 2 ? { hash: null, rows: [], tokens: [] } : read());
+  const ok = await carto.crawl(app.driver, { bundle: 'x', maxActions: 20 });
+  assert.ok(ok.screens.home, 'waited for the screen to be drawn');
+
+  const blank = { launch: async () => ({ hash: null, rows: [] }), read: async () => ({ hash: null, rows: [] }), inApp: async () => true,
+    tap: async () => ({}), back: async () => ({ acted: false }), route: () => null, walk: async () => ({}), sameScreen: async () => false };
+  let t = 0;
+  const s = await carto.crawl(blank, { bundle: 'x', now: () => (t += 3000) });
+  assert.equal(s.runs[0].failed, true);
+  assert.match(carto.renderReport(carto.coverage(s)), /^FAILED/);
+});

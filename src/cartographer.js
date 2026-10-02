@@ -376,15 +376,17 @@ export async function crawl(driver, {
   const arrive = async (r) => {
     const t = now();
     let cur = r;
-    while (cur?.hash && !didNotStart(cur, { locale }) && !placeLike(cur) && now() - t < LAUNCH_CAP_MS) {
+    // A reading with no identity is a screen not yet drawn — a black frame
+    // mid-launch — and is waited on like a splash. Returning it at once made a
+    // crawl of Ecotrak record zero screens and report "nothing reachable".
+    const waiting = (x) => !x?.hash || (!didNotStart(x, { locale }) && !placeLike(x));
+    while (waiting(cur) && now() - t < LAUNCH_CAP_MS) {
       const next = await driver.read();
       cur = next ?? cur;
     }
     // Still nothing to operate at the cap: the app has not finished launching,
     // and its launch screen must not be crawled as though it were the app.
-    if (cur?.hash && !didNotStart(cur, { locale }) && !placeLike(cur)) {
-      return { ...cur, notArrived: true };
-    }
+    if (waiting(cur)) return { ...(cur ?? {}), rows: cur?.rows ?? [], notArrived: true };
     return cur;
   };
   // Back in front without restarting: what leaving the app needs.
@@ -614,6 +616,11 @@ export async function crawl(driver, {
     reading = home;
   }
   run.attempts += inAttempt ? 1 : 0;
+  // A crawl that mapped nothing did not succeed, whatever stopped it.
+  if (!Object.keys(state.screens).length && !run.failed) {
+    run.failed = true;
+    run.stoppedBecause = `no screen was identified (${run.stoppedBecause ?? 'stopped'})`;
+  }
   run.endedAt = now();
   run.screensBefore = knownBefore.size;
   persist(state);
