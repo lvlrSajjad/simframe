@@ -7633,3 +7633,22 @@ test('a crawl waits through an unidentified screen after launch, and a crawl tha
   assert.equal(s.runs[0].failed, true);
   assert.match(carto.renderReport(carto.coverage(s)), /^FAILED/);
 });
+
+test('readings with nearly the same doors are one screen, and a strip that does nothing is not walked', async () => {
+  const carto = await import('../src/cartographer.js');
+  const row = (label, y) => ({ label, x: 200, y, type: 'button', region: 'content', frame: { x: 16, y: y - 20, width: 370, height: 40 } });
+  const chip = (label, i) => ({ label, x: 40 + i * 70, y: 500, type: 'button', region: 'content', frame: { x: 10 + i * 70, y: 480, width: 60, height: 40 } });
+  let n = 0;
+  const taps = [];
+  // Every read gets a new hash and different tokens, as Track Time did, but the doors are the same.
+  const read = () => ({ hash: `tt-${n}`, name: null, tokens: [`t${n}`], rows: [row('Service Provider', 200), row('Oct 2026', 260), row('Comments', 320), ...['MON', 'TUE', 'WED', 'THU'].map(chip)] });
+  const driver = {
+    launch: async () => read(), read: async () => read(), inApp: async () => true,
+    tap: async (door) => { taps.push(door.label); n += 1; return { ok: true, verdict: 'ok' }; },
+    back: async () => ({ acted: false }), route: () => null, walk: async () => ({ steps: 0 }),
+    sameScreen: async (a, b) => a.hash === b.hash, relaunchBlocked: async () => 'test',
+  };
+  const state = await carto.crawl(driver, { bundle: 'x', maxActions: 40 });
+  assert.equal(carto.coverage(state).screens, 1, `screens: ${Object.keys(state.screens)}`);
+  assert.ok(taps.length <= 5, `tapped ${taps.join(',')}`);
+});

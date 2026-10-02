@@ -243,8 +243,39 @@ const canon = (state, hash) => {
   return h;
 };
 
+/** Doors two screens share, as a fraction of all their doors. */
+export const SAME_DOORS = 0.7;
+
+function doorKeys(reading, opts) {
+  return doorsOf(reading?.rows, opts).doors.filter((d) => d.region !== 'tab-bar').map((d) => d.key);
+}
+
+/**
+ * The screen already in the map that this reading is, by its doors. Structure
+ * and names both failed on Ecotrak's Track Time — seven identities, no name,
+ * too few shared tokens — while every one of them carried the same controls.
+ * What a person can do on a screen is what the crawl cares about, so a reading
+ * whose doors are mostly an existing screen's doors is that screen.
+ */
+function sameDoorsAs(state, reading, opts) {
+  const mine = doorKeys(reading, opts);
+  if (mine.length < 3) return null;
+  let best = null;
+  for (const [hash, sc] of Object.entries(state.screens)) {
+    const theirs = Object.entries(sc.controls).filter(([, c]) => c.region !== 'tab-bar').map(([k]) => k);
+    if (theirs.length < 3) continue;
+    const j = jaccard(mine, theirs);
+    if (j >= SAME_DOORS && (!best || j > best.j)) best = { hash, j };
+  }
+  return best?.hash ?? null;
+}
+
 function register(state, reading, opts) {
   if (!reading?.hash) return null;
+  if (!state.screens[canon(state, reading.hash)]) {
+    const same = sameDoorsAs(state, reading, opts);
+    if (same && same !== reading.hash) (state.aliases ??= {})[reading.hash] = same;
+  }
   if (canon(state, reading.hash) !== reading.hash) return registerAs(state, { ...reading, hash: canon(state, reading.hash) }, opts);
   return registerAs(state, reading, opts);
 }
@@ -303,7 +334,9 @@ function sampleList(state, hash0, key) {
   const same = Object.values(controls).filter((c) => (shape && c.shape === shape) || (strip && c.strip === strip));
   // One in-place change in a group is enough: the rest of a day strip or a
   // set of filter chips change the same screen the same way.
-  if (same.some((c) => c.status === 'in-place')) {
+  // Two of a group that did nothing visible: the rest of it will not either,
+  // and each costs a full no-change verification.
+  if (same.some((c) => c.status === 'in-place') || same.filter((c) => c.status === 'no-change').length >= 2) {
     for (const c of same) if (c.status === 'pending') c.status = 'sampled';
     return;
   }
@@ -508,15 +541,21 @@ export async function crawl(driver, {
           for (const c of Object.values(state.screens[canon(state, before.hash)]?.controls ?? {})) {
             if (shape && c.shape === shape && c.status === 'pending') c.status = 'refused-after-change';
           }
-        } else if (!/^unexpected/.test(res?.verdict ?? '')) mark(state, before.hash, door.key, { status: 'no-change' });
+        } else if (!/^unexpected/.test(res?.verdict ?? '')) {
+          mark(state, before.hash, door.key, { status: 'no-change' });
+          sampleList(state, before.hash, door.key);
+        }
         reading = reading?.hash ? reading : before;
         continue;
       }
       // The same screen with a new face: an alias, not a new place.
       const beforeName = state.screens[canon(state, before.hash)]?.name ?? before.name ?? null;
-      const inPlace = !state.screens[canon(state, reading.hash)] && (
+      const unknown = !state.screens[canon(state, reading.hash)];
+      const sameDoors = unknown ? sameDoorsAs(state, reading, { allowCreate, locale }) : null;
+      const inPlace = (unknown && (
         (beforeName && reading.name && alnum(beforeName) === alnum(reading.name))
-        || (before.tokens?.length && reading.tokens?.length && jaccard(before.tokens, reading.tokens) >= ALIKE));
+        || (before.tokens?.length && reading.tokens?.length && jaccard(before.tokens, reading.tokens) >= ALIKE)))
+        || (sameDoors && canon(state, sameDoors) === canon(state, before.hash));
       if (inPlace) {
         (state.aliases ??= {})[reading.hash] = canon(state, before.hash);
         if (!/^unexpected/.test(res?.verdict ?? '')) mark(state, before.hash, door.key, { status: 'in-place', to: reading.hash });
@@ -527,7 +566,15 @@ export async function crawl(driver, {
       // A row that sends you back to the screen you came from was an option
       // being chosen (a picker), not a door. One is enough: the rest of that
       // list would each choose something else.
-      const cameFrom = state.screens[canon(state, before.hash)]?.via?.from;
+      const via = state.screens[canon(state, before.hash)]?.via;
+      const cameFrom = via?.from;
+      // The same control that opened this screen closes it: a toggle, which is
+      // a way back, not an option chosen.
+      if (cameFrom && via.label && alnum(via.label) === alnum(door.label) && canon(state, reading.hash) === canon(state, cameFrom)) {
+        mark(state, before.hash, door.key, { status: 'toggle', to: reading.hash });
+        register(state, reading, { allowCreate, locale });
+        continue;
+      }
       if (door.region === 'content' && cameFrom && canon(state, reading.hash) === canon(state, cameFrom)) {
         mark(state, before.hash, door.key, { status: 'picked', to: reading.hash });
         (state.picked ??= []).push({ at: now(), screen: before.name ?? before.hash, label: door.label });
@@ -691,7 +738,8 @@ export function renderReport(cov, { limit = 12 } = {}) {
   if (barrier.length) lines.push(`refused by the verify barrier (${barrier.length}): ${barrier.slice(0, limit).map((x) => `"${x.label}" — ${x.reason}`).join('; ')}`);
   if (readOnly.length) lines.push(`not opened, read-only run (${readOnly.length}): ${readOnly.slice(0, limit).map((x) => `"${x.label}" — ${x.reason.replace(/ — read-only run.*$/, '')}`).join('; ')}`);
   if (cov.picked.length) lines.push(`picked an option ${cov.picked.length}x (the tap returned to the previous screen, so the rest of that list was not opened): ${cov.picked.slice(0, limit).map((x) => `"${x.label}" on ${x.screen}`).join('; ')}`);
-  if (cov.inPlace) lines.push(`${cov.inPlace} tap(s) changed a screen in place; ${cov.aliases} identity(ies) were the same screen with a new face (DEFERRED 174)`);
+  if (cov.inPlace) lines.push(`${cov.inPlace} tap(s) changed a screen in place`);
+  if (cov.aliases) lines.push(`${cov.aliases} identity(ies) were a screen already mapped, with a new face — splits for DEFERRED 174`);
   if (cov.sampled) lines.push(`${cov.sampled} list row(s) not opened: earlier rows of the same list led to the same screen`);
   if (unlabeled) lines.push(`${unlabeled} unlabeled control(s) were not opened: nothing says what they do`);
   if (cov.leftApp.length) lines.push(`left the app ${cov.leftApp.length}x: ${cov.leftApp.slice(0, limit).map((x) => x.label ? `"${x.label}"` : x.note).join('; ')} — relaunched each time`);
