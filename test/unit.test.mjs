@@ -7707,3 +7707,14 @@ test('a crawl that starts under a dialog dismisses it and maps the app, and a cr
   assert.equal(s2.runs[0].failed, true);
   assert.match(carto.renderReport(carto.coverage(s2)), /^FAILED — no transition was recorded/);
 });
+
+test('an unlabeled button is neither a way back nor a dialog, and a React Native dialog is still a dialog', async () => {
+  const carto = await import('../src/cartographer.js');
+  const r = (label, type, x, y) => ({ label, type, x, y, region: 'content', frame: { x: x - 30, y: y - 20, width: 60, height: 40 } });
+  assert.equal(carto.isBackAffordance(r(undefined, 'Button', 378, 229)), false);
+  const chips = [r('All', 'Button', 48, 229), r(undefined, 'Button', 378, 229), r('Open', 'Button', 310, 229)];
+  assert.equal(carto.dialogDismiss(chips), null);
+  assert.ok(carto.doorsOf(chips).doors.length >= 2);
+  const rn = [r('CANCEL', 'GenericElement', 117, 485), r('OPEN SETTINGS', 'GenericElement', 286, 485)];
+  assert.equal(carto.dialogDismiss(rn).label, 'CANCEL');
+});

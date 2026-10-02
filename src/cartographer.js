@@ -77,7 +77,9 @@ export function didNotStart(reading, { locale } = {}) {
 export function isBackAffordance(row, { locale } = {}) {
   const w = words(locale);
   const label = String(row?.label ?? '').trim();
-  if (w.rawBack.includes(label) || w.back.includes(alnum(label))) return true;
+  // Symbols ("✕", "<") normalise to nothing, so an empty label would match
+  // them: every unlabeled button was a "back" until this was checked.
+  if (label && (w.rawBack.includes(label) || (alnum(label) && w.back.includes(alnum(label))))) return true;
   // A nav bar's leading button is a back button whatever it is called. iOS
   // labels it with the previous screen's title — "Settings" on every screen
   // under Settings — and RN apps name theirs after a testID
@@ -109,8 +111,10 @@ export function placeLike(reading) {
  * and backed out with the nav-bar button underneath.
  */
 export function dialogDismiss(rows, { locale } = {}) {
-  const words = (vocabulary.load(locale).cartographer?.dismiss ?? []).map(alnum);
-  const buttons = (rows ?? []).filter((r) => /button/i.test(String(r.type ?? '')) && (r.region ?? 'content') === 'content');
+  const words = (vocabulary.load(locale).cartographer?.dismiss ?? []).map(alnum).filter(Boolean);
+  // React Native draws a dialog's buttons as generic elements, not buttons.
+  const buttons = (rows ?? []).filter((r) => /button|genericelement|other/i.test(String(r.type ?? ''))
+    && (r.region ?? 'content') === 'content' && alnum(r.label));
   return buttons.find((b) => words.includes(alnum(b.label))
     && buttons.some((o) => o !== b && Math.abs((o.y ?? 0) - (b.y ?? 0)) <= 12)) ?? null;
 }
