@@ -4895,3 +4895,11 @@ three reads in a row.
 
 Both are inside the 10 s cap. The app came back on "Refresh Auth Error —
 Refresh Token has expired": the sign-in had lapsed, not been cleared.
+
+**Warm relaunch to the signed-in home screen** (2026-10-02, packager running,
+same device): 15294, 13369 and 9109 ms, median **13.4 s**. The earlier 7.4–8.0 s
+was to the lighter sign-in screen. Two of three exceed the 10 s cap on any
+wait, so a crawl that restarts this app to recover usually stops as "did not
+finish launching". The crawl no longer restarts at its start, and leaves
+recovery restarts under the cap. Whether a launch edge may wait p95 + margin
+past 10 s is the owner's call, not this code's.

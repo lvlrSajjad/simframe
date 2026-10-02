@@ -423,12 +423,12 @@ export async function crawl(driver, {
     return r;
   };
 
-  // Start from the app's own start screen when a restart is safe, so the map
-  // is rooted where a user starts rather than wherever the app was left (a
-  // half-open sheet, the middle of a form). When it is not safe, the app is
-  // only brought forward and the crawl starts where it is.
-  const safeRestart = driver.relaunchBlocked ? !(await driver.relaunchBlocked()) : false;
-  let reading = await arrive(await driver.launch({ relaunch: safeRestart }));
+  // Start where the app is: brought forward, never restarted. Restarting to
+  // root the map at the app's own start screen was tried and measured: a warm
+  // restart of the Ecotrak debug build took more than the 10 s cap to become
+  // operable, so the crawl failed before it began. Leave the app on its start
+  // screen before mapping it.
+  let reading = await arrive(await driver.launch({ relaunch: false }));
   act();
   {
     const dead = didNotStart(reading, { locale });
