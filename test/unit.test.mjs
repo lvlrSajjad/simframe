@@ -7573,3 +7573,45 @@ test('a crawl waits for an app to leave its launch screen before it treats anyth
   assert.ok(!state.screens.splash, 'the splash is not a screen of the map');
   assert.ok(state.screens.home);
 });
+
+test('a tap that changes a screen in place is an alias, and the rest of its strip is sampled', async () => {
+  const carto = await import('../src/cartographer.js');
+  const days = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
+  let day = 'MON';
+  const taps = [];
+  const chip = (label, i) => ({ label, x: 40 + i * 70, y: 300, type: 'button', region: 'content', frame: { x: 10 + i * 70, y: 280, width: 60, height: 40 } });
+  const toks = Array.from({ length: 12 }, (_, i) => `button:content:w${i}`);
+  const read = () => ({ hash: `track-${day}`, name: null, tokens: [...toks, `sel:${day}`], rows: days.map(chip) });
+  const driver = {
+    launch: async () => read(), read: async () => read(), inApp: async () => true,
+    tap: async (door) => { taps.push(door.label); day = door.label; return { ok: true, verdict: 'ok' }; },
+    back: async () => ({ acted: false }), route: () => null, walk: async () => ({ steps: 0 }),
+    sameScreen: async (a, b) => a.hash === b.hash, relaunchBlocked: async () => null,
+  };
+  const state = await carto.crawl(driver, { bundle: 'x', maxActions: 30 });
+  const cov = carto.coverage(state);
+  // MON is already selected (no change), TUE changes the screen in place, and
+  // the rest of the strip is sampled.
+  assert.deepEqual(taps, ['MON', 'TUE']);
+  assert.equal(cov.screens, 1, 'one screen, not one per selected day');
+  assert.equal(cov.inPlace, 1);
+  assert.match(carto.renderReport(cov), /changed a screen in place/);
+});
+
+test('a row that returns to the screen it was opened from is a picked option, and its list is not walked', async () => {
+  const carto = await import('../src/cartographer.js');
+  const row = (label, y) => ({ label, x: 200, y, type: 'button', region: 'content', frame: { x: 16, y: y - 20, width: 370, height: 40 } });
+  let stack = ['form'];
+  const taps = [];
+  const S = { form: [row('Service Provider', 200)], picker: [row('Acme', 200), row('Globex', 250), row('Initech', 300)] };
+  const read = () => ({ hash: stack.at(-1), name: stack.at(-1), tokens: [stack.at(-1)], rows: S[stack.at(-1)] });
+  const driver = {
+    launch: async () => { stack = ['form']; return read(); }, read: async () => read(), inApp: async () => true,
+    tap: async (door) => { taps.push(door.label); if (door.label === 'Service Provider') stack.push('picker'); else stack.pop(); return { ok: true, verdict: 'ok' }; },
+    back: async () => ({ acted: false }), route: () => null, walk: async () => ({ steps: 0 }),
+    sameScreen: async (a, b) => a.hash === b.hash, relaunchBlocked: async () => null,
+  };
+  const state = await carto.crawl(driver, { bundle: 'x', maxActions: 30 });
+  assert.deepEqual(taps, ['Service Provider', 'Acme']);
+  assert.match(carto.renderReport(carto.coverage(state)), /picked an option 1x/);
+});

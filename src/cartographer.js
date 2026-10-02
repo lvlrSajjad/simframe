@@ -166,7 +166,7 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
       refused.push({ key, label: row.label ?? null, reason: 'an option in a selection list — choosing it changes a setting', kind: 'read-only' });
       continue;
     }
-    doors.push({ key, label: row.label, region: row.region ?? 'content', x: row.x, y: row.y, type: row.type ?? null, shape });
+    doors.push({ key, label: row.label, region: row.region ?? 'content', x: row.x, y: row.y, type: row.type ?? null, shape, strip: stripOf(row) });
   }
   return { doors, refused, skipped };
 }
@@ -177,6 +177,13 @@ export function shapeOf(row) {
   const w = Math.round(row.frame.width / 8);
   const h = Math.round((row.frame.height ?? 0) / 4);
   return `${row.type ?? ''}|${w}|${h}|${Math.round((row.x ?? 0) / 16)}`;
+}
+
+/** Controls of one size side by side in one row: a strip — days, chips, segments. */
+export function stripOf(row) {
+  if ((row?.region ?? 'content') !== 'content' || !(row?.frame?.width > 0)) return null;
+  if (row.frame.width > 200) return null;
+  return `${row.type ?? ''}|${Math.round(row.frame.width / 8)}|${Math.round((row.frame.height ?? 0) / 4)}|y${Math.round((row.y ?? 0) / 12)}`;
 }
 
 /** Rows whose selection or value differs between two readings of one screen. */
@@ -223,8 +230,26 @@ const seenTokens = new WeakMap();
 const tokensFor = (state, hash) => seenTokens.get(state)?.get(hash) ?? [];
 const asReading = (state, hash) => ({ hash, tokens: tokensFor(state, hash) });
 
-function register(state, reading, { allowCreate, locale, via = null }) {
+/**
+ * The screen a hash is, for the crawl. A tap that changes a screen in place —
+ * a day picked in a week strip, a month flipped — can give it a new identity
+ * (DEFERRED 174). Measured on Ecotrak's Track Time: 48 actions spent re-tapping
+ * the same strip on what the crawl took for six new screens. Such a hash is an
+ * alias of the screen it came from, and shares its doors.
+ */
+const canon = (state, hash) => {
+  let h = hash;
+  for (let i = 0; i < 8 && state.aliases?.[h]; i += 1) h = state.aliases[h];
+  return h;
+};
+
+function register(state, reading, opts) {
   if (!reading?.hash) return null;
+  if (canon(state, reading.hash) !== reading.hash) return registerAs(state, { ...reading, hash: canon(state, reading.hash) }, opts);
+  return registerAs(state, reading, opts);
+}
+
+function registerAs(state, reading, { allowCreate, locale, via = null }) {
   if (!seenTokens.has(state)) seenTokens.set(state, new Map());
   if (reading.tokens?.length) seenTokens.get(state).set(reading.hash, reading.tokens);
   let s = state.screens[reading.hash];
@@ -242,7 +267,7 @@ function register(state, reading, { allowCreate, locale, via = null }) {
       if (state.chrome[d.key]) continue;
       state.chrome[d.key] = { label: d.label, status: 'pending', from: reading.hash };
     }
-    if (!s.controls[d.key]) s.controls[d.key] = { label: d.label, region: d.region, status: 'pending', ...(d.shape ? { shape: d.shape } : {}) };
+    if (!s.controls[d.key]) s.controls[d.key] = { label: d.label, region: d.region, status: 'pending', ...(d.shape ? { shape: d.shape } : {}), ...(d.strip ? { strip: d.strip } : {}) };
   }
   for (const r of refused) {
     // A door saved by an earlier run, refused by today's rules: refused.
@@ -254,7 +279,8 @@ function register(state, reading, { allowCreate, locale, via = null }) {
   return s;
 }
 
-function pendingOn(state, hash) {
+function pendingOn(state, hash0) {
+  const hash = canon(state, hash0);
   const s = state.screens[hash];
   if (!s) return null;
   for (const [key, c] of Object.entries(s.controls)) {
@@ -269,11 +295,18 @@ function pendingOn(state, hash) {
 }
 
 /** After a row of a shape is opened: is the rest of that shape a list? */
-function sampleList(state, hash, key) {
-  const controls = state.screens[hash]?.controls ?? {};
+function sampleList(state, hash0, key) {
+  const controls = state.screens[canon(state, hash0)]?.controls ?? {};
   const shape = controls[key]?.shape;
-  if (!shape) return;
-  const same = Object.values(controls).filter((c) => c.shape === shape);
+  const strip = controls[key]?.strip;
+  if (!shape && !strip) return;
+  const same = Object.values(controls).filter((c) => (shape && c.shape === shape) || (strip && c.strip === strip));
+  // One in-place change in a group is enough: the rest of a day strip or a
+  // set of filter chips change the same screen the same way.
+  if (same.some((c) => c.status === 'in-place')) {
+    for (const c of same) if (c.status === 'pending') c.status = 'sampled';
+    return;
+  }
   const opened = same.filter((c) => c.status === 'explored');
   const dests = opened.map((c) => c.to);
   const names = opened.map((c) => c.toName).filter(Boolean).map(alnum);
@@ -286,7 +319,8 @@ function sampleList(state, hash, key) {
   for (const c of same) if (c.status === 'pending') { c.status = 'sampled'; }
 }
 
-function mark(state, hash, key, patch) {
+function mark(state, hash0, key, patch) {
+  const hash = canon(state, hash0);
   const c = state.screens[hash]?.controls?.[key];
   if (c) Object.assign(c, patch);
   if (state.chrome[key] && (patch.status && patch.status !== 'pending')) Object.assign(state.chrome[key], patch);
@@ -365,7 +399,7 @@ export async function crawl(driver, {
   // screen with the signed-in session unusable — measured on a real device on
   // 2026-10-01, by this crawler, before this existed.
   const recover = async (here) => {
-    if (root && here?.hash && here.hash !== root) {
+    if (root && here?.hash && canon(state, here.hash) !== root) {
       const r = driver.route(here, asReading(state, root));
       if (r?.length) {
         const walked = await driver.walk(r);
@@ -375,7 +409,7 @@ export async function crawl(driver, {
       }
     }
     // Relaunching from the start screen can only return to it.
-    if (root && here?.hash === root) return { stop: 'nothing reachable left to open', done: true };
+    if (root && here?.hash && canon(state, here.hash) === root) return { stop: 'nothing reachable left to open', done: true };
     const blocked = await driver.relaunchBlocked?.();
     if (blocked) return { stop: `stuck${here?.name ? ` on "${here.name}"` : ''}, and relaunching is not safe: ${blocked}`, blocked: true };
     run.relaunches += 1;
@@ -463,16 +497,41 @@ export async function crawl(driver, {
           // shape here is refused from now on, and the change is reported first.
           mark(state, before.hash, door.key, { status: 'changed-state', changed });
           (state.changedState ??= []).push({ at: now(), screen: before.name ?? before.hash, label: door.label, changed });
-          const shape = state.screens[before.hash]?.controls?.[door.key]?.shape;
-          for (const c of Object.values(state.screens[before.hash]?.controls ?? {})) {
+          const shape = state.screens[canon(state, before.hash)]?.controls?.[door.key]?.shape;
+          for (const c of Object.values(state.screens[canon(state, before.hash)]?.controls ?? {})) {
             if (shape && c.shape === shape && c.status === 'pending') c.status = 'refused-after-change';
           }
         } else if (!/^unexpected/.test(res?.verdict ?? '')) mark(state, before.hash, door.key, { status: 'no-change' });
         reading = reading?.hash ? reading : before;
         continue;
       }
+      // The same screen with a new face: an alias, not a new place.
+      const beforeName = state.screens[canon(state, before.hash)]?.name ?? before.name ?? null;
+      const inPlace = !state.screens[canon(state, reading.hash)] && (
+        (beforeName && reading.name && alnum(beforeName) === alnum(reading.name))
+        || (before.tokens?.length && reading.tokens?.length && jaccard(before.tokens, reading.tokens) >= ALIKE));
+      if (inPlace) {
+        (state.aliases ??= {})[reading.hash] = canon(state, before.hash);
+        if (!/^unexpected/.test(res?.verdict ?? '')) mark(state, before.hash, door.key, { status: 'in-place', to: reading.hash });
+        register(state, reading, { allowCreate, locale });
+        sampleList(state, before.hash, door.key);
+        continue;
+      }
+      // A row that sends you back to the screen you came from was an option
+      // being chosen (a picker), not a door. One is enough: the rest of that
+      // list would each choose something else.
+      const cameFrom = state.screens[canon(state, before.hash)]?.via?.from;
+      if (door.region === 'content' && cameFrom && canon(state, reading.hash) === canon(state, cameFrom)) {
+        mark(state, before.hash, door.key, { status: 'picked', to: reading.hash });
+        (state.picked ??= []).push({ at: now(), screen: before.name ?? before.hash, label: door.label });
+        const ctl = state.screens[canon(state, before.hash)]?.controls ?? {};
+        const shape = ctl[door.key]?.shape;
+        for (const c of Object.values(ctl)) if (shape && c.shape === shape && c.status === 'pending') c.status = 'sampled';
+        register(state, reading, { allowCreate, locale });
+        continue;
+      }
       if (!/^unexpected/.test(res?.verdict ?? '')) mark(state, before.hash, door.key, { status: 'explored', to: reading.hash, toName: reading.name ?? null });
-      const fresh = !state.screens[reading.hash];
+      const fresh = !state.screens[canon(state, reading.hash)];
       register(state, reading, { allowCreate, locale, via: { from: before.hash, label: door.label } });
       sampleList(state, before.hash, door.key);
       if (fresh) run.newScreens += 1;
@@ -482,7 +541,7 @@ export async function crawl(driver, {
     // Nothing left here. Back out, the app's own way first — except from the
     // start screen, where there is nowhere to go back to and a "back" is a
     // wasted tap on whatever sits in the nav bar's leading slot.
-    const back = here.hash === root ? null : await driver.back(here);
+    const back = canon(state, here.hash) === root ? null : await driver.back(here);
     if (back?.acted) {
       act();
       const after = back.after ?? await driver.read();
@@ -493,7 +552,7 @@ export async function crawl(driver, {
       }
     }
     // Then the graph's own path to the nearest screen that still has doors.
-    const targets = Object.keys(state.screens).filter((h) => h !== here.hash && pendingOn(state, h) && (unreachable.get(h) ?? 0) < 2);
+    const targets = Object.keys(state.screens).filter((h) => h !== canon(state, here.hash) && pendingOn(state, h) && (unreachable.get(h) ?? 0) < 2);
     let best = null;
     // A walk is verified step by step and stops on a wrong turn, like `goto`.
     // What the barrier forbids is acting again on what went wrong before, so
@@ -587,10 +646,13 @@ export function coverage(state) {
     explored: by('explored').length + by('no-change').length,
     noChange: by('no-change').length,
     sampled: by('sampled').length,
+    inPlace: by('in-place').length,
+    aliases: Object.keys(state.aliases ?? {}).length,
     frontier: by('pending').map((c) => ({ screen: c.screen ?? c.hash.slice(0, 8), label: c.label })),
     failed: by('failed').map((c) => ({ screen: c.screen ?? c.hash.slice(0, 8), label: c.label, detail: c.detail })),
     refused: Object.values(state.refused).map((r) => ({ label: r.label, reason: r.reason, kind: r.kind, screens: r.screens.length })),
     leftApp: state.leftApp,
+    picked: state.picked ?? [],
     changedState: state.changedState ?? [],
     unexpected: state.unexpected,
     splits,
@@ -616,6 +678,8 @@ export function renderReport(cov, { limit = 12 } = {}) {
   const unlabeled = cov.refused.filter((x) => x.reason === 'unlabeled').reduce((n, x) => n + x.screens, 0);
   if (barrier.length) lines.push(`refused by the verify barrier (${barrier.length}): ${barrier.slice(0, limit).map((x) => `"${x.label}" — ${x.reason}`).join('; ')}`);
   if (readOnly.length) lines.push(`not opened, read-only run (${readOnly.length}): ${readOnly.slice(0, limit).map((x) => `"${x.label}" — ${x.reason.replace(/ — read-only run.*$/, '')}`).join('; ')}`);
+  if (cov.picked.length) lines.push(`picked an option ${cov.picked.length}x (the tap returned to the previous screen, so the rest of that list was not opened): ${cov.picked.slice(0, limit).map((x) => `"${x.label}" on ${x.screen}`).join('; ')}`);
+  if (cov.inPlace) lines.push(`${cov.inPlace} tap(s) changed a screen in place; ${cov.aliases} identity(ies) were the same screen with a new face (DEFERRED 174)`);
   if (cov.sampled) lines.push(`${cov.sampled} list row(s) not opened: earlier rows of the same list led to the same screen`);
   if (unlabeled) lines.push(`${unlabeled} unlabeled control(s) were not opened: nothing says what they do`);
   if (cov.leftApp.length) lines.push(`left the app ${cov.leftApp.length}x: ${cov.leftApp.slice(0, limit).map((x) => x.label ? `"${x.label}"` : x.note).join('; ')} — relaunched each time`);
