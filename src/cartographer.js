@@ -509,6 +509,20 @@ export async function crawl(driver, {
     }
     // Relaunching from the start screen can only return to it.
     if (root && here?.hash && canon(state, here.hash) === root) return { stop: 'nothing reachable left to open', done: true };
+    // A tabbed app has a way home that costs one tap: the tab the start
+    // screen showed in its bottom band. Ecotrak's tab bar is OCR-only text, so
+    // it is matched by label and position, not by region. Relaunching that app
+    // takes 9-16 s, past the 10 s cap, and ended two crawls.
+    if (rootTabs.length && here?.rows) {
+      const lowest = Math.max(0, ...here.rows.map((r) => r.y ?? 0));
+      const tab = here.rows.find((r) => (r.y ?? 0) >= lowest - 30 && rootTabs.includes(alnum(r.label)));
+      if (tab) {
+        const res = await driver.tap({ key: controlKey(tab), label: tab.label, x: tab.x, y: tab.y, region: tab.region }, here);
+        act();
+        const after = await driver.read();
+        if (res?.ok !== false && after?.hash && (canon(state, after.hash) === root || await driver.sameScreen({ hash: root, tokens: tokensFor(state, root) }, after))) return after;
+      }
+    }
     const blocked = await driver.relaunchBlocked?.();
     if (blocked) return { stop: `stuck${here?.name ? ` on "${here.name}"` : ''}, and relaunching is not safe: ${blocked}`, blocked: true };
     run.relaunches += 1;
@@ -540,6 +554,13 @@ export async function crawl(driver, {
     }
   }
   let root = reading?.hash ?? null;
+  // The start screen's bottom band, by label: the tab that leads home.
+  const tabsOf = (r) => {
+    const lowest = Math.max(0, ...(r?.rows ?? []).map((x) => x.y ?? 0));
+    return (r?.rows ?? []).filter((x) => (x.y ?? 0) >= lowest - 30 && alnum(x.label)).map((x) => alnum(x.label));
+  };
+  const homeWords = (vocabulary.load(locale).cartographer?.homeTabs ?? []).map(alnum);
+  let rootTabs = tabsOf(reading).filter((l) => homeWords.includes(l));
   register(state, reading, { allowCreate, locale });
 
   while (true) {

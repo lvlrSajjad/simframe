@@ -7736,3 +7736,23 @@ test('a week strip paged to another week is the same screen', async () => {
   assert.equal(taps.filter((t) => t === 'Prev Week').length, 1, taps.join(','));
   assert.equal(carto.coverage(state).screens, 1);
 });
+
+test('a crawl goes home by the home tab before it considers a restart', async () => {
+  const carto = await import('../src/cartographer.js');
+  const row = (label, y) => ({ label, x: 200, y, type: 'Button', region: 'content', frame: { x: 16, y: y - 20, width: 370, height: 40 } });
+  const tab = (label, x) => ({ label, x, y: 836, type: 'Text', region: 'content', source: 'ocr', frame: { x: x - 20, y: 830, width: 40, height: 8 } });
+  const tabs = [tab('Home', 62), tab('Assets', 126)];
+  let at = 'home';
+  const S = { home: [row('Track Time', 200), row('Reports', 260), ...tabs], track: [row('Week', 200), ...tabs], reports: [row('Export', 200), ...tabs] };
+  const read = () => ({ hash: at, name: at, tokens: [at], rows: S[at] });
+  const launches = [];
+  const driver = {
+    launch: async (o) => { launches.push(o?.relaunch); at = 'home'; return read(); }, read: async () => read(), inApp: async () => true,
+    tap: async (door) => { if (door.label === 'Track Time') at = 'track'; else if (door.label === 'Reports') at = 'reports'; else if (door.label === 'Home') at = 'home'; return { ok: true, verdict: 'ok' }; },
+    back: async () => ({ acted: false }), route: () => null, walk: async () => ({ steps: 0 }),
+    sameScreen: async (a, b) => a.hash === b.hash, relaunchBlocked: async () => null,
+  };
+  const state = await carto.crawl(driver, { bundle: 'x', maxActions: 40 });
+  assert.ok(state.screens.reports, 'reached the second door by going home through the tab');
+  assert.ok(!launches.includes(true), 'never restarted');
+});

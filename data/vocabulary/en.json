@@ -162,7 +162,7 @@
     ]
   },
   "cartographer": {
-    "note": "What `simframe map` reads. A crawl of a signed-in app touches real data, so it defaults to read-only navigation: it opens doors, never writes. `opensWrite` are controls that start creating or changing something; a run opens them only when it is given --allow-create, and even then the destructive list and exploration.neverOpen (save, submit, apply, confirm...) still bar every commit. `back` are the controls a crawl uses to back out of a screen it opened; they are never explored as doors. `didNotStart` are texts on a screen that says the app itself did not start (a React Native red screen); a crawl that meets one stops and says so first, rather than mapping the error screen. `contactLinkPatterns` are labels that are a phone number, an email address or a web address: tapping one calls, mails or leaves, so a crawl never opens it. `formCommit` marks a screen as a form: when one of these is on screen, the screen's own rows are fields and options of a pending change, and a read-only crawl does not touch them. `actsImmediately` write the moment they are tapped (CHECK IN, CLOCK OUT, Approve, Assign…) and are refused even with --allow-create, which only opens forms (`opensWrite`) and never commits them. `dismiss` are the buttons that decline a dialog; while a dialog is up, nothing behind it is a door, and backing out uses one of these.",
+    "note": "What `simframe map` reads. A crawl of a signed-in app touches real data, so it defaults to read-only navigation: it opens doors, never writes. `opensWrite` are controls that start creating or changing something; a run opens them only when it is given --allow-create, and even then the destructive list and exploration.neverOpen (save, submit, apply, confirm...) still bar every commit. `back` are the controls a crawl uses to back out of a screen it opened; they are never explored as doors. `didNotStart` are texts on a screen that says the app itself did not start (a React Native red screen); a crawl that meets one stops and says so first, rather than mapping the error screen. `contactLinkPatterns` are labels that are a phone number, an email address or a web address: tapping one calls, mails or leaves, so a crawl never opens it. `formCommit` marks a screen as a form: when one of these is on screen, the screen's own rows are fields and options of a pending change, and a read-only crawl does not touch them. `actsImmediately` write the moment they are tapped (CHECK IN, CLOCK OUT, Approve, Assign…) and are refused even with --allow-create, which only opens forms (`opensWrite`) and never commits them. `dismiss` are the buttons that decline a dialog; while a dialog is up, nothing behind it is a door, and backing out uses one of these. `homeTabs` name the tab that leads to an app's start screen; a crawl taps it to get home before it considers a restart.",
     "opensWrite": [
       "create",
       "add",
@@ -270,6 +270,12 @@
       "later",
       "x",
       "✕"
+    ],
+    "homeTabs": [
+      "home",
+      "dashboard",
+      "today",
+      "overview"
     ]
   }
 }
