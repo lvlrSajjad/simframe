@@ -7652,3 +7652,21 @@ test('readings with nearly the same doors are one screen, and a strip that does 
   assert.equal(carto.coverage(state).screens, 1, `screens: ${Object.keys(state.screens)}`);
   assert.ok(taps.length <= 5, `tapped ${taps.join(',')}`);
 });
+
+test('a read-only crawl does not touch the rows of a form', async () => {
+  const carto = await import('../src/cartographer.js');
+  const row = (label, y, type = 'button') => ({ label, x: 200, y, type, region: 'content', frame: { x: 16, y: y - 20, width: 370, height: 40 } });
+  const rows = [row('Administrator', 300), row('Andrew', 350), row('Benton Test', 400), row('RESET', 700), row('APPLY', 700)];
+  const { doors, refused } = carto.doorsOf(rows);
+  assert.deepEqual(doors, []);
+  assert.ok(refused.filter((r) => /form committed by "APPLY"|form committed by "RESET"/.test(r.reason)).length >= 3, JSON.stringify(refused));
+  assert.ok(carto.doorsOf(rows, { allowCreate: true }).doors.length >= 3, 'an opted-in run may fill a form, and still never commits it');
+});
+
+test('controls that write when tapped are refused even when a run opts in to opening forms', async () => {
+  const carto = await import('../src/cartographer.js');
+  for (const label of ['CHECK IN', 'START DRIVE', 'START BREAK', 'CLOCK OUT', 'Approve Proposal', 'Assign Technician']) {
+    assert.equal(carto.classify({ label, type: 'button' }, { allowCreate: true }).kind, 'barrier', label);
+  }
+  assert.equal(carto.classify({ label: 'Add Asset', type: 'button' }, { allowCreate: true }).open, true);
+});

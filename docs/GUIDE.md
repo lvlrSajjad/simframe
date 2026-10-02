@@ -683,8 +683,10 @@ saved crawl unless given `--fresh`. The MCP tool is `sim_map`.
 (Delete, Pay, Send, Sign out, Submit, Save…). It never follows a control that
 leaves the app, and relaunches if one does. It never taps again a control that
 once landed somewhere unexpected. By default it is read-only. It does not type,
-toggle switches, or open write flows such as Add, New or Edit; `--allow-create`
-opens those, and nothing is committed either way. A list is sampled: rows are
+toggle switches, touch the rows of a form (a screen with Apply, Save, Done…),
+or open write flows such as Add, New or Edit; `--allow-create` opens those, and
+nothing is committed either way. Controls that write the moment they are
+tapped (Check In, Clock Out, Start, Approve, Assign…) are refused even then. A list is sampled: rows are
 opened until two land on the same screen. An app that needs an account must
 already be signed in.
 

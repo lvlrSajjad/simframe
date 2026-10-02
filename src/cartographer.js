@@ -122,6 +122,11 @@ export function classify(row, { allowCreate = false, locale } = {}) {
   if (links.some((p) => new RegExp(p, 'i').test(label))) return { open: false, reason: 'a phone number, email or web address — it calls, mails or leaves', kind: 'barrier' };
   if (w.stateTypes.test(String(row.type ?? ''))) return { open: false, reason: `changes state (${row.type})`, kind: 'read-only' };
   if (row.enabled === false) return { open: false, reason: 'disabled', kind: 'skipped' };
+  // Some controls write the moment they are tapped. Opting in to open forms
+  // does not cover them: --allow-create opens forms and never commits, and
+  // CHECK IN commits on the tap itself.
+  const now_ = (vocabulary.load(locale).cartographer?.actsImmediately ?? []).find((p) => says(label, p));
+  if (now_) return { open: false, reason: `writes when tapped ("${now_}")`, kind: 'barrier' };
   if (!allowCreate) {
     const hit = w.opensWrite.find((p) => says(label, p));
     if (hit) return { open: false, reason: `opens a write flow ("${hit}") — read-only run; pass --allow-create to open it`, kind: 'read-only' };
@@ -148,6 +153,13 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
   // static, and tapping it costs a full no-change verification — 13-22 s each,
   // measured on Settings. Where the tree says nothing about controls (many RN
   // screens), text is all there is and stays a candidate.
+  // A screen with a commit control is a form, and its rows are what the
+  // commit would apply. Measured on Ecotrak: a filter sheet with RESET and
+  // APPLY had its radio options tapped one after another — nothing applied,
+  // but read-only means not editing a form either, and RN radios carry no
+  // `selected` trait to warn by.
+  const commits = vocabulary.load(locale).cartographer?.formCommit ?? [];
+  const commit = allowCreate ? null : ordered.find((r) => /button/i.test(String(r.type ?? '')) && commits.some((w) => alnum(r.label) === alnum(w)));
   const treeKnowsControls = ordered.some((r) => /ax/.test(String(r.source ?? '')) && /button|cell|link|switch|tab/i.test(String(r.type ?? '')));
   for (const row of ordered) {
     const key = controlKey(row);
@@ -159,6 +171,10 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
     if (!verdict.open) {
       if (verdict.kind !== 'skipped' || verdict.reason === 'unlabeled') refused.push({ key, label: row.label ?? null, reason: verdict.reason, kind: verdict.kind });
       else skipped.push(key);
+      continue;
+    }
+    if (commit && (row.region ?? 'content') === 'content') {
+      refused.push({ key, label: row.label ?? null, reason: `on a form committed by "${commit.label}" — read-only run`, kind: 'read-only' });
       continue;
     }
     const shape = shapeOf(row);
