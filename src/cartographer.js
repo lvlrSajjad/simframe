@@ -101,6 +101,20 @@ export function placeLike(reading) {
   return (reading?.rows ?? []).some((r) => /button|cell|link|switch|tab|field|segment|search|slider|picker/i.test(String(r.type ?? '')));
 }
 
+/**
+ * The dismiss button of a dialog on this screen, if one is up: a button whose
+ * whole label declines (Cancel, Not Now…) with another button beside it on the
+ * same line. Measured on Ecotrak: "Location Permission Disabled" sat over the
+ * work-order list, the crawl tapped list rows behind it 7 times at ~13 s each,
+ * and backed out with the nav-bar button underneath.
+ */
+export function dialogDismiss(rows, { locale } = {}) {
+  const words = (vocabulary.load(locale).cartographer?.dismiss ?? []).map(alnum);
+  const buttons = (rows ?? []).filter((r) => /button/i.test(String(r.type ?? '')) && (r.region ?? 'content') === 'content');
+  return buttons.find((b) => words.includes(alnum(b.label))
+    && buttons.some((o) => o !== b && Math.abs((o.y ?? 0) - (b.y ?? 0)) <= 12)) ?? null;
+}
+
 /** A stable name for a control on a screen. */
 export function controlKey(row) {
   return `${row.region ?? 'content'}|${alnum(row.label)}`;
@@ -149,6 +163,16 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
   const ordered = [...(rows ?? [])].sort((a, b) => (a.y - b.y) || (a.x - b.x));
   // A row that is selected marks a selection list, and choosing another of its
   // options changes a setting by itself — no Save, no write word on the label.
+  // A dialog is up: everything behind it is out of reach, and what is in it
+  // answers it. The way out is its dismiss button, which `back` takes.
+  const dialog = dialogDismiss(ordered, { locale });
+  if (dialog) {
+    for (const row of ordered) {
+      if (row === dialog || !row.label) continue;
+      refused.push({ key: controlKey(row), label: row.label, reason: `behind or inside a dialog — dismissed with "${dialog.label}"`, kind: 'skipped-dialog' });
+    }
+    return { doors, refused: refused.filter((r) => r.kind !== 'skipped-dialog'), skipped: [], dialog };
+  }
   const optionShapes = new Set(ordered.filter((r) => r.selected === true).map(shapeOf).filter(Boolean));
   // The accessibility tree is authoritative when it is describing this screen's
   // controls (CLAUDE.md's perception order). Then what it calls static text is

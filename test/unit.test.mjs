@@ -7676,3 +7676,13 @@ test('an unlabeled leading nav-bar button is a way back', async () => {
   assert.equal(carto.isBackAffordance({ label: undefined, type: 'Button', region: 'nav-bar', navSlot: 'leading', x: 30, y: 91 }), true);
   assert.equal(carto.classify({ label: undefined, type: 'Button', region: 'nav-bar', navSlot: 'leading' }).reason, 'back affordance');
 });
+
+test('while a dialog is up nothing behind it is a door, and backing out dismisses it', async () => {
+  const carto = await import('../src/cartographer.js');
+  const b = (label, x, y) => ({ label, x, y, type: 'Button', region: 'content', frame: { x: x - 50, y: y - 20, width: 100, height: 40 } });
+  const rows = [b('WO: 6322847', 200, 300), b('Near Me', 125, 229), b('CANCEL', 90, 470), b('OPEN SETTINGS', 290, 470)];
+  const { doors } = carto.doorsOf(rows);
+  assert.deepEqual(doors, []);
+  assert.equal(carto.dialogDismiss(rows).label, 'CANCEL');
+  assert.equal(carto.dialogDismiss([b('Cancel', 90, 470)]), null, 'a lone Cancel is not a dialog');
+});

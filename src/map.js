@@ -81,7 +81,9 @@ export function deviceDriver(udid, bundle, { options = {} } = {}) {
     },
     async back(here) {
       const rows = here?.rows ?? [];
-      const affordance = rows.find((r) => r.region === 'nav-bar' && cartographer.isBackAffordance(r))
+      // A dialog first: nothing behind it can be reached until it is dismissed.
+      const affordance = cartographer.dialogDismiss(rows)
+        ?? rows.find((r) => r.region === 'nav-bar' && cartographer.isBackAffordance(r))
         ?? rows.find((r) => cartographer.isBackAffordance(r));
       const step = affordance
         ? selectorFor({ label: affordance.label, x: affordance.x, y: affordance.y }, here)
