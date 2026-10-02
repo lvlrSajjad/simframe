@@ -4879,3 +4879,19 @@ Build → sign-in" as a transition. Fixed: after a launch the crawl re-reads a
 screen with nothing to operate until it gives way, capped at 10 s, and it
 re-checks the screen before every tap. The false edge was removed from the
 graph.
+
+A live recheck found the first version of that fix wanting, three ways. A
+splash's version string sits where a tab bar would and was read as one, so the
+splash counted as "arrived". The crawl relaunched from the start screen, which
+can only return to it. And one front-app read taken mid-transition was reported
+as leaving the app, three times in 43 s. Arrival is now judged by control type
+alone, the start screen is never relaunched from, and leaving the app needs
+three reads in a row.
+
+| warm relaunch, packager running | operable after |
+| --- | --- |
+| run 1 | 7449 ms |
+| run 2 | 7995 ms |
+
+Both are inside the 10 s cap. The app came back on "Refresh Auth Error —
+Refresh Token has expired": the sign-in had lapsed, not been cleared.

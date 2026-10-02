@@ -55,10 +55,15 @@ export function deviceDriver(udid, bundle, { options = {} } = {}) {
       return needs && !needs.running ? `it is ${needs.detail}` : null;
     },
     async inApp() {
-      const { pid } = await frontmost.read(udid);
-      // "Cannot say" is not "somewhere else". A missing sensor must not turn
-      // every step into a relaunch.
-      return pid == null || appPid == null || pid === appPid;
+      // "Cannot say" is not "somewhere else", and neither is one read taken
+      // mid-transition: the front can belong to the system for a moment while
+      // a sheet or the app itself animates. Measured on Ecotrak: three false
+      // "left the app" in one 43 s run. Out means out on three reads.
+      for (let i = 0; i < 3; i += 1) {
+        const { pid } = await frontmost.read(udid);
+        if (pid == null || appPid == null || pid === appPid) return true;
+      }
+      return false;
     },
     async tap(door, before) {
       const res = await run([selectorFor(door, before)]);

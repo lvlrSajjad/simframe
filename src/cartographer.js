@@ -90,12 +90,13 @@ export function isBackAffordance(row, { locale } = {}) {
 
 /**
  * Does this reading look like somewhere an app has arrived: anything a person
- * could operate, or a tab bar? A splash has text and nothing to operate. A
+ * could operate? A splash has text and nothing to operate. A
  * screen that is genuinely all text costs one capped wait, once per launch.
  */
 export function placeLike(reading) {
-  return (reading?.rows ?? []).some((r) => r.region === 'tab-bar'
-    || /button|cell|link|switch|tab|field|segment|search|slider|picker/i.test(String(r.type ?? '')));
+  // By type only. Region is geometry: a splash's version string sits where a
+  // tab bar would and was read as one, which called the splash "arrived".
+  return (reading?.rows ?? []).some((r) => /button|cell|link|switch|tab|field|segment|search|slider|picker/i.test(String(r.type ?? '')));
 }
 
 /** A stable name for a control on a screen. */
@@ -343,15 +344,20 @@ export async function crawl(driver, {
     let cur = r;
     while (cur?.hash && !didNotStart(cur, { locale }) && !placeLike(cur) && now() - t < LAUNCH_CAP_MS) {
       const next = await driver.read();
-      if (next?.hash && next.hash !== cur.hash) return next;
       cur = next ?? cur;
+    }
+    // Still nothing to operate at the cap: the app has not finished launching,
+    // and its launch screen must not be crawled as though it were the app.
+    if (cur?.hash && !didNotStart(cur, { locale }) && !placeLike(cur)) {
+      return { ...cur, notArrived: true };
     }
     return cur;
   };
   // Back in front without restarting: what leaving the app needs.
   const foreground = async () => {
     act();
-    return arrive(await driver.launch({ relaunch: false }));
+    const r = await arrive(await driver.launch({ relaunch: false }));
+    return r?.notArrived ? { ...r, rows: [] } : r;
   };
   // Out of a dead end: the graph's own way home first, a restart last, and a
   // restart only when it is safe. A restart of a debug build whose JavaScript
@@ -368,6 +374,8 @@ export async function crawl(driver, {
         if (after?.hash && (after.hash === root || await driver.sameScreen({ hash: root, tokens: [] }, after))) return after;
       }
     }
+    // Relaunching from the start screen can only return to it.
+    if (root && here?.hash === root) return { stop: 'nothing reachable left to open', done: true };
     const blocked = await driver.relaunchBlocked?.();
     if (blocked) return { stop: `stuck${here?.name ? ` on "${here.name}"` : ''}, and relaunching is not safe: ${blocked}`, blocked: true };
     run.relaunches += 1;
@@ -375,6 +383,7 @@ export async function crawl(driver, {
     const r = await arrive(await driver.launch({ relaunch: true }));
     const dead = didNotStart(r, { locale });
     if (dead) return { stop: `the app did not start after a relaunch: "${dead}"`, failed: true };
+    if (r?.notArrived) return { stop: `after a relaunch the app did not finish launching within ${LAUNCH_CAP_MS / 1000} s`, blocked: true };
     return r;
   };
 
@@ -382,8 +391,10 @@ export async function crawl(driver, {
   act();
   {
     const dead = didNotStart(reading, { locale });
-    if (dead) {
-      run.stoppedBecause = `the app is not running: "${dead}"`;
+    if (dead || reading?.notArrived) {
+      run.stoppedBecause = dead
+        ? `the app is not running: "${dead}"`
+        : `the app did not finish launching within ${LAUNCH_CAP_MS / 1000} s — it is still on a screen with nothing to operate`;
       run.failed = true;
       run.endedAt = now();
       persist(state);
@@ -516,6 +527,11 @@ export async function crawl(driver, {
     // No back and no path. Home, by the graph or a safe restart; if home has
     // nothing either, the reachable map is done.
     const home = await recover(here);
+    if (home?.done) {
+      const left = Object.values(state.screens).reduce((n, sc) => n + Object.values(sc.controls).filter((c) => c.status === 'pending').length, 0);
+      run.stoppedBecause = left ? `${left} door(s) are left on screens no known path reaches from the start screen` : home.stop;
+      break;
+    }
     if (home?.stop) {
       run.stoppedBecause = home.stop;
       if (home.failed) run.failed = true;
