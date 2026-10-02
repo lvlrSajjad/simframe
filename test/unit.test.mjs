@@ -7718,3 +7718,21 @@ test('an unlabeled button is neither a way back nor a dialog, and a React Native
   const rn = [r('CANCEL', 'GenericElement', 117, 485), r('OPEN SETTINGS', 'GenericElement', 286, 485)];
   assert.equal(carto.dialogDismiss(rn).label, 'CANCEL');
 });
+
+test('a week strip paged to another week is the same screen', async () => {
+  const carto = await import('../src/cartographer.js');
+  const chip = (label, i) => ({ label, x: 40 + i * 50, y: 273, type: 'GenericElement', region: 'content', frame: { x: 20 + i * 50, y: 253, width: 45, height: 40 } });
+  const row = (label, y) => ({ label, x: 200, y, type: 'Button', region: 'content', frame: { x: 16, y: y - 20, width: 370, height: 40 } });
+  let week = 28;
+  const taps = [];
+  const read = () => ({ hash: `wk-${week}`, name: null, tokens: [`w${week}`], rows: [row('Service Provider', 169), row('Prev Week', 209), ...['MON', 'TUE', 'WED'].map((d, i) => chip(`${d}, ${week + i}`, i))] });
+  const driver = {
+    launch: async () => read(), read: async () => read(), inApp: async () => true,
+    tap: async (door) => { taps.push(door.label); if (door.label === 'Prev Week') week -= 7; return { ok: true, verdict: 'ok' }; },
+    back: async () => ({ acted: false }), route: () => null, walk: async () => ({ steps: 0 }),
+    sameScreen: async (a, b) => a.hash === b.hash, relaunchBlocked: async () => 'test',
+  };
+  const state = await carto.crawl(driver, { bundle: 'x', maxActions: 40 });
+  assert.equal(taps.filter((t) => t === 'Prev Week').length, 1, taps.join(','));
+  assert.equal(carto.coverage(state).screens, 1);
+});

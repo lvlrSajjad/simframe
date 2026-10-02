@@ -303,8 +303,15 @@ const canon = (state, hash) => {
 /** Doors two screens share, as a fraction of all their doors. */
 export const SAME_DOORS = 0.7;
 
+/**
+ * A door's key with its numbers taken out, for comparing screens. A week strip
+ * reads "MON, 14" one week and "MON, 28" the next, and Ecotrak's Track Time
+ * paged back week after week as a new screen each time because of it.
+ */
+const shapeKey = (k) => String(k).replace(/\d+/g, '#');
+
 function doorKeys(reading, opts) {
-  return doorsOf(reading?.rows, opts).doors.filter((d) => d.region !== 'tab-bar').map((d) => d.key);
+  return doorsOf(reading?.rows, opts).doors.filter((d) => d.region !== 'tab-bar').map((d) => shapeKey(d.key));
 }
 
 /**
@@ -319,7 +326,7 @@ function sameDoorsAs(state, reading, opts) {
   if (mine.length < 3) return null;
   let best = null;
   for (const [hash, sc] of Object.entries(state.screens)) {
-    const theirs = Object.entries(sc.controls).filter(([, c]) => c.region !== 'tab-bar').map(([k]) => k);
+    const theirs = Object.entries(sc.controls).filter(([, c]) => c.region !== 'tab-bar').map(([k]) => shapeKey(k));
     if (theirs.length < 3) continue;
     const j = jaccard(mine, theirs);
     if (j >= SAME_DOORS && (!best || j > best.j)) best = { hash, j };
