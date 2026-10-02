@@ -33,6 +33,8 @@ import * as store from './store.js';
 import * as vocabulary from './vocabulary.js';
 
 export const ATTEMPT_ACTIONS = 6;
+/** The longest a crawl waits for an app to leave its launch screen. */
+export const LAUNCH_CAP_MS = 10000;
 export const STATE_VERSION = 1;
 /**
  * Rows of one shape are opened until two of them land on the same screen (or
@@ -84,6 +86,16 @@ export function isBackAffordance(row, { locale } = {}) {
   // of each screen after one tap.
   if (row?.region === 'nav-bar' && row?.navSlot === 'leading' && label) return true;
   return /(^|[-_ ])back([-_ ]|$)|header-back|toolbar-back/i.test(label);
+}
+
+/**
+ * Does this reading look like somewhere an app has arrived: anything a person
+ * could operate, or a tab bar? A splash has text and nothing to operate. A
+ * screen that is genuinely all text costs one capped wait, once per launch.
+ */
+export function placeLike(reading) {
+  return (reading?.rows ?? []).some((r) => r.region === 'tab-bar'
+    || /button|cell|link|switch|tab|field|segment|search|slider|picker/i.test(String(r.type ?? '')));
 }
 
 /** A stable name for a control on a screen. */
@@ -320,10 +332,26 @@ export async function crawl(driver, {
   };
   const knownBefore = new Set(Object.keys(state.screens));
 
+  // An app's launch screen is still and has no doors: a splash, a version
+  // string, a spinner that is not moving. It is not a place. Measured on the
+  // Ecotrak app: the crawl tapped "Build 260902314" on its splash just as the
+  // JavaScript finished loading, and recorded the sign-in screen as where that
+  // tap leads. So after a launch, a screen with no doors is read again until it
+  // gives way, for at most LAUNCH_CAP_MS — CLAUDE.md's hard cap on any wait.
+  const arrive = async (r) => {
+    const t = now();
+    let cur = r;
+    while (cur?.hash && !didNotStart(cur, { locale }) && !placeLike(cur) && now() - t < LAUNCH_CAP_MS) {
+      const next = await driver.read();
+      if (next?.hash && next.hash !== cur.hash) return next;
+      cur = next ?? cur;
+    }
+    return cur;
+  };
   // Back in front without restarting: what leaving the app needs.
   const foreground = async () => {
     act();
-    return driver.launch({ relaunch: false });
+    return arrive(await driver.launch({ relaunch: false }));
   };
   // Out of a dead end: the graph's own way home first, a restart last, and a
   // restart only when it is safe. A restart of a debug build whose JavaScript
@@ -344,13 +372,13 @@ export async function crawl(driver, {
     if (blocked) return { stop: `stuck${here?.name ? ` on "${here.name}"` : ''}, and relaunching is not safe: ${blocked}`, blocked: true };
     run.relaunches += 1;
     act();
-    const r = await driver.launch({ relaunch: true });
+    const r = await arrive(await driver.launch({ relaunch: true }));
     const dead = didNotStart(r, { locale });
     if (dead) return { stop: `the app did not start after a relaunch: "${dead}"`, failed: true };
     return r;
   };
 
-  let reading = await driver.launch({ relaunch: false });
+  let reading = await arrive(await driver.launch({ relaunch: false }));
   act();
   {
     const dead = didNotStart(reading, { locale });
@@ -382,6 +410,14 @@ export async function crawl(driver, {
       const before = here;
       // Where the control is now, not where it was when it was first seen.
       const row = (here.rows ?? []).find((r) => controlKey(r) === door.key);
+      // The screen may have moved on its own since it was read (a list
+      // arriving, a splash giving way). A tap is only attributed to what it was
+      // aimed at if the screen is still the one that was read.
+      if (driver.stillHere && !(await driver.stillHere(here))) {
+        reading = await driver.read();
+        register(state, reading, { allowCreate, locale });
+        continue;
+      }
       if (!row) {
         mark(state, here.hash, door.key, { status: 'not-on-screen' });
         continue;

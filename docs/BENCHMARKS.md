@@ -4868,3 +4868,14 @@ What runs 1 and 2 found, each fixed before run 3:
 
 Run 3 is about 5.4 s per action. It recorded three suspected splits ("settings"
 ×3, "display mode" ×2, "colors spectrum" ×2), the kind DEFERRED 174 describes.
+
+**Ecotrak, second attempt (2026-10-02), packager running, app signed out.** The
+overnight shutdown ended the session, so the app opened on its sign-in screen
+and the crawl correctly opened nothing there. It refused NEXT and the support
+phone number, and skipped the support address and the email field. It also
+found one more bug. It read the app's splash screen before the JavaScript had
+loaded, tapped "Build 260902314" just as loading finished, and recorded "tap
+Build → sign-in" as a transition. Fixed: after a launch the crawl re-reads a
+screen with nothing to operate until it gives way, capped at 10 s, and it
+re-checks the screen before every tap. The false edge was removed from the
+graph.

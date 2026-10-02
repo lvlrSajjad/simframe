@@ -7559,3 +7559,17 @@ test('a read-only crawl refuses options in a selection list and contact links, a
   assert.equal(picked, 'Chime', 'one tap, then the rest of the list is refused');
   assert.match(carto.renderReport(carto.coverage(state)), /^CHANGED STATE 1x — a tap changed something in place.*"Chime" on Sound/m);
 });
+
+test('a crawl waits for an app to leave its launch screen before it treats anything as a place', async () => {
+  const carto = await import('../src/cartographer.js');
+  const app = fakeApp();
+  let reads = 0;
+  const splash = { hash: 'splash', name: null, tokens: [], rows: [{ label: 'Version 5.17.0', x: 200, y: 800, type: 'text', region: 'content', frame: { x: 150, y: 790, width: 100, height: 20 } }] };
+  const launch = app.driver.launch; const read = app.driver.read;
+  app.driver.launch = async (o) => { await launch(o); reads = 0; return splash; };
+  app.driver.read = async () => (++reads < 3 ? splash : read());
+  const state = await carto.crawl(app.driver, { bundle: 'com.example.fake', maxActions: 30 });
+  assert.ok(!app.taps.some((t) => /Version/.test(t)), 'nothing on the splash was tapped');
+  assert.ok(!state.screens.splash, 'the splash is not a screen of the map');
+  assert.ok(state.screens.home);
+});

@@ -86,6 +86,11 @@ export function deviceDriver(udid, bundle, { options = {} } = {}) {
     // By reading, not by bare hash: the graph files an edge under the stored
     // screen a reading resembles, which may carry a different hash than this
     // reading, and a bare hash only ever matches exactly.
+    // Cheap: a state read, not a screen map. Did anything move since `here`?
+    async stillHere(here) {
+      const id = await api.screenIdentity(udid, { options, confirmNovel: false }).catch(() => null);
+      return !id?.hash || id.hash === here.hash || graph.sameScreen(udid, here, id);
+    },
     route: (from, to) => {
       const target = graph.nearestScreen(udid, to)?.node?.hash ?? to.hash;
       return graph.route(udid, from, target);
