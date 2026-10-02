@@ -84,7 +84,9 @@ export function isBackAffordance(row, { locale } = {}) {
   // ("screen-toolbar-back-button"). Measured: before this, a crawl of Settings
   // took every screen's "Settings" button for a door and backed straight out
   // of each screen after one tap.
-  if (row?.region === 'nav-bar' && row?.navSlot === 'leading' && label) return true;
+  // Unlabeled too: Ecotrak's back chevron has no accessibility label, and a
+  // crawl that could not see it as a way back relaunched the app instead.
+  if (row?.region === 'nav-bar' && row?.navSlot === 'leading' && /button/i.test(String(row.type ?? 'button'))) return true;
   return /(^|[-_ ])back([-_ ]|$)|header-back|toolbar-back/i.test(label);
 }
 
@@ -110,9 +112,9 @@ export function controlKey(row) {
  */
 export function classify(row, { allowCreate = false, locale } = {}) {
   const label = String(row?.label ?? '').trim();
+  if (isBackAffordance(row, { locale })) return { open: false, reason: 'back affordance', kind: 'skipped' };
   if (!label || /^\(icon-only\)$/i.test(label)) return { open: false, reason: 'unlabeled', kind: 'skipped' };
   if (row.region === 'status-bar' || row.region === 'keyboard') return { open: false, reason: 'system chrome', kind: 'skipped' };
-  if (isBackAffordance(row, { locale })) return { open: false, reason: 'back affordance', kind: 'skipped' };
   if (row.region === 'nav-bar' && row.navSlot === 'title') return { open: false, reason: 'screen title', kind: 'skipped' };
   if (/^heading$/i.test(String(row.type ?? ''))) return { open: false, reason: 'heading', kind: 'skipped' };
   const barrier = vocabulary.mayActLocally(label, { locale, purpose: 'explore' });

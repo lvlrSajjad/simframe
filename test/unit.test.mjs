@@ -7670,3 +7670,9 @@ test('controls that write when tapped are refused even when a run opts in to ope
   }
   assert.equal(carto.classify({ label: 'Add Asset', type: 'button' }, { allowCreate: true }).open, true);
 });
+
+test('an unlabeled leading nav-bar button is a way back', async () => {
+  const carto = await import('../src/cartographer.js');
+  assert.equal(carto.isBackAffordance({ label: undefined, type: 'Button', region: 'nav-bar', navSlot: 'leading', x: 30, y: 91 }), true);
+  assert.equal(carto.classify({ label: undefined, type: 'Button', region: 'nav-bar', navSlot: 'leading' }).reason, 'back affordance');
+});

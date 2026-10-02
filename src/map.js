@@ -20,6 +20,8 @@ import * as view from './view.js';
 const READ_LIMIT = 400;
 
 function selectorFor(door, before) {
+  // A control with no label is addressed by where it is.
+  if (!String(door.label ?? '').trim()) return { tapAt: { x: Math.round(door.x), y: Math.round(door.y) } };
   const same = (before?.rows ?? []).filter((r) => String(r.label ?? '').trim() === String(door.label).trim());
   // A label that names one thing is the replayable selector. Two things wearing
   // it means the label is not an address; the point is.
