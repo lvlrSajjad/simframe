@@ -21,7 +21,7 @@
   },
   {
     "name": "browser",
-    "note": "A static page the project hosts (docs/fixtures/static-page.html). It was https://example.com until that page started animating its text through languages on 2026-09-28, which turned the fingerprint shard red on unchanged code. A static page, so its structure should be identical on every visit. Arrival is asserted on a CHROME control and not only on the page text: \"Static Fixture\" is page content that OCR alone can satisfy, so the tour used to proceed while Safari's accessibility tree was still empty on a cold first launch. Measured — sharding CI removed the memory-layer step that had been warming Safari, and round 1 then read e00725fce7 with 0 named elements where rounds 2 and 3 read 9589eb2471 with 5. Waiting for \"Address\", which only the tree can name, makes arrival mean addressable rather than merely drawn.",
+    "note": "A static page the project hosts (docs/fixtures/static-page.html). It was https://example.com until that page started animating its text through languages on 2026-09-28, which turned the fingerprint shard red on unchanged code. A static page, so its structure should be identical on every visit. Arrival is asserted on a CHROME control and not only on the page text: \"Static Fixture\" is page content that OCR alone can satisfy, so the tour used to proceed while Safari's accessibility tree was still empty on a cold first launch. Measured — sharding CI removed the memory-layer step that had been warming Safari, and round 1 then read e00725fce7 with 0 named elements where rounds 2 and 3 read 9589eb2471 with 5. Waiting for \"Address\", which only the tree can name, makes arrival mean addressable rather than merely drawn. On a fresh device Safari can open with a first-run tip popover (\"You can now view these in the @ menu\", View Bookmarks, Close) over the toolbar, which hid \"Address\" and turned the shard red on 2026-10-02 and 2026-10-03 with no code involved. An optional tap on the page's own heading dismisses it: a tip closes on a tap outside it, and the heading is plain text on a static page, so the tap does nothing when there is no tip. Safari's toolbar has its own \"Close\", so tapping \"Close\" was not safe.",
     "steps": [
       {
         "openUrl": "https://lvlrsajjad.github.io/simframe/fixtures/static-page.html"
@@ -31,6 +31,10 @@
           "value": "Static Fixture",
           "timeoutMs": 20000
         }
+      },
+      {
+        "tap": "Static Fixture",
+        "optional": true
       },
       {
         "waitFor": {
