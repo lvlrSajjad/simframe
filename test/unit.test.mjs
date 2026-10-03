@@ -3511,6 +3511,9 @@ test('result strings say what happened (field report, 0.22.0)', async () => {
   assert.match(v.nextHint({ ok: true, settled: true, known: true, hash: 'abcdef12', ambiguous: 1, repeated: ['Problem'] }), /one label repeats on this screen \("Problem"\)/);
   const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
   assert.match(src, /found\.target\.label \?\? found\.target\.identifier \?\? step\.into/, 'never "undefined"');
+  // A recalled map never earns "chain without looking again".
+  assert.match(v.nextHint({ ok: true, settled: true, known: true, hash: 'abcdef12', recalledAgeMs: 103 * 60_000 }), /recalled from memory, not read now/);
+  assert.match(v.nextHint({ ok: true, settled: true, known: true, hash: 'abcdef12', recalledAgeMs: 5 * 60_000 }), /without looking again/, 'this session\'s memory still chains');
 });
 
 test('simframe do takes a script inline, as the skill shows (field report, 0.22.0)', async () => {

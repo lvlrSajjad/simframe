@@ -338,6 +338,7 @@ export function rowsFor(entry, { screen, filter, interactive, all = false, limit
  * skimmed.
  */
 export const RECALL_NOTE_FLOOR_MS = 1000;
+export const RECALL_TOO_OLD_TO_CHAIN_MS = 10 * 60_000;
 
 export function recalledNote(identity, now = Date.now()) {
   const at = identity?.entry?.at;
@@ -634,7 +635,7 @@ export async function screenMap(deviceQuery, {
  * cheerfully says "carry on" into an unknown screen would be worse than no hint
  * at all.
  */
-export function nextHint({ ok, escalated, settled, unmoved, loading, known, hash, exits, elements, ambiguous, repeated, filtered, exitList, staleExits } = {}) {
+export function nextHint({ ok, escalated, settled, unmoved, loading, known, hash, exits, elements, ambiguous, repeated, filtered, exitList, staleExits, recalledAgeMs = null } = {}) {
   if (ok === false) {
     return 'next: the flow stopped here — this is the moment to think. sim_recall shows how you got here; sim_ui re-reads the screen.';
   }
@@ -676,6 +677,15 @@ export function nextHint({ ok, escalated, settled, unmoved, loading, known, hash
     return ambiguous === 1
       ? `next: one label repeats on this screen${which} — address that one by #ref, and the rest can go in one sim_do.`
       : `next: ${ambiguous} labels repeat on this screen${which} — address those by #ref, and the rest can go in one sim_do.`;
+  }
+  // Elements from memory are a claim about the past. "Chain without looking
+  // again" over a map recalled 103 minutes earlier sent an agent onto a screen
+  // whose list had changed (field report, 0.22.0). Not every recall: a known
+  // screen is recalled after almost every step of a working session, and that
+  // is the speed the graph exists for. Memory older than this came from
+  // another session.
+  if (recalledAgeMs != null && recalledAgeMs >= RECALL_TOO_OLD_TO_CHAIN_MS) {
+    return 'next: these elements were recalled from memory, not read now — read the screen (refresh) before chaining steps on them.';
   }
   const known_ = hash ? `known (${hash.slice(0, 8)}${exits ? `, ${exits} known exit${exits === 1 ? '' : 's'}` : ''})` : 'known';
   if (filtered) {
@@ -728,6 +738,7 @@ export function hintFor(map, { flowOk = true, escalated = false } = {}) {
     elements: map?.rows?.length ?? 0,
     ambiguous: ambiguousLabels(map?.rows),
     repeated: repeatedLabels(map?.rows),
+    recalledAgeMs: Number.isFinite(map?.identity?.entry?.at) ? Date.now() - map.identity.entry.at : null,
   });
 }
 
