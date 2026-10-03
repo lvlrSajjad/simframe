@@ -3451,6 +3451,15 @@ test('a ref survives the keyboard coming up, and nothing else (peer test 0.21.0,
     (e) => e.staleKind === 'identity' && e.staleKeyboard === false && e.staleAt.y === 371);
 });
 
+test('the store is readable by this account only (peer test 0.21.0)', async () => {
+  const store = await import('../src/store.js');
+  fs.mkdirSync(store.ROOT, { recursive: true });
+  fs.chmodSync(store.ROOT, 0o755);
+  assert.equal(store.securePrivateRoot(), 0o700, 'a world-readable root is tightened');
+  assert.equal(fs.statSync(store.ROOT).mode & 0o777, 0o700);
+  assert.equal(store.securePrivateRoot(), 0o700, 'and left alone once private');
+});
+
 test('a partial name never flips a switch (bench device, 2026-10-03)', async () => {
   const a = await import('../src/actions.js');
   // `tap "Accessibility"` on the Larger Text page hit "Larger Accessibility

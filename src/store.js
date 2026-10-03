@@ -15,7 +15,34 @@ export const isUdid = (name) => /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4
 
 export const ROOT = process.env.SIMFRAME_HOME || path.join(os.homedir(), '.simframe');
 
+/**
+ * Only this account may read the store.
+ *
+ * It holds whatever was on screen: every stored reading keeps the labels of a
+ * signed-in app (customer names, addresses, notification text), the graph
+ * keeps the rows it tapped by name, and the frames are screenshots. It was
+ * created 755 with files 644, so any other account on the Mac could read a
+ * field app's customer data (peer test 0.21.0). Tightening the root covers
+ * everything under it, including what the daemon creates. Returns the mode it
+ * left, or null when it could not look.
+ */
+export function securePrivateRoot() {
+  try {
+    fs.mkdirSync(ROOT, { recursive: true, mode: 0o700 });
+    const mode = fs.statSync(ROOT).mode & 0o777;
+    if (mode & 0o077) fs.chmodSync(ROOT, mode & 0o700);
+    return fs.statSync(ROOT).mode & 0o777;
+  } catch {
+    return null;
+  }
+}
+let rootSecured = false;
+
 export function deviceDir(udid) {
+  if (!rootSecured) {
+    rootSecured = true;
+    securePrivateRoot();
+  }
   return path.join(ROOT, udid);
 }
 

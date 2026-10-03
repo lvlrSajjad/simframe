@@ -2603,8 +2603,19 @@ worth more than the verdict.
      changed and the same label is found again within 6 pt of where it was
      numbered. Verified live: three `type` steps by ref in one `do`, 3/3.
    - *Open:* screens are named after tab-bar chrome; a
-     list row under the tab bar is offered as tappable; crawl maps keep
-     customer names and notification text in `refused` keys and `samples`.
+     list row under the tab bar is offered as tappable.
+   - **Customer data at rest.** Crawl maps keep customer names and
+     notification text in `refused` keys and `samples`, but they are the
+     smallest copy. Every stored reading (`screens/`) keeps every label of a
+     signed-in app, graph edges are keyed by the row tapped (`tap:<name>`),
+     and frames are screenshots; 19 MB for the field app's device. Scrubbing
+     the crawl maps alone would be cosmetic. FIXED 2026-10-03, the part that
+     needed no decision: the store was 755 with files 644, readable by any
+     account on the Mac, and its root is now 0700 (`store.securePrivateRoot`).
+     *Open, the owner's call, with the frames:* whether to keep screen text
+     at all for a signed-in app (a per-app "sensitive" mode that hashes
+     labels in maps and edge keys, at the cost of readable reports), and how
+     long to keep frames and readings.
    - *Open:* the global `simframe` on this Mac is 0.20.1, and the plugin's
      `npx simframe mcp` resolves to it, so the plugin prefix has no `sim_map`.
 
