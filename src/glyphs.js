@@ -9,8 +9,8 @@
  * whole label is that one character, so it came out with no name at all.
  *
  * The character is not noise. It is an exact address into a font the app
- * ships, and community icon fonts name their glyphs: Ecotrak's
- * MaterialDesignIcons.ttf names all 7,431 ("bell-outline", "dots-horizontal",
+ * ships, and community icon fonts name their glyphs: a field
+ * app's MaterialDesignIcons.ttf names all 7,431 ("bell-outline", "dots-horizontal",
  * "delete"). So a code point plus the font's own `cmap` (character → glyph)
  * and `post` (glyph → name) tables is the icon's name — no pixels, no model,
  * no guessing. See docs/research/07-icon-naming.md.

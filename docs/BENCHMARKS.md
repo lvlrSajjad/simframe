@@ -4829,7 +4829,7 @@ route is a prediction until it is walked. A wrong one stops a flow as
 Apple M2 Pro, Xcode 27.0 (CoreSimulator 1174.9.2), iOS 26.5. N=1 per row:
 these are the first runs, not a distribution.
 
-**Ecotrak (`com.ecotrak.etm2`, `7B8F8963`, signed in): FAILED, and the failure
+**Ecotrak (`7B8F8963`, signed in): FAILED, and the failure
 was the crawler's.** The first run relaunched the app. It is a React Native
 debug build with no embedded bundle, its packager had stopped, and it came
 back on "No script URL provided" with the signed-in session unusable. That run

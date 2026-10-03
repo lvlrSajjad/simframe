@@ -39,7 +39,7 @@ export function deviceDriver(udid, bundle, { options = {} } = {}) {
   // Waiting is learned, not fixed. A crawl opens edges nobody has seen, which
   // runScript times out at its cold default — and a tap that changes nothing
   // then pays that default several times over: 13-22 s each, measured on
-  // Ecotrak. So the crawl learns this app's own settle time from the
+  // a React Native field app. So the crawl learns this app's own settle time from the
   // transitions it records (p95 + 1 s, at least 2.5 s, never above the
   // default) and hands that to every new edge once it has four samples.
   const settles = [];
@@ -80,7 +80,7 @@ export function deviceDriver(udid, bundle, { options = {} } = {}) {
     async inApp() {
       // "Cannot say" is not "somewhere else", and neither is one read taken
       // mid-transition: the front can belong to the system for a moment while
-      // a sheet or the app itself animates. Measured on Ecotrak: three false
+      // a sheet or the app itself animates. Measured on a React Native field app: three false
       // "left the app" in one 43 s run. Out means out on three reads.
       for (let i = 0; i < 3; i += 1) {
         const { pid } = await frontmost.read(udid);
@@ -140,7 +140,7 @@ export function deviceDriver(udid, bundle, { options = {} } = {}) {
 
 /**
  * Every driver call, timed, on stderr. A crawl that wastes its budget does so
- * one decision at a time, and each fault in the first Ecotrak crawls was found
+ * one decision at a time, and each fault in the first crawls of a field app was found
  * by reading this, not by reasoning about the report.
  */
 export function traced(driver, write = (line) => process.stderr.write(`${line}\n`)) {

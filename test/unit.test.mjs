@@ -7269,7 +7269,7 @@ test('no email address that simframe read off a screen reaches disk', async () =
   const metrics = await import('../src/metrics.js');
   const screenmapmod = await import('../src/screenmap.js');
   const udid = freshDevice('mask-email');
-  const addr = 'dave.burgers@example-fm.com';
+  const addr = 'kate.bell@example.org';
   screenmapmod.remember(udid, { hash: 'c'.repeat(32), layoutHash: '0'.repeat(72), targets: [{ label: `Email = ${addr}`, x: 1, y: 2 }] });
   metrics.recordEscalation(udid, { reason: 'unknown_screen', detail: `Visible: Email, ${addr}, NEXT`, candidates: [{ label: addr, x: 1, y: 2 }] });
   for (const [p, body] of filesUnder(store.deviceDir(udid))) assert.ok(!body.includes(addr), `an address reached ${p}`);
@@ -7444,18 +7444,18 @@ function fakeApp() {
 
 test('the cartographer maps what it may open and never opens what the barrier forbids', async () => {
   const carto = await import('../src/cartographer.js');
-  const app = fakeApp();
-  const state = await carto.crawl(app.driver, { bundle: 'com.example.fake', maxActions: 200 });
+  const fake = fakeApp();
+  const state = await carto.crawl(fake.driver, { bundle: 'com.example.fake', maxActions: 200 });
   const cov = carto.coverage(state);
   // Reached every screen a read-only crawl may reach…
   for (const h of ['home', 'wos', 'wo', 'comments', 'assets', 'asset', 'more', 'sheets']) assert.ok(state.screens[h], `reached ${h}`);
   // …and never touched what it must not.
   for (const forbidden of ['Delete', 'Sign Out', 'Create Work Order', 'Notify me', 'Edit', 'Open in Safari']) {
-    assert.ok(!app.taps.some((t) => t.endsWith(`|${forbidden}`)), `tapped ${forbidden}`);
+    assert.ok(!fake.taps.some((t) => t.endsWith(`|${forbidden}`)), `tapped ${forbidden}`);
   }
   // A list is sampled, not walked row by row.
-  assert.ok(app.taps.includes('wos|WO-1') && app.taps.includes('wos|WO-2'));
-  assert.ok(!app.taps.some((t) => /\|WO-[3-5]$/.test(t)), 'two rows reached the same screen, so the rest are a list');
+  assert.ok(fake.taps.includes('wos|WO-1') && fake.taps.includes('wos|WO-2'));
+  assert.ok(!fake.taps.some((t) => /\|WO-[3-5]$/.test(t)), 'two rows reached the same screen, so the rest are a list');
   assert.equal(cov.sampled, 3);
   // Leaving the app is recorded and recovered from.
   assert.equal(cov.leftApp.length, 1);
@@ -7475,27 +7475,27 @@ test('the cartographer maps what it may open and never opens what the barrier fo
 
 test('a cartographer run stops on its budget and the next run resumes where it stopped', async () => {
   const carto = await import('../src/cartographer.js');
-  const app = fakeApp();
+  const fake = fakeApp();
   let saved = null;
-  const first = await carto.crawl(app.driver, { bundle: 'com.example.fake', maxActions: 6, persist: (s) => { saved = structuredClone(s); } });
+  const first = await carto.crawl(fake.driver, { bundle: 'com.example.fake', maxActions: 6, persist: (s) => { saved = structuredClone(s); } });
   assert.equal(first.runs[0].stoppedBecause, 'action budget spent');
   assert.ok(carto.coverage(first).frontier.length > 0);
   assert.ok(saved, 'state saved at the attempt boundary');
-  const second = await carto.crawl(app.driver, { bundle: 'com.example.fake', state: saved, maxActions: 200 });
+  const second = await carto.crawl(fake.driver, { bundle: 'com.example.fake', state: saved, maxActions: 200 });
   assert.equal(second.runs.length, 2);
   assert.equal(carto.coverage(second).frontier.length, 0);
 });
 
 test('a control whose tap landed somewhere unexpected is never tapped again', async () => {
   const carto = await import('../src/cartographer.js');
-  const app = fakeApp();
-  const tap = app.driver.tap;
-  app.driver.tap = async (door, before) => {
+  const fake = fakeApp();
+  const tap = fake.driver.tap;
+  fake.driver.tap = async (door, before) => {
     const r = await tap(door, before);
     return door.label === 'Work Orders' ? { ...r, verdict: 'unexpected-screen' } : r;
   };
-  const state = await carto.crawl(app.driver, { bundle: 'com.example.fake', maxActions: 200 });
-  assert.equal(app.taps.filter((t) => t === 'home|Work Orders').length, 1);
+  const state = await carto.crawl(fake.driver, { bundle: 'com.example.fake', maxActions: 200 });
+  assert.equal(fake.taps.filter((t) => t === 'home|Work Orders').length, 1);
   assert.equal(carto.coverage(state).unexpected.length, 1);
 });
 
@@ -7514,14 +7514,14 @@ test('a crawl never restarts an app whose restart is unsafe, and an app that did
   const carto = await import('../src/cartographer.js');
   // Dead end on a screen with no back and no route: the crawl must stop rather
   // than restart a build that would come back on an error screen.
-  const app = fakeApp();
+  const fake = fakeApp();
   const launches = [];
-  const launch = app.driver.launch;
-  app.driver.launch = async (o) => { launches.push(o?.relaunch ? 'relaunch' : 'front'); return launch(o); };
-  app.driver.back = async () => ({ acted: false });
-  app.driver.route = () => null;
-  app.driver.relaunchBlocked = async () => 'it is a debug build and its packager is not running';
-  const state = await carto.crawl(app.driver, { bundle: 'com.example.fake', maxActions: 200 });
+  const launch = fake.driver.launch;
+  fake.driver.launch = async (o) => { launches.push(o?.relaunch ? 'relaunch' : 'front'); return launch(o); };
+  fake.driver.back = async () => ({ acted: false });
+  fake.driver.route = () => null;
+  fake.driver.relaunchBlocked = async () => 'it is a debug build and its packager is not running';
+  const state = await carto.crawl(fake.driver, { bundle: 'com.example.fake', maxActions: 200 });
   assert.ok(!launches.includes('relaunch'), launches.join(','));
   assert.equal(state.runs[0].blocked, true);
   assert.match(carto.renderReport(carto.coverage(state)), /^STOPPED EARLY — stuck on "[^"]+", and relaunching is not safe: it is a debug build/);
@@ -7564,14 +7564,14 @@ test('a read-only crawl refuses options in a selection list and contact links, a
 
 test('a crawl waits for an app to leave its launch screen before it treats anything as a place', async () => {
   const carto = await import('../src/cartographer.js');
-  const app = fakeApp();
+  const fake = fakeApp();
   let reads = 0;
   const splash = { hash: 'splash', name: null, tokens: [], rows: [{ label: 'Version 5.17.0', x: 200, y: 800, type: 'text', region: 'content', frame: { x: 150, y: 790, width: 100, height: 20 } }] };
-  const launch = app.driver.launch; const read = app.driver.read;
-  app.driver.launch = async (o) => { await launch(o); reads = 0; return splash; };
-  app.driver.read = async () => (++reads < 3 ? splash : read());
-  const state = await carto.crawl(app.driver, { bundle: 'com.example.fake', maxActions: 30 });
-  assert.ok(!app.taps.some((t) => /Version/.test(t)), 'nothing on the splash was tapped');
+  const launch = fake.driver.launch; const read = fake.driver.read;
+  fake.driver.launch = async (o) => { await launch(o); reads = 0; return splash; };
+  fake.driver.read = async () => (++reads < 3 ? splash : read());
+  const state = await carto.crawl(fake.driver, { bundle: 'com.example.fake', maxActions: 30 });
+  assert.ok(!fake.taps.some((t) => /Version/.test(t)), 'nothing on the splash was tapped');
   assert.ok(!state.screens.splash, 'the splash is not a screen of the map');
   assert.ok(state.screens.home);
 });
@@ -7620,12 +7620,12 @@ test('a row that returns to the screen it was opened from is a picked option, an
 
 test('a crawl waits through an unidentified screen after launch, and a crawl that maps nothing is a failure', async () => {
   const carto = await import('../src/cartographer.js');
-  const app = fakeApp();
+  const fake = fakeApp();
   let n = 0;
-  const read = app.driver.read; const launch = app.driver.launch;
-  app.driver.launch = async (o) => { await launch(o); n = 0; return { hash: null, rows: [], tokens: [] }; };
-  app.driver.read = async () => (++n < 2 ? { hash: null, rows: [], tokens: [] } : read());
-  const ok = await carto.crawl(app.driver, { bundle: 'x', maxActions: 20 });
+  const read = fake.driver.read; const launch = fake.driver.launch;
+  fake.driver.launch = async (o) => { await launch(o); n = 0; return { hash: null, rows: [], tokens: [] }; };
+  fake.driver.read = async () => (++n < 2 ? { hash: null, rows: [], tokens: [] } : read());
+  const ok = await carto.crawl(fake.driver, { bundle: 'x', maxActions: 20 });
   assert.ok(ok.screens.home, 'waited for the screen to be drawn');
 
   const blank = { launch: async () => ({ hash: null, rows: [] }), read: async () => ({ hash: null, rows: [] }), inApp: async () => true,
@@ -7691,15 +7691,15 @@ test('while a dialog is up nothing behind it is a door, and backing out dismisse
 
 test('a crawl that starts under a dialog dismisses it and maps the app, and a crawl that opens nothing is a failure', async () => {
   const carto = await import('../src/cartographer.js');
-  const app = fakeApp();
+  const fake = fakeApp();
   let dialog = true;
   const b = (label, x, y) => ({ label, x, y, type: 'Button', region: 'content', frame: { x: x - 50, y: y - 20, width: 100, height: 40 } });
-  const read = app.driver.read; const back = app.driver.back;
+  const read = fake.driver.read; const back = fake.driver.back;
   const withDialog = async () => (dialog ? { hash: 'dlg', name: null, tokens: [], rows: [b('CANCEL', 90, 470), b('OPEN SETTINGS', 290, 470)] } : read());
-  app.driver.read = withDialog;
-  app.driver.launch = async () => withDialog();
-  app.driver.back = async (here) => { if (dialog) { dialog = false; return { acted: true, after: await read() }; } return back(here); };
-  const state = await carto.crawl(app.driver, { bundle: 'x', maxActions: 60 });
+  fake.driver.read = withDialog;
+  fake.driver.launch = async () => withDialog();
+  fake.driver.back = async (here) => { if (dialog) { dialog = false; return { acted: true, after: await read() }; } return back(here); };
+  const state = await carto.crawl(fake.driver, { bundle: 'x', maxActions: 60 });
   assert.ok(state.screens.wos, 'mapped the app behind the dialog');
   assert.notEqual(state.runs[0].failed, true);
 

@@ -667,7 +667,7 @@ async function appBundlePath(udid, bundleId) {
  * The font files an app ships, from `UIAppFonts` in its Info.plist — the
  * authoritative list for React Native's icon fonts — found anywhere inside the
  * .app. Listed names that are not present are left out; a bundle can declare
- * fonts it never copied (Ecotrak declares three Material fonts and ships one).
+ * fonts it never copied (one field app declares three Material fonts and ships one).
  */
 async function appIconFonts(udid, bundleId) {
   const app = await appBundlePath(udid, bundleId);

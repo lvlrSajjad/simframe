@@ -36,7 +36,7 @@ export const ATTEMPT_ACTIONS = 6;
 /**
  * The longest a crawl waits for an app to leave its launch screen. Every other
  * wait is capped at 10 s (CLAUDE.md); a launch is the owner's exception, decided
- * 2026-10-03 after a warm relaunch of the Ecotrak debug build measured 9-16 s
+ * 2026-10-03 after a warm relaunch of a React Native field app's debug build measured 9-16 s
  * and ended crawl after crawl at the 10 s cap. The wait still ends the moment
  * the app has something to operate — this is a ceiling, not a sleep.
  */
@@ -92,11 +92,11 @@ export function isBackAffordance(row, { locale } = {}) {
   // ("screen-toolbar-back-button"). Measured: before this, a crawl of Settings
   // took every screen's "Settings" button for a door and backed straight out
   // of each screen after one tap.
-  // Unlabeled too: Ecotrak's back chevron has no accessibility label, and a
+  // Unlabeled too: a field app's back chevron has no accessibility label, and a
   // crawl that could not see it as a way back relaunched the app instead.
   if (row?.region === 'nav-bar' && row?.navSlot === 'leading' && /button/i.test(String(row.type ?? 'button'))) return true;
   // And an unlabeled button in the top-left corner, wherever the region
-  // priors put it: Ecotrak's chevron is often read as content, and a crawl
+  // priors put it: that chevron is often read as content, and a crawl
   // that could not find it fell back to edge swipes that did nothing.
   // Labelled or not: iOS titles the back button with the parent screen
   // ("General"), and on some screens the region priors put it in content. A
@@ -119,7 +119,7 @@ export function placeLike(reading) {
 /**
  * The dismiss button of a dialog on this screen, if one is up: a button whose
  * whole label declines (Cancel, Not Now…) with another button beside it on the
- * same line. Measured on Ecotrak: "Location Permission Disabled" sat over the
+ * same line. Measured on a React Native field app: "Location Permission Disabled" sat over the
  * work-order list, the crawl tapped list rows behind it 7 times at ~13 s each,
  * and backed out with the nav-bar button underneath.
  */
@@ -162,7 +162,7 @@ export function labelOf(row) {
 
 /**
  * A framework's developer overlay — React Native's red box or log box — over
- * the app: the text it shows, or null. Found on Ecotrak: tapping "Map" in the
+ * the app: the text it shows, or null. Found on a React Native field app: tapping "Map" in the
  * Ema assistant raised one, and the crawl tapped its "Reload JS" as a door.
  * It is an app error and a finding, never a place to explore.
  */
@@ -249,7 +249,7 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
   // measured on Settings. Where the tree says nothing about controls (many RN
   // screens), text is all there is and stays a candidate.
   // A screen with a commit control is a form, and its rows are what the
-  // commit would apply. Measured on Ecotrak: a filter sheet with RESET and
+  // commit would apply. Measured on a React Native field app: a filter sheet with RESET and
   // APPLY had its radio options tapped one after another — nothing applied,
   // but read-only means not editing a form either, and RN radios carry no
   // `selected` trait to warn by.
@@ -268,7 +268,7 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
     // Text that only OCR sees, mid-screen, where the tree is describing the
-    // controls: drawn text — a map's place names, a chart's labels. Ecotrak's
+    // controls: drawn text — a map's place names, a chart's labels. A field app's
     // map put "Los Angeles" and street names in the door list at ~22 s a
     // no-change tap. The bottom band is spared: that app's tab bar is OCR-only.
     const ocrOnly = !/ax/.test(String(row.source ?? '')) && /^(text|statictext)?$/i.test(String(row.type ?? ''));
@@ -360,7 +360,7 @@ const asReading = (state, hash) => ({ hash, tokens: tokensFor(state, hash) });
 /**
  * The screen a hash is, for the crawl. A tap that changes a screen in place —
  * a day picked in a week strip, a month flipped — can give it a new identity
- * (DEFERRED 174). Measured on Ecotrak's Track Time: 48 actions spent re-tapping
+ * (DEFERRED 174). Measured on a field app's time-tracking screen: 48 actions spent re-tapping
  * the same strip on what the crawl took for six new screens. Such a hash is an
  * alias of the screen it came from, and shares its doors.
  */
@@ -375,7 +375,7 @@ export const SAME_DOORS = 0.7;
 
 /**
  * A door's key with its numbers taken out, for comparing screens. A week strip
- * reads "MON, 14" one week and "MON, 28" the next, and Ecotrak's Track Time
+ * reads "MON, 14" one week and "MON, 28" the next, and a field app's time-tracking screen
  * paged back week after week as a new screen each time because of it.
  */
 const shapeKey = (k) => String(k).replace(/\d+/g, '#');
@@ -386,7 +386,7 @@ function doorKeys(reading, opts) {
 
 /**
  * The screen already in the map that this reading is, by its doors. Structure
- * and names both failed on Ecotrak's Track Time — seven identities, no name,
+ * and names both failed on a field app's time-tracking screen — seven identities, no name,
  * too few shared tokens — while every one of them carried the same controls.
  * What a person can do on a screen is what the crawl cares about, so a reading
  * whose doors are mostly an existing screen's doors is that screen.
@@ -540,8 +540,8 @@ export async function crawl(driver, {
   const knownBefore = new Set(Object.keys(state.screens));
 
   // An app's launch screen is still and has no doors: a splash, a version
-  // string, a spinner that is not moving. It is not a place. Measured on the
-  // Ecotrak app: the crawl tapped "Build 260902314" on its splash just as the
+  // string, a spinner that is not moving. It is not a place. Measured on a
+  // React Native field app: the crawl tapped "Build 260902314" on its splash just as the
   // JavaScript finished loading, and recorded the sign-in screen as where that
   // tap leads. So after a launch, a screen with no doors is read again until it
   // gives way, for at most LAUNCH_CAP_MS — CLAUDE.md's hard cap on any wait.
@@ -550,7 +550,7 @@ export async function crawl(driver, {
     let cur = r;
     // A reading with no identity is a screen not yet drawn — a black frame
     // mid-launch — and is waited on like a splash. Returning it at once made a
-    // crawl of Ecotrak record zero screens and report "nothing reachable".
+    // crawl of a field app record zero screens and report "nothing reachable".
     const waiting = (x) => !x?.hash || (!didNotStart(x, { locale }) && !placeLike(x));
     while (waiting(cur) && now() - t < LAUNCH_CAP_MS) {
       const next = await driver.read();
@@ -585,7 +585,7 @@ export async function crawl(driver, {
     // Relaunching from the start screen can only return to it.
     if (root && here?.hash && canon(state, here.hash) === root) return { stop: 'nothing reachable left to open', done: true };
     // A tabbed app has a way home that costs one tap: the tab the start
-    // screen showed in its bottom band. Ecotrak's tab bar is OCR-only text, so
+    // screen showed in its bottom band. A field app's tab bar is OCR-only text, so
     // it is matched by label and position, not by region. Relaunching that app
     // takes 9-16 s, past the 10 s cap, and ended two crawls.
     if (rootTabs.length && here?.rows) {
@@ -611,7 +611,7 @@ export async function crawl(driver, {
 
   // Start where the app is: brought forward, never restarted. Restarting to
   // root the map at the app's own start screen was tried and measured: a warm
-  // restart of the Ecotrak debug build took more than the 10 s cap to become
+  // restart of a React Native field app's debug build took more than the 10 s cap to become
   // operable, so the crawl failed before it began. Leave the app on its start
   // screen before mapping it.
   let reading = await arrive(await driver.launch({ relaunch: false }));
