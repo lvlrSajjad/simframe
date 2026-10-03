@@ -21,9 +21,15 @@ work, has the screen settled) is made locally in tens of milliseconds.
 `Vision`/`Accelerate`. Reference implementations we follow: `tddworks/baguette`
 (capture + iOS 26 HID) and `valewnrt/testa` (a11y + OCR + warm daemon).
 
-**Capture.** `SimDevice.io` IOSurface framebuffer callback
-(`registerCallbackWithUUID:ioSurfacesChangeCallback:`), read via public
-`IOSurface*` accessors. Target: ≤20 ms warm frame, up to 60 fps. Frames continue
+**Capture.** The display's damage callback
+(`registerCallbackWithUUID:damageRectanglesCallback:`, ~52/s while redrawing)
+triggers a read of its `framebufferSurface` via public `IOSurface*` accessors;
+`ioSurfacesChangeCallback` fires only on reallocation and is not a frame signal.
+Target: ≤20 ms warm frame. There is no frame-rate target: capture runs at the
+rate settle and verification need (about 4 fps moving, 1.5 fps still, capped
+near 12 fps by the 80 ms coalesce). The old "up to 60 fps" was dropped by the
+owner on 2026-10-03 because nothing consumes it and each frame costs 12–21 ms;
+revisit only if animation or jank testing becomes a real use case. Frames continue
 to land in `~/.simframe/<udid>/` with the same atomic-rename layout so existing
 readers keep working during the transition.
 
