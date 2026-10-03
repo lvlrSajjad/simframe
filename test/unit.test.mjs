@@ -3578,6 +3578,15 @@ test('a relaunch forgets what was typed, so a fresh form is not reported cleared
   assert.match(src, /await terminateApp\(udid, step\.value \?\? step\.bundleId\);\n\s+wrote\.forget\(udid\);/);
 });
 
+test('an app button the keyboard covers is marked, the keyboard\'s own keys are not (field report, 0.22.0)', async () => {
+  const sm = await import('../src/screenmap.js');
+  const k = (label, x, w = 39) => ({ label, type: 'Button', source: 'ax', region: 'keyboard', x, y: 617, frame: { x, y: 590, width: w, height: 54 } });
+  const review = { label: 'REVIEW', type: 'Button', source: 'ax', region: 'keyboard', x: 201, y: 844, frame: { x: 16, y: 820, width: 370, height: 48 } };
+  const targets = [k('q', 5), k('w', 44), k('Next keyboard', 8, 68), k('', 103, 197), review];
+  assert.equal(sm.markUnderKeyboard(targets), 1);
+  assert.equal(review.behind, 'keyboard');
+});
+
 test('a hash seen before with nothing learned from it does not read as known (field report, 0.22.0)', async () => {
   const v = await import('../src/view.js');
   const text = v.render({ device: { name: 'iPhone' }, identity: { hash: 'abcdef012345' }, rows: [], exits: 0 });

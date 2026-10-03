@@ -560,6 +560,7 @@ export async function build(udid, {
     if (screen?.width && screen?.height) regions.annotate(targets, screen);
     if (screen?.height) markBehindSheet(targets, screen);
     if (screen?.height && screen?.width) markUnderBottomBar(targets, screen);
+    markUnderKeyboard(targets);
     // Two hashes, two jobs. The pixel layout hash indexes this entry, because
     // it can be computed from a frame alone and so can find a map without
     // building one. The structural hash identifies the screen, because content
@@ -789,6 +790,28 @@ export function markUnderBottomBar(targets, screen) {
     for (const t of under) t.behind = 'bar';
     marked += under.length;
     break;
+  }
+  return marked;
+}
+
+/**
+ * App controls the keyboard covers.
+ *
+ * A form's REVIEW button at y=844 was printed under `keyboard:` like a key
+ * (field report, 0.22.0): it is the app's footer, hidden by the keyboard, and
+ * a tap there types. Not a key, inside the keyboard's band: `behind:
+ * 'keyboard'`. Returns how many.
+ */
+const KEYBOARD_OWN = /^(next keyboard|dictate|dictation|space|emoji|globe|keyboard|predictive|suggestions?)$/i;
+export function markUnderKeyboard(targets) {
+  let marked = 0;
+  for (const t of targets) {
+    if (t.region !== 'keyboard' || t.behind || regions.looksLikeKey(t)) continue;
+    if (!matching.isAxTarget(t) || !String(t.label ?? t.identifier ?? '').trim()) continue;
+    // The keyboard's own wide controls: not keys by width, still the keyboard.
+    if (KEYBOARD_OWN.test(String(t.label ?? '').trim())) continue;
+    t.behind = 'keyboard';
+    marked += 1;
   }
   return marked;
 }

@@ -574,8 +574,9 @@ export async function screenMap(deviceQuery, {
   // peer who had to fall back to a screenshot to count five radio options
   // through a sheet, which is the case the text map exists to remove.
   const layered = (identity?.entry?.occluded ?? []).length;
-  const behind = (identity?.entry?.targets ?? []).filter((t) => t.behind && t.behind !== 'bar');
+  const behind = (identity?.entry?.targets ?? []).filter((t) => t.behind === true);
   const underBar = (identity?.entry?.targets ?? []).filter((t) => t.behind === 'bar');
+  const underKeyboard = (identity?.entry?.targets ?? []).filter((t) => t.behind === 'keyboard');
   const overlay = behind.length
     ? `a sheet or alert looks open: ${behind.length} label(s) above it were read from pixels only and probably belong to the screen behind`
       + ` (${behind.slice(0, 4).map((t) => JSON.stringify(String(t.label).slice(0, 20))).join(', ')}${behind.length > 4 ? ', …' : ''})`
@@ -599,9 +600,14 @@ export async function screenMap(deviceQuery, {
     : !sources.includes('ax') && sources.length
       ? `the accessibility tree was NOT read (${(identity?.entry?.degraded ?? [])[0] ?? 'unavailable'}) — every element is from pixels`
       : null;
-  const barNote = underBar.length
-    ? `${underBar.length} row(s) sit under the bar at the bottom of the screen and are marked "behind?" — a tap there hits the bar; scroll them up first`
-    : null;
+  const barNote = [
+    underBar.length
+      ? `${underBar.length} row(s) sit under the bar at the bottom of the screen and are marked "behind?" — a tap there hits the bar; scroll them up first`
+      : null,
+    underKeyboard.length
+      ? `${underKeyboard.map((t) => JSON.stringify(String(t.label || t.identifier || 'a control').slice(0, 20))).slice(0, 3).join(', ')} ${underKeyboard.length === 1 ? 'is' : 'are'} under the keyboard — dismiss it (Done, or tap outside the field) before tapping ${underKeyboard.length === 1 ? 'it' : 'them'}`
+      : null,
+  ].filter(Boolean).join('\n') || null;
 
   // Controls that are on the screen and answer to no name — item 122.
   //
