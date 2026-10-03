@@ -1338,7 +1338,9 @@ numbers below refer to it.
   decisions. In order: a forward step that diagnoses a failed save locally,
   satisficing in the driver, habits (saved flows with slots, replayed), glance
   instead of read on known screens, places after words. The person's own
-  account is in `docs/research/08-how-a-person-drives.md`.
+  account is in `docs/research/08-how-a-person-drives.md`. First up: a
+  `forward:` line in the screen map and a `forward` step that reports a failed
+  save's validation messages locally.
 - **Never describe a screen that is no longer there.** A read that reports
   the previous screen with confidence is worse than a refusal, because every
   decision after it rests on it. Two fixes for this ship in **0.19.0**: a

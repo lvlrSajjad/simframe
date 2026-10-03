@@ -1,115 +1,129 @@
-# Handoff — 2026-10-03
+# Handoff — 2026-10-04
 
-The previous handoff (2026-09-25) is in git history. This one covers the
-goal-mode / cartographer work from 2026-10-01 to 2026-10-03.
+The previous handoff (2026-10-03, goal mode and cartographer) is in git history.
+This one covers the field reports, the model and tool comparison, the human
+baseline, and **0.23.0**.
 
 ## Read this first
 
-- **Released:** 0.21.0 (cartographer, credential redaction, memory carry) and
-  **0.22.0** (goal mode, peer-test fixes, launch wait, head-to-head benchmark).
-  0.22.0 was tagged and pushed at the end of the session. Confirm it reached npm
-  with `npm view simframe dist-tags`. The release workflow was still running.
-- **Phase rule:** the end of a phase is a peer test, not a release. The owner
-  asked for both releases explicitly. **Next is a peer test of goal mode
-  (0.22.0).** Write the prompt (pattern: `peer-reports/` and the 0.21.0 prompt
-  in the conversation), wait for the report, triage, fix.
-- **The last peer test found a read-only crawl writing real data** (DEFERRED
-  197): MARK ALL READ was tapped 3× on the field app and four notifications were
-  marked read. Fixed: notification and selection verbs are refused, any
-  label that changed something without navigating is tapped once per crawl, and
-  in-place changes are reported first. **Treat every crawl or goal run on the
-  field app as able to write.** Watch it and verify afterwards.
+- **The goal is driving like a person; tokens are the proof that it works.** On
+  2026-10-03 a person who knows the field app did a service request in **39.1 s**
+  and an add-asset in **48.9 s** (medians of five, `simframe baseline record`).
+  Every agent setup took 13–16 minutes for the pair, about 9–10× slower. The cause
+  is measured: about 12 decisions for the person, 50–130 model calls for the
+  agents. **Phase 20** in `docs/PHASES-HUMAN-PARITY.md` is the plan. The source is
+  `docs/research/08-how-a-person-drives.md`, in the owner's own words.
+- **The token saving is proven.** The same model with simframe used 2.5× fewer
+  tokens and 3.5× fewer calls than without (BENCHMARKS, "Who drives"). The docs
+  lead with it. **Never quote a human time without a recording** (DECISIONS,
+  2026-10-03): a guessed "5–10 minutes" had flattered the agents five times over.
+- **The plugin ships a Sonnet driver agent** (`agents/simframe-driver.md`, simframe
+  tools only), which now carries the "move like a person" rules. It exists only
+  with the plugin install, and the README, skill and GUIDE say so.
+- **Released 0.23.0** at the end of this session. Confirm with
+  `npm view simframe dist-tags`, and update the global (`npm i -g
+  simframe@latest`) so the plugin's server and this checkout agree. This
+  session's version skew (checkout on fingerprint rules v10, global on v9) made
+  both of the owner's field runs see an empty graph.
 
-## What exists now (all on main)
+## The backlog, in order
 
-| piece | where | what it does |
-| --- | --- | --- |
-| Cartographer | `src/cartographer.js` (logic), `src/map.js` (device driver), `simframe map` / `sim_map` | Read-only crawl in attempts of ≤6 actions. It refuses the barrier (`data/vocabulary/en.json`: destructive, leavesTheApp, exploration.neverOpen, cartographer.actsImmediately/opensWrite/formCommit/devOverlay/contactLinkPatterns/dismiss/homeTabs), backs out via the app's own back, dialog dismiss or home tab, and relaunches only when `platform.relaunchNeeds` says it is safe. It is resumable (`~/.simframe/<udid>/maps/<bundle>.json`), `--trace` logs every decision, and Ctrl-C saves and reports. |
-| Goal mode | `src/goal.js`, `simframe goal "<goal>"` / `sim_goal` | Targets are split on `>`/`then`. Per target: on screen now (fresh read), then a remembered route (named screen, a door with that label, or a label chain that survives split/merged identities), then backing out ≤3 toward a target the graph knows, then one `seek` of ≤6. It returns at done (with evidence) / blocked / ambiguous / not-found / failed / budget, each with an escalation reason. The barrier holds even for named controls. |
-| Memory carry | `src/carry.js` | Re-fingerprints old screen maps after a TOKEN_RULES_VERSION bump and retires what it cannot rebuild. The memory line in `doctor` and `screens` counts the retired folders. |
-| Credentials | `src/typed.js` | No username, password or email reaches disk: graph edges keep the field and drop the text, saved flows hold credentials as `needsText`, stored readings replace text-field values with `<typed>` everywhere, and email addresses are written as `<email>`. Frames (PNG) are NOT scrubbed; that is the owner's decision, still open. |
-| Icon names | `src/glyphs.js` + `platform.appIconFonts/bundleForPid` | An icon-font glyph is looked up in the front app's bundled fonts (`cmap` + `post`) and shown as `bell (icon)`. Derived names never enter fingerprints. Identifiers (`testID`) name unlabeled controls in the cartographer. Research: `docs/research/07-icon-naming.md`. |
-| Launch wait | `actions.js` `untilOperable` | A `launch` step waits until the app shows a control, up to 30 s (the owner's exception to the 10 s cap, written into CLAUDE.md). |
-| Benchmark | `scripts/bench-headtohead.mjs` | Tokens and model calls per verified flow in four arms (batch / goal / step / screenshot). Results are in BENCHMARKS and GUIDE. |
-| Testbed Icons tab | `examples/rn-testbed/src/screens/Icons.tsx`, `Feather.ttf` (MIT) | Seven glyph-only buttons for verifying icon naming. It needs its packager: `cd examples/rn-testbed && npm start` (port 8083). |
+Pick from the top. Each item is scored on model calls per job, wall time
+against the person's medians, and wrong taps (must stay zero). Measure on the
+two field jobs before and after.
 
-## Numbers to carry
+### Phase 20, drive like a person (detail in PHASES-HUMAN-PARITY)
 
-- **Field (Phase 0):** about 1.1 actions per model call over 24 real sessions
-  and 876 calls. In a hand-labelled sample, up to 46/59 (78%) of hand-backs
-  were absorbable locally.
-- **Head to head, 4-step Settings flow:** 1 `sim_do` = 1 call, 382 tokens.
-  Goal = 2 calls, 436. Text map per step = 7 calls, 1,506. Screenshot per step
-  = 8 calls, 6,461. 24/24 runs verified. The screenshot arm has the least tool
-  time, because it verifies nothing.
-- **Goal mode, live:** 5/5 goals done in their final versions (3 on Settings,
-  2 on the field app), 1–3 actions each.
-- **Cartographer, field app:** best run 34 screens / 42 transitions. Settings:
-  27 screens / 32 transitions in 6 min, with Accessibility, Preferences,
-  ColorPicker, appearance, text size and languages identical before and after.
-- **Warm relaunch** of the field app's debug build: 9–16 s to an operable home
-  screen.
+1. **The forward step, with surprises handled locally.** These are the cheap
+   wins agreed with the owner and not yet built:
+   - (a) A `forward:` line in the screen map naming the primary action: the big
+     button at the bottom. With one, that is forward; with several, the one with
+     a forward word (next, save, submit, review, apply, approve). Never
+     destructive or barrier.
+   - (b) A `{"forward": true}` step: tap it; landing on another screen is `ok`
+     with nothing re-read. If it stays put, collect the visible validation
+     messages ("required", "invalid") and any error toast, and return them in
+     one line.
+   - (c) Then scroll the form for validation messages it cannot see.
+2. **Know the form's shape.** Single-step forms: `sweep` returns an outline
+   (field, type, required, section, position) and the fill becomes one planned
+   batch. Progressive forms: a local "what appeared, is it required?" loop until
+   forward enables.
+3. **Satisficing, with backtracking.** "If you're given a combination then you
+   choose / search for those; if not, then first options." Named values go
+   through the list's search box. On a dead end (an empty list, a drop-down that
+   will not open, forward still disabled), go back to the latest choice point,
+   locally and bounded. The driver's instructions already say this; the local
+   machinery does not exist yet.
+4. **Habits.** Save a flow the driver completed, with choices as slots, and
+   replay it. Target: a repeat run within 1.5× of 39 s.
+5. **Glance, don't read** on known screens: what changed plus the forward
+   control.
+6. **Places after words:** positions as a prior on screens seen many times.
+
+### Measurement (do alongside item 1)
+
+- **A generic twin of the field jobs in the testbed** (a progressive wizard and
+  a long form with a radio-row date choice), so CI and `simframe hpi` can track
+  Phase 20 without naming the field app. The field suite itself lives only in
+  the scratchpad: `field-human-suite.json`, plus the task files `field-task*.md`
+  and `driver-body.md`. It names the app's bundle id, so it never goes in the
+  repo.
+- **The Sonnet driver twice in a row, cold then warm,** against the person's
+  medians.
+- **Re-record `docs/research/hpi-baseline.json`** (CLAUDE.md requires it; one of
+  its flows never completed). DEFERRED 173 (the suite wedging its device) is
+  still open and gates it.
+
+### Open bugs, by cost
+
+- **Identity splits** (DEFERRED 174). Still the root of most re-reads. Settings'
+  root (search focused or not) and the field app's lists split. 0.23.0 stops a
+  same-titled split from failing a step, but the split itself remains. On the
+  field app, recall at distances 0–4 matched a different screen more often than
+  the same one (137 vs 81 pairs).
+- **`goal`:** "Settings fits 2 remembered screens" from deeper screens, and it
+  opened several screens hunting a target that does not exist.
+- **The radio fallback costs about 16 s;** learn per screen which edge works.
+- **The "pending sync" reminder** appears and disappears (an app modal). An
+  `optional` tap handles it; nothing in simframe knows it is recurring.
+- **The first `ui` after a rules bump took 28 s** (the one-time carry) and said
+  nothing while it ran.
+- **The asset that vanished.** One field-app asset disappeared from the app's
+  offline queue across a device reboot, and nothing was uploaded. Possibly the
+  app's own behaviour; unexplained.
+- **Customer data at rest** and **frames on disk**: owner decisions, still
+  open. The store is 0700 now.
 
 ## Environment facts that will bite
 
-- **Devices:** `326464A4` is the benchmark device and ours. `7B8F8963`
-  ("ecotrak-simframe") holds the owner's signed-in field app, which has real
-  data. The owner said to use it, but **ask before any crawl there**.
-  `B55AB0AE` and `CDB00FD6` are colleagues': do not drive or modify them. A
-  read-only look at `B55AB0AE` was allowed once. Whether to scrub and carry its
-  store is still unanswered. Other sessions use other simulators (an iPhone 16
-  Pro, `F795DD6E`, was another session's).
-- **The field app is an RN debug build with no embedded bundle.** A relaunch
-  needs its packager on :8081 (`yarn start:ecotrak` in
-  `~/Coding/ET/ecotrak-mobile`, started by the owner). Its sign-in lapses after
-  about a day ("Refresh Token has expired"). Never type credentials; ask the
-  owner to sign in.
-- **No third-party identifiers in the repo** (`scripts/check-private.mjs`, CI).
-  Shipped `src/` says "a React Native field app", never the company. Do not
-  name a variable `app` in tests: a property chain on it reads as a bundle id.
-- **CI:** about 10 min. A Safari first-run tip on a fresh runner device turned
-  the fingerprint shard red twice. It is fixed in `test/tours/device-native.json`
-  with an optional tap on the page heading. Release only on green.
-- **Release:** `npm version minor|patch` (the hook syncs server.json and the
-  plugin manifest), push main, push the tag `vX.Y.Z`, watch `release.yml`, then
-  `npm view simframe@X.Y.Z`. `gh` needs `GH_CONFIG_DIR=~/.config/gh-personal`.
-- **The global `simframe`** was updated to 0.21.0 by the owner. The plugin's
-  `npx simframe mcp` resolves to the global install, so update it to 0.22.0
-  (`npm i -g simframe@latest`) and restart MCP sessions.
-- **The benchmark device's Accessibility** (`PrefersHorizontalText`, Hover Text
-  colour) was changed by an earlier crawl and **reset by the owner**. When a crawl
-  runs on Settings, compare `com.apple.Accessibility`, `com.apple.Preferences`
-  and `com.apple.UIKit.ColorPickerUIService` before and after, not only
-  Preferences.
-
-## Open items (DEFERRED 197 lists them in full)
-
-- The screen header still says `NOT MOVED … did not land` after a small text
-  change, because it judges by pixels. Step verdicts are fixed.
-- Typing into a label that is both a field and its caption is ambiguous. The
-  keyboard coming up invalidates refs, so a form cannot be filled by ref in one
-  script.
-- Screens are named after tab-bar chrome. A list row under the tab bar is
-  offered as tappable.
-- Crawl maps keep customer names and notification text in `refused` keys and
-  `samples`.
-- Frames on disk show typed text (owner's decision).
-- The SF Symbols pixel route was approved but deferred by measurement: only 9 of
-  4,266 bench controls and 3 of 2,306 field-app controls lack both a label and
-  an identifier.
-- Identity splits and merges (DEFERRED 174) remain the root of most crawler and
-  goal-mode workarounds: label chains, door-set aliases, fresh reads.
-
-## Next
-
-1. Confirm 0.22.0 on npm. Tell the owner to `npm i -g simframe@latest` and
-   restart MCP sessions.
-2. Write the goal-mode peer-test prompt. Cover goals on Settings, Contacts and
-   the testbed, read-only goals on the field app with before/after state checks,
-   barrier refusals, ambiguity, not-found, and the 1-call / milestone report
-   quality.
-3. Phase 3, scoring. Build a small fixed task set (field app + system apps) and
-   measure actions per model call (1.1 in the field, target 8–10), model turns
-   per flow, HPI_accuracy, step_ratio and wrong taps, before and after each
-   change. Re-record `docs/research/hpi-baseline.json` first: one of its two
-   flows never completed.
+- **Devices:**
+  - `326464A4` is the bench device.
+  - `7B8F8963` ("ecotrak-simframe") is the owner's signed-in field app on DEV:
+    real data, so ask before crawls.
+  - `simframe-arm-B/C/D` (`AD9186D8`, `C27BA38D`, `4A7E66EC`) are clones of it,
+    made for the comparison. They are shut down, not deleted, and the owner may
+    want them deleted.
+  - Arm D's clone may still be booted.
+  - `B55AB0AE` and `CDB00FD6` are colleagues' devices: never touch them.
+- **Cloning a device** carries its app, sign-in and offline queues. An app's
+  pending uploads would be duplicated by every clone, so clear them on the
+  clones first.
+- **The session's permission check** refused some real writes (an asset upload,
+  a final submit) in agent runs. Agents are told to stop, never to route
+  around it.
+- **DEV records** to clean up:
+  - Work orders: 6322851 (A), 6322852 (C), 6322853 (D), 6322854 (E), 6322855
+    (D2), plus the owner's five baseline service requests (one is 6322860;
+    their description is "Mo").
+  - Assets: arm B (ID 4511086), arm C, arm E, and the owner's five, all named
+    "simframe QA asset - please ignore (…)".
+- **Release:** `npm version minor|patch`, push main, push the tag, watch
+  `release.yml`, then `npm view`. `gh` needs `GH_CONFIG_DIR=~/.config/gh-personal`.
+  The GitHub API dropped connections from this machine on 2026-10-04. Retry, or
+  ask the owner to look at Actions.
+- **Run locally before pushing:** `npm test`, `node scripts/eval-perception.mjs`
+  (a CI step), `node scripts/check-private.mjs`, and
+  `node scripts/article-md.mjs --check` after editing the article page.
+- **`simframe frame` writes `simframe.png` into the working directory.** Delete
+  it; it is an app screenshot.
