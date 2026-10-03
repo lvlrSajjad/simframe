@@ -567,7 +567,8 @@ export async function screenMap(deviceQuery, {
   // peer who had to fall back to a screenshot to count five radio options
   // through a sheet, which is the case the text map exists to remove.
   const layered = (identity?.entry?.occluded ?? []).length;
-  const behind = (identity?.entry?.targets ?? []).filter((t) => t.behind);
+  const behind = (identity?.entry?.targets ?? []).filter((t) => t.behind && t.behind !== 'bar');
+  const underBar = (identity?.entry?.targets ?? []).filter((t) => t.behind === 'bar');
   const overlay = behind.length
     ? `a sheet or alert looks open: ${behind.length} label(s) above it were read from pixels only and probably belong to the screen behind`
       + ` (${behind.slice(0, 4).map((t) => JSON.stringify(String(t.label).slice(0, 20))).join(', ')}${behind.length > 4 ? ', …' : ''})`
@@ -578,6 +579,9 @@ export async function screenMap(deviceQuery, {
         + ' — a sheet, toast or banner is probably covering part of the screen, so treat anything'
         + ' you did not expect to see as belonging to the layer underneath'
       : null;
+  const barNote = underBar.length
+    ? `${underBar.length} row(s) sit under the bar at the bottom of the screen and are marked "behind?" — a tap there hits the bar; scroll them up first`
+    : null;
 
   // Controls that are on the screen and answer to no name — item 122.
   //
@@ -615,9 +619,9 @@ export async function screenMap(deviceQuery, {
     exitList,
     staleExits,
     cleared,
-    overlay,
+    overlay: [overlay, barNote].filter(Boolean).join('\n') || null,
     unnamed,
-    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, cleared, overlay, unnamed,
+    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, cleared, overlay: [overlay, barNote].filter(Boolean).join('\n') || null, unnamed,
       // An unknown screen may be one simframe learned and could not carry over a
       // fingerprint change. Say so rather than calling it new without comment.
       memoryNote: exits == null ? carry.headerNote(udid) : null }),

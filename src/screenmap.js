@@ -559,6 +559,7 @@ export async function build(udid, {
     // they are.
     if (screen?.width && screen?.height) regions.annotate(targets, screen);
     if (screen?.height) markBehindSheet(targets, screen);
+    if (screen?.height && screen?.width) markUnderBottomBar(targets, screen);
     // Two hashes, two jobs. The pixel layout hash indexes this entry, because
     // it can be computed from a frame alone and so can find a map without
     // building one. The structural hash identifies the screen, because content
@@ -735,5 +736,60 @@ export function markBehindSheet(targets, screen) {
   if (above.length < 2) return 0;
   for (const t of above) t.behind = true;
   return above.length;
+}
+
+/**
+ * List rows scrolled under a sticky bottom bar.
+ *
+ * The accessibility tree keeps every row of a list at its scrolled position,
+ * including the ones a pinned footer covers, so a picker's rows behind its
+ * CLEAN / SELECT bar were listed as ordinary tappable rows (field report,
+ * 0.22.0, both runs). A tap there hits the bar.
+ *
+ * The bar: buttons in the lower part of the screen, side by side on one line,
+ * spanning most of its width and no taller than a button. Under it: anything
+ * from the tree whose centre is below the bar's top edge and that OCR did not
+ * see — a covered row is in the tree and not in the pixels. Marked
+ * `behind: 'bar'`, a flag like the sheet's, so nothing is hidden and no
+ * identity moves. Returns how many were marked.
+ */
+export const BOTTOM_BAR_MIN_SPAN = 0.6;
+export const BOTTOM_BAR_MAX_INSET = 130;
+export function markUnderBottomBar(targets, screen) {
+  const buttons = targets.filter((t) => t.frame && matching.isAxTarget(t)
+    && /button/i.test(String(t.type ?? ''))
+    && !['keyboard', 'tab-bar', 'status-bar'].includes(t.region)
+    && t.frame.y > screen.height * 0.6
+    && (t.frame.height ?? 0) <= screen.height * 0.08);
+  let marked = 0;
+  for (const seed of buttons) {
+    // Two or more buttons on one line: a single full-width button is
+    // indistinguishable from a list row.
+    const line = buttons.filter((b) => Math.abs(b.frame.y - seed.frame.y) <= 8);
+    if (line.length < 2) continue;
+    const left = Math.min(...line.map((b) => b.frame.x));
+    const right = Math.max(...line.map((b) => b.frame.x + (b.frame.width ?? 0)));
+    if (right - left < screen.width * BOTTOM_BAR_MIN_SPAN) continue;
+    const barTop = Math.min(...line.map((b) => b.frame.y));
+    const barBottom = Math.max(...line.map((b) => b.frame.y + (b.frame.height ?? 0)));
+    // Pinned to the bottom, not a row of chips or a grid mid-screen.
+    if (barBottom < screen.height - BOTTOM_BAR_MAX_INSET) continue;
+    const under = targets.filter((t) => t.frame && !line.includes(t) && !t.behind
+      && !['keyboard', 'tab-bar', 'status-bar'].includes(t.region)
+      && matching.isAxTarget(t) && !String(t.source ?? '').includes('ocr')
+      && t.frame.y < screen.height
+      && t.frame.y + (t.frame.height ?? 0) / 2 >= barTop + 4
+      // Part of the bar, not under it: its container, or a sibling on its line.
+      && !/tab ?bar|toolbar/i.test(`${t.type ?? ''} ${t.label ?? ''}`)
+      && !line.some((b) => inside({ x: b.frame.x + 1, y: b.frame.y + 1 }, t.frame)
+        && inside({ x: b.frame.x + b.frame.width - 1, y: b.frame.y + b.frame.height - 1 }, t.frame))
+      && !(t.frame.y >= barTop - 2 && t.frame.y + (t.frame.height ?? 0) <= barBottom + 2));
+    // And content passes under it: something straddles its top edge.
+    if (!under.some((t) => t.frame.y < barBottom && t.frame.y + (t.frame.height ?? 0) > barTop)) continue;
+    for (const t of under) t.behind = 'bar';
+    marked += under.length;
+    break;
+  }
+  return marked;
 }
 

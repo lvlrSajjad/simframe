@@ -3518,6 +3518,23 @@ test('overlap is reported only when another layer shows, and the screen behind a
   assert.equal(sm.markBehindSheet([ocr('Page', 174), ocr('Text', 268), ax('Back', 830), ax('Cancel', 835)], screen), 0);
 });
 
+test('rows scrolled under a pinned bottom bar are marked, a list that merely ends is not (field report, 0.22.0)', async () => {
+  const sm = await import('../src/screenmap.js');
+  const screen = { width: 402, height: 874 };
+  const b = (label, x, y, w, h, source = 'ax|ocr', type = 'Button') => ({ label, type, source, x: x + w / 2, y: y + h / 2, frame: { x, y, width: w, height: h }, region: 'content' });
+  const bar = [b('CLEAN', 32, 800, 161, 48), b('SELECT', 209, 800, 161, 48)];
+  const visibleRow = b('Facilities Team', 32, 700, 338, 40, 'ax|ocr', 'GenericElement');
+  const straddling = b('Third Party', 32, 795, 338, 40, 'ax', 'StaticText');
+  const coveredRow = b('Addilan Group', 32, 830, 338, 40, 'ax', 'GenericElement');
+  const targets = [...bar, visibleRow, straddling, coveredRow];
+  assert.equal(sm.markUnderBottomBar(targets, screen), 2);
+  assert.equal(coveredRow.behind, 'bar');
+  assert.equal(visibleRow.behind, undefined);
+  // One full-width button at the end of a list is a row, not a bar.
+  const list = [b('Motion', 16, 780, 370, 44, 'ax|ocr'), b('Spoken Content', 16, 826, 370, 44, 'ax')];
+  assert.equal(sm.markUnderBottomBar(list, screen), 0);
+});
+
 test('a relaunch forgets what was typed, so a fresh form is not reported cleared (field report, 0.22.0)', () => {
   const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
   assert.match(src, /if \(step\.relaunch === true\) wrote\.forget\(udid\);/);
