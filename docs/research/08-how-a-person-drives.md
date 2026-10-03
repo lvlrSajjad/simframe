@@ -93,8 +93,10 @@ back and chose another, at the cost of a model turn to work that out.
    scrolls the form and collects the validation messages itself ("not saved:
    Warranty Start Date is required"), and returns them in one line. The model is
    consulted with the answer, not asked to hunt for it.
-4. **Satisfice, and back out of dead ends.** A brief says what matters. Every
-   other option gets the first valid choice, or one the graph saw lead somewhere
+4. **Satisfice, and back out of dead ends.** "If you're given a combination
+   then you choose / search for those; if not, then first options." A named
+   value is found through the list's search box when it has one. Every other
+   option gets the first valid choice, or one the graph saw lead somewhere
    before (the familiar option), and every other required text gets a minimal
    valid value, still never through the verify barrier. Choice points are
    remembered as the flow goes. A dead end can be recognised without a model:

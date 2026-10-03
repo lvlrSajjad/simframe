@@ -495,10 +495,12 @@ In priority order, by how much of the gap each closes and what it costs:
    reveal. Both strategies are the owner's own ("I'd do a scroll to understand
    the field names, field types … whether they are required … then start
    filling").
-3. **Satisficing in the driver, with backtracking.** The brief says what
-   matters; every other option gets the first valid choice, or one the graph
-   saw lead somewhere before, and every other required text a minimal valid
-   value ("my task is just finish CSR … not typing something specific"). A dead
+3. **Satisficing in the driver, with backtracking.** The rule, in the owner's
+   words: "if you're given a combination then you choose / search for those; if
+   not, then first options." A value the brief names is found, through the
+   list's search box when it has one rather than by scrolling. Every other
+   option gets the first valid choice (or one the graph saw lead somewhere
+   before), and every other required text a minimal valid value ("my task is just finish CSR … not typing something specific"). A dead
    end (an empty list, a drop-down that will not open, forward still disabled
    with everything visible filled) steps back to the latest choice point and
    takes its next option, a few tries at most, locally ("I may trace back if the
