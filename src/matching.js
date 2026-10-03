@@ -121,10 +121,23 @@ export function confusableFold(s) {
     .replace(/[b8]/gi, '8');
 }
 
+/**
+ * Whole words only, and never inside an identifier.
+ *
+ * `q.includes(w)` found "done" inside the testID
+ * `create-service-request-3-toolbardonebarbuttonitemtext-input`, pulled in the
+ * close/dismiss group, and an unrelated "Close" button scored 0.95 against the
+ * field the caller named exactly — refused as ambiguous (field report,
+ * 0.22.0). A caller who writes an identifier means that control, not a
+ * synonym of a fragment of it.
+ */
+const IDENTIFIER_LIKE = /^[\w.]+(?:[-_.][\w.]+){2,}$/;
 function synonymGroup(query) {
   const q = norm(query);
-  for (const [key, words] of Object.entries(SYNONYMS)) {
-    if (words.some((w) => w === q || q.includes(w))) return { key, words };
+  if (IDENTIFIER_LIKE.test(q)) return null;
+  const words = new Set(q.split(/[^a-z0-9.]+/).filter(Boolean));
+  for (const [key, group] of Object.entries(SYNONYMS)) {
+    if (group.some((w) => w === q || (w.includes(' ') ? ` ${q} `.includes(` ${w} `) : words.has(w)))) return { key, words: group };
   }
   return null;
 }
@@ -151,6 +164,11 @@ export function rank(targets, intent, { screen } = {}) {
   const regionHint = REGION_HINTS.find((h) => h.pattern.test(intent));
   // Strip the verb: "tap the Save button" should match a control called "Save".
   const bare = norm(intent)
+    .replace(/^(please\s+)?(tap|press|click|hit|type|enter|fill|open|select|choose|toggle|switch)\s+/i, '')
+    .replace(/^(the|a|an)\s+/i, '')
+    .replace(/\s+(button|tab|field|cell|link|icon)$/i, '');
+  // The same, with the caller's case kept.
+  const bareRaw = String(intent ?? '').trim()
     .replace(/^(please\s+)?(tap|press|click|hit|type|enter|fill|open|select|choose|toggle|switch)\s+/i, '')
     .replace(/^(the|a|an)\s+/i, '')
     .replace(/\s+(button|tab|field|cell|link|icon)$/i, '');
@@ -195,12 +213,24 @@ export function rank(targets, intent, { screen } = {}) {
     // see at all: "back" reaching a control labelled "Previous", "settings"
     // reaching "Preferences". That is synonymy, and it is unaffected.
     const spelledOut = (n) => bare.includes(norm(n)) || norm(intent).includes(norm(n));
+    let bySynonym = false;
     if (group && base < 0.5
-      && names.some((n) => group.words.includes(norm(n)) && !spelledOut(n))) base = 0.9;
+      && names.some((n) => group.words.includes(norm(n)) && !spelledOut(n))) {
+      base = 0.9;
+      bySynonym = true;
+    }
     if (base <= 0) continue;
 
     const reasons = [matched ? `label "${matched}"` : 'icon-only'];
     let score = base;
+    // The caller's own spelling, case and all: "Done" is the toolbar button,
+    // "done" the keyboard's return key. Both scored 1 and the tap was refused
+    // (field report, 0.22.0). Exact case is evidence of which one was read.
+    if (bareRaw && names.some((n) => String(n).trim() === bareRaw)) {
+      score += 0.1;
+      reasons.push('exact spelling');
+    }
+    if (bySynonym) reasons.push('synonym');
     if (roleHint && roleHint.roles.test(t.type ?? '')) {
       score += 0.12;
       reasons.push(`role ${t.type}`);
@@ -218,7 +248,13 @@ export function rank(targets, intent, { screen } = {}) {
     // signal the bonuses exist to provide. Two elements sharing a label both
     // reach 1.0 on the name alone, and the region bonus that should separate
     // them disappears into the ceiling.
-    scored.push({ target: t, score, reasons });
+    scored.push({ target: t, score, reasons, bySynonym });
+  }
+  // A synonym is for reaching a control nobody named. When something on the
+  // screen carries the caller's word itself, a synonym of it is not a second
+  // candidate: "Close" is not an answer to "Done" when "Done" is right there.
+  if (scored.some((c) => !c.bySynonym && c.score >= 1)) {
+    for (let i = scored.length - 1; i >= 0; i -= 1) if (scored[i].bySynonym) scored.splice(i, 1);
   }
   scored.sort((a, b) => b.score - a.score);
 

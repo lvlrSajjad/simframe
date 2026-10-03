@@ -3489,6 +3489,27 @@ test('a typed field is not slowed or flagged by a settle the pixels cannot satis
   assert.match(act, /timeoutMs: graph\.STAYS_ON_SCREEN\.has\(step\.action\) \? STAYS_PUT_BUDGET_MS : timeoutMs,/);
 });
 
+test('a synonym never competes with the name the caller wrote (field report, 0.22.0)', async () => {
+  const m = await import('../src/matching.js');
+  const screen = { width: 402, height: 874 };
+  const id = 'create-service-request-3-toolbardonebarbuttonitemtext-input';
+  const field = { label: null, identifier: id, type: 'TextView', x: 30, y: 666, region: 'content' };
+  const close = { label: 'Close', type: 'Button', x: 370, y: 90, region: 'nav-bar' };
+  const done = { label: 'Done', type: 'Button', x: 360, y: 520, region: 'content' };
+  const key = { label: 'done', type: 'Button', x: 350, y: 800, region: 'keyboard' };
+  // An identifier containing "done" is not a request for close/dismiss/done.
+  const byId = m.resolve([field, close, done, key], id, { screen });
+  assert.equal(byId.status, 'ok');
+  assert.equal(byId.target.identifier, id);
+  // "Done" was refused: [Done 1, done (keyboard) 1, Close 0.95].
+  const tap = m.resolve([field, close, done, key], 'Done', { screen });
+  assert.equal(tap.status, 'ok');
+  assert.equal(tap.target.y, 520, 'the exact spelling, not the keyboard key and not a synonym');
+  // A synonym still reaches a control nobody named.
+  assert.equal(m.resolve([close], 'dismiss', { screen }).target?.label, 'Close');
+  assert.equal(m.resolve([close], 'done', { screen }).target?.label, 'Close');
+});
+
 test('a caption printed above its field is not a second candidate (peer test 0.21.0, F11)', async () => {
   const m = await import('../src/matching.js');
   // The testbed's Long form: "First Name" as text at (17,127), the field named
