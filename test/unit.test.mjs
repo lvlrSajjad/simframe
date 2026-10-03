@@ -7861,3 +7861,57 @@ test('a send icon makes a form only beside a field, and a selected tab is not a 
   const tabs = [tab('Plants, tab, 1 of 4', 50, false), tab('Forms, tab, 2 of 4', 151, false), tab('Icons, tab, 4 of 4', 352, true)];
   assert.ok(carto.doorsOf(tabs).doors.length >= 2);
 });
+
+test('a control that changed something without navigating is tapped once per crawl, whatever identities its screen takes', async () => {
+  const carto = await import('../src/cartographer.js');
+  assert.equal(carto.classify({ label: 'MARK ALL READ', type: 'Button' }).kind, 'barrier');
+  // An unknown write verb on a screen that splits into a new identity on every read.
+  const row = (label, y) => ({ label, x: 200, y, type: 'Button', region: 'content', frame: { x: 16, y: y - 20, width: 370, height: 40 } });
+  let n = 0;
+  const taps = [];
+  const read = () => ({ hash: `notes-${n}`, name: null, tokens: [`t${n}`], rows: [row('TIDY UP', 200), row('Older', 260), row('Newer', 320), row('Pinned', 380)] });
+  const driver = {
+    launch: async () => read(), read: async () => read(), inApp: async () => true,
+    tap: async (door) => { taps.push(door.label); n += 1; return { ok: true, verdict: 'no-visible-change' }; },
+    back: async () => ({ acted: false }), route: () => null, walk: async () => ({ steps: 0 }),
+    sameScreen: async () => false, relaunchBlocked: async () => 'test',
+  };
+  await carto.crawl(driver, { bundle: 'x', maxActions: 40 });
+  assert.equal(taps.filter((t) => t === 'TIDY UP').length, 1, taps.join(','));
+});
+
+test('a stored screen reading keeps no typed text: not in the field, the suggestion bar, or OCR', async () => {
+  const typedmod2 = await import('../src/typed.js');
+  const entry = { hash: 'h', targets: [
+    { label: 'First Name', type: 'TextField', value: 'zorblax42' },
+    { label: 'Search', type: 'SearchField', value: 'Search' },
+    { label: '\u201czorblax42\u201d', type: 'text', region: 'keyboard', aliases: ['zorblax42'] },
+    { label: 'zorblax42', type: 'text' },
+  ], occluded: [{ under: 'First Name zorblax42' }] };
+  const out = JSON.stringify(typedmod2.maskTyped(entry));
+  assert.ok(!out.includes('zorblax42'), out);
+  assert.ok(out.includes('"value":"Search"'), 'a placeholder is not typed text');
+  const screenmapmod = await import('../src/screenmap.js');
+  const udid = freshDevice('mask-typed');
+  screenmapmod.remember(udid, entry);
+  for (const [p, body] of filesUnder(store.deviceDir(udid))) assert.ok(!body.includes('zorblax42'), p);
+});
+
+test('peer-test fixes: "(icon)" is not part of a selector, exploration words match leading phrases, segments are selections', async () => {
+  const refsmod = await import('../src/refs.js');
+  assert.deepEqual(refsmod.parseSelector('bell (icon)'), { kind: 'label', label: 'bell', exact: false });
+  const carto = await import('../src/cartographer.js');
+  for (const ok of ['Limit Frame Rate', 'Avenir Next', 'Haptic Feedback']) assert.equal(carto.classify({ label: ok, type: 'Button' }).open, true, ok);
+  for (const no of ['Rate this app', 'Send feedback', 'Next', 'Apply filters']) assert.equal(carto.classify({ label: no, type: 'Button' }).kind, 'barrier', no);
+  const seg = (label, i, selected) => ({ label, type: 'Button', region: 'content', selected, x: 80 + i * 90, y: 300, frame: { x: 40 + i * 90, y: 280, width: 80, height: 40 } });
+  const { doors } = carto.doorsOf([seg('Grid', 0, true), seg('Spectrum', 1, false), seg('Sliders', 2, false)]);
+  assert.deepEqual(doors, []);
+});
+
+test('a tap that only changed a line of text is not "no visible change"', async () => {
+  const { textChange } = await import('../src/actions.js');
+  const t = (label, region = 'content') => ({ label, region });
+  assert.equal(textChange({ targets: [t('Last pressed: nothing yet'), t('9:41', 'status-bar')] }, { targets: [t('Last pressed: bell'), t('9:42', 'status-bar')] }),
+    '"Last pressed: nothing yet" → "Last pressed: bell"');
+  assert.equal(textChange({ targets: [t('A'), t('9:41', 'status-bar')] }, { targets: [t('A'), t('9:42', 'status-bar')] }), null, 'the clock is not the app');
+});

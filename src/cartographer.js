@@ -200,7 +200,16 @@ export function classify(row, { allowCreate = false, locale } = {}) {
   // Some controls write the moment they are tapped. Opting in to open forms
   // does not cover them: --allow-create opens forms and never commits, and
   // CHECK IN commits on the tap itself.
-  const now_ = (vocabulary.load(locale).cartographer?.actsImmediately ?? []).find((p) => says(label, p));
+  // A one-word verb counts only where a verb goes, at the start ("Rate this
+  // app", not "Limit Frame Rate"); a phrase counts anywhere. A name simframe
+  // derived from an identifier or an icon is a noun phrase
+  // ("home header bookmark button"), so every word of it counts.
+  const leading = (p) => {
+    const t = alnum(label); const w = alnum(p);
+    return t === w || t.startsWith(`${w} `);
+  };
+  const now_ = (vocabulary.load(locale).cartographer?.actsImmediately ?? [])
+    .find((p) => (row.labelFrom || /\s/.test(p) ? says(label, p) : leading(p)));
   if (now_) return { open: false, reason: `writes when tapped ("${now_}")`, kind: 'barrier' };
   if (!allowCreate) {
     const hit = w.opensWrite.find((p) => says(label, p));
@@ -243,6 +252,10 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
   // navigation ("Plants, tab, 1 of 4").
   const isTabRow = (r) => /\btab\b/i.test(String(r.label ?? '')) || /^tab$/i.test(String(r.type ?? ''));
   const optionShapes = new Set(ordered.filter((r) => r.selected === true && !isTabRow(r)).map(shapeOf).filter(Boolean));
+  // The same for a row of segments side by side: a selected one makes the row
+  // a selection. A Settings crawl switched a colour picker's tabs and wrote
+  // its selected tab to disk (peer test, 0.21.0).
+  const optionStrips = new Set(ordered.filter((r) => r.selected === true && !isTabRow(r)).map(stripOf).filter(Boolean));
   // The accessibility tree is authoritative when it is describing this screen's
   // controls (CLAUDE.md's perception order). Then what it calls static text is
   // static, and tapping it costs a full no-change verification — 13-22 s each,
@@ -286,7 +299,7 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
       continue;
     }
     const shape = shapeOf(row);
-    if (shape && optionShapes.has(shape)) {
+    if ((shape && optionShapes.has(shape)) || (!isTabRow(row) && stripOf(row) && optionStrips.has(stripOf(row)))) {
       refused.push({ key, label: row.label ?? null, reason: 'an option in a selection list — choosing it changes a setting', kind: 'read-only' });
       continue;
     }
@@ -381,7 +394,11 @@ export const SAME_DOORS = 0.7;
 const shapeKey = (k) => String(k).replace(/\d+/g, '#');
 
 function doorKeys(reading, opts) {
-  return doorsOf(reading?.rows, opts).doors.filter((d) => d.region !== 'tab-bar').map((d) => shapeKey(d.key));
+  // Tabs are on every screen of a tabbed app and say nothing about which one
+  // this is; two tab roots matched on their tab bars alone (peer test).
+  return doorsOf(reading?.rows, opts).doors
+    .filter((d) => d.region !== 'tab-bar' && !/\btab\b/i.test(String(d.label)))
+    .map((d) => shapeKey(d.key));
 }
 
 /**
@@ -396,7 +413,7 @@ function sameDoorsAs(state, reading, opts) {
   if (mine.length < 3) return null;
   let best = null;
   for (const [hash, sc] of Object.entries(state.screens)) {
-    const theirs = Object.entries(sc.controls).filter(([, c]) => c.region !== 'tab-bar').map(([k]) => shapeKey(k));
+    const theirs = Object.entries(sc.controls).filter(([, c]) => c.region !== 'tab-bar' && !/\btab\b/i.test(String(c.label))).map(([k]) => shapeKey(k));
     if (theirs.length < 3) continue;
     const j = jaccard(mine, theirs);
     if (j >= SAME_DOORS && (!best || j > best.j)) best = { hash, j };
@@ -449,12 +466,27 @@ function registerAs(state, reading, { allowCreate, locale, via = null }) {
   return s;
 }
 
+/**
+ * Labels that, somewhere in this crawl, changed something without going
+ * anywhere. Tapped once per crawl, never again under another identity of the
+ * screen. Found by a peer test: "MARK ALL READ" marked a field app's
+ * notifications read three times, because its screen split into three
+ * identities and each one offered the same door as new. Whatever the
+ * vocabulary misses, an unknown write is now one tap, not one per identity.
+ */
+const STAYED = new Set(['no-change', 'in-place', 'changed-state', 'refused-after-change']);
+
 function pendingOn(state, hash0) {
   const hash = canon(state, hash0);
   const s = state.screens[hash];
   if (!s) return null;
+  const stayedLabels = state.stayedLabels ?? [];
   for (const [key, c] of Object.entries(s.controls)) {
     if (c.status !== 'pending') continue;
+    if (stayedLabels.includes(alnum(c.label))) {
+      c.status = 'once-per-crawl';
+      continue;
+    }
     if (c.region === 'tab-bar' && state.chrome[key]?.status !== 'pending') {
       c.status = 'tab-elsewhere';
       continue;
@@ -494,6 +526,10 @@ function sampleList(state, hash0, key) {
 function mark(state, hash0, key, patch) {
   const hash = canon(state, hash0);
   const c = state.screens[hash]?.controls?.[key];
+  if (c && STAYED.has(patch.status) && c.region !== 'tab-bar') {
+    state.stayedLabels ??= [];
+    if (!state.stayedLabels.includes(alnum(c.label))) state.stayedLabels.push(alnum(c.label));
+  }
   if (c) Object.assign(c, patch);
   if (state.chrome[key] && (patch.status && patch.status !== 'pending')) Object.assign(state.chrome[key], patch);
 }
@@ -521,6 +557,8 @@ export async function crawl(driver, {
   state = null,
   persist = () => {},
   now = () => Date.now(),
+  // Asked at every step; true ends the crawl there, saved and reported.
+  interrupted = () => false,
 } = {}) {
   state ??= { version: STATE_VERSION, bundle, startedAt: now(), runs: [], screens: {}, chrome: {}, refused: {}, leftApp: [], unexpected: [] };
   const run = { startedAt: now(), actions: 0, attempts: 0, explored: 0, newScreens: 0, relaunches: 0, stoppedBecause: null };
@@ -639,6 +677,7 @@ export async function crawl(driver, {
   register(state, reading, { allowCreate, locale });
 
   while (true) {
+    if (interrupted()) { run.stoppedBecause = 'interrupted by the user'; run.blocked = true; break; }
     const why = spent();
     if (why) { run.stoppedBecause = why; break; }
     boundary();
@@ -690,7 +729,14 @@ export async function crawl(driver, {
       reading = res?.after ?? await driver.read();
       run.explored += 1;
       if (!reading?.hash || (await driver.sameScreen(before, reading))) {
-        const changed = reading?.hash ? stateDiff(before, reading) : [];
+        // A selection that moved, or text that changed in place: either means
+        // the tap did something here. "MARK ALL READ" emptied a list without
+        // the screen changing identity (peer test, 0.21.0).
+        let changed = reading?.hash ? stateDiff(before, reading) : [];
+        if (!changed.length && reading?.hash && driver.textChange) {
+          const t = driver.textChange({ targets: before.rows }, { targets: reading.rows });
+          if (t) changed = [t];
+        }
         if (changed.length) {
           // The tap changed something in place: a selection, a value. A
           // read-only crawl must not do that twice, so every control of the same
@@ -709,16 +755,27 @@ export async function crawl(driver, {
         continue;
       }
       // The same screen with a new face: an alias, not a new place.
-      const beforeName = state.screens[canon(state, before.hash)]?.name ?? before.name ?? null;
       const unknown = !state.screens[canon(state, reading.hash)];
       const sameDoors = unknown ? sameDoorsAs(state, reading, { allowCreate, locale }) : null;
-      const inPlace = (unknown && (
-        (beforeName && reading.name && alnum(beforeName) === alnum(reading.name))
-        || (before.tokens?.length && reading.tokens?.length && jaccard(before.tokens, reading.tokens) >= ALIKE)))
+      // Not by name: an iOS child page shows its parent's title on the back
+      // button, so the Action Button page was named "settings", aliased to the
+      // Settings root, and a crawl stopped at 2% of its budget believing it was
+      // home (peer test, 0.21.0). Structure must agree and so must the doors.
+      const doorsAlike = jaccard(doorKeys(before, { allowCreate, locale }), doorKeys(reading, { allowCreate, locale }));
+      const inPlace = (unknown && before.tokens?.length && reading.tokens?.length
+        && jaccard(before.tokens, reading.tokens) >= ALIKE && doorsAlike >= 0.5)
         || (sameDoors && canon(state, sameDoors) === canon(state, before.hash));
       if (inPlace) {
         (state.aliases ??= {})[reading.hash] = canon(state, before.hash);
         if (!/^unexpected/.test(res?.verdict ?? '')) mark(state, before.hash, door.key, { status: 'in-place', to: reading.hash });
+        // The same screen with a new face may be the same screen with less in
+        // it: a list a tap just emptied. Say what changed, at the top.
+        const what = [...stateDiff(before, reading)];
+        if (!what.length && driver.textChange) {
+          const t = driver.textChange({ targets: before.rows }, { targets: reading.rows });
+          if (t) what.push(t);
+        }
+        if (what.length) (state.changedState ??= []).push({ at: now(), screen: before.name ?? before.hash, label: door.label, changed: what });
         register(state, reading, { allowCreate, locale });
         sampleList(state, before.hash, door.key);
         continue;
@@ -811,6 +868,9 @@ export async function crawl(driver, {
     if (home?.done) {
       const left = Object.values(state.screens).reduce((n, sc) => n + Object.values(sc.controls).filter((c) => c.status === 'pending').length, 0);
       run.stoppedBecause = left ? `${left} door(s) are left on screens no known path reaches from the start screen` : home.stop;
+      // Doors left and budget left is not a finished map. A peer test saw this
+      // exit 0 at 9 s of 480, with the path in the map it had just saved.
+      if (left) run.blocked = true;
       break;
     }
     if (home?.stop) {
@@ -825,6 +885,7 @@ export async function crawl(driver, {
       run.stoppedBecause = left
         ? `${left} door(s) are left on screens no known path reaches from the start screen`
         : 'nothing reachable left to open';
+      if (left) run.blocked = true;
       reading = home;
       break;
     }

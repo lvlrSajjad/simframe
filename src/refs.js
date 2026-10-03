@@ -93,9 +93,13 @@ export function parseSelector(query) {
   const at = /^@\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/.exec(raw);
   if (at) return { kind: 'point', x: Math.round(Number(at[1])), y: Math.round(Number(at[2])) };
   // A quoted label is an explicit "this exact text", not an intent.
+  // "(icon)" is how the map marks a name read off an icon glyph; it is not
+  // part of the name. A peer copied "bell (icon)" from the map into a tap and
+  // got "not on this screen" (0.21.0).
+  const unmarked = (t) => t.replace(/\s*\(icon\)\s*$/i, '');
   const quoted = /^"(.*)"$/.exec(raw) || /^'(.*)'$/.exec(raw);
-  if (quoted) return { kind: 'label', label: quoted[1], exact: true };
-  return { kind: 'label', label: raw, exact: false };
+  if (quoted) return { kind: 'label', label: unmarked(quoted[1]), exact: true };
+  return { kind: 'label', label: unmarked(raw), exact: false };
 }
 
 /**

@@ -93,8 +93,15 @@ export function mayActLocally(label, { locale, purpose = 'substitute' } = {}) {
   if (purpose === 'explore') {
     // Checked before the "listed as safe" exemption below, which exists for
     // declining dialogs and must never make something a door.
+    // Leading position only: an exploration word refuses a door when it is
+    // the whole label or the verb it starts with ("Send feedback", "Apply
+    // filters"). Anywhere in the label refused "Limit Frame Rate", "Avenir
+    // Next" and "Haptic Feedback" (peer test, 0.21.0). The destructive list
+    // below still matches anywhere, which is where its strength belongs.
     for (const word of vocab.exploration?.neverOpen ?? []) {
-      if (saysPhrase(text, word)) {
+      const w = alnum(word);
+      const t = alnum(text);
+      if (w && (t === w || t.startsWith(`${w} `))) {
         return { allowed: false, reason: 'not a door — it commits, abandons or answers', matched: word };
       }
     }

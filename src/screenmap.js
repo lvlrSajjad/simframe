@@ -17,7 +17,7 @@ import * as regions from './regions.js';
 import { informative } from './refs.js';
 import * as store from './store.js';
 import * as glyphs from './glyphs.js';
-import { maskCredentials } from './typed.js';
+import { maskCredentials, maskTyped } from './typed.js';
 
 export const MAP_VERSION = 9; // ax targets carry value, selected and focused
 
@@ -127,7 +127,7 @@ export function remember(udid, entry) {
   const dir = mapDir(udid);
   fs.mkdirSync(dir, { recursive: true });
   // Masked on the way to disk only: a sign-in screen shows its username. See typed.js.
-  store.writeAtomic(path.join(dir, `${entry.hash}.json`), JSON.stringify(maskCredentials(entry)));
+  store.writeAtomic(path.join(dir, `${entry.hash}.json`), JSON.stringify(maskCredentials(maskTyped(entry))));
   return entry;
 }
 

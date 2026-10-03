@@ -130,7 +130,17 @@ export function carryForward(udid, { screen, dryRun = false, now = Date.now() } 
     }
     // A different map schema is a different shape of record, not a different
     // rule over the same record. Not guessed at.
-    if (e.version !== screenmap.MAP_VERSION || !Array.isArray(e.targets)) { report.screens.unreadable += 1; continue; }
+    if (e.version !== screenmap.MAP_VERSION || !Array.isArray(e.targets)) {
+      report.screens.unreadable += 1;
+      // Moved aside, not left to be found stale on every start: a reading that
+      // stayed here made every process carry again, and each carry rewrote the
+      // report with zeros, so doctor said "nothing lost" (peer test, 0.21.0).
+      if (!dryRun) {
+        fs.mkdirSync(path.join(sdir, 'retired'), { recursive: true });
+        fs.renameSync(file, path.join(sdir, 'retired', f));
+      }
+      continue;
+    }
     const fp = refingerprint(e, screen);
     if (!fp.hash) { report.screens.unreadable += 1; continue; }
     note(e.structuralHash, fp.hash);
@@ -259,11 +269,22 @@ export function headerNote(udid) {
   return `${c.missing} screen(s) learned under older fingerprint rules are not in memory; see doctor`;
 }
 
+/**
+ * What is retired, counted from the folders themselves. The last carry's report
+ * only knows its own run, and a later run with nothing to do wrote zeros over
+ * an earlier one's losses.
+ */
+export function retired(udid) {
+  const count = (dir) => readDir(dir).length;
+  const gdir = path.join(graph.graphDir(udid), 'retired');
+  let edges = 0;
+  for (const f of readDir(gdir)) edges += store.readJson(path.join(gdir, f))?.edges?.length ?? 0;
+  return { screens: count(gdir), edges, readings: count(path.join(screenmap.mapDir(udid), 'retired')) };
+}
+
 function memoryCounts(udid) {
   try {
-    const r = lastReport(udid);
-    const s = staleness(udid);
-    return { missing: (r ? r.graph.lost + r.graph.split : 0) + s.graph.files };
+    return { missing: retired(udid).screens + staleness(udid).graph.files };
   } catch {
     return null;
   }
@@ -271,14 +292,13 @@ function memoryCounts(udid) {
 
 /** One line for a human about memory that is not in use, or null. */
 export function memoryLine(udid) {
-  const r = lastReport(udid);
   const s = staleness(udid);
+  const gone = retired(udid);
   const parts = [];
-  if (r && (r.graph.lost || r.graph.split)) {
-    parts.push(`${r.graph.lost + r.graph.split} screen(s) and ${r.graph.lostEdges} step(s) learned under older fingerprint rules could not be carried over`
-      + (r.graph.split ? ` (${r.graph.split} split into several screens under the new rules)` : '')
-      + ' — they are in graph/retired/');
+  if (gone.screens) {
+    parts.push(`${gone.screens} screen(s) and ${gone.edges} step(s) learned under older fingerprint rules could not be carried over — they are in graph/retired/`);
   }
+  if (gone.readings) parts.push(`${gone.readings} stored screen reading(s) were in an older format and could not be rebuilt — they are in screens/retired/`);
   if (s.graph.files) parts.push(`${s.graph.files} screen(s) and ${s.graph.edges} step(s) are under older fingerprint rules and not in use yet (${Object.entries(s.graph.versions).map(([v, n]) => `${n} ${v}`).join(', ')})`);
   return parts.length ? `memory: ${parts.join('; ')}` : null;
 }

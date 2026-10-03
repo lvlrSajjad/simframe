@@ -1826,13 +1826,50 @@ const LATE_CHANGE_MS = 700;
  * The test is provable rather than heuristic: if the screen is now different
  * from how it was *before* the action, the action changed it.
  */
+/**
+ * Text that differs between two readings of one screen, outside the status
+ * bar, or null. Pure. The first difference is described; that is enough to
+ * say the tap landed.
+ */
+export function textChange(before, after) {
+  const texts = (entry) => (entry?.targets ?? [])
+    .filter((t) => t.region !== 'status-bar' && t.region !== 'keyboard')
+    .map((t) => [t.label, t.value].filter((x) => x != null && String(x).trim()).join(' = '))
+    .filter(Boolean);
+  if (!before?.targets || !after?.targets) return null;
+  const a = new Set(texts(before));
+  const b = new Set(texts(after));
+  const gone = [...a].find((x) => !b.has(x));
+  const came = [...b].find((x) => !a.has(x));
+  if (!gone && !came) return null;
+  const clip = (x) => (x.length > 60 ? `${x.slice(0, 57)}…` : x);
+  return gone && came ? `"${clip(gone)}" → "${clip(came)}"` : came ? `"${clip(came)}" appeared` : `"${clip(gone)}" went away`;
+}
+
 async function confirmNoChange(deviceQuery, verification, { beforeScreen, options, stableMs, timeoutMs }) {
   if (verification?.verdict !== 'no-visible-change' || !beforeScreen?.hash) return verification;
   await api.waitFor(deviceQuery, {
     mode: 'settle', stableMs: 250, timeoutMs: LATE_CHANGE_MS, options,
   }).catch(() => null);
-  const again = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs }).catch(() => null);
-  if (!again?.hash || again.hash === beforeScreen.hash) return verification;
+  // A fresh read: a screen whose text changed in a small region has nearly the
+  // same pixel layout, so a recall would hand back the old text and agree that
+  // nothing happened.
+  const again = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, fresh: true }).catch(() => null);
+  if (!again?.hash) return verification;
+  if (again.hash === beforeScreen.hash) {
+    // Identity ignores content text on purpose, so a tap that only changed a
+    // line of text ("Last pressed: nothing yet" → "Last pressed: bell") read as
+    // no change, and an agent was told to retry a tap that had worked (peer
+    // test, 0.21.0). The text is compared before that is said.
+    const changed = textChange(beforeScreen.entry, again.entry);
+    if (!changed) return verification;
+    return {
+      ...verification,
+      verdict: 'unverified',
+      detail: `the screen stayed, and its text changed in place: ${changed}`,
+      lateArrival: again,
+    };
+  }
   return {
     ...verification,
     verdict: 'unverified',

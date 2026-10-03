@@ -239,3 +239,45 @@ export function maskCredentials(value) {
   }
   return value;
 }
+
+/** What typed text is written down as, in a stored screen reading. */
+export const MASKED_TYPED = '<typed>';
+
+const FIELD_TYPE = /field|textview|searchfield|securetext|textarea/i;
+
+/**
+ * A screen reading as it may be written to disk: what is in its text fields is
+ * replaced by `<typed>`, and so is that same text anywhere else on the screen.
+ *
+ * Found by a peer test of 0.21.0: a username typed into "First Name" was kept in
+ * the stored reading five ways — the field's value, the keyboard's suggestion
+ * bar (which echoes the word above itself, whatever the field is called), the
+ * suggestion's OCR alias, OCR's own reading of the field, and an occlusion note.
+ * Field names cannot catch the suggestion bar, so the values themselves are the
+ * thing to take out. A placeholder (a value equal to the field's own label) is
+ * not typed text and stays.
+ */
+export function maskTyped(entry) {
+  const targets = entry?.targets ?? [];
+  const typedValues = [...new Set(targets
+    .filter((t) => FIELD_TYPE.test(String(t.type ?? '')) && typeof t.value === 'string')
+    .map((t) => ({ v: t.value.trim(), l: String(t.label ?? '').trim() }))
+    .filter(({ v, l }) => v.length >= 2 && v !== l && v !== MASKED_TYPED)
+    .map(({ v }) => v))].sort((a, b) => b.length - a.length);
+  if (!typedValues.length) return entry;
+  const scrub = (value) => {
+    if (typeof value === 'string') {
+      let out = value;
+      for (const v of typedValues) out = out.split(v).join(MASKED_TYPED);
+      return out;
+    }
+    if (Array.isArray(value)) return value.map(scrub);
+    if (value && typeof value === 'object') {
+      const o = {};
+      for (const [k, v] of Object.entries(value)) o[k] = scrub(v);
+      return o;
+    }
+    return value;
+  };
+  return scrub(entry);
+}

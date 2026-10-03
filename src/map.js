@@ -135,6 +135,7 @@ export function deviceDriver(udid, bundle, { options = {} } = {}) {
       return { steps: res.ranSteps ?? 0, after: null };
     },
     sameScreen: async (a, b) => graph.sameScreen(udid, a, b),
+    textChange: actions.textChange,
   };
 }
 
@@ -184,6 +185,16 @@ export async function map(deviceQuery, bundle, {
   const udid = device.udid;
   const state = fresh ? null : cartographer.loadState(udid, bundle);
   const driver = deviceDriver(udid, bundle, { options });
+  // Ctrl-C finishes the step in hand, saves and reports. A peer stopping a crawl
+  // that was writing to real data got no summary at all (0.21.0). A second
+  // Ctrl-C exits at once.
+  let stopRequested = false;
+  const onSigint = () => {
+    if (stopRequested) process.exit(130);
+    stopRequested = true;
+    process.stderr.write('\nsimframe map: stopping after this step — Ctrl-C again to quit now\n');
+  };
+  process.on('SIGINT', onSigint);
   const result = await cartographer.crawl(trace ? traced(driver) : driver, {
     bundle,
     budgetMs: Math.max(1, Number(minutes)) * 60 * 1000,
@@ -191,7 +202,8 @@ export async function map(deviceQuery, bundle, {
     allowCreate,
     state: state && Object.keys(state.screens).length ? state : null,
     persist: (s) => cartographer.saveState(udid, s),
-  });
+    interrupted: () => stopRequested,
+  }).finally(() => process.off('SIGINT', onSigint));
   cartographer.saveState(udid, result);
   const coverage = cartographer.coverage(result);
   return { device, state: result, coverage, text: cartographer.renderReport(coverage) };

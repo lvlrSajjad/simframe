@@ -2511,6 +2511,59 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+197. **Peer test of 0.21.0 (the cartographer): a read-only crawl wrote to real data.**
+   Report: `peer-reports/0.21.0-phase1.md` (not committed; it holds field-app
+   data). FIXED the same day unless marked open.
+
+   - **A server write (F1).** "MARK ALL READ" was not in the vocabulary, and the
+     notifications screen split into three identities, so the same door was
+     tapped three times and four real notifications were marked read. It cannot
+     be undone from here. Fix: notification verbs join `actsImmediately`, and a
+     label that changed something without navigating is tapped **once per
+     crawl**, whatever identity its screen takes. An unknown write verb now
+     costs one tap, not one per identity. A tap that changes the screen's text in
+     place is reported as CHANGED STATE at the top.
+   - **A persisted filter (F2).** "Assigned to Me" was tapped 3× across
+     identities and left selected. The once-per-crawl rule covers it.
+   - **False stops with exit 0 (F3).** A child page was aliased to the start
+     screen by name, because iOS titles the back button with the parent. The
+     crawl stopped at 9 s of 480. Aliasing by name is gone, structural aliasing
+     now also needs the doors to agree (tabs excluded), and stopping with doors
+     and budget left is STOPPED EARLY with a non-zero exit.
+   - **Memory line said "nothing lost" (F6).** A carry with nothing to do
+     overwrote an earlier one's losses with zeros. Unreadable readings now move
+     to `screens/retired/`, and the line counts the retired folders themselves.
+   - **A text change read as "no visible change" (F5).** Identity ignores
+     content text, so `tap` told an agent to retry a tap that had landed. The
+     no-change verdict now re-reads fresh and compares text first.
+     *Open:* the map's `NOT MOVED SINCE THE ACTION … it did not land` comes from
+     pixel stillness and still fires on a small text change.
+   - **A colour picker's tab persisted (F7).** A selected segment now makes its
+     row a selection. *Open, for the owner to check:* a Settings crawl window
+     correlates with `PrefersHorizontalText = 1` and a Hover Text colour in
+     `com.apple.Accessibility` on `326464A4`. That is correlation only, and it
+     may have been an earlier crawl of mine.
+   - **A username on disk (F10).** It was kept five ways in a stored reading,
+     the keyboard's suggestion bar among them. Stored readings now replace every
+     text-field value, and that text wherever else it appears, with `<typed>`.
+     *Open:* frames (`latest.png`, `ring/`) show typed text, and whether to keep
+     them is the owner's call.
+   - **Over-broad refusals.** Exploration words now refuse only as the whole
+     label or its leading phrase ("Send feedback", not "Haptic Feedback"), and
+     so do one-word immediate verbs ("Rate this app", not "Limit Frame Rate").
+     The destructive list still matches anywhere.
+   - **`bell (icon)` was not a selector (F4).** The `(icon)` marker is now
+     stripped from selectors.
+   - **No summary on Ctrl-C (F8).** The first interrupt now ends the step,
+     saves and reports.
+   - *Open:* `type` into a label that matches both the field and its caption is
+     ambiguous; the keyboard coming up invalidates refs, so a form cannot be
+     filled by ref in one script; screens are named after tab-bar chrome; a
+     list row under the tab bar is offered as tappable; crawl maps keep
+     customer names and notification text in `refused` keys and `samples`.
+   - *Open:* the global `simframe` on this Mac is 0.20.1, and the plugin's
+     `npx simframe mcp` resolves to it, so the plugin prefix has no `sim_map`.
+
 196. **A change to the fingerprint rules erased the graph, and nothing said so.**
    FIXED, 2026-10-01. `allNodes` and `screenmap.usable` read only records of the
    current `TOKEN_RULES_VERSION`, so each bump made everything older invisible.
