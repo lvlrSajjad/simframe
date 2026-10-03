@@ -228,7 +228,10 @@ export function rank(targets, intent, { screen } = {}) {
     // The caller's own spelling, case and all: "Done" is the toolbar button,
     // "done" the keyboard's return key. Both scored 1 and the tap was refused
     // (field report, 0.22.0). Exact case is evidence of which one was read.
-    if (bareRaw && names.some((n) => String(n).trim() === bareRaw)) {
+    // Three characters at least: a single letter's case is no evidence ("a"
+    // on a contacts list is an index letter and a dozen names; the perception
+    // set keeps it ambiguous).
+    if (bareRaw.length >= 3 && names.some((n) => String(n).trim() === bareRaw)) {
       score += 0.1;
       reasons.push('exact spelling');
     }
