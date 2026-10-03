@@ -3784,6 +3784,21 @@ test('a type step means a field: "Search" is the search field, not the Search ro
   assert.match(src, /api\.locate\(deviceQuery, step\.into, \{ index: step\.index, refresh: step\.refresh, role: 'field' \}\)/);
 });
 
+test('a keyboard key never competes with an app control of the same name (field report, 2026-10-04)', async () => {
+  const m = await import('../src/matching.js');
+  const screen = { width: 402, height: 874 };
+  const bar = { label: 'Done', type: 'Button', x: 359, y: 514, region: 'content', source: 'ax' };
+  for (const keyLabel of ['Done', 'done']) {
+    const key = { label: keyLabel, type: 'Button', x: 350, y: 779, region: 'keyboard', source: 'ax' };
+    for (const order of [[bar, key], [key, bar]]) {
+      const r = m.resolve(order, 'Done', { screen });
+      assert.equal(r.status, 'ok', keyLabel);
+      assert.equal(r.target.region, 'content');
+    }
+    assert.equal(m.resolve([key], 'Done', { screen }).status, 'ok', 'the key alone still answers');
+  }
+});
+
 test('a synonym never competes with the name the caller wrote (field report, 0.22.0)', async () => {
   const m = await import('../src/matching.js');
   const screen = { width: 402, height: 874 };

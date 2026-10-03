@@ -543,6 +543,20 @@ export function preferTheControl(ranked) {
  * echo of a control's label is dropped, so a heading still answers when
  * nothing else does.
  */
+/**
+ * A keyboard key never competes with an app control of the same name.
+ *
+ * "Done" on a field's accessory bar and "done" (or "Done") on the keyboard
+ * scored as a tie on 0.23.0, the order flipped between runs, and callers
+ * needed `index: 0` in one run and `index: 1` in the next (field report,
+ * 2026-10-04). Both close the keyboard, but the app's control is the one a
+ * caller means; the key stays reachable when nothing else carries the name.
+ */
+export function dropShadowingKeys(ranked) {
+  const app = new Set(ranked.filter((c) => c.target.region !== 'keyboard').map((c) => norm(c.target.label)).filter(Boolean));
+  return ranked.filter((c) => c.target.region !== 'keyboard' || !app.has(norm(c.target.label)));
+}
+
 export function dropEchoedCaptions(ranked) {
   const controls = new Set();
   return ranked.filter((c) => {
@@ -588,7 +602,7 @@ function collapseSamePlace(ranked) {
  * @returns {{status: 'ok'|'ambiguous'|'none', target?, score?, reasons?, alternatives?}}
  */
 export function resolve(targets, intent, options = {}) {
-  const ranked = dropEchoedCaptions(preferTheControl(collapseSamePlace(rank(targets, intent, options).filter((c) => c.score >= MINIMUM_SCORE))));
+  const ranked = dropShadowingKeys(dropEchoedCaptions(preferTheControl(collapseSamePlace(rank(targets, intent, options).filter((c) => c.score >= MINIMUM_SCORE)))));
   if (!ranked.length) return { status: 'none', alternatives: [] };
   const [best, second] = ranked;
   if (second && best.score - second.score < AMBIGUITY_MARGIN) {
