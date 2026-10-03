@@ -135,6 +135,35 @@ export function deviceDriver(udid, bundle, { options = {} } = {}) {
 }
 
 /**
+ * Every driver call, timed, on stderr. A crawl that wastes its budget does so
+ * one decision at a time, and each fault in the first Ecotrak crawls was found
+ * by reading this, not by reasoning about the report.
+ */
+export function traced(driver, write = (line) => process.stderr.write(`${line}\n`)) {
+  const t0 = Date.now();
+  const short = (r) => {
+    if (r == null || typeof r !== 'object') return String(r);
+    if (Array.isArray(r)) return `route of ${r.length}: ${r.map((e) => e.action).join(' > ')}`;
+    if (r.rows) return `${String(r.hash ?? 'unidentified').slice(0, 8)} "${r.name ?? ''}" ${r.rows.length} rows`;
+    return JSON.stringify(r).slice(0, 160);
+  };
+  const out = {};
+  for (const [name, fn] of Object.entries(driver)) {
+    out[name] = (...args) => {
+      const t = Date.now();
+      const label = name === 'tap' ? ` "${String(args[0]?.label ?? '').slice(0, 40)}"` : '';
+      const done = (r) => {
+        write(`${((Date.now() - t0) / 1000).toFixed(1).padStart(7)}s ${name}${label} ${Date.now() - t}ms -> ${short(r)}`);
+        return r;
+      };
+      const r = fn(...args);
+      return r && typeof r.then === 'function' ? r.then(done) : done(r);
+    };
+  }
+  return out;
+}
+
+/**
  * Map an app: resume its saved state, crawl within the budget, save, report.
  * Returns `{ state, coverage, text }`.
  */
@@ -144,12 +173,14 @@ export async function map(deviceQuery, bundle, {
   maxActions = 200,
   allowCreate = false,
   fresh = false,
+  trace = false,
 } = {}) {
   if (!bundle) throw new Error('usage: simframe map <bundle-id> [--minutes=10] [--actions=200] [--allow-create] [--fresh]');
   const { device } = await api.ensureDaemon(deviceQuery, options);
   const udid = device.udid;
   const state = fresh ? null : cartographer.loadState(udid, bundle);
-  const result = await cartographer.crawl(deviceDriver(udid, bundle, { options }), {
+  const driver = deviceDriver(udid, bundle, { options });
+  const result = await cartographer.crawl(trace ? traced(driver) : driver, {
     bundle,
     budgetMs: Math.max(1, Number(minutes)) * 60 * 1000,
     maxActions: Math.max(1, Number(maxActions)),

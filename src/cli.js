@@ -43,7 +43,8 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe map     <bundle-id>       crawl an app on purpose and record every screen and transition
                                      (read-only by default; --minutes=10 --actions=200
                                       --allow-create opens write flows but never commits;
-                                      --fresh forgets the saved crawl; resumes otherwise)
+                                      --fresh forgets the saved crawl; resumes otherwise;
+                                      --trace logs every decision to stderr)
                    --text '{"Password":"..."}'  text for fields on the route (the graph keeps none)
   simframe flow    save <name> <script.json>   run a flow and save it if every step verifies
   simframe flow    run  <name>       replay a saved flow (--text as for goto, for secure fields)
@@ -896,6 +897,7 @@ async function main() {
         maxActions: num(flags.actions, 200),
         allowCreate: Boolean(flags['allow-create'] ?? flags.allowCreate),
         fresh: Boolean(flags.fresh),
+        trace: Boolean(flags.trace),
       });
       emit(flags, res.coverage, res.text);
       // A crawl that could not run, or that changed something in place, is not

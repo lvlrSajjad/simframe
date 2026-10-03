@@ -148,7 +148,10 @@
       "install now",
       "erase",
       "dictate",
-      "dictation"
+      "dictation",
+      "loading",
+      "please wait",
+      "refreshing"
     ],
     "neverOpenPatterns": [
       "^yes[,. ]",

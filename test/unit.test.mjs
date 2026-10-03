@@ -7756,3 +7756,10 @@ test('a crawl goes home by the home tab before it considers a restart', async ()
   assert.ok(state.screens.reports, 'reached the second door by going home through the tab');
   assert.ok(!launches.includes(true), 'never restarted');
 });
+
+test('an unlabeled top-left button is a way back whatever region it was given, and a loading label is not a door', async () => {
+  const carto = await import('../src/cartographer.js');
+  assert.equal(carto.isBackAffordance({ label: undefined, type: 'Button', region: 'content', x: 30, y: 91 }), true);
+  assert.equal(carto.isBackAffordance({ label: undefined, type: 'Button', region: 'content', x: 360, y: 132 }), false);
+  assert.equal(carto.classify({ label: 'loading', type: 'StaticText' }).open, false);
+});

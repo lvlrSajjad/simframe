@@ -89,6 +89,10 @@ export function isBackAffordance(row, { locale } = {}) {
   // Unlabeled too: Ecotrak's back chevron has no accessibility label, and a
   // crawl that could not see it as a way back relaunched the app instead.
   if (row?.region === 'nav-bar' && row?.navSlot === 'leading' && /button/i.test(String(row.type ?? 'button'))) return true;
+  // And an unlabeled button in the top-left corner, wherever the region
+  // priors put it: Ecotrak's chevron is often read as content, and a crawl
+  // that could not find it fell back to edge swipes that did nothing.
+  if (!label && /button/i.test(String(row?.type ?? '')) && (row?.x ?? 999) <= 60 && (row?.y ?? 999) <= 130) return true;
   return /(^|[-_ ])back([-_ ]|$)|header-back|toolbar-back/i.test(label);
 }
 
