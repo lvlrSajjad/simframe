@@ -3578,6 +3578,25 @@ test('a relaunch forgets what was typed, so a fresh form is not reported cleared
   assert.match(src, /await terminateApp\(udid, step\.value \?\? step\.bundleId\);\n\s+wrote\.forget\(udid\);/);
 });
 
+test('the plugin\'s driver agent runs on sonnet with every simframe tool but the ones that change the device unasked', () => {
+  // The owner's runs (2026-10-03): Sonnet drove faster than Opus, and Haiku
+  // never used simframe at all — it picked other simulator tools. An agent
+  // limited to simframe's tools removes that choice. Kept in step with the
+  // server here, because a tool added to mcp.js and not to this list is a tool
+  // the driver silently cannot use.
+  const agent = fs.readFileSync(new URL('../agents/simframe-driver.md', import.meta.url), 'utf8');
+  const front = agent.split('---')[1];
+  assert.match(front, /^name: simframe-driver$/m);
+  assert.match(front, /^model: sonnet$/m);
+  const listed = new Set(front.match(/^tools: (.*)$/m)[1].split(',').map((x) => x.trim().replace('mcp__plugin_simframe_simframe__', '')));
+  const served = [...fs.readFileSync(new URL('../src/mcp.js', import.meta.url), 'utf8').matchAll(/name: '(sim_[a-z_]+)'/g)].map((m) => m[1]);
+  const withheld = new Set(['sim_map', 'sim_permission']);
+  for (const tool of served) assert.equal(listed.has(tool), !withheld.has(tool), tool);
+  for (const tool of listed) assert.ok(served.includes(tool), `${tool} is not a simframe tool`);
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.ok(pkg.files.includes('agents'));
+});
+
 test('an app button the keyboard covers is marked, the keyboard\'s own keys are not (field report, 0.22.0)', async () => {
   const sm = await import('../src/screenmap.js');
   const k = (label, x, w = 39) => ({ label, type: 'Button', source: 'ax', region: 'keyboard', x, y: 617, frame: { x, y: 590, width: w, height: 54 } });

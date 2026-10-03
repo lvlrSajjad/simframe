@@ -51,6 +51,7 @@
     "native/simframed/Sources",
     "native/simframed/Tests",
     "skills",
+    "agents",
     "scripts",
     "README.md",
     "LICENSE"
