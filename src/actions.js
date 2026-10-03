@@ -3793,7 +3793,9 @@ export function stateDelta(beforeEntry, afterEntry) {
   // Name the control that turned ON, not the one that turned off. A radio move
   // changes two rows and reporting "Inline changed from true to false" is
   // accurate and reads like a loss — the useful half is what is selected now.
-  const on = (v) => v === true || v === 'true' || v === '1';
+  // "checked" is on too (a radio row's value), and "unchecked" is not: the
+  // evidence led with a row turning unchecked while the tapped one turned on.
+  const on = (v) => v === true || v === 'true' || v === '1' || (/\bchecked\b/i.test(String(v)) && !/unchecked/i.test(String(v)));
   const first = changes.find((c) => on(c.to) && !on(c.from)) ?? changes[0];
   return {
     count: changes.length,

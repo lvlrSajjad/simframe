@@ -3784,6 +3784,25 @@ test('a type step means a field: "Search" is the search field, not the Search ro
   assert.match(src, /api\.locate\(deviceQuery, step\.into, \{ index: step\.index, refresh: step\.refresh, role: 'field' \}\)/);
 });
 
+test('field report 2026-10-04: repeats skip background rows, a bare count reads as loading, evidence leads with the row turned on', async () => {
+  const v = await import('../src/view.js');
+  const a = await import('../src/actions.js');
+  const screen = { width: 402, height: 874 };
+  assert.deepEqual(v.repeatedLabels([
+    { label: 'Asset', type: 'Text', behind: true }, { label: 'Asset', type: 'Text', behind: true },
+    { label: 'Change', type: 'Button', behind: true }, { label: 'Change', type: 'Button', behind: true },
+  ]), [], 'background words are not repeats to address by #ref');
+  const row = (label, y, extra = {}) => ({ label, type: 'StaticText', x: 201, y, region: 'content', ...extra });
+  assert.equal(v.listMayBeLoading([row('Asset', 366), row('81 Records', 453)], screen), true, 'a count with nothing under it');
+  assert.equal(v.listMayBeLoading([row('81 Records', 453), ...[561, 729, 898].map((y) => row(`Unit ${y}`, y, { type: 'Button' }))], screen), false);
+  assert.equal(v.listMayBeLoading([row('0 Records', 453)], screen), false, 'zero records is an answer, not a wait');
+  assert.equal(v.listMayBeLoading([row('1, Asset', 157), row('Location', 236)], screen), false, 'a step label is not a count');
+  assert.equal(v.listMayBeLoading([row('1,644 Records', 453)], screen), true, 'thousands separators are');
+  const before = { targets: [{ label: 'Option A', value: 'radio button, checked' }, { label: 'Option B', value: 'radio button, unchecked' }] };
+  const after = { targets: [{ label: 'Option A', value: 'radio button, unchecked' }, { label: 'Option B', value: 'radio button, checked' }] };
+  assert.match(a.stateDelta(before, after).detail, /^"Option B" changed/);
+});
+
 test('a keyboard key never competes with an app control of the same name (field report, 2026-10-04)', async () => {
   const m = await import('../src/matching.js');
   const screen = { width: 402, height: 874 };

@@ -861,9 +861,17 @@ export function listMayBeLoading(rows, screen) {
   const inContent = (r) => !['tab-bar', 'keyboard', 'status-bar', 'nav-bar'].includes(r.region ?? 'content');
   const search = (rows ?? []).filter((r) => inContent(r) && /field/i.test(String(r.type ?? ''))
     && SEARCHISH.test(`${r.type ?? ''} ${r.label ?? ''} ${r.identifier ?? ''}`));
-  if (!search.length) return false;
-  const top = Math.max(...search.map((r) => r.y));
-  const below = (rows ?? []).filter((r) => inContent(r) && r.y > top + 60 && r.y < h);
+  // A count with nothing under it is the same signal: "81 Records" printed
+  // before the rows arrived (field report, 2026-10-04). The count line itself
+  // is not content.
+  // Commas only as thousands separators: "1, Asset" is a wizard's step label.
+  const COUNT = /^\s*(loaded\s+)?\d{1,3}(,\d{3})*(\s+of\s+\d{1,3}(,\d{3})*)?\s+(records?|results?|items?|assets?)\s*$/i;
+  const counts = (rows ?? []).filter((r) => inContent(r) && COUNT.test(String(r.label ?? '')) && !/^\s*0\s/.test(String(r.label)));
+  if (!search.length && !counts.length) return false;
+  const top = Math.max(...[...search, ...counts].map((r) => r.y));
+  const below = (rows ?? []).filter((r) => inContent(r) && !COUNT.test(String(r.label ?? '')) && r.y > top + (counts.length ? 20 : 60) && r.y < h);
+  // A count that says there are records, with not one row under it.
+  if (counts.length && !below.length) return true;
   const lastY = below.length ? Math.max(...below.map((r) => r.y)) : top;
   return h * 0.85 - lastY > h * 0.35;
 }
@@ -881,7 +889,9 @@ export function repeatedLabels(rows) {
   const seen = new Map();
   for (const r of rows ?? []) {
     const key = alnum(r.label);
-    if (!key) continue;
+    // Behind a sheet or under a bar is not something to address by #ref:
+    // "2 labels repeat ('Asset', 'Change')" named two background words.
+    if (!key || r.behind) continue;
     const e = seen.get(key) ?? { label: r.label, controls: 0, captions: 0 };
     if (NAMES_ONLY.test(String(r.type ?? ''))) e.captions += 1;
     else e.controls += 1;
