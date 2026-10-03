@@ -899,7 +899,13 @@ export function render({ device, identity, rows, truncated, collapsed, screen, n
       ? `screen ${identity.hash.slice(0, 8)}${name ? ` "${name}"` : ''}` +
         (exits == null
           ? ` (new to simframe${memoryNote ? ` — ${memoryNote}` : ''})`
-          : ` (known, ${exits} known exit${exits === 1 ? '' : 's'})`)
+          // "known, 0 known exits" read as recognition and made an agent trust
+          // a new form's map (field report, 0.22.0): its hash had been seen,
+          // nothing had been learned from it, and a merged identity looks
+          // exactly like that.
+          : exits === 0
+            ? ' (seen before; nothing learned from here yet — treat it as new)'
+            : ` (known, ${exits} known exit${exits === 1 ? '' : 's'})`)
       : 'screen unidentified',
     identity?.keyboard ? 'keyboard up' : null,
     identity?.settled === false ? (identity?.unmoved ? 'NOT MOVED SINCE THE ACTION' : 'STILL MOVING') : null,

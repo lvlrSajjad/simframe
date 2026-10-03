@@ -3518,6 +3518,14 @@ test('overlap is reported only when another layer shows, and the screen behind a
   assert.equal(sm.markBehindSheet([ocr('Page', 174), ocr('Text', 268), ax('Back', 830), ax('Cancel', 835)], screen), 0);
 });
 
+test('text that lands through another keyboard layout is said, not passed (field report, 0.22.0)', async () => {
+  const a = await import('../src/actions.js');
+  const note = a.readbackNote('hello', { value: 'اثممخ', landed: false, otherLayout: true });
+  assert.equal(note.landed, false);
+  assert.match(note.note, /non-English keyboard layout is probably active/);
+  assert.match(a.readbackNote('hello', { value: 'hello', landed: true }).note, /= "hello"/);
+});
+
 test('a search field with nothing under it is not told to chain without looking (field report, 0.22.0)', async () => {
   const v = await import('../src/view.js');
   const screen = { width: 402, height: 874 };
@@ -3568,6 +3576,13 @@ test('a relaunch forgets what was typed, so a fresh form is not reported cleared
   const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
   assert.match(src, /if \(step\.relaunch === true\) wrote\.forget\(udid\);/);
   assert.match(src, /await terminateApp\(udid, step\.value \?\? step\.bundleId\);\n\s+wrote\.forget\(udid\);/);
+});
+
+test('a hash seen before with nothing learned from it does not read as known (field report, 0.22.0)', async () => {
+  const v = await import('../src/view.js');
+  const text = v.render({ device: { name: 'iPhone' }, identity: { hash: 'abcdef012345' }, rows: [], exits: 0 });
+  assert.match(text, /seen before; nothing learned from here yet — treat it as new/);
+  assert.doesNotMatch(text, /known, 0 known exits/);
 });
 
 test('a sweep says why it stopped and whether it found what it was sent for (field report, 0.22.0)', () => {

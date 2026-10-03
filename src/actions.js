@@ -1294,6 +1294,12 @@ async function readbackPass(deviceQuery, target, wanted, ctx, useOcr, radius) {
     if (valued && String(valued.value) === '') {
       return { value: '', landed: false, focused: Boolean(valued.focused) };
     }
+    // Something other than what was sent, in a script the text did not use:
+    // the keystrokes went through a different keyboard layout. `doctor` warns
+    // that one is installed, and the step never said (field report, 0.22.0).
+    if (valued && wanted && /[^\x00-\x7F]/.test(String(valued.value)) && !/[^\x00-\x7F]/.test(wanted)) {
+      return { value: String(valued.value), landed: false, otherLayout: true, focused: Boolean(valued.focused) };
+    }
     return null;
   } catch {
     return null;
@@ -1350,6 +1356,13 @@ export function readbackNote(sent, seen) {
     const v = String(seen.value);
     const shown = v.length > 60 ? `${v.slice(0, 60)}…` : v;
     return { note: ` = ${JSON.stringify(shown)}`, empty: false, landed: true };
+  }
+  if (seen.otherLayout) {
+    return {
+      note: ` [the field holds ${JSON.stringify(String(seen.value).slice(0, 30))}, not what was sent — a non-English keyboard layout is probably active; switch it (doctor lists the installed layouts) or use paste]`,
+      empty: false,
+      landed: false,
+    };
   }
   return { note: ' [the field reads empty]', empty: Boolean(sent), landed: false };
 }
