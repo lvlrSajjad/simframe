@@ -74,6 +74,13 @@ recordings:
   whether they are required or not, and their places, then start filling them."
   Survey first, then fill.
 
+**Testing without specific data, and backing out of a dead end.** "I just go
+with the first options or an option I am familiar with and go forward. I may
+trace back if the first options get blocked, for example I reach the problem
+selection but the combination has no problem list." Arm A did the same in the
+comparison runs: its first asset's Problem drop-down would not open, so it went
+back and chose another, at the cost of a model turn to work that out.
+
 ## What simframe should copy
 
 1. **A forward control.** The map names the screen's primary action: the big
@@ -86,9 +93,15 @@ recordings:
    scrolls the form and collects the validation messages itself ("not saved:
    Warranty Start Date is required"), and returns them in one line. The model is
    consulted with the answer, not asked to hunt for it.
-4. **Satisfice.** A brief says what matters. Every other option gets the first
-   valid choice and every other required text gets a minimal valid value, still
-   never through the verify barrier.
+4. **Satisfice, and back out of dead ends.** A brief says what matters. Every
+   other option gets the first valid choice, or one the graph saw lead somewhere
+   before (the familiar option), and every other required text gets a minimal
+   valid value, still never through the verify barrier. Choice points are
+   remembered as the flow goes. A dead end can be recognised without a model:
+   an empty list, a drop-down that will not open, or a forward control still
+   disabled with everything visible filled. Then step back to the latest choice
+   point and take its next option: a few tries, then escalate with what was
+   tried.
 5. **Words first, places later.** Labels stay the selector. The graph already
    stores positions; on screens seen many times they become a prior that
    shortens the search, the way a person's second run does.

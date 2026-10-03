@@ -495,9 +495,14 @@ In priority order, by how much of the gap each closes and what it costs:
    reveal. Both strategies are the owner's own ("I'd do a scroll to understand
    the field names, field types … whether they are required … then start
    filling").
-3. **Satisficing in the driver.** The brief says what matters; every other
-   option gets the first valid choice and every other required text a minimal
-   valid value ("my task is just finish CSR … not typing something specific").
+3. **Satisficing in the driver, with backtracking.** The brief says what
+   matters; every other option gets the first valid choice, or one the graph
+   saw lead somewhere before, and every other required text a minimal valid
+   value ("my task is just finish CSR … not typing something specific"). A dead
+   end (an empty list, a drop-down that will not open, forward still disabled
+   with everything visible filled) steps back to the latest choice point and
+   takes its next option, a few tries at most, locally ("I may trace back if the
+   first options get blocked").
    Verify at the milestone ("Work Order #"), not after every tap. This is
    instructions plus small helpers; it should take the service request from
    30–90 calls to under ten on a first run.
