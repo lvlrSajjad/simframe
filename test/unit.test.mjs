@@ -3683,6 +3683,21 @@ test('simframe do takes a script inline, as the skill shows (field report, 0.22.
   assert.deepEqual(scriptSteps('flow.json', () => '[{"tap":"B"}]'), [{ tap: 'B' }], 'a path is still a path');
 });
 
+test('landing on another stored version of the expected screen is not a wrong turn (comparison runs, 2026-10-03)', async () => {
+  const a = await import('../src/actions.js');
+  const sm = await import('../src/screenmap.js');
+  const graph = await import('../src/graph.js');
+  assert.equal(graph.titleOf({ tokens: ['statictext:nav-bar:@title:w8:h1:"settings"'] }), 'settings');
+  assert.equal(graph.titleOf({ tokens: ['button:tab-bar:w4:h2:"home"'] }), null, 'a tab bar is not a title');
+  assert.equal(sm.topTitle({ targets: [
+    { label: '9:41', type: 'Text', region: 'status-bar', y: 20 },
+    { label: 'Assets', type: 'Text', region: 'content', y: 79 },
+    { label: 'Filters', type: 'GenericElement', region: 'content', y: 132 },
+  ] }), 'Assets');
+  const v = { verdict: 'ok' };
+  assert.equal(a.sameTitledScreen(v, { udid: 'x', prediction: { to: 'a' }, landed: { hash: 'b' } }), v, 'only an unexpected-screen is reconsidered');
+});
+
 test('committing a form forgets what was typed into it (field runs, 2026-10-03)', async () => {
   const a = await import('../src/actions.js');
   assert.equal(a.commitsAForm('SAVE'), true);

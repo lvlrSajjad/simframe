@@ -453,6 +453,21 @@ export function exitsOf(node, { limit = 8 } = {}) {
  * thing available to name it by — and they are the right thing anyway: a screen
  * is called what its nav bar says it is.
  */
+/** The nav-bar title alone, or null. A tab-bar name is shared by every tab root. */
+export function titleOf(node) {
+  const title = (node?.tokens ?? [])
+    .filter((t) => /:nav-bar:@title:/.test(t) && t.includes('"'))
+    .map((t) => t.slice(t.indexOf('"') + 1, t.lastIndexOf('"')))
+    .filter(Boolean);
+  return title.length ? title.join(' ') : null;
+}
+
+/** The stored node for a screen hash, or null. */
+export function nodeByHash(udid, hash) {
+  if (!hash) return null;
+  return allNodes(udid).find((n) => n.hash === hash || (n.variants ?? []).some((v) => v.hash === hash)) ?? null;
+}
+
 export function describe(node) {
   const labels = (pattern) => (node.tokens ?? [])
     .filter((t) => pattern.test(t) && t.includes('"'))

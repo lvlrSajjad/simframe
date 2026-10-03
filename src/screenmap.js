@@ -816,3 +816,22 @@ export function markUnderKeyboard(targets) {
   return marked;
 }
 
+/** A stored reading of a screen identity, or null. */
+export function byStructuralHash(udid, structuralHash) {
+  if (!structuralHash) return null;
+  return loadAll(udid).find((e) => e.structuralHash === structuralHash) ?? null;
+}
+
+/**
+ * The text at the top of a reading, as a title: the highest text element
+ * under the status bar, within the top 130pt. React Native titles sit in
+ * content, where the fingerprint does not keep labels. Null when none.
+ */
+export function topTitle(entry) {
+  const top = (entry?.targets ?? [])
+    .filter((t) => t.region !== 'status-bar' && t.region !== 'keyboard' && t.label && String(t.label).trim().length > 1
+      && /text|heading|label/i.test(String(t.type ?? '')) && Number.isFinite(t.y) && t.y < 130)
+    .sort((a, b) => a.y - b.y)[0];
+  return top ? String(top.label).trim() : null;
+}
+

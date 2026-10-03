@@ -2014,7 +2014,32 @@ async function confirmWrongTurn(deviceQuery, verification, { udid, prediction, b
   // belongs to the moment of the first look, and it only ever decorates an
   // `ok`. Re-using it here would date-stamp this answer with that one.
   const second = graph.verdict({ udid, prediction, before: beforeScreen, after: again, action: step.action });
-  return afterSecondLook(verification, second, again);
+  return sameTitledScreen(afterSecondLook(verification, second, again), { udid, prediction, landed: again });
+}
+
+/**
+ * Landed on another stored version of the screen it expected.
+ *
+ * One screen kept under two identities (DEFERRED 174) — Settings' root with
+ * its search field focused, a list with a search typed in — made a correct
+ * step fail as `unexpected-screen` and stop the batch, twice in one day of
+ * comparison runs (2026-10-03). When the expected and the landed screen carry
+ * the same nav-bar title, that is evidence it arrived: `unverified`, named,
+ * not a stop. Titles only — every tab root shares its tab bar.
+ */
+export function sameTitledScreen(verification, { udid, prediction, landed }) {
+  if (verification?.verdict !== 'unexpected-screen' || !prediction?.to || !landed?.hash) return verification;
+  const found = graph.nearestScreen(udid, landed);
+  const expected = graph.titleOf(graph.nodeByHash(udid, prediction.to))
+    ?? screenmap.topTitle(screenmap.byStructuralHash(udid, prediction.to));
+  const got = graph.titleOf(found?.node) ?? screenmap.topTitle(landed.entry);
+  if (!expected || !got || expected.toLowerCase() !== got.toLowerCase()) return verification;
+  return {
+    ...verification,
+    verdict: 'unverified',
+    detail: `landed on "${got}" as expected, under a different stored identity`
+      + ` (${String(prediction.to).slice(0, 8)} → ${String(landed.hash).slice(0, 8)}) — the screen is right; its identity is split`,
+  };
 }
 
 /**
