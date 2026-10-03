@@ -2883,6 +2883,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
       // add-asset form, every screen warned "a value simframe wrote here is
       // gone" (field runs, 2026-10-03).
       if (commitsAForm(found.target.label)) wrote.forget(udid);
+      lastTapped.set(udid, { target: found.target, at: Date.now() });
       return `tapped "${found.target.label}" at ${found.target.x},${found.target.y} (${found.from}${found.from === 'memory' ? ` d=${found.distance}` : ''}, via ${found.target.source})`
         + relabelledNote(found);
     }
@@ -2971,7 +2972,19 @@ async function runStep(deviceQuery, udid, step, ctx) {
       // GREEN step, and the note is where that has to be fixed until there is a
       // signal worth gating on.
       const focus = await focusedSomewhere(deviceQuery, ctx);
-      await input.typeText(udid, step.text ?? step.value);
+      const sentBlind = step.text ?? step.value;
+      await input.typeText(udid, sentBlind);
+      // The field the previous step tapped is the field this typed into, and
+      // it can be read back: "[tap Description, type text]" said NOT CONFIRMED
+      // while the text had landed (field report, 2026-10-04).
+      const tapped = lastTapped.get(udid);
+      if (tapped && Date.now() - tapped.at < 15_000 && FIELDISH.test(String(tapped.target.type ?? ''))) {
+        const back = readbackNote(sentBlind, await fieldContents(deviceQuery, tapped.target, sentBlind, ctx));
+        if (back.landed) {
+          noteFieldChange(udid, { where: `"${tapped.target.label ?? tapped.target.identifier ?? 'the field'}"` }, back);
+          return `typed into "${tapped.target.label ?? tapped.target.identifier ?? 'the field just tapped'}" (the field the previous step tapped)${back.note}`;
+        }
+      }
       return 'typed text [NOT CONFIRMED: no field named, so nothing was read back'
         + (focus.known && !focus.focused
           ? ' and nothing on this screen reports keyboard focus — the text may have gone nowhere'
@@ -3158,7 +3171,12 @@ async function runStep(deviceQuery, udid, step, ctx) {
     }
     case 'waitText': {
       const target = step.value ?? step.text;
-      const limit = Date.now() + (step.timeoutMs ?? 8000);
+      const waitStarted = Date.now();
+      const limit = waitStarted + (step.timeoutMs ?? 8000);
+      // How long it actually held for a control still loading. "Waited out the
+      // timeout" was printed after 12 s of a 20 s timeout (field report,
+      // 2026-10-04): the hold has its own, shorter cap.
+      const heldFor = () => `stopped holding for it after ${((Date.now() - waitStarted) / 1000).toFixed(1)} s`;
       let lastError = 'never appeared';
       while (Date.now() < limit) {
         try {
@@ -3509,7 +3527,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
               const late = stillFillingIn(found?.entry);
               return `${JSON.stringify(one)} appeared at ${found.target.x},${found.target.y}`
                 + ` (first of ${alternatives.length} awaited)`
-                + (late ? ` [but ${late} — waited out the timeout]` : '');
+                + (late ? ` [but ${late} — ${heldFor()}]` : '');
             } catch (err) {
               lastError = err.message;
             }
@@ -3559,7 +3577,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
           }
           const late = stillFillingIn(found?.entry);
           return `"${found.target.label}" appeared at ${found.target.x},${found.target.y}`
-            + (late ? ` [but ${late} — waited out the timeout; the screen may still be arriving]` : '');
+            + (late ? ` [but ${late} — ${heldFor()}; the screen may still be arriving]` : '');
         } catch (err) {
           lastError = err.message;
           // Waiting cannot make a thing unique.
@@ -3866,6 +3884,10 @@ export function settleEvidence(w) {
  * reading as no change on 2026-10-01 — and retrying on a false one is how a
  * tap fires twice, which the verify barrier forbids.
  */
+/** The last control a tap step resolved, per device: a later blind `type` reads it back. */
+const lastTapped = new Map();
+const FIELDISH = /field|textarea|textview|search/i;
+
 /**
  * Does this label commit a form? The vocabulary's form-commit words, minus the
  * ones that also mean "close the keyboard" or "next step" (done, next,

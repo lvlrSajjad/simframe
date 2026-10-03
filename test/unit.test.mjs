@@ -3803,6 +3803,13 @@ test('field report 2026-10-04: repeats skip background rows, a bare count reads 
   assert.match(a.stateDelta(before, after).detail, /^"Option B" changed/);
 });
 
+test('a blind type after tapping a field reads that field back (field report, 2026-10-04)', () => {
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /lastTapped\.set\(udid, \{ target: found\.target, at: Date\.now\(\) \}\);/);
+  assert.match(src, /const tapped = lastTapped\.get\(udid\);\n\s+if \(tapped && Date\.now\(\) - tapped\.at < 15_000 && FIELDISH\.test/);
+  assert.match(src, /stopped holding for it after/, 'and a waitFor says how long it held, not "the timeout"');
+});
+
 test('after a sweep or a late arrival the header says the screen moved, not that it did not (field report, 2026-10-04)', async () => {
   const v = await import('../src/view.js');
   const a = await import('../src/actions.js');
