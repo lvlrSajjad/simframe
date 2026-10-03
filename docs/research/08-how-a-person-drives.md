@@ -61,6 +61,19 @@ second time I may look at the places too."
 **Typing.** "I type 'Mo' because my task is just finish CSR. It's not finish CSR
 typing something specific. In that case I would take a few more milliseconds."
 
+**Two kinds of form, two strategies.** Added by the owner after the
+recordings:
+
+- **Progressive forms**, like the service request's first step: "I just
+  understand based on what I see on the screen. I have to choose a location;
+  then when the asset list pops up I have to choose the asset; then the problem
+  drop-down pops up…" Each answer reveals the next question, and the person
+  reacts to what appeared.
+- **Single-step forms**, like add asset: "I'd do a scroll to understand the
+  field names, field types (drop-down, free-form text, radio button, etc.),
+  whether they are required or not, and their places, then start filling them."
+  Survey first, then fill.
+
 ## What simframe should copy
 
 1. **A forward control.** The map names the screen's primary action: the big
@@ -79,7 +92,16 @@ typing something specific. In that case I would take a few more milliseconds."
 5. **Words first, places later.** Labels stay the selector. The graph already
    stores positions; on screens seen many times they become a prior that
    shortens the search, the way a person's second run does.
-6. **Habits.** A flow done once is saved with its choices as slots and replayed,
+6. **Know the form's shape before filling it.** For a single-step form, a
+   survey pass (one sweep) returns an outline, not a flat element list: each
+   field's name, type (text, drop-down, radio group, checkbox, date), whether it
+   is required, and where it sits. The fill is then one planned batch: what the
+   brief asks for, a satisficing value for every other required field, then
+   forward. For a progressive form, the loop is "what appeared since the last
+   answer, and is it required?", answered until the forward control enables.
+   The agents met the add-asset form one screen at a time and were surprised by
+   every field a choice revealed (refrigerant tracking, the warranty radio rows).
+7. **Habits.** A flow done once is saved with its choices as slots and replayed,
    checking only at the milestone. A repeat should cost app time plus taps,
    which is the person's 39 seconds.
 

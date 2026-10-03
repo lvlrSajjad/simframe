@@ -486,20 +486,29 @@ In priority order, by how much of the gap each closes and what it costs:
    saved: Warranty Start Date is required"). The person only thinks "when I get
    surprised"; the agent should be handed the surprise already diagnosed.
    Never a destructive or barrier control as forward.
-2. **Satisficing in the driver.** The brief says what matters; every other
+2. **Know the form's shape (two kinds).** *Single-step forms:* survey, then
+   fill. `sweep` already makes the pass; it should return an outline (field,
+   type, required, section, position) instead of a flat list, and the fill
+   becomes one planned batch. *Progressive forms,* where each answer reveals
+   the next question: a local loop of "what appeared since the last answer, and
+   is it required?", answered until forward enables, with no model turn per
+   reveal. Both strategies are the owner's own ("I'd do a scroll to understand
+   the field names, field types … whether they are required … then start
+   filling").
+3. **Satisficing in the driver.** The brief says what matters; every other
    option gets the first valid choice and every other required text a minimal
    valid value ("my task is just finish CSR … not typing something specific").
    Verify at the milestone ("Work Order #"), not after every tap. This is
    instructions plus small helpers; it should take the service request from
    30–90 calls to under ten on a first run.
-3. **Habits.** A flow the driver completed is saved with its choices as slots
+4. **Habits.** A flow the driver completed is saved with its choices as slots
    and replayed next time: taps as soon as targets appear, checks only at the
    milestone. The replay path exists; saving what worked is the missing half.
    Target: a repeat run within 1.5× of the person's median.
-4. **Glance, don't read.** On a known screen, return what changed and the
+5. **Glance, don't read.** On a known screen, return what changed and the
    forward control, not the whole map. The person gave "Previous Work Orders"
    and "AI Insights" a glance and pressed NEXT.
-5. **Places after words.** Labels stay the selector. The graph already keeps
+6. **Places after words.** Labels stay the selector. The graph already keeps
    positions; on screens seen many times they become a prior that shortens the
    search ("the second time I may look at the places too").
 
