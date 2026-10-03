@@ -398,6 +398,10 @@ function valueNote(r) {
   if (r.value == null || r.value === '') return null;
   const v = trim(String(r.value));
   if (!v) return null;
+  // A value masked on its way to memory (typed.js) is not the field's contents
+  // now: a recalled map printed "= <typed>" over a field holding "Search"
+  // (field report, 0.22.0).
+  if (/<typed>|<email>/.test(v)) return '= (held typed text when remembered; refresh to read it)';
   const said = alnum(r.label);
   if (said && alnum(v) && said.includes(alnum(v))) return null;
   return `= ${v}`;
@@ -472,7 +476,9 @@ function aliasNote(r, shown = r.label) {
       // Compared against the name actually printed, not against the label. An
       // unlabelled control is named by its own alias now, and comparing against
       // an absent label printed every one of them twice: `Sort ~ Sort`.
-      return t && !alnum(shown).includes(t);
+      // One or two characters is OCR reading a glyph ("~ V" for a chevron,
+      // "~ Al" for "AI"): it names nothing anyone would type.
+      return t && t.length > 2 && !alnum(shown).includes(t);
     })
     .slice(0, 2);
   return extra.length ? `~ ${trim(extra.join(' '))}` : null;
@@ -484,6 +490,7 @@ function aliasNote(r, shown = r.label) {
  * and `text`, and a column of them costs a third as much.
  */
 const TYPE_NAMES = [
+  [/textarea/i, 'textarea'],
   [/textfield|textview|searchfield|field/i, 'field'],
   [/button/i, 'button'],
   [/statictext|^text$/i, 'text'],
@@ -579,6 +586,19 @@ export async function screenMap(deviceQuery, {
         + ' — a sheet, toast or banner is probably covering part of the screen, so treat anything'
         + ' you did not expect to see as belonging to the layer underneath'
       : null;
+  // The tree was read and came back empty: every element below is from
+  // pixels, so roles are guesses — a button prints as text, and a word may be
+  // split from its line. A review screen and a success modal came back like
+  // this with nothing to say so (field report, 0.22.0), and "AX empty" and "AX
+  // not read" are different problems.
+  const entryTargets = identity?.entry?.targets ?? [];
+  const sources = identity?.entry?.sources ?? [];
+  const axEmpty = sources.includes('ax') && entryTargets.length > 0
+    && !entryTargets.some((t) => matching.isAxTarget(t))
+    ? 'the accessibility tree was read and is EMPTY for this screen — every element is from pixels (OCR), so roles are guesses (buttons show as text) and a tap point is the middle of the words'
+    : !sources.includes('ax') && sources.length
+      ? `the accessibility tree was NOT read (${(identity?.entry?.degraded ?? [])[0] ?? 'unavailable'}) — every element is from pixels`
+      : null;
   const barNote = underBar.length
     ? `${underBar.length} row(s) sit under the bar at the bottom of the screen and are marked "behind?" — a tap there hits the bar; scroll them up first`
     : null;
@@ -619,9 +639,9 @@ export async function screenMap(deviceQuery, {
     exitList,
     staleExits,
     cleared,
-    overlay: [overlay, barNote].filter(Boolean).join('\n') || null,
+    overlay: [axEmpty, overlay, barNote].filter(Boolean).join('\n') || null,
     unnamed,
-    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, cleared, overlay: [overlay, barNote].filter(Boolean).join('\n') || null, unnamed,
+    text: render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, cleared, overlay: [axEmpty, overlay, barNote].filter(Boolean).join('\n') || null, unnamed,
       // An unknown screen may be one simframe learned and could not carry over a
       // fingerprint change. Say so rather than calling it new without comment.
       memoryNote: exits == null ? carry.headerNote(udid) : null }),

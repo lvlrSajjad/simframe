@@ -3518,6 +3518,23 @@ test('overlap is reported only when another layer shows, and the screen behind a
   assert.equal(sm.markBehindSheet([ocr('Page', 174), ocr('Text', 268), ax('Back', 830), ax('Cancel', 835)], screen), 0);
 });
 
+test('the map says when the tree is empty, and never prints a masked value as live (field report, 0.22.0)', async () => {
+  const v = await import('../src/view.js');
+  const ocr = (label, y) => ({ label, type: 'Text', source: 'ocr', x: 40, y, frame: { x: 20, y: y - 6, width: 60, height: 12 } });
+  const map = await (async () => {
+    const identity = { hash: 'abcdef012345', settled: true, entry: { sources: ['ax', 'ocr'], targets: [ocr('Review', 100), ocr('Submit', 700)] } };
+    return v.render({ device: { name: 'iPhone' }, identity, rows: [], overlay: null });
+  })();
+  assert.ok(map);
+  const src = fs.readFileSync(new URL('../src/view.js', import.meta.url), 'utf8');
+  assert.match(src, /the accessibility tree was read and is EMPTY for this screen/);
+  assert.match(src, /the accessibility tree was NOT read/);
+  const rows = v.rowsFor({ targets: [{ label: 'global-search-input', type: 'SearchField', value: '<typed>', x: 201, y: 120, source: 'ax' }] }, { screen: { width: 402, height: 874 } });
+  const text = v.render({ device: { name: 'iPhone' }, identity: { hash: 'abcdef012345' }, rows: Array.isArray(rows) ? rows : rows.rows });
+  assert.doesNotMatch(text, /= <typed>/);
+  assert.match(text, /held typed text when remembered/);
+});
+
 test('rows scrolled under a pinned bottom bar are marked, a list that merely ends is not (field report, 0.22.0)', async () => {
   const sm = await import('../src/screenmap.js');
   const screen = { width: 402, height: 874 };
