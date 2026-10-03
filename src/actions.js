@@ -911,10 +911,16 @@ export async function runScript(
       // radio move settled in 2714ms with `sawChange` true, so
       // `settled.noVisibleChange` was false and the verdict came from the
       // fingerprint instead.
-      const changedState = (settled?.noVisibleChange || verification?.verdict === 'no-visible-change')
+      let changedState = (settled?.noVisibleChange || verification?.verdict === 'no-visible-change')
         ? stateDelta(beforeScreen?.entry, afterReading?.entry)
         : null;
       if (changedState) verification = stateChanged(verification, changedState);
+      // The text comparison confirmNoChange made on a fresh read counts the
+      // same way: a line of text that changed is the tap having worked.
+      const TEXT_MOVED = /^the screen stayed, and (its text changed in place: .*)$/;
+      if (!changedState && TEXT_MOVED.test(verification?.detail ?? '')) {
+        changedState = { detail: TEXT_MOVED.exec(verification.detail)[1] };
+      }
       const wentNowhere = !changedState
         && (Boolean(settled?.noVisibleChange) || verification?.verdict === 'no-visible-change');
       const aimNote = wentNowhere && aim.at

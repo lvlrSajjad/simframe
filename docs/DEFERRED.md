@@ -2536,8 +2536,11 @@ worth more than the verdict.
    - **A text change read as "no visible change" (F5).** Identity ignores
      content text, so `tap` told an agent to retry a tap that had landed. The
      no-change verdict now re-reads fresh and compares text first.
-     *Open:* the map's `NOT MOVED SINCE THE ACTION … it did not land` comes from
-     pixel stillness and still fires on a small text change.
+     Verified live on the testbed: the step now reads `ok … the screen did not
+     move, but its text changed in place: "Last pressed: nothing yet" → "Last
+     pressed: more-horizontal" — this worked, do not retry`. *Open:* the map
+     header's `NOT MOVED SINCE THE ACTION … it did not land` comes from pixel
+     stillness and still fires on a small text change.
    - **A colour picker's tab persisted (F7).** A selected segment now makes its
      row a selection. *Open, for the owner to check:* a Settings crawl window
      correlates with `PrefersHorizontalText = 1` and a Hover Text colour in

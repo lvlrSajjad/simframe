@@ -4993,3 +4993,18 @@ It found that "trash" was missing from the destructive vocabulary, now added. It
 also found two over-cautious rules, both fixed. A "send" icon marked the whole
 grid as a form, so an icon now counts as a commit only beside a text field. A
 selected tab made its siblings a selection list, so tabs are navigation.
+
+## After the 0.21.0 peer-test fixes — 2026-10-03
+
+`326464A4`. A fresh Settings crawl took 77 actions and 377 s, mapping 27 screens
+and 32 transitions. It stopped on its wall-time budget, not early, and recorded
+no back button as a picked option. Before and after, these were compared and
+were **identical**: `com.apple.Accessibility`, `com.apple.Preferences`,
+`com.apple.UIKit.ColorPickerUIService`, appearance, text size and languages. The
+peer test showed `com.apple.Preferences` alone missed what a crawl can change.
+On the testbed, `tap "bell (icon)"` resolves, and a tap that only changed a line
+of text reads `ok … its text changed in place`.
+
+Found while checking: `PrefersHorizontalText = 1` and a stored Hover Text colour
+in `com.apple.Accessibility` on this device. Both are off by default, and both
+correlate with an earlier crawl window. They are left for the owner to reset.

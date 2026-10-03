@@ -1763,7 +1763,9 @@ async function locateWith(
       });
     }
   }
-  if (selector.exact) query = selector.label;
+  // The parsed label, quoted or not: parsing is where display markers such as
+  // "(icon)" come off, and an unquoted selector skipped it.
+  if (selector.kind === 'label') query = selector.label;
   // Key memory off a settled frame, never off whichever frame happened to be
   // newest, so the capture rate cannot change what gets remembered.
   const { state, settled } = await settledState(udid, { settleMs });
