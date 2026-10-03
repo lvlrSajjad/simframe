@@ -1269,7 +1269,10 @@ async function fieldContents(deviceQuery, target, sent, ctx) {
 async function readbackPass(deviceQuery, target, wanted, ctx, useOcr, radius) {
   try {
     const { entry } = await api.readScreenWith(deviceQuery, { useOcr, options: ctx.options });
-    const near = (entry.targets ?? []).filter((t) => sameField(t, target, radius));
+    // Never the keyboard: its keys sit right under a field, and the
+    // next-layout key is labelled with a layout's name ("فارسی"), which read
+    // back as the field's contents in another script (comparison run B).
+    const near = (entry.targets ?? []).filter((t) => t.region !== 'keyboard' && sameField(t, target, radius));
     if (!near.length) return null;
     // The text may arrive as the control's `value` or as a sibling's label —
     // a React Native input renders its contents as a separate text node — so

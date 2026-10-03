@@ -134,8 +134,18 @@ export function confusableFold(s) {
  */
 const IDENTIFIER_LIKE = /^[\w.]+(?:[-_.][\w.]+){2,}$/;
 function synonymGroup(query) {
-  const q = norm(query);
+  const q = norm(query)
+    .replace(/^(please\s+)?(tap|press|click|hit|open|select|choose)\s+/i, '')
+    .replace(/^(the|a|an)\s+/i, '')
+    .replace(/\s+(button|tab|icon|link)$/i, '')
+    // What is being acted on is not part of the name: "dismiss this dialog".
+    .replace(/\s+((this|the|that)\s+)?(dialog|sheet|popup|pop-up|modal|alert|screen|view|page|keyboard|menu|panel)$/i, '');
   if (IDENTIFIER_LIKE.test(q)) return null;
+  // A name of several words is a name, not a synonym: "New asset sub" is a
+  // row, and the word "new" in it pulled in every "Add" button and refused
+  // the tap as ambiguous (comparison run B, 2026-10-03). "back", "close
+  // sheet", "navigate back" stay synonymy.
+  if (q.split(/\s+/).filter(Boolean).length > 2) return null;
   const words = new Set(q.split(/[^a-z0-9.]+/).filter(Boolean));
   for (const [key, group] of Object.entries(SYNONYMS)) {
     if (group.some((w) => w === q || (w.includes(' ') ? ` ${q} `.includes(` ${w} `) : words.has(w)))) return { key, words: group };

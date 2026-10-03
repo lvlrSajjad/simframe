@@ -3683,6 +3683,19 @@ test('simframe do takes a script inline, as the skill shows (field report, 0.22.
   assert.deepEqual(scriptSteps('flow.json', () => '[{"tap":"B"}]'), [{ tap: 'B' }], 'a path is still a path');
 });
 
+test('a name of several words is not a synonym, and the keyboard is not a field\'s contents (comparison runs, 2026-10-03)', async () => {
+  const m = await import('../src/matching.js');
+  const screen = { width: 402, height: 874 };
+  const add = (y) => ({ label: 'Add', type: 'Button', x: 350, y, region: 'content', source: 'ax' });
+  const row = { label: 'New asset sub', type: 'Button', x: 201, y: 500, region: 'content', source: 'ax' };
+  const r = m.resolve([add(200), add(300), add(400), row], 'New asset sub', { screen });
+  assert.equal(r.status, 'ok');
+  assert.equal(r.target.label, 'New asset sub');
+  assert.equal(m.resolve([add(200)], 'new', { screen }).target?.label, 'Add', 'one word is still synonymy');
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /t\.region !== 'keyboard' && sameField\(t, target, radius\)/);
+});
+
 test('a type step means a field: "Search" is the search field, not the Search row (comparison runs, 2026-10-03)', async () => {
   const m = await import('../src/matching.js');
   const screen = { width: 402, height: 874 };
