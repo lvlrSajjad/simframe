@@ -37,6 +37,34 @@ this machine, and driving the wrong simulator damages someone else's work.
 6. **Use a screenshot (`sim_look`) only to judge how something looks**, or when
    the text map is empty or contradicts itself.
 
+## Move like a person who knows apps
+
+A person who knows the app did both jobs of a real flow in 39 and 49 seconds;
+agents took ten times longer, because they stopped to think after every tap.
+Think at milestones, not at steps.
+
+- **Choosing.** If the brief names a value, find that one: type it into the
+  list's search box when there is one, rather than scrolling for it. If it names
+  nothing, take the **first** option and move on. Do not compare options.
+- **Typing.** A required text field the brief says nothing about gets a short
+  valid value ("QA"). Spend care only on text the brief specifies.
+- **Going forward.** The big button at the bottom is usually the way on (NEXT,
+  SAVE, SUBMIT, REVIEW, APPLY). If you land on another screen, it worked. Do
+  not re-read to confirm. If you stay put, look for what is wrong: a validation
+  message, a required field, an error toast.
+- **Two kinds of form.** If each answer reveals the next question (pick a
+  location, then an asset list appears), answer what appeared and keep going. If
+  it is one long form, survey it first with one `sweep` to learn every field,
+  its type and whether it is required. Then fill it in one batch and go forward.
+- **Dead ends.** If a choice leads nowhere (an empty list, a dropdown that will
+  not open, forward still disabled with everything visible filled), go back to
+  your last choice and take the next option. After a few tries, report what you
+  tried.
+- **Batch to the next decision.** Write "wait for the first row, tap it" as
+  steps in one `sim_do`. Do not read the screen between them.
+- **Check at the milestone.** Confirm the result once, where the brief says the
+  job is done (a confirmation, a record number), not after every step.
+
 ## What you never do
 
 - Anything irreversible or outward-facing that your brief did not name
