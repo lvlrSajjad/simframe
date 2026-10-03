@@ -445,6 +445,7 @@ function renderRow(r) {
   const state = [
     r.enabled === false ? 'disabled' : null,
     r.selected ? 'selected' : null,
+    r.behind ? 'behind?' : null,
   ].filter(Boolean).join(',');
   return [
     `#${r.ref}`.padStart(4),
@@ -566,11 +567,17 @@ export async function screenMap(deviceQuery, {
   // peer who had to fall back to a screenshot to count five radio options
   // through a sheet, which is the case the text map exists to remove.
   const layered = (identity?.entry?.occluded ?? []).length;
-  const overlay = layered
-    ? `${layered} element(s) on this screen overlap and disagree about what is there`
-      + ' — a sheet or overlay is probably covering the screen behind it, so treat anything'
-      + ' you did not expect to see as belonging to the layer underneath'
-    : null;
+  const behind = (identity?.entry?.targets ?? []).filter((t) => t.behind);
+  const overlay = behind.length
+    ? `a sheet or alert looks open: ${behind.length} label(s) above it were read from pixels only and probably belong to the screen behind`
+      + ` (${behind.slice(0, 4).map((t) => JSON.stringify(String(t.label).slice(0, 20))).join(', ')}${behind.length > 4 ? ', …' : ''})`
+      + ' — they are marked "behind?" below; dismiss the sheet before acting on them'
+    : layered
+      ? `${layered} element(s) on this screen overlap and disagree about what is there`
+        + ` (e.g. ${JSON.stringify(String(identity.entry.occluded[0].under).slice(0, 24))} over ${JSON.stringify(String(identity.entry.occluded[0].over ?? '').slice(0, 24))})`
+        + ' — a sheet, toast or banner is probably covering part of the screen, so treat anything'
+        + ' you did not expect to see as belonging to the layer underneath'
+      : null;
 
   // Controls that are on the screen and answer to no name — item 122.
   //

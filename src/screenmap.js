@@ -13,6 +13,7 @@ import * as fingerprint from './fingerprint.js';
 import * as input from './input.js';
 import * as ocr from './ocr.js';
 import * as matching from './matching.js';
+import * as vocabulary from './vocabulary.js';
 import * as regions from './regions.js';
 import { informative } from './refs.js';
 import * as store from './store.js';
@@ -75,6 +76,33 @@ const alnum = (v) => String(v ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '
  * disabling the sensor. A pure function can be tested with the value that broke
  * it, and the source-shape assertion this replaces could not.
  */
+/**
+ * Is an OCR word inside an accessibility element evidence of another layer?
+ *
+ * Only when it is plainly something else. Counted on every stored reading,
+ * the old test (any word not contained in the label) fired on 126 of 268 of
+ * a field app's readings and 95 of 575 on the bench device, almost all of it
+ * OCR misreading the same text ("Location (AII)", "Oh Om Os"), an icon glyph
+ * ("Close" / "X"), a field's own contents or a row's value — so a warning
+ * that should mean "a sheet is over this" meant nothing (field report,
+ * 0.22.0). With this test: 32 and 40, mostly toasts, banners and sheets.
+ */
+const CONTENT_HOLDER = /field|textarea|textview|search/i;
+export function anotherLayer(cover, text) {
+  const seen = alnum(text);
+  if ((seen.match(/\p{L}/gu) ?? []).length < 3) return false;
+  if (CONTENT_HOLDER.test(String(cover?.type ?? ''))) return false;
+  const fold = (v) => matching.confusableFold(alnum(v));
+  const b = fold(text);
+  for (const name of [cover?.label, cover?.value, ...(cover?.aliases ?? [])].filter((v) => v != null && String(v).trim())) {
+    const a = fold(name);
+    if (!a || a.includes(b) || b.includes(a)) return false;
+    // A misread of the same words: close in edit distance.
+    if (matching.editDistance(a.slice(0, Math.max(a.length, b.length)), b, 12) / Math.max(1, b.length) <= 0.4) return false;
+  }
+  return true;
+}
+
 export function aliasRelates(coveringLabel, text) {
   const own = alnum(coveringLabel);
   const seen = alnum(text);
@@ -505,7 +533,7 @@ export async function build(udid, {
           // its own — which is what it is. Marked, because "these two things
           // overlap and disagree" is exactly the shape of an occluding layer,
           // and a caller counting radio options needs to know it is there.
-          occluded.push({ over: covering.label, under: w.text });
+          if (anotherLayer(covering, w.text)) occluded.push({ over: covering.label, under: w.text });
         }
         targets.push({
           label: w.text,
@@ -530,6 +558,7 @@ export async function build(udid, {
     // deal: "Assets" the nav title and "Assets" the tab differ only by where
     // they are.
     if (screen?.width && screen?.height) regions.annotate(targets, screen);
+    if (screen?.height) markBehindSheet(targets, screen);
     // Two hashes, two jobs. The pixel layout hash indexes this entry, because
     // it can be computed from a frame alone and so can find a map without
     // building one. The structural hash identifies the screen, because content
@@ -670,5 +699,41 @@ export function nameFieldsByCaption(targets) {
     if (name) { f.label = name; f.labelFrom = 'caption'; }
   }
   return targets;
+}
+
+/**
+ * Text OCR read above a sheet or alert belongs to the screen behind it.
+ *
+ * An app hides the background from accessibility while a sheet is open, which
+ * is right, and OCR still reads it through the dimming — so the Problem
+ * picker's map offered "Asset", "Anaheim" and the step tabs as tappable text,
+ * with nothing to say they were behind it (field report, 0.22.0; both runs).
+ *
+ * The shape: every accessibility element sits low on the screen, one of them
+ * is a way to dismiss (Close, Cancel, Not now…), and OCR-only text lies above
+ * all of them. The dismiss control is what separates a sheet from a web page
+ * (whose content is not in the tree) or a screen with an unlabeled header.
+ * Marked with a flag, not a region, so no screen's identity moves. Returns how
+ * many were marked.
+ */
+export const SHEET_TOP_MIN_FRACTION = 0.3;
+export const SHEET_MIN_HEIGHT_FRACTION = 0.2;
+export function markBehindSheet(targets, screen) {
+  const placed = targets.filter((t) => t.frame && t.region !== 'status-bar');
+  // Keys are not the sheet; a toolbar is too thin to be one (a web page's
+  // content is not in the tree, its toolbar is).
+  const ax = placed.filter((t) => matching.isAxTarget(t) && t.region !== 'keyboard');
+  if (ax.length < 2) return 0;
+  const top = Math.min(...ax.map((t) => t.frame.y));
+  if (top < screen.height * SHEET_TOP_MIN_FRACTION) return 0;
+  const bottom = Math.max(...ax.map((t) => t.frame.y + (t.frame.height ?? 0)));
+  if (bottom - top < screen.height * SHEET_MIN_HEIGHT_FRACTION) return 0;
+  const dismiss = new Set((vocabulary.load().cartographer?.dismiss ?? []).map((w) => alnum(w)));
+  if (!ax.some((t) => dismiss.has(alnum(t.label)))) return 0;
+  const above = placed.filter((t) => t.source === 'ocr' && t.frame.y + (t.frame.height ?? 0) <= top);
+  // One stray word above a form (a logo) is not a screen behind a sheet.
+  if (above.length < 2) return 0;
+  for (const t of above) t.behind = true;
+  return above.length;
 }
 

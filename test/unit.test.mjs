@@ -3493,6 +3493,31 @@ test('a typed field is not slowed or flagged by a settle the pixels cannot satis
   assert.match(act, /const staysPut = graph\.STAYS_ON_SCREEN\.has\(step\.action\) \|\| landing\.movedNothing === true;/);
 });
 
+test('overlap is reported only when another layer shows, and the screen behind a sheet is marked (field report, 0.22.0)', async () => {
+  const sm = await import('../src/screenmap.js');
+  const m = await import('../src/matching.js');
+  // OCR misreads, glyphs, a field's contents and a row's value are the same thing.
+  assert.equal(sm.anotherLayer({ label: 'Location (All)', type: 'Button' }, 'Location (AII)'), false);
+  assert.equal(sm.anotherLayer({ label: '0h 0m 0s', type: 'StaticText' }, 'Oh Om Os'), false);
+  assert.equal(sm.anotherLayer({ label: 'Close', type: 'Button' }, 'X'), false);
+  assert.equal(sm.anotherLayer({ label: 'First Name', type: 'TextField' }, 'Grace Hopper'), false);
+  assert.equal(sm.anotherLayer({ label: 'Language', value: 'English (United States)', type: 'Cell' }, 'English (United States) >'), false);
+  // A toast over a title is another layer.
+  assert.equal(sm.anotherLayer({ label: 'Work Order #1', type: 'StaticText' }, 'Get Asset By Id Error'), true);
+
+  const screen = { width: 402, height: 874 };
+  const ocr = (label, y) => ({ label, type: 'Text', source: 'ocr', x: 40, y, frame: { x: 20, y: y - 6, width: 60, height: 12 }, region: 'content' });
+  const ax = (label, y, h = 44) => ({ label, type: 'Button', source: 'ax', x: 201, y, frame: { x: 16, y: y - h / 2, width: 370, height: h }, region: 'content' });
+  const sheet = [ocr('Asset', 174), ocr('Anaheim', 268), ax('Close', 470), ax('ADA Items', 560), ax('Adjust Sprinkler', 620), ax('Roof', 800)];
+  assert.equal(sm.markBehindSheet(sheet, screen), 2);
+  assert.equal(sheet[0].behind, true);
+  const r = m.resolve([...sheet, ax('Asset', 700)], 'Asset', { screen });
+  assert.equal(r.target.source, 'ax', 'the sheet\'s own control, not the word behind it');
+  // No dismiss control, or a thin toolbar: not a sheet.
+  assert.equal(sm.markBehindSheet([ocr('Asset', 174), ocr('Anaheim', 268), ax('Month', 470), ax('Roof', 800)], screen), 0);
+  assert.equal(sm.markBehindSheet([ocr('Page', 174), ocr('Text', 268), ax('Back', 830), ax('Cancel', 835)], screen), 0);
+});
+
 test('a relaunch forgets what was typed, so a fresh form is not reported cleared (field report, 0.22.0)', () => {
   const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
   assert.match(src, /if \(step\.relaunch === true\) wrote\.forget\(udid\);/);

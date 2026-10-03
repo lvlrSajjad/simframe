@@ -176,6 +176,7 @@ export function rank(targets, intent, { screen } = {}) {
 
   const scored = [];
   for (const t of visible) {
+
     // The accessibility identifier is a name a caller can legitimately write,
     // and this list did not contain it.
     //
@@ -232,6 +233,13 @@ export function rank(targets, intent, { screen } = {}) {
       reasons.push('exact spelling');
     }
     if (bySynonym) reasons.push('synonym');
+    // Probably behind a sheet (screenmap.markBehindSheet): reachable only when
+    // nothing in front answers to the name. A penalty rather than a filter,
+    // because the shape is a guess and hiding real content is the worse error.
+    if (t.behind) {
+      score -= 0.3;
+      reasons.push('probably behind a sheet');
+    }
     if (roleHint && roleHint.roles.test(t.type ?? '')) {
       score += 0.12;
       reasons.push(`role ${t.type}`);
