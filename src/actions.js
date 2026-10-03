@@ -2845,6 +2845,10 @@ async function runStep(deviceQuery, udid, step, ctx) {
       await input.tapPoint(udid, found.target.x, found.target.y, { durationMs: step.durationMs });
       const toggled = await selectionLanded(deviceQuery, udid, query, found, step);
       if (toggled) return toggled;
+      // A committed form is expected to come back empty. After SAVE reset the
+      // add-asset form, every screen warned "a value simframe wrote here is
+      // gone" (field runs, 2026-10-03).
+      if (commitsAForm(found.target.label)) wrote.forget(udid);
       return `tapped "${found.target.label}" at ${found.target.x},${found.target.y} (${found.from}${found.from === 'memory' ? ` d=${found.distance}` : ''}, via ${found.target.source})`
         + relabelledNote(found);
     }
@@ -3826,6 +3830,19 @@ export function settleEvidence(w) {
  * reading as no change on 2026-10-01 — and retrying on a false one is how a
  * tap fires twice, which the verify barrier forbids.
  */
+/**
+ * Does this label commit a form? The vocabulary's form-commit words, minus the
+ * ones that also mean "close the keyboard" or "next step" (done, next,
+ * continue), matched as the label's first word.
+ */
+const NOT_A_COMMIT = new Set(['done', 'next', 'continue']);
+export function commitsAForm(label) {
+  const first = String(label ?? '').trim().toLowerCase().split(/[^\p{L}\p{N}]+/u)[0];
+  if (!first || NOT_A_COMMIT.has(first)) return false;
+  const words = vocabulary.load().cartographer?.formCommit ?? [];
+  return words.includes(first) || first === 'upload' || first === 'create';
+}
+
 /**
  * A radio or checkbox row that did not take the tap at its centre.
  *

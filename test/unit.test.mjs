@@ -3683,6 +3683,15 @@ test('simframe do takes a script inline, as the skill shows (field report, 0.22.
   assert.deepEqual(scriptSteps('flow.json', () => '[{"tap":"B"}]'), [{ tap: 'B' }], 'a path is still a path');
 });
 
+test('committing a form forgets what was typed into it (field runs, 2026-10-03)', async () => {
+  const a = await import('../src/actions.js');
+  assert.equal(a.commitsAForm('SAVE'), true);
+  assert.equal(a.commitsAForm('SUBMIT SERVICE REQUEST'), true);
+  assert.equal(a.commitsAForm('Done'), false, 'also closes the keyboard');
+  assert.equal(a.commitsAForm('NEXT'), false, 'a wizard step');
+  assert.equal(a.commitsAForm('Saved items'), false);
+});
+
 test('a short word inside a long row is not "the only element containing" it (field run, 2026-10-03)', async () => {
   const m = await import('../src/matching.js');
   const screen = { width: 402, height: 874 };
