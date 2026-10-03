@@ -152,6 +152,9 @@ export function runFrom({ flow, startedAt, endedAt, history, oldestHistoryAt = n
  * time at all. It is deliberately not expressed as flow steps — terminating an
  * app that is not running throws, and a reset is not a step anybody is timing.
  */
+/** How long a reset waits for a relaunched app to show its root (the launch cap). */
+export const LAUNCH_WAIT_MS = 30_000;
+
 export async function resetFor(udid, flow) {
   const reset = flow.reset ?? {};
   const failures = [];
@@ -172,6 +175,20 @@ export async function resetFor(udid, flow) {
   if (reset.rootMarker && reset.launch) {
     try {
       await launchApp(udid, reset.launch, { terminateFirst: true });
+      // A relaunched app shows its splash first. The root marker was looked for
+      // on the splash ("Version 5.17.0, Build …"), not found, and the reset went
+      // looking for "back" on every one of ten human runs (2026-10-03). Wait for
+      // the marker the way a launch step waits for an operable app, up to the
+      // launch cap, before backing out of anything.
+      const until = Date.now() + LAUNCH_WAIT_MS;
+      while (Date.now() < until) {
+        try {
+          await api.locate(udid, reset.rootMarker, { refresh: true });
+          break;
+        } catch {
+          await new Promise((r) => setTimeout(r, 700));
+        }
+      }
       for (let attempt = 0; attempt <= (reset.maxBack ?? 4); attempt += 1) {
         await api.waitFor(udid, { mode: 'stable', stableMs: 350, timeoutMs: 3000 });
         try {

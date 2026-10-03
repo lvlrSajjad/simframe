@@ -3683,6 +3683,16 @@ test('simframe do takes a script inline, as the skill shows (field report, 0.22.
   assert.deepEqual(scriptSteps('flow.json', () => '[{"tap":"B"}]'), [{ tap: 'B' }], 'a path is still a path');
 });
 
+test('a baseline reset waits for the relaunched app before backing out (human runs, 2026-10-03)', async () => {
+  const b = await import('../src/baseline.js');
+  assert.equal(b.LAUNCH_WAIT_MS, 30_000);
+  const src = fs.readFileSync(new URL('../src/baseline.js', import.meta.url), 'utf8');
+  const launch = src.indexOf("await launchApp(udid, reset.launch, { terminateFirst: true });");
+  const wait = src.indexOf('const until = Date.now() + LAUNCH_WAIT_MS;');
+  const backOut = src.indexOf("await api.locate(udid, 'back', { refresh: true });");
+  assert.ok(launch > 0 && wait > launch && backOut > wait, 'launch, then wait for the root, then back out');
+});
+
 test('landing on another stored version of the expected screen is not a wrong turn (comparison runs, 2026-10-03)', async () => {
   const a = await import('../src/actions.js');
   const sm = await import('../src/screenmap.js');
