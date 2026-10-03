@@ -677,7 +677,7 @@ export async function runScript(
         // `fieldContents` — so the wait only has to cover the keystrokes
         // landing, not a navigation. A short budget, and no pretence that an
         // unsatisfied one means anything.
-        const staysPut = graph.STAYS_ON_SCREEN.has(step.action);
+        const staysPut = graph.STAYS_ON_SCREEN.has(step.action) || landing.movedNothing === true;
         const w = await api.waitFor(deviceQuery, {
           mode: 'settle',
           since: before,
@@ -698,7 +698,7 @@ export async function runScript(
           // What this wait was allowed, and where the number came from. A
           // timeout nobody can explain is how a fixed sleep comes back as a
           // constant with a comment.
-          budgetMs: graph.STAYS_ON_SCREEN.has(step.action) ? STAYS_PUT_BUDGET_MS : budgetMs,
+          budgetMs: staysPut ? STAYS_PUT_BUDGET_MS : budgetMs,
           stillnessMs: stillness,
           quietGapMs: w.quietGapMs,
           // The baseline had already finished moving when the wait began, so it
@@ -794,7 +794,7 @@ export async function runScript(
         // this wait. It gets the stays-put budget, as its own settle does.
         const afterScreen = await api.screenIdentity(deviceQuery, {
           options, settleMs: stableMs, confirmNovel,
-          timeoutMs: graph.STAYS_ON_SCREEN.has(step.action) ? STAYS_PUT_BUDGET_MS : timeoutMs,
+          timeoutMs: graph.STAYS_ON_SCREEN.has(step.action) || landing.movedNothing === true ? STAYS_PUT_BUDGET_MS : timeoutMs,
         });
         afterReading = afterScreen;
         verification = {
@@ -823,6 +823,12 @@ export async function runScript(
           predicted: prediction ? { to: prediction.to.slice(0, 10), kind: prediction.kind, seen: prediction.count } : null,
           observed: { to: afterScreen.hash?.slice(0, 10), kind },
         };
+        // A step that had nothing to do (a scrollTo whose target was already in
+        // view) is right not to move the screen; "not confirmed to have landed"
+        // there sent agents to check a step that had nothing to land.
+        if (landing.movedNothing === true && verification.verdict === 'no-visible-change') {
+          verification = { ...verification, verdict: 'ok', detail: 'nothing to do — the target was already in view' };
+        }
         // One more look before "nothing happened" is allowed to stand, because
         // the map printed below the verdict is a later read and has three times
         // contradicted it in the same response.
@@ -3287,6 +3293,10 @@ async function runStep(deviceQuery, udid, step, ctx) {
               `"${query}" is in the tree but not in view (at ${found.target.x},${found.target.y}`
               + ` on a ${Math.round(points?.width ?? 0)}x${Math.round(points?.height ?? 0)}pt screen)`);
           }
+          // Nothing scrolled: the screen has no reason to move, and the settle
+          // after this step waited for it until it gave up — "already in view"
+          // followed by "never settled after 2.5s" (field report, 0.22.0).
+          if (!scrolled.length && ctx.landing) ctx.landing.movedNothing = true;
           return `"${found.target.label ?? query}" is in view at ${found.target.x},${found.target.y}${arrivedHow()}`;
         } catch (err) {
           if (lastMiss !== 'off-view') lastMiss = 'absent';

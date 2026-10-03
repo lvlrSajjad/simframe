@@ -3486,7 +3486,11 @@ test('a typed field is not slowed or flagged by a settle the pixels cannot satis
   assert.match(src, /const changedQuietly = store\.textChangeOf\(udid, actedAt\) != null;/);
   assert.match(src, /const fresh = changedQuietly \|\| stillSinceActing\(state, actedAt\);/);
   const act = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
-  assert.match(act, /timeoutMs: graph\.STAYS_ON_SCREEN\.has\(step\.action\) \? STAYS_PUT_BUDGET_MS : timeoutMs,/);
+  assert.match(act, /timeoutMs: graph\.STAYS_ON_SCREEN\.has\(step\.action\) \|\| landing\.movedNothing === true \? STAYS_PUT_BUDGET_MS : timeoutMs,/);
+  // A scrollTo that found its target already in view moved nothing, and is
+  // not made to wait for movement (field report, 0.22.0: "never settled").
+  assert.match(act, /if \(!scrolled\.length && ctx\.landing\) ctx\.landing\.movedNothing = true;/);
+  assert.match(act, /const staysPut = graph\.STAYS_ON_SCREEN\.has\(step\.action\) \|\| landing\.movedNothing === true;/);
 });
 
 test('a sweep says why it stopped and whether it found what it was sent for (field report, 0.22.0)', () => {
