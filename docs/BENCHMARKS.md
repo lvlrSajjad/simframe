@@ -4903,3 +4903,33 @@ wait, so a crawl that restarts this app to recover usually stops as "did not
 finish launching". The crawl no longer restarts at its start, and leaves
 recovery restarts under the cap. Whether a launch edge may wait p95 + margin
 past 10 s is the owner's call, not this code's.
+
+## Ecotrak crawls 4–12 — 2026-10-02
+
+`7B8F8963`, signed in, packager running, read-only. No complete Ecotrak map yet.
+Each run found a fault, which was fixed and committed before the next run. The
+best run (11) mapped 6 screens and 6 transitions in 24 actions before a
+relaunch ran past the 10 s cap. Every write control the app showed — CHECK IN,
+START DRIVE, START BREAK, CLOCK OUT, Confirm, APPLY, RESET — was refused in
+every run. Checked against the crawl state, the graph and the logs: none was
+ever tapped.
+
+| run | what stopped it or wasted it | fix |
+| --- | --- | --- |
+| 4 | Track Time's week strip re-tapped as seven "new" screens | aliases by name and by tokens; strips grouped like lists |
+| 4 | the Service Provider control toggled a sheet and read as a picked option | a control that closes what it opened is a toggle |
+| 5 | an unlabeled back chevron was not a way back, so the crawl relaunched (>10 s) | a leading nav-bar button is a back affordance with or without a label |
+| 5 | filter-sheet radio options tapped one after another (never applied) | a screen with Apply, Save, Done… is a form; read-only does not touch its rows |
+| 5 | `--allow-create` would have opened CHECK IN, which writes on the tap | `actsImmediately` is refused in every mode |
+| 6 | "Near Me" raised a location dialog; 7 taps behind it at ~13 s each | a dialog is detected by its dismiss button, and backing out dismisses it |
+| 6 | OPEN SETTINGS left the app | "open settings" and kin join the leave-the-app words |
+| 7, 8 | began under the dialog, rooted the map on it, reported success with 0 transitions | dialogs dismissed at the start screen too; zero transitions is FAILED |
+| 9 | empty labels matched "✕" and "<", so an unlabeled chip read as a dialog | symbols that normalise to nothing match nothing |
+| 9 | the map's place names were doors at ~22 s per no-change tap | OCR-only mid-screen text is not a door where the tree knows controls; learned tap timeout |
+| 10 | Track Time paged back week by week, "MON, 14" vs "MON, 28" | doors compared with numbers removed |
+| 11 | recovery relaunched (>10 s) instead of going home | the home tab is tried first |
+
+Two measurements matter for the next decision. A tap that changes nothing
+costs 13–22 s of verification, and a warm relaunch of this debug build takes
+9–16 s to reach home. Both are larger than the actions the crawl exists to
+take, so most of a 15-minute budget goes to recovery and verification.
