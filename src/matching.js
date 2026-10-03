@@ -149,7 +149,7 @@ function synonymGroup(query) {
  * Returns candidates sorted best first, each with the reasons behind its score
  * so a caller — or a person reading a failure — can see why.
  */
-export function rank(targets, intent, { screen } = {}) {
+export function rank(targets, intent, { screen, role } = {}) {
   // Never offer something that is not on screen. A scrolled-away row still sits
   // in the map with a negative y, and tapping it lands somewhere else entirely.
   const visible = screen?.width && screen?.height
@@ -161,7 +161,10 @@ export function rank(targets, intent, { screen } = {}) {
       })
     : targets;
   const group = synonymGroup(intent);
-  const roleHint = ROLE_HINTS.find((h) => h.pattern.test(intent));
+  // A caller that knows the role says so: a `type` step means a field, and
+  // `type into "Search"` went into Settings' Search *row* instead of its search
+  // field, in two runs out of three (2026-10-03).
+  const roleHint = (role === 'field' ? ROLE_HINTS[0] : null) ?? ROLE_HINTS.find((h) => h.pattern.test(intent));
   const regionHint = REGION_HINTS.find((h) => h.pattern.test(intent));
   // Strip the verb: "tap the Save button" should match a control called "Save".
   const bare = norm(intent)

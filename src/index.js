@@ -1650,7 +1650,7 @@ export async function locate(deviceQuery, query, opts = {}) {
 async function locateWith(
   deviceQuery,
   query,
-  { index, refresh = false, useAx = true, useOcr = true, settleMs = MEMORY_SETTLE_MS, options, escalated } = {},
+  { index, refresh = false, useAx = true, useOcr = true, settleMs = MEMORY_SETTLE_MS, options, escalated, role } = {},
 ) {
   const { device, state: firstState } = await ensureDaemon(deviceQuery, options);
   const udid = device.udid;
@@ -1835,7 +1835,7 @@ async function locateWith(
   // ("tap Save"), typos, icon-only controls by synonym ("back"), and where on
   // screen the caller meant ("Assets tab").
   if (index == null) {
-    const outcome = matching.resolve(entry.targets, query, { screen: points });
+    const outcome = matching.resolve(entry.targets, query, { screen: points, role });
     if (outcome.status === 'ambiguous') {
       const list = outcome.alternatives
         .map((a, i) => `[${i}] "${a.label}" (${a.x},${a.y}) ${a.region ?? 'content'} ${a.score}`)

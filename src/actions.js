@@ -2164,7 +2164,7 @@ function noteFieldChange(udid, field, back) {
 }
 
 async function focusField(deviceQuery, udid, step, ctx) {
-  const found = await api.locate(deviceQuery, step.into, { index: step.index, refresh: step.refresh });
+  const found = await api.locate(deviceQuery, step.into, { index: step.index, refresh: step.refresh, role: 'field' });
   const tappedAt = Date.now();
   await input.tapPoint(udid, found.target.x, found.target.y);
   const focused = await awaitFocus(deviceQuery, found.target, ctx);
@@ -3389,9 +3389,15 @@ async function runStep(deviceQuery, udid, step, ctx) {
               // reversal, so "there is no direction to try" (which it used to
               // say when the tree was silent) is no longer true and would be
               // the same kind of unchecked assertion as the sentence below it.
-              `${query} is not reachable by scrolling: it stopped moving`
-              + (new Set(scrolled).size > 1 ? ' both ways' : ` scrolling ${scrolled[0]}`)
-              + ` (${scrolled.join(', ')}) after ${i + 1} attempt(s).`
+              // When it moved and reached both ends without the label ever
+              // appearing, the answer is that the label is not on this screen.
+              // "It stopped moving both ways" read as a scrolling fault to a
+              // tester whose sweep scrolled the same list fine (2026-10-03).
+              (movedOnce && lastMiss === 'absent' && new Set(scrolled).size > 1
+                ? `"${query}" is not on this screen: scrolled to both ends (${scrolled.join(', ')}) and it never appeared.`
+                : `${query} is not reachable by scrolling: it stopped moving`
+                  + (new Set(scrolled).size > 1 ? ' both ways' : ` scrolling ${scrolled[0]}`)
+                  + ` (${scrolled.join(', ')}) after ${i + 1} attempt(s).`)
               // Reported on 0.19.0: a React Native ScrollView that a plain swipe
               // from another tool scrolled at once, and that none of these moved.
               + (movedOnce ? '' : ' No scroll moved the screen at all, so this says nothing about'

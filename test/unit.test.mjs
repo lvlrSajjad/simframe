@@ -3683,6 +3683,19 @@ test('simframe do takes a script inline, as the skill shows (field report, 0.22.
   assert.deepEqual(scriptSteps('flow.json', () => '[{"tap":"B"}]'), [{ tap: 'B' }], 'a path is still a path');
 });
 
+test('a type step means a field: "Search" is the search field, not the Search row (comparison runs, 2026-10-03)', async () => {
+  const m = await import('../src/matching.js');
+  const screen = { width: 402, height: 874 };
+  const row = { label: 'Search', type: 'Button', x: 201, y: 520, region: 'content', source: 'ax' };
+  const field = { label: 'Search', type: 'SearchField', x: 201, y: 820, region: 'content', source: 'ax' };
+  assert.equal(m.resolve([row, field], 'Search', { screen }).status, 'ambiguous', 'a tap still asks');
+  const typed = m.resolve([row, field], 'Search', { screen, role: 'field' });
+  assert.equal(typed.status, 'ok');
+  assert.equal(typed.target.type, 'SearchField');
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /api\.locate\(deviceQuery, step\.into, \{ index: step\.index, refresh: step\.refresh, role: 'field' \}\)/);
+});
+
 test('a synonym never competes with the name the caller wrote (field report, 0.22.0)', async () => {
   const m = await import('../src/matching.js');
   const screen = { width: 402, height: 874 };
@@ -6636,7 +6649,7 @@ test('a wait resolves against the live screen, not against memory', async () => 
   // are required to be fresh. The first version of this assertion swept in
   // `type`'s field lookup and would have undone that design in the name of
   // tidiness.
-  assert.match(src, /api\.locate\(deviceQuery, step\.into, \{ index: step\.index, refresh: step\.refresh \}/,
+  assert.match(src, /api\.locate\(deviceQuery, step\.into, \{ index: step\.index, refresh: step\.refresh, role: 'field' \}/,
     'an action still resolves from the map; this test is about checks');
 });
 
