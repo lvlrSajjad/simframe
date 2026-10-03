@@ -824,6 +824,18 @@ Reproduce all of it with `npm run bench`, which prints the same table against
 your machine. Full detail, including the measurement traps, is in
 [`BENCHMARKS.md`](BENCHMARKS.md).
 
+### Tokens and model calls per verified flow
+
+Measured on two suite flows, three runs each, all verified
+(`scripts/bench-headtohead.mjs`; derivations in BENCHMARKS):
+
+| 4-step Settings flow | model calls | tokens | projected with model turns |
+| --- | --- | --- | --- |
+| one `sim_do` | 1 | 382 | 39 s |
+| `sim_goal` | 2 | 436 | 65 s |
+| text map + tap, per step | 7 | 1,506 | 168 s |
+| screenshot + tap, per step | 8 | 6,461 | 183 s |
+
 ### Wall clock per step — where the time really goes
 
 Every number above is microscopic next to the one that decides how fast this

@@ -5047,3 +5047,53 @@ opened a month picker and got lost, so goal mode now backs out toward a target
 the graph knows before it searches. Backing out had no way off a tab root, so
 it now uses the home tab. One search also opened "Select All" and "Deselect
 All" in a filter sheet without applying them; selection verbs are now refused.
+
+## Head to head: tokens and model calls per verified flow — 2026-10-03
+
+`scripts/bench-headtohead.mjs`, on `326464A4` (iPhone 17 Pro, iOS 26.5),
+M2 Pro, Xcode 27.0. The two HPI suite flows were run three times in each of
+four arms, on the same device and through the same simframe actions. Every one
+of the 24 runs ended verified, checked by a fresh `find` of the flow's end
+marker.
+
+- **batch:** one `simframe do` with the whole flow.
+- **goal:** `do` the launch, then `simframe goal "A > B > C"`.
+- **step:** what agents did in the field — per step, read the text map, then tap.
+- **screenshot:** what screenshot-driven tools do — per step, a full
+  screenshot, then a tap, plus one last screenshot to see the result.
+
+| flow | arm | verified | model calls | tokens (median) | of which images | tool wall (median) | projected with model turns | tokens per verified flow |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| settings-larger-text | batch | 3/3 | 1 | 382 | 0 | 18.7 s | 39 s | 378 |
+| settings-larger-text | goal | 3/3 | 2 | 436 | 0 | 24.9 s | 65 s | 436 |
+| settings-larger-text | step | 3/3 | 7 | 1506 | 0 | 28.4 s | 168 s | 1504 |
+| settings-larger-text | screenshot | 3/3 | 8 | 6461 | 6032 | 22.7 s | 183 s | 6462 |
+| contacts-kate-bell | batch | 3/3 | 1 | 480 | 0 | 26.2 s | 46 s | 480 |
+| contacts-kate-bell | goal | 3/3 | 2 | 440 | 0 | 28.3 s | 68 s | 446 |
+| contacts-kate-bell | step | 3/3 | 3 | 755 | 0 | 28.4 s | 88 s | 753 |
+| contacts-kate-bell | screenshot | 3/3 | 4 | 3412 | 3016 | 20.5 s | 101 s | 3425 |
+
+**What is measured and what is derived.** The text each command printed,
+every screenshot's pixel size (1206×2622 here), wall time and the end check are
+measured. Tokens are derived: characters ÷ 3.5 for text, and for an image
+width × height ÷ 750 after the API's downscale to ≤1568 px and ≤1.15 MP, which
+comes to about 1,508 tokens per screenshot. Model calls follow each protocol;
+they are not counted from a live agent. The projected column adds 20 s per model
+call, the figure the `hpi` latency model uses.
+
+**Reading it.**
+- One `sim_do` used **17×** fewer tokens than the screenshot protocol on the
+  4-step flow (382 vs 6,461) and **7×** fewer on the 2-step flow. It made 8×
+  and 4× fewer model calls.
+- Driving step by step with the text map costs about 4× a batch in tokens
+  and 3–7× in calls. That is the field pattern goal mode exists to remove.
+- Goal mode costs about what a batch costs, 2 calls and roughly 440 tokens,
+  without the caller knowing the steps.
+- Against simframe: the screenshot arm used the **least tool time** (20.5 and
+  22.7 s, against 18.7–28.4 s), because it verifies nothing. simframe's
+  per-step verification costs a few seconds per flow. That only stops mattering
+  once model turns are counted, which is the column the projection adds.
+- **Not a product comparison.** The screenshot arm drives taps by label
+  through simframe, not by coordinates a model read off an image, so it
+  measures the protocol's cost. A real screenshot tool would add the model's
+  own mis-taps and retries, and nothing here counts those.
