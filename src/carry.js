@@ -266,7 +266,9 @@ export function headerNote(udid) {
   if (!lines.has(udid)) lines.set(udid, memoryCounts(udid));
   const c = lines.get(udid);
   if (!c?.missing) return null;
-  return `${c.missing} screen(s) learned under older fingerprint rules are not in memory; see doctor`;
+  // Say whether it matters: "see doctor" left an agent unsure whether to act
+  // (field report, 2026-10-04). Nothing to do; it only costs a re-read.
+  return `${c.missing} screen(s) learned under older fingerprint rules are not in memory — nothing to do: they are relearned on the next visit, which costs one fresh read`;
 }
 
 /**

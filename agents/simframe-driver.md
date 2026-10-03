@@ -61,7 +61,13 @@ Think at milestones, not at steps.
   your last choice and take the next option. After a few tries, report what you
   tried.
 - **Batch to the next decision.** Write "wait for the first row, tap it" as
-  steps in one `sim_do`. Do not read the screen between them.
+  steps in one `sim_do`. Do not read the screen between them. Tap a row by its
+  label up to the first comma or more ("Unit 4, Air Compressor" beats "Unit 4
+  Copy, …"), not by coordinate; a bare prefix that fits several rows is
+  refused.
+- **Values the app changes by itself.** A field can change after the screen
+  settles (an app overriding a priority, say). Re-read before you report a value
+  as what you set.
 - **Check at the milestone.** Confirm the result once, where the brief says the
   job is done (a confirmation, a record number), not after every step.
 
@@ -80,8 +86,11 @@ Think at milestones, not at steps.
 
 Short, plain, under 200 words, in this order:
 
-- **Outcome:** reached / stopped before an irreversible step / blocked / failed,
-  in one sentence.
+- **Outcome:** reached / stopped before an irreversible step / **brief
+  contradicted by the app** / blocked / failed, in one sentence. Use "brief
+  contradicted by the app" when the app owns a value the brief fixed (a priority
+  the app sets itself, an option it locks), and say what the app did instead.
+  Stop there rather than fighting the app.
 - **Evidence:** the final screen's header line and the two or three elements
   that prove the outcome, quoted from simframe's output.
 - **Cost:** how many simframe calls you made.

@@ -25,9 +25,16 @@ commands are its tools under the same names (`sim_ui`, `sim_do`, `sim_state`,
 `sim_goto`…). Use those; for `doctor` and the other diagnostics, ask the user
 to run `npm install -g simframe`.
 
-## Delegate the driving
+## Delegate the driving — the default
 
-If the `simframe:simframe-driver` agent is available, hand it anything that takes more than one or two simulator actions:
+**Hand the driving to the `simframe:simframe-driver` agent.** Drive yourself
+only for one or two actions. This holds when the task is testing simframe
+itself: run the driver first and ask it to quote any tool line that looked odd.
+A main session that drove thirteen calls by hand, with the driver available,
+blamed simframe for an app's own behaviour that the driver's run then exposed
+(field report, 2026-10-04).
+
+Give it anything that takes more than one or two simulator actions:
 the device UDID, the app, the goal, what "done" looks like, and what it must not
 do. It drives on a faster model with only simframe's tools, so it cannot drift
 into other simulator tools, and its tool output stays out of your context. It
@@ -298,6 +305,26 @@ Steps — every place a control is named accepts a selector:
 | `{"launch": {"value": "com.example.app", "relaunch": true, "args": ["-uiTest","1"]}}` | |
 | `{"openUrl": "myapp://path"}` | |
 | `{"permission": {"value": "photos", "grant": "grant", "bundleId": "com.example.app"}}` | |
+
+## A network-heavy wizard in one batch
+
+When every step loads something, put the wait for the next row *before* the tap
+that needs it, and chain the whole wizard in one `sim_do`:
+
+```json
+[{"tap": "CREATE A SERVICE REQUEST"},
+ {"waitFor": {"value": "Store #", "timeoutMs": 15000}},
+ {"tap": "Downtown | Store # 12"},
+ {"waitFor": {"value": "Records", "timeoutMs": 15000}},
+ {"tap": "Unit 4, Air Compressor"}]
+```
+
+Once a run like that has worked, save it (`saveAs`) and replay it with
+`sim_flow_run`. A repeat should cost the app's loading and the taps, not a model
+turn per screen. Name a row by its label up to the first comma or more: "Unit
+4, Air Compressor" picks that row over "Unit 4 Copy, Air Compressor", so a raw
+coordinate is not needed. A bare "Unit 4" fits every copy and is refused as
+ambiguous, which is the safe answer.
 
 ## Selectors
 
