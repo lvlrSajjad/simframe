@@ -634,7 +634,7 @@ export async function screenMap(deviceQuery, {
  * cheerfully says "carry on" into an unknown screen would be worse than no hint
  * at all.
  */
-export function nextHint({ ok, escalated, settled, unmoved, loading, known, hash, exits, elements, ambiguous, filtered, exitList, staleExits } = {}) {
+export function nextHint({ ok, escalated, settled, unmoved, loading, known, hash, exits, elements, ambiguous, repeated, filtered, exitList, staleExits } = {}) {
   if (ok === false) {
     return 'next: the flow stopped here — this is the moment to think. sim_recall shows how you got here; sim_ui re-reads the screen.';
   }
@@ -670,9 +670,12 @@ export function nextHint({ ok, escalated, settled, unmoved, loading, known, hash
     return 'next: new screen, nothing predicted here yet — read it before acting on a label you have not seen on it.';
   }
   if (ambiguous > 0) {
+    // Named: "one label repeats" sent an agent hunting for which (field
+    // report, 0.22.0).
+    const which = Array.isArray(repeated) && repeated.length ? ` (${repeated.slice(0, 4).map((l) => JSON.stringify(l)).join(', ')}${repeated.length > 4 ? ', …' : ''})` : '';
     return ambiguous === 1
-      ? 'next: one label repeats on this screen — address that one by #ref, and the rest can go in one sim_do.'
-      : `next: ${ambiguous} labels repeat on this screen — address those by #ref, and the rest can go in one sim_do.`;
+      ? `next: one label repeats on this screen${which} — address that one by #ref, and the rest can go in one sim_do.`
+      : `next: ${ambiguous} labels repeat on this screen${which} — address those by #ref, and the rest can go in one sim_do.`;
   }
   const known_ = hash ? `known (${hash.slice(0, 8)}${exits ? `, ${exits} known exit${exits === 1 ? '' : 's'}` : ''})` : 'known';
   if (filtered) {
@@ -724,6 +727,7 @@ export function hintFor(map, { flowOk = true, escalated = false } = {}) {
     staleExits: map?.staleExits ?? 0,
     elements: map?.rows?.length ?? 0,
     ambiguous: ambiguousLabels(map?.rows),
+    repeated: repeatedLabels(map?.rows),
   });
 }
 
@@ -785,15 +789,33 @@ export function exitsLine(exitList, { limit = 6, stale = 0 } = {}) {
   return `worked here before: ${parts.join(', ')}`;
 }
 
-/** How many labels are worn by more than one element a caller could act on. */
-export function ambiguousLabels(rows) {
+/**
+ * Labels worn by more than one element a caller could act on.
+ *
+ * The same rule as `matching.dropEchoedCaptions`: a caption that repeats its
+ * own control's name is not a second candidate, so a form's "First Name"
+ * caption and field are not a repeat. Two controls, or two captions with no
+ * control, are.
+ */
+const NAMES_ONLY = /^(statictext|text|label|heading|image)$/i;
+export function repeatedLabels(rows) {
   const seen = new Map();
   for (const r of rows ?? []) {
     const key = alnum(r.label);
     if (!key) continue;
-    seen.set(key, (seen.get(key) ?? 0) + 1);
+    const e = seen.get(key) ?? { label: r.label, controls: 0, captions: 0 };
+    if (NAMES_ONLY.test(String(r.type ?? ''))) e.captions += 1;
+    else e.controls += 1;
+    seen.set(key, e);
   }
-  return [...seen.values()].filter((n) => n > 1).length;
+  return [...seen.values()]
+    .filter((e) => e.controls > 1 || (e.controls === 0 && e.captions > 1))
+    .map((e) => e.label);
+}
+
+/** How many labels are worn by more than one element a caller could act on. */
+export function ambiguousLabels(rows) {
+  return repeatedLabels(rows).length;
 }
 
 export function render({ device, identity, rows, truncated, collapsed, screen, name, exits, exitList, staleExits, verdictLine, ambiguities, cleared, overlay, unnamed, memoryNote = null }) {

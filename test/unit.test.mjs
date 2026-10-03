@@ -3489,6 +3489,30 @@ test('a typed field is not slowed or flagged by a settle the pixels cannot satis
   assert.match(act, /timeoutMs: graph\.STAYS_ON_SCREEN\.has\(step\.action\) \? STAYS_PUT_BUDGET_MS : timeoutMs,/);
 });
 
+test('result strings say what happened (field report, 0.22.0)', async () => {
+  const a = await import('../src/actions.js');
+  const v = await import('../src/view.js');
+  // A multiline input found at its left edge is the same field as the focused
+  // text area that contains that point.
+  const found = { x: 30, y: 666 };
+  const area = { x: 201, y: 690, frame: { x: 16, y: 650, width: 370, height: 80 } };
+  assert.equal(a.sameField(area, found), true);
+  assert.equal(a.sameField({ x: 201, y: 400, frame: { x: 16, y: 380, width: 370, height: 40 } }, found), false);
+  // A radio row whose selected flag appeared is not "changed from X to X".
+  const row = (extra) => ({ targets: [{ label: 'Henry the Handyman', value: 'radio button', ...extra }] });
+  assert.equal(a.stateDelta(row({}), row({ selected: false })), null, 'absent to false is not a change');
+  assert.match(a.stateDelta(row({ selected: false }), row({ selected: true })).detail, /changed from "false" to "true"/);
+  // A repeat is named, and a caption with its own field is not one.
+  const rows = [
+    { label: 'First Name', type: 'StaticText' }, { label: 'First Name', type: 'TextField' },
+    { label: 'Problem', type: 'Button' }, { label: 'Problem', type: 'Button' },
+  ];
+  assert.deepEqual(v.repeatedLabels(rows), ['Problem']);
+  assert.match(v.nextHint({ ok: true, settled: true, known: true, hash: 'abcdef12', ambiguous: 1, repeated: ['Problem'] }), /one label repeats on this screen \("Problem"\)/);
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /found\.target\.label \?\? found\.target\.identifier \?\? step\.into/, 'never "undefined"');
+});
+
 test('simframe do takes a script inline, as the skill shows (field report, 0.22.0)', async () => {
   const { scriptSteps } = await import('../src/actions.js');
   const noFile = () => { throw new Error('read a file'); };

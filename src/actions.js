@@ -72,6 +72,22 @@ const KEYBOARD_UP_TO = 40;
 const FOCUS_STABLE_MS = 250;
 /** How far a control's centre may move between the read and the readback. */
 const FIELD_READBACK_RADIUS = 40;
+/**
+ * The element the caller named, or the field it sits in.
+ *
+ * Centres alone missed a multiline React Native input: before focus it was
+ * found as a small element at its left edge (30,666), and the focused text
+ * area's centre was far from that, so a correctly focused field read as
+ * "focus is on another element" and its text as unconfirmed while the map
+ * showed it holding exactly the typed text (field report, 0.22.0). A frame
+ * that contains the other's point is the same field.
+ */
+export function sameField(t, target, radius = FIELD_READBACK_RADIUS) {
+  const inside = (f, p) => Boolean(f) && Number.isFinite(p?.x) && Number.isFinite(p?.y)
+    && p.x >= f.x && p.x <= f.x + (f.width ?? 0) && p.y >= f.y && p.y <= f.y + (f.height ?? 0);
+  return Math.hypot((t.x ?? 0) - target.x, (t.y ?? 0) - target.y) <= radius
+    || inside(t.frame, target) || inside(target.frame, t);
+}
 // The OCR pass needs a far wider one, and 40 is why measuring mattered: OCR
 // reports a value at the *value's* centre, not the label's tap point, and on a
 // pinch-zoomed page those were 133pt apart on a field that had filled
@@ -1247,9 +1263,7 @@ async function fieldContents(deviceQuery, target, sent, ctx) {
 async function readbackPass(deviceQuery, target, wanted, ctx, useOcr, radius) {
   try {
     const { entry } = await api.readScreenWith(deviceQuery, { useOcr, options: ctx.options });
-    const near = (entry.targets ?? []).filter(
-      (t) => Math.hypot((t.x ?? 0) - target.x, (t.y ?? 0) - target.y) <= radius,
-    );
+    const near = (entry.targets ?? []).filter((t) => sameField(t, target, radius));
     if (!near.length) return null;
     // The text may arrive as the control's `value` or as a sibling's label —
     // a React Native input renders its contents as a separate text node — so
@@ -2046,7 +2060,7 @@ async function focusHint(deviceQuery, target, ctx) {
     let elsewhere = false;
     for (const t of entry.targets ?? []) {
       if (t.focused !== true) continue;
-      if (Math.hypot((t.x ?? 0) - target.x, (t.y ?? 0) - target.y) <= FIELD_READBACK_RADIUS) {
+      if (sameField(t, target)) {
         return { focused: true, elsewhere: false };
       }
       elsewhere = true;
@@ -2152,7 +2166,8 @@ async function focusField(deviceQuery, udid, step, ctx) {
   void tappedAt;
   return {
     found,
-    where: `"${found.target.label}" at ${found.target.x},${found.target.y}`,
+    // `typed into "undefined"` was printed for a field with no label.
+    where: `"${found.target.label ?? found.target.identifier ?? step.into}" at ${found.target.x},${found.target.y}`,
     // Only claimed when the tree named a *different* focused element. "The
     // tree says nothing about focus" is not evidence the tap missed, and
     // asserting it from a screen that simply did not move is what made this
@@ -3664,10 +3679,20 @@ export function stateDelta(beforeEntry, afterEntry) {
     if (t.value == null && t.selected == null) continue;
     const was = before.get(keyOf(t));
     if (!was || was.state === stateOf(t)) continue;
+    // Say the part that changed. Printing `value ?? selected` reported a radio
+    // row whose selected flag moved as `changed from "radio button" to "radio
+    // button" — this worked` (field report, 0.22.0). And a flag that appears
+    // as false where it was absent is the tree saying more, not the control
+    // changing.
+    const valueMoved = String(was.target.value ?? '') !== String(t.value ?? '');
+    const flag = (v) => v === true || v === 'true' || v === '1';
+    const selectedMoved = flag(was.target.selected) !== flag(t.selected);
+    if (!valueMoved && !selectedMoved) continue;
     changes.push({
       name: t.label || t.identifier || keyOf(t),
-      from: was.target.value ?? was.target.selected,
-      to: t.value ?? t.selected,
+      from: valueMoved ? was.target.value : was.target.selected ?? false,
+      to: valueMoved ? t.value : t.selected ?? false,
+      what: valueMoved ? 'value' : 'selected',
     });
   }
   if (!changes.length) return null;
