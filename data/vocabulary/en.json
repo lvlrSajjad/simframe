@@ -296,7 +296,15 @@
       "unstar",
       "save for later",
       "join",
-      "leave"
+      "leave",
+      "select all",
+      "deselect all",
+      "unselect all",
+      "select none",
+      "clear selection",
+      "reset filters",
+      "clear filters",
+      "toggle all"
     ],
     "dismiss": [
       "cancel",

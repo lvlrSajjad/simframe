@@ -30,14 +30,18 @@
  * `runScript` and the graph.
  */
 import * as actions from './actions.js';
+import * as cartographer from './cartographer.js';
 import * as api from './index.js';
 import * as graph from './graph.js';
 import * as matching from './matching.js';
 import * as metrics from './metrics.js';
 import * as navigate from './navigate.js';
+import * as view from './view.js';
 import * as vocabulary from './vocabulary.js';
 
 export const SEEK_ACTIONS = 6;
+/** How far goal mode backs out toward a target the graph knows, before searching. */
+export const BACK_OUT_STEPS = 3;
 export const DEFAULT_MAX_ACTIONS = 30;
 export const DEFAULT_BUDGET_MS = 120000;
 
@@ -142,6 +146,35 @@ export async function runGoal(driver, {
         continue;
       }
 
+    }
+    // 2b. The graph knows where the target is but no route reaches it from
+    //     here: a person backs out first. Searching forward from a deep screen
+    //     for something on the home screen opened a month picker and got lost
+    //     (field app, 2026-10-03).
+    if (here.status !== 'found' && driver.knowsTarget && driver.back && await driver.knowsTarget(target)) {
+      for (let k = 0; k < BACK_OUT_STEPS && here.status !== 'found' && actions_ < maxActions; k += 1) {
+        const backed = await driver.back();
+        if (!backed?.acted) break;
+        actions_ += 1;
+        log.push(`backed out (${backed.via})`);
+        here = await driver.locate(target);
+        if (here.status === 'ambiguous') return out('ambiguous', { reason: 'ambiguous_intent', detail: `"${target}" matches ${here.candidates.length} things on this screen`, candidates: here.candidates });
+        if (here.status === 'found') break;
+        const known = await driver.knownRoute(target, { through: !(last && mode === 'find') });
+        if (known?.route?.length) {
+          const walked = await driver.walk(known.route);
+          actions_ += walked.steps ?? known.route.length;
+          log.push(`walked a remembered route of ${known.route.length} step(s) to "${target}"`);
+          if (walked.ok && !known.stoppedBefore) {
+            if (last) return finish(driver, out, { target, mode, reached: known.via });
+            here = { status: 'reached' };
+            break;
+          }
+          here = await driver.locate(target);
+          break;
+        }
+      }
+      if (here.status === 'reached') continue;
     }
     if (here.status !== 'found') {
       // 3. Explore for it, bounded.
@@ -348,6 +381,27 @@ export function deviceDriver(udid, { options = {}, flowName = null } = {}) {
         frontier = next;
       }
       return null;
+    },
+    /** Does the graph remember a door, or a screen, by this name? */
+    async knowsTarget(target) {
+      return Boolean(graph.findScreen(udid, target)?.node) || doorsNamed(udid, target).length > 0;
+    },
+    /** One step back: a dialog's dismiss, the nav bar's back, or the edge swipe. */
+    async back() {
+      const m = await view.screenMap(udid, { options, refresh: true }).catch(() => null);
+      const rows = m?.rows ?? [];
+      // On a tab root there is no back: the way home is the home tab, found by
+      // label in the bottom band (a field app draws its tab bar as plain text).
+      const homeWords = (vocabulary.load().cartographer?.homeTabs ?? []).map((w) => w.toLowerCase());
+      const lowest = Math.max(0, ...rows.map((r) => r.y ?? 0));
+      const homeTab = rows.find((r) => (r.y ?? 0) >= lowest - 30 && homeWords.includes(String(r.label ?? '').trim().toLowerCase().replace(/,.*$/, '')));
+      const way = cartographer.dialogDismiss(rows)
+        ?? rows.find((r) => r.region === 'nav-bar' && cartographer.isBackAffordance(r))
+        ?? rows.find((r) => cartographer.isBackAffordance(r))
+        ?? homeTab;
+      const step = way ? { tapAt: { x: Math.round(way.x), y: Math.round(way.y) } } : { swipe: { from: [6, 420], to: [320, 420] } };
+      const res = await run([step]);
+      return { acted: (res.ranSteps ?? 0) > 0, via: way ? `"${way.label ?? 'back'}"` : 'edge swipe' };
     },
     /** Is this label on screen as a control — not the screen's title, not the back button? */
     async visibleControl(label) {

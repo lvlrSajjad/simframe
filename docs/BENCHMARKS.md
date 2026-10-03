@@ -5034,3 +5034,16 @@ found:
 - **The search used a looser door list than the crawler.** `seek`, which goal
   mode uses to search, now uses the crawler's door rules, so it can no longer
   open MARK ALL READ, CHECK IN, or an option in a filter sheet.
+
+On the field app (`7B8F8963`, read-only navigation goals):
+
+| goal | result | actions | wall |
+| --- | --- | --- | --- |
+| open Time Sheets | done; a stale route went astray, so it looked and tapped "Time Sheets" | 3 | 17.8 s |
+| find Emergency Work Orders, from the More tab | done; backed out ("Back", then the "Home" tab), and the tile was on screen | 2 | 5.3 s |
+
+The second goal failed twice first. Searching forward from a deep screen
+opened a month picker and got lost, so goal mode now backs out toward a target
+the graph knows before it searches. Backing out had no way off a tab root, so
+it now uses the home tab. One search also opened "Select All" and "Deselect
+All" in a filter sheet without applying them; selection verbs are now refused.

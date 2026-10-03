@@ -7994,3 +7994,20 @@ test('goal mode stops, with a reason, rather than guess or cross the barrier', a
   for (const res of [blocked, ambiguous, missing, r]) assert.ok(metricsReasons.includes(res.reason), res.reason);
 });
 const metricsReasons = ['unknown_screen', 'ambiguous_intent', 'verification_failed', 'novel_dialog', 'no_plan'];
+
+test('goal mode backs out toward a target the graph knows before it searches forward', async () => {
+  const g = await import('../src/goal.js');
+  const a = goalApp();
+  await a.driver.tap({ label: 'More' });
+  await a.driver.tap({ label: 'Time Sheets' });
+  a.log.length = 0;
+  const stack = ['home', 'more', 'sheets'];
+  a.driver.knowsTarget = async (t) => t === 'Assets';
+  a.driver.back = async () => { stack.pop(); a.log.push('back'); Object.defineProperty(a, 'at', { value: stack.at(-1), configurable: true }); return { acted: true, via: 'Back' }; };
+  const S = { home: ['More', 'Assets'], more: ['Time Sheets'], sheets: ['Week'] };
+  a.driver.locate = async (t) => (S[stack.at(-1)].includes(t) ? { status: 'found', target: { label: t, x: 200, y: 200 } } : { status: 'absent' });
+  a.driver.seek = async () => { a.log.push('seek'); return { found: false, steps: 6 }; };
+  const r = await g.runGoal(a.driver, { goal: 'find Assets' });
+  assert.equal(r.status, 'done', g.renderGoal(r));
+  assert.deepEqual(a.log, ['back', 'back'], 'backed out twice and never searched');
+});
