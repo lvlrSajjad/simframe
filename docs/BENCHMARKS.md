@@ -4941,3 +4941,31 @@ and after. It found one more fault: iOS 26 titles the back button with the
 parent screen, the region priors sometimes put it in content, and the crawl
 recorded it nine times as a "picked option". A button in the top-left corner
 is now a back affordance whatever its label or region.
+
+## Ecotrak crawl 14 — 2026-10-03, after the app gained accessibility labels
+
+`7B8F8963`, signed in, read-only, 15-minute budget. The publish added real
+labels to the icon buttons ("Followed work orders", "Notifications", "Scan QR
+code", "Open Ema assistant").
+
+| | crawl 13 | crawl 14 |
+| --- | --- | --- |
+| screens | 7 | **34** |
+| transitions | 7 | **42** |
+| actions / wall | 30 / 142 s | 94 / 403 s |
+| stopped | relaunch past the 10 s cap | relaunch past the 10 s cap |
+
+Refused by the barrier, every time: CHECK IN, START DRIVE, START BREAK, CLOCK
+OUT, PURCHASE ORDERS, DISPATCH SCHEDULE, the bookmark button, map pins. Two
+in-place changes were flagged: the work-order filter chips "Open" and "Near Me".
+These are view filters, and nothing was saved.
+
+**Found:** after "Open Ema assistant" then "Map", a React Native developer
+overlay (Dismiss (ESC) / Reload JS) appeared, and the crawl tapped Reload JS as a
+door. A developer overlay is now an app error: it is reported first, it has no
+doors, it is dismissed, and Reload is never tapped. Tabs the app now marks as
+tabs are no longer reported as picked options.
+
+**Icon glyphs:** 0 of the targets read in this run carried an icon-font
+character. With real labels in place the tree no longer passes the glyph, so
+the glyph route is still unverified on a live screen.

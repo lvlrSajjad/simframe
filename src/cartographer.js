@@ -154,6 +154,20 @@ export function labelOf(row) {
   return nameFromIdentifier(row?.identifier);
 }
 
+/**
+ * A framework's developer overlay — React Native's red box or log box — over
+ * the app: the text it shows, or null. Found on Ecotrak: tapping "Map" in the
+ * Ema assistant raised one, and the crawl tapped its "Reload JS" as a door.
+ * It is an app error and a finding, never a place to explore.
+ */
+export function devOverlay(rows, { locale } = {}) {
+  const marks = (vocabulary.load(locale).cartographer?.devOverlay ?? []).map((w) => w.toLowerCase());
+  const hit = (rows ?? []).some((r) => marks.some((m) => String(r.label ?? '').toLowerCase().startsWith(m)));
+  if (!hit) return null;
+  const text = (rows ?? []).map((r) => String(r.label ?? '')).filter((l) => l && !marks.some((m) => l.toLowerCase().startsWith(m)) && !/^\d{1,2}:\d{2}$/.test(l));
+  return text.join(' | ').slice(0, 300) || '(the overlay showed no message)';
+}
+
 /** A stable name for a control on a screen. */
 export function controlKey(row) {
   return `${row.region ?? 'content'}|${alnum(row.label)}`;
@@ -210,6 +224,7 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
   // options changes a setting by itself — no Save, no write word on the label.
   // A dialog is up: everything behind it is out of reach, and what is in it
   // answers it. The way out is its dismiss button, which `back` takes.
+  if (devOverlay(ordered, { locale })) return { doors, refused, skipped: [], overlay: true };
   const dialog = dialogDismiss(ordered, { locale });
   if (dialog) {
     for (const row of ordered) {
@@ -386,6 +401,11 @@ function register(state, reading, opts) {
 }
 
 function registerAs(state, reading, { allowCreate, locale, via = null }) {
+  const overlay = devOverlay(reading.rows, { locale });
+  if (overlay) {
+    state.appErrors ??= [];
+    if (!state.appErrors.some((e) => e.text === overlay)) state.appErrors.push({ at: Date.now(), text: overlay, after: via });
+  }
   if (!seenTokens.has(state)) seenTokens.set(state, new Map());
   if (reading.tokens?.length) seenTokens.get(state).set(reading.hash, reading.tokens);
   let s = state.screens[reading.hash];
@@ -701,7 +721,10 @@ export async function crawl(driver, {
         register(state, reading, { allowCreate, locale });
         continue;
       }
-      if (door.region === 'content' && cameFrom && canon(state, reading.hash) === canon(state, cameFrom)) {
+      // A tab the app marks as one ("Attachments, tab, 2 of 4") switches a
+      // view; returning to a screen seen before is that, not a choice.
+      const isTab = /\btab\b/i.test(String(door.label)) || /tab/i.test(String(door.type ?? ''));
+      if (!isTab && door.region === 'content' && cameFrom && canon(state, reading.hash) === canon(state, cameFrom)) {
         mark(state, before.hash, door.key, { status: 'picked', to: reading.hash });
         (state.picked ??= []).push({ at: now(), screen: before.name ?? before.hash, label: door.label });
         const ctl = state.screens[canon(state, before.hash)]?.controls ?? {};
@@ -847,6 +870,7 @@ export function coverage(state) {
     refused: Object.values(state.refused).map((r) => ({ label: r.label, reason: r.reason, kind: r.kind, screens: r.screens.length })),
     leftApp: state.leftApp,
     picked: state.picked ?? [],
+    appErrors: state.appErrors ?? [],
     changedState: state.changedState ?? [],
     unexpected: state.unexpected,
     splits,
@@ -863,6 +887,7 @@ export function renderReport(cov, { limit = 12 } = {}) {
   const lines = [
     ...(r.failed ? [`FAILED — ${r.stoppedBecause}. Nothing below is a map of the app.`] : []),
     ...(r.blocked ? [`STOPPED EARLY — ${r.stoppedBecause}`] : []),
+    ...((cov.appErrors ?? []).length ? [`APP ERROR ${cov.appErrors.length}x — the app showed a developer error overlay: ${cov.appErrors.map((e) => `"${e.text}"${e.after?.label ? ` after tapping "${e.after.label}"` : ''}`).join('; ')}`] : []),
     ...((cov.changedState ?? []).length ? [`CHANGED STATE ${cov.changedState.length}x — a tap changed something in place, which a read-only crawl must not do; check it: ${cov.changedState.map((x) => `"${x.label}" on ${x.screen} (${x.changed.join(', ')})`).join('; ')}`] : []),
     `map of ${cov.bundle}: ${cov.screens} screen(s) (${cov.named} named), ${cov.edges} transition(s) recorded, ${cov.frontier.length} door(s) not yet opened`,
     `this run: ${r.actions ?? 0} action(s) in ${r.attempts ?? 0} attempt(s) of ≤${ATTEMPT_ACTIONS}${secs != null ? `, ${secs}s` : ''}, ${r.newScreens ?? 0} new screen(s), ${r.relaunches ?? 0} relaunch(es); stopped: ${r.stoppedBecause ?? '—'}${cov.runs > 1 ? ` (run ${cov.runs}, resumed)` : ''}`,

@@ -7831,3 +7831,13 @@ test('an icon-font glyph in a label is named from the app\'s own font, exactly o
   const view = await import('../src/view.js');
   assert.equal(view.displayName(icon('bell outline')), 'bell outline (icon)');
 });
+
+test('a developer error overlay is an app error to report, never a door, and Reload is never tapped', async () => {
+  const carto = await import('../src/cartographer.js');
+  const b = (label, x, y) => ({ label, x, y, type: 'Button', region: 'content', frame: { x: x - 50, y: y - 20, width: 100, height: 40 } });
+  const rows = [b('Dismiss (ESC)', 60, 800), b('Reload JS (⌘R)', 200, 800), { label: 'TypeError: undefined is not an object', type: 'Text', region: 'content', x: 200, y: 300 }];
+  assert.ok(carto.devOverlay(rows).includes('TypeError'));
+  assert.deepEqual(carto.doorsOf(rows).doors, []);
+  assert.equal(carto.classify(b('Reload JS (⌘R)', 200, 800)).kind, 'barrier');
+  assert.equal(carto.dialogDismiss(rows).label, 'Dismiss (ESC)');
+});
