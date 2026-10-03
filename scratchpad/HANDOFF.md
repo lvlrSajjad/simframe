@@ -66,7 +66,7 @@ goal-mode / cartographer work from 2026-10-01 to 2026-10-03.
   owner to sign in.
 - **No third-party identifiers in the repo** (`scripts/check-private.mjs`, CI).
   Shipped `src/` says "a React Native field app", never the company. Do not
-  name a variable `app` in tests: `app.foo.bar` reads as a bundle id.
+  name a variable `app` in tests: a property chain on it reads as a bundle id.
 - **CI:** about 10 min. A Safari first-run tip on a fresh runner device turned
   the fingerprint shard red twice. It is fixed in `test/tours/device-native.json`
   with an optional tap on the page heading. Release only on green.
