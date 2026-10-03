@@ -177,7 +177,7 @@ const trim = (text) => {
  *
  * It was wrong, and the counter-example is decisive. A React Native list card
  * exposes all of its children as one concatenated accessibility label —
- * `Anaheim | Store # 1020, , 1234 Main St, … | Quick Casual Restaurant`, 105
+ * `Downtown | Store # 12, , 100 Main St, … | Restaurant`, 105
  * characters, type `GenericElement`, region `content`. Every property my rule
  * tested is identical to the Settings caption's, and that card is *the only
  * tappable thing on the screen*.

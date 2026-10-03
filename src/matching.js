@@ -126,7 +126,7 @@ export function confusableFold(s) {
  * Whole words only, and never inside an identifier.
  *
  * `q.includes(w)` found "done" inside the testID
- * `create-service-request-3-toolbardonebarbuttonitemtext-input`, pulled in the
+ * `form-3-toolbardonebarbuttonitem-text-input`, pulled in the
  * close/dismiss group, and an unrelated "Close" button scored 0.95 against the
  * field the caller named exactly — refused as ambiguous (field report,
  * 0.22.0). A caller who writes an identifier means that control, not a

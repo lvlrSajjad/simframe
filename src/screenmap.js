@@ -708,7 +708,7 @@ export function nameFieldsByCaption(targets) {
  *
  * An app hides the background from accessibility while a sheet is open, which
  * is right, and OCR still reads it through the dimming — so the Problem
- * picker's map offered "Asset", "Anaheim" and the step tabs as tappable text,
+ * picker's map offered the form's labels and step tabs behind it as tappable text,
  * with nothing to say they were behind it (field report, 0.22.0; both runs).
  *
  * The shape: every accessibility element sits low on the screen, one of them

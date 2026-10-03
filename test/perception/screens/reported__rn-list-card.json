@@ -24,7 +24,7 @@
       "source": "ax"
     },
     {
-      "label": "Anaheim | Store # 1020, , 1234 Main St, Anaheim, CA 92806, , +1 (555) 555-1234, , Quick Casual Restaurant",
+      "label": "Downtown | Store # 1020, , 1234 Main St, Springfield, CA 90000, , +1 (555) 555-1234, , Quick Casual Restaurant",
       "value": null,
       "type": "GenericElement",
       "x": 201,
@@ -54,7 +54,7 @@
       "source": "ax"
     },
     {
-      "label": "4 Casa | Store # 3312, , 55 Mission Street, San Jose, CA 95110, , +1 (555) 555-2200, , Quick Service",
+      "label": "Uptown | Store # 3312, , 55 Mission Street, San Jose, CA 95110, , +1 (555) 555-2200, , Quick Service",
       "value": null,
       "type": "GenericElement",
       "x": 201,
@@ -92,16 +92,16 @@
         "label": "Add location"
       },
       {
-        "query": "Anaheim",
-        "label": "Anaheim | Store # 1020, , 1234 Main St, Anaheim, CA 92806, , +1 (555) 555-1234, , Quick Casual Restaurant"
+        "query": "Downtown",
+        "label": "Downtown | Store # 1020, , 1234 Main St, Springfield, CA 90000, , +1 (555) 555-1234, , Quick Casual Restaurant"
       }
     ],
     "ambiguous": [],
     "none": [],
     "discoverable": [
-      "Anaheim | Store # 1020, , 1234 Main St, Anaheim, CA 92806, , +1 (555) 555-1234, , Quick Casual Restaurant",
+      "Downtown | Store # 1020, , 1234 Main St, Springfield, CA 90000, , +1 (555) 555-1234, , Quick Casual Restaurant",
       "B test 1 | Store # 2041, , 900 Elm Road, Fresno, CA 93650, , +1 (555) 555-9876, , Fast Casual",
-      "4 Casa | Store # 3312, , 55 Mission Street, San Jose, CA 95110, , +1 (555) 555-2200, , Quick Service",
+      "Uptown | Store # 3312, , 55 Mission Street, San Jose, CA 95110, , +1 (555) 555-2200, , Quick Service",
       "Add location"
     ]
   }

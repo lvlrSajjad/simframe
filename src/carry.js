@@ -5,7 +5,7 @@
  * A screen's identity is a hash of tokens, and the token rules have a version.
  * When the rules changed, every node and every screen map written under the old
  * version stopped being read — `allNodes` and `screenmap.usable` filter on the
- * version — and nothing said so. Measured on 2026-10-01: a create-service-request
+ * version — and nothing said so. Measured on 2026-10-01: a multi-step request form
  * path on the bench device, learned over a week, had become invisible, and the
  * agent was told "new to simframe" on screens it had driven dozens of times.
  *
