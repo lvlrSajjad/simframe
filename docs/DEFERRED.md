@@ -2511,6 +2511,71 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+201. **The owner's 0.23.0 field run: a service request by hand and by the driver
+   (2026-10-04).** The report is kept by the owner and not committed, because it
+   holds app data. The finding that matters most: hand-driving, plus two
+   missing pieces of evidence, led an agent to blame simframe for the app's own
+   asynchronous priority override.
+
+   FIXED the same day:
+   - A keyboard key no longer ties with an app control of the same name
+     ("Done": `index` 0 in one run, 1 in the next).
+   - Repeats skip `behind?` rows.
+   - "81 Records" with no rows reads as loading.
+   - Radio evidence leads with the row turned on.
+   - A centred dialog marks the background below it.
+   - The header says the screen moved after a sweep or a late arrival. It no
+     longer says "NOT MOVED".
+   - A blind `type` after tapping a field reads that field back.
+   - `waitFor` says how long it held.
+   - The memory banner says nothing needs doing.
+   - The skill makes delegating to the driver the default, with a recipe for
+     network-heavy wizards.
+   - The driver reports "brief contradicted by the app".
+
+   *Open, in priority order (the handoff ranks them with Phase 20):*
+   1. **Transient text is lost.** A "Create Work Order Error" toast lived about
+      2 s during a `waitFor` and was gone before anything read it. The reason a
+      submit failed was lost for good. Fix: while a wait is pending, OCR the
+      frames that differ, and report text that appeared and went away. Also
+      return it from `sim_recall`, whose description promises "the actions
+      taken, and what each one did".
+   2. **Values that change with no action.** A field's value changing after the
+      screen was reported settled looks exactly like a wrong tap. Wanted:
+      "Priority: L4 → L1, 1.8 s after settle, no gesture sent". While
+      consecutive reads disagree, say "values still changing", not "settled;
+      chain".
+   3. **The keyboard hides the next field.** `[type A, type B]` fails with "B
+      is not on this screen", and `sweep` stops behind its own keyboard: "each
+      gesture moved 166, 0pt", then "reached the bottom", Description NOT
+      FOUND. Before resolving a named field, scroll it into view or dismiss
+      the keyboard. A 0 pt move means "blocked", not "bottom".
+   4. **`sweep` keeps no action log.** List every gesture it sent, with the
+      element under each start point.
+   5. **A cold first `ui` was slow and stale.** The harness moved it to the
+      background, and it served a map recalled 121 minutes earlier. A cold
+      session should read live.
+   6. **Several booted devices** (owner's decision). The main tools pick
+      one. The driver refuses; the tools should too.
+   7. **Two simframe servers in one client** (the plugin and `claude mcp
+      add`). `sim_devices` should say so, and say which one the driver uses.
+   8. **Stillness bail-out off by default.** `failIfStillFor` defaults to
+      off, so a dead wait runs its full timeout.
+   9. **Nudges.** No "next:" nudge toward the driver after many single-action
+      calls. No "save this as a flow?" after a fully seen multi-screen run. No
+      "what's new" line after an upgrade.
+   10. **Smaller items:**
+       - An assert reported y=0 for a visible element.
+       - Coordinates are shifted while a toast or the keyboard animates. Needs
+         a recording.
+       - A textarea's read-back was not retried after the keyboard closed.
+       - OCR noise in `~` text.
+       - Hints from a conflated identity (174).
+
+   App findings, the owner's to triage:
+   - The priority the screen let you pick was overridden asynchronously.
+   - A failed submit is not yet confirmed as creating no work order.
+
 200. **The model and tool comparison runs (2026-10-03; BENCHMARKS, "Who drives").**
    FIXED the same day unless marked open:
    - **Radio and checkbox rows ignored a tap at their centre** (React Native

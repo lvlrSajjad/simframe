@@ -28,6 +28,15 @@ baseline, and **0.23.0**.
 
 ## The backlog, in order
 
+**First, three fixes from the owner's 0.23.0 run** (DEFERRED 201; they cost
+trust and caused a misattribution, and #1 also feeds Phase 20's forward step):
+- (a) Transient toasts captured during waits and returned as text.
+- (b) "Value changed with no action" and "values still changing".
+- (c) The keyboard covering the next field in a batch or a sweep.
+
+After them, DEFERRED 201 items 4–10, in order, between Phase 20 items when they
+block a measurement.
+
 Pick from the top. Each item is scored on model calls per job, wall time
 against the person's medians, and wrong taps (must stay zero). Measure on the
 two field jobs before and after.
