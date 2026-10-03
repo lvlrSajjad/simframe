@@ -619,3 +619,23 @@ export function rank(entry, query) {
 export function match(entry, query) {
   return rank(entry, query)[0] ?? null;
 }
+
+/**
+ * Text that differs between two readings of one screen, outside the status
+ * bar, or null. Pure. The first difference is described; that is enough to
+ * say the tap landed.
+ */
+export function textChange(before, after) {
+  const texts = (entry) => (entry?.targets ?? [])
+    .filter((t) => t.region !== 'status-bar' && t.region !== 'keyboard')
+    .map((t) => [t.label, t.value].filter((x) => x != null && String(x).trim()).join(' = '))
+    .filter(Boolean);
+  if (!before?.targets || !after?.targets) return null;
+  const a = new Set(texts(before));
+  const b = new Set(texts(after));
+  const gone = [...a].find((x) => !b.has(x));
+  const came = [...b].find((x) => !a.has(x));
+  if (!gone && !came) return null;
+  const clip = (x) => (x.length > 60 ? `${x.slice(0, 57)}…` : x);
+  return gone && came ? `"${clip(gone)}" → "${clip(came)}"` : came ? `"${clip(came)}" appeared` : `"${clip(gone)}" went away`;
+}

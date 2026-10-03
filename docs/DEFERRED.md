@@ -2538,9 +2538,17 @@ worth more than the verdict.
      no-change verdict now re-reads fresh and compares text first.
      Verified live on the testbed: the step now reads `ok … the screen did not
      move, but its text changed in place: "Last pressed: nothing yet" → "Last
-     pressed: more-horizontal" — this worked, do not retry`. *Open:* the map
-     header's `NOT MOVED SINCE THE ACTION … it did not land` comes from pixel
-     stillness and still fires on a small text change.
+     pressed: more-horizontal" — this worked, do not retry`. The map header's
+     `NOT MOVED SINCE THE ACTION … it did not land` came from pixel stillness
+     (the daemon's change signal is a coarse grid) and still fired on a small
+     text change; FIXED 2026-10-03. A screen read that would say "not moved"
+     now reads fresh instead of recalling the old text, and two witnesses can
+     overrule the pixels: the step that made the action records its in-place
+     text change (described from masked readings) against that action's
+     timestamp, and memory holding older text. Either makes the header say
+     `text changed: "…" → "…"` and the screen settled. Verified live on the
+     testbed: a new icon reads `text changed`, the same icon again reads
+     `NOT MOVED`.
    - **A colour picker's tab persisted (F7).** A selected segment now makes its
      row a selection. *Open, for the owner to check:* a Settings crawl window
      correlates with `PrefersHorizontalText = 1` and a Hover Text colour in

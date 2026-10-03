@@ -7063,7 +7063,38 @@ test('a screen that has not moved since the action is not reported as still movi
   assert.match(v.nextHint({ ok: true, settled: false, unmoved: true }), /did not land/);
   assert.match(v.nextHint({ ok: true, settled: false }), /still moving/);
   const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
-  assert.match(src, /unmoved: !settled && Boolean\(stillnessPredatesAction\)/);
+  assert.match(src, /let stale = !settled && Boolean\(stillnessPredatesAction\)/);
+  assert.match(src, /unmoved: stale/);
+});
+
+test('a text change too small for the pixel signal is not reported as NOT MOVED (DEFERRED 197)', async () => {
+  // Peer test 0.21.0, F5: the testbed bell changed "Last pressed: nothing yet"
+  // to "Last pressed: bell", and the header said the tap did not land. The
+  // daemon's change signal is a coarse grid, and the unchanged layout recalled
+  // the old text, which agreed.
+  const v = await import('../src/view.js');
+  const quiet = v.render({ device: { name: 'iPhone' }, identity: { hash: 'abcdef012345', settled: true, unmoved: false, quietChange: '"Last pressed: nothing yet" → "Last pressed: bell"' }, rows: [] });
+  assert.doesNotMatch(quiet, /NOT MOVED|STILL MOVING/);
+  assert.match(quiet, /text changed: "Last pressed: nothing yet" → "Last pressed: bell"/);
+  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  // An unmoved screen is read fresh, never recalled, and its text decides.
+  assert.match(src, /let entry = stale \? null : recalled;/);
+  assert.match(src, /quietChange = store\.textChangeOf\(udid, store\.lastActionAt\(udid\)\)\n\s+\?\? \(recalled \? screenmap\.textChange\(recalled, entry\) : null\);/);
+  // The step that saw the change says so, keyed to its own action: a later
+  // action makes the note stale by itself.
+  const store = await import('../src/store.js');
+  const udid = freshDevice('quiet-text');
+  fs.mkdirSync(path.dirname(store.paths(udid).lastAction), { recursive: true });
+  store.noteAction(udid, 1000);
+  store.noteTextChange(udid, '"Last pressed: nothing yet" → "Last pressed: bell"');
+  assert.equal(store.textChangeOf(udid, 1000), '"Last pressed: nothing yet" → "Last pressed: bell"');
+  store.noteAction(udid, 2000);
+  assert.equal(store.textChangeOf(udid, store.lastActionAt(udid)), null, 'a later action did not change text');
+  // What reaches disk is described from masked readings.
+  const act = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(act, /textChange\(typed\.maskTyped\(beforeScreen\.entry\), typed\.maskTyped\(again\.entry\)\)/);
+  assert.match(src, /if \(quietChange\) \{ stale = false; screenmap\.remember\(udid, entry\); \}/);
+  assert.match(src, /settled: settled \|\| Boolean\(quietChange\)/);
 });
 
 test('the daemon looks again soon while the last frame was unsettled (0.19.0)', () => {

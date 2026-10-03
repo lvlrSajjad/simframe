@@ -1996,7 +1996,14 @@ export async function screenIdentity(deviceQuery, { options, confirmNovel = true
       timeoutMs: Math.min(timeoutMs ?? IDENTITY_SETTLE_TIMEOUT_MS, IDENTITY_SETTLE_TIMEOUT_MS),
     });
     const current = settledFrame ?? state;
-    let entry = fresh ? null : screenmap.recallNearest(udid, current.layoutHash)?.entry;
+    // Pixels still since before the action. The daemon's change signal is a
+    // coarse grid, so a tap that only rewrote a line of text ("Last pressed:
+    // nothing yet" → "bell") never moves it — and the same layout recalls the
+    // old reading, which then agreed that nothing happened. Read fresh and let
+    // the text decide: memory may confirm, never deny.
+    let stale = !settled && Boolean(stillnessPredatesAction);
+    const recalled = fresh ? null : screenmap.recallNearest(udid, current.layoutHash)?.entry;
+    let entry = stale ? null : recalled;
     const geo = await deviceGeometry(udid, current);
     if (!entry) {
       entry = await screenmap.build(udid, {
@@ -2008,16 +2015,30 @@ export async function screenIdentity(deviceQuery, { options, confirmNovel = true
         persist: settled,
       });
     }
+    let quietChange = null;
+    if (stale) {
+      // Two witnesses, either enough: the step that made the action saw the
+      // text change (its own before/after), or memory holds older text.
+      quietChange = store.textChangeOf(udid, store.lastActionAt(udid))
+        ?? (recalled ? screenmap.textChange(recalled, entry) : null);
+      // The screen is still, so this reading is the one to remember: the next
+      // comparison must start from the new text, or a tap that really missed
+      // would be credited with this change again.
+      if (quietChange) { stale = false; screenmap.remember(udid, entry); }
+    }
     return {
       hash: entry.structuralHash,
       tokens: entry.structuralTokens ?? [],
       keyboard: Boolean(entry.keyboard),
       layoutHash: current.layoutHash,
-      settled,
+      // A text change below the pixel threshold on a still screen is a settled
+      // screen, not a moving one.
+      settled: settled || Boolean(quietChange),
       // Unsettled for the opposite reason to moving: nothing has changed since
       // the action at all. Both used to render as `STILL MOVING`, which told an
       // agent to wait for a screen that a missed tap had left perfectly still.
-      unmoved: !settled && Boolean(stillnessPredatesAction),
+      unmoved: stale,
+      ...(quietChange ? { quietChange } : {}),
       // Settled and incomplete are different states and used to render
       // identically. A screen awaiting a network call is perfectly still; a
       // person sees a spinner and knows to wait. The classifier already says
@@ -2028,6 +2049,7 @@ export async function screenIdentity(deviceQuery, { options, confirmNovel = true
       // screen map needs both, and reading twice was the whole cost of it.
       entry,
       state: current,
+      udid,
       points: { width: geo.pointWidth, height: geo.pointHeight },
     };
   };

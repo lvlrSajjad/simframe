@@ -17,6 +17,7 @@ import * as view from './view.js';
 import * as planner from './planner.js';
 import * as metrics from './metrics.js';
 import * as screenmap from './screenmap.js';
+import * as store from './store.js';
 import { launchApp, openUrl, setPermission, terminateApp } from './platform/index.js';
 import { shellCrashed } from './device-state.js';
 
@@ -1851,25 +1852,9 @@ async function untilOperable(deviceQuery, options, capMs) {
   }
 }
 
-/**
- * Text that differs between two readings of one screen, outside the status
- * bar, or null. Pure. The first difference is described; that is enough to
- * say the tap landed.
- */
-export function textChange(before, after) {
-  const texts = (entry) => (entry?.targets ?? [])
-    .filter((t) => t.region !== 'status-bar' && t.region !== 'keyboard')
-    .map((t) => [t.label, t.value].filter((x) => x != null && String(x).trim()).join(' = '))
-    .filter(Boolean);
-  if (!before?.targets || !after?.targets) return null;
-  const a = new Set(texts(before));
-  const b = new Set(texts(after));
-  const gone = [...a].find((x) => !b.has(x));
-  const came = [...b].find((x) => !a.has(x));
-  if (!gone && !came) return null;
-  const clip = (x) => (x.length > 60 ? `${x.slice(0, 57)}…` : x);
-  return gone && came ? `"${clip(gone)}" → "${clip(came)}"` : came ? `"${clip(came)}" appeared` : `"${clip(gone)}" went away`;
-}
+// Lives in screenmap.js so the screen read can use it too; kept exported here.
+export { textChange } from './screenmap.js';
+const { textChange } = screenmap;
 
 async function confirmNoChange(deviceQuery, verification, { beforeScreen, options, stableMs, timeoutMs }) {
   if (verification?.verdict !== 'no-visible-change' || !beforeScreen?.hash) return verification;
@@ -1888,6 +1873,12 @@ async function confirmNoChange(deviceQuery, verification, { beforeScreen, option
     // test, 0.21.0). The text is compared before that is said.
     const changed = textChange(beforeScreen.entry, again.entry);
     if (!changed) return verification;
+    // So the next screen read does not say this tap did not land. Described
+    // from masked readings: this one goes to disk.
+    if (again.udid) {
+      const masked = textChange(typed.maskTyped(beforeScreen.entry), typed.maskTyped(again.entry));
+      store.noteTextChange(again.udid, masked ? typed.maskCredentials(masked) : 'text changed in place');
+    }
     return {
       ...verification,
       verdict: 'unverified',

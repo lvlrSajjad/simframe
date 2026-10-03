@@ -36,6 +36,7 @@ export function paths(udid) {
     captureHealth: path.join(dir, 'capture-health.json'),
     lastInput: path.join(dir, 'last-input'),
     lastAction: path.join(dir, 'last-action'),
+    lastActionText: path.join(dir, 'last-action-text.json'),
   };
 }
 
@@ -86,6 +87,30 @@ export function noteAction(udid, at = Date.now()) {
     writeAtomic(paths(udid).lastAction, String(at));
   } catch {
     /* as above: a timestamp may not fail the action it describes */
+  }
+}
+
+/**
+ * The last action changed text in place without moving the pixels enough for
+ * the daemon to notice. Keyed to that action's timestamp, so a later action
+ * makes it stale by itself. The caller describes the change from masked
+ * readings (typed.js), so no field value reaches this file.
+ */
+export function noteTextChange(udid, change) {
+  try {
+    writeAtomic(paths(udid).lastActionText, JSON.stringify({ at: lastActionAt(udid), change }));
+  } catch {
+    /* a note about an action may not fail it */
+  }
+}
+
+/** The in-place text change the action at `actedAt` made, or null. */
+export function textChangeOf(udid, actedAt) {
+  try {
+    const note = JSON.parse(fs.readFileSync(paths(udid).lastActionText, 'utf8'));
+    return Number.isFinite(actedAt) && note?.at === actedAt ? note.change ?? null : null;
+  } catch {
+    return null;
   }
 }
 
