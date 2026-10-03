@@ -2210,11 +2210,18 @@ async function candidatesToOpen(deviceQuery, udid, { visited, options }) {
   const map = await view.screenMap(deviceQuery, { options, refresh: true });
   const here = map.identity?.hash ?? null;
   const labels = [];
+  // The cartographer's door rules decide, not a looser list of seek's own: a
+  // read-only crawl and a local search are the same act — opening doors
+  // nobody asked for — and only the crawler knew that MARK ALL READ, CHECK IN
+  // or an option in a filter sheet writes. Exploration reaches them through
+  // goal mode now, so the strict rules apply here too.
+  const doors = new Set(cartographer.doorsOf(map.rows ?? []).doors.map((d) => String(d.label)));
   for (const r of map.rows ?? []) {
     // Content only. A nav-bar title is not a door — the first version of this
     // opened "Settings", which is the name of the screen it was already on.
     if ((r.region ?? 'content') !== 'content') continue;
     if (!r.label || r.enabled === false) continue;
+    if (!doors.has(String(r.label))) continue;
     if (visited.has(String(r.label))) continue;
     // Permissive about *shape*, strict about *vocabulary* — and that pairing is
     // the correction, not a loosening. Requiring `actsInteractive` found **zero

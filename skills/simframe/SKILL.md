@@ -359,6 +359,10 @@ simframe flow run checkout       # replay it
 screens equally, no remembered path — each is reported, with what it does know.
 A wrong route is worse than no route, because it taps things.
 
+When you know where you want to be, say so once instead of tapping your way
+there: `simframe goal "open Time Sheets"` (or `sim_goal`). It returns only when it
+is done, blocked, ambiguous or lost, with the reason.
+
 When the app is new to simframe and `screens` is nearly empty, map it first,
 once, if the user agrees to the minutes it takes. The crawl is read-only and
 never crosses the destructive vocabulary, and afterwards `goto` has routes:

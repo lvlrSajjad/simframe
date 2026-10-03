@@ -239,6 +239,21 @@ const TOOLS = [
     },
   },
   {
+    name: 'sim_goal',
+    description: 'Hand simframe a goal in words and let it drive there locally, returning only at a milestone: done (with evidence), blocked by the verify barrier, ambiguous, not found, or out of budget. Use it instead of a sequence of single taps when you know where you want to be: "open Time Sheets", "find Larger Text", "Settings > Accessibility > Display & Text Size". It walks remembered routes first, taps what the goal names, and explores at most six steps for anything it has not seen. It never taps destructive controls (Delete, Send, Pay, Sign out…) even when named — it stops and says so. Text only, no images.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...deviceProp,
+        ...modeProps,
+        goal: { type: 'string', description: 'Where to get to, in words. Separate steps with ">" or "then". Start with "find" to stop when the last target is on screen instead of tapping it.' },
+        maxActions: { type: 'number', description: 'Action budget (default 30).' },
+        minutes: { type: 'number', description: 'Wall-time budget (default 2).' },
+      },
+      required: ['goal'],
+    },
+  },
+  {
     name: 'sim_map',
     description: 'Crawl an app unattended and record every screen and transition into the graph, so later goals and sim_goto are served from memory with no model calls. Opt-in and slow on purpose: minutes, not seconds. Read-only by default — it opens doors and never types, toggles, or opens a write flow; the verify barrier (Delete, Pay, Send, Sign out, Submit, Save…) and leaving the app are never crossed. Resumes a saved crawl. Returns a text coverage report: screens, transitions, unopened frontier, what the barrier refused and why, suspected merges and splits.',
     inputSchema: {
@@ -645,6 +660,11 @@ export async function serve({ device: defaultDevice, options: baseOptions = {} }
           );
         case 'sim_goto':
           return await goto(target, args, options);
+        case 'sim_goal': {
+          const { goal } = await import('./goal.js');
+          const res = await goal(target, args.goal, { options, maxActions: args.maxActions, minutes: args.minutes });
+          return { content: [text(res.text)] };
+        }
         case 'sim_map': {
           const { map } = await import('./map.js');
           const res = await map(target, args.bundleId, {

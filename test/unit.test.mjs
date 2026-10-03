@@ -7915,3 +7915,82 @@ test('a tap that only changed a line of text is not "no visible change"', async 
     '"Last pressed: nothing yet" → "Last pressed: bell"');
   assert.equal(textChange({ targets: [t('A'), t('9:41', 'status-bar')] }, { targets: [t('A'), t('9:42', 'status-bar')] }), null, 'the clock is not the app');
 });
+
+// ── goal mode, against a fake app ────────────────────────────────────────
+
+function goalApp() {
+  const S = {
+    home: ['More', 'Assets', 'Delete Draft'],
+    more: ['Time Sheets', 'Settings', 'Sign Out'],
+    sheets: ['Week'],
+    settings: ['Larger Text', 'Larger Font'],
+  };
+  const T = { 'home|More': 'more', 'more|Time Sheets': 'sheets', 'more|Settings': 'settings' };
+  let at = 'home';
+  const log = [];
+  const el = (label, i) => ({ label, x: 200, y: 100 + i * 50 });
+  return {
+    log,
+    get at() { return at; },
+    driver: {
+      locate: async (t) => {
+        const hits = S[at].map(el).filter((e) => e.label.toLowerCase().startsWith(t.toLowerCase()));
+        if (hits.length > 1 && !hits.some((h) => h.label.toLowerCase() === t.toLowerCase())) return { status: 'ambiguous', candidates: hits };
+        const exact = hits.find((h) => h.label.toLowerCase() === t.toLowerCase()) ?? hits[0];
+        return exact ? { status: 'found', target: exact } : { status: 'absent' };
+      },
+      knownRoute: async (t) => (t === 'Time Sheets' && at === 'home'
+        ? { route: [{ action: 'tap:more' }, { action: 'tap:time sheets' }], via: 'door' } : null),
+      walk: async (route) => { for (const e of route) { log.push(e.action); at = T[`${at}|${e.action.slice(4).replace(/\b\w/g, (c) => c.toUpperCase())}`] ?? at; } return { ok: true, steps: route.length }; },
+      seek: async (t) => (t === 'Settings' && at === 'home' ? (log.push('seek'), at = 'more', { found: true, steps: 1 }) : { found: false, steps: 6, opened: ['Assets'] }),
+      tap: async (e) => { log.push(`tap:${e.label}`); at = T[`${at}|${e.label}`] ?? at; return { ok: true, verdict: 'ok' }; },
+      here: async () => ({ hash: `h-${at}`, name: at }),
+    },
+  };
+}
+
+test('goal mode walks a remembered route, taps what is here, and explores only for what it has not seen', async () => {
+  const g = await import('../src/goal.js');
+  const a = goalApp();
+  const r = await g.runGoal(a.driver, { goal: 'open Time Sheets' });
+  assert.equal(r.status, 'done');
+  assert.equal(a.at, 'sheets');
+  assert.match(g.renderGoal(r), /^GOAL DONE: "open Time Sheets" — 2 action\(s\)/);
+
+  const b = goalApp();
+  const r2 = await g.runGoal(b.driver, { goal: 'Settings > Larger Text' });
+  assert.equal(r2.status, 'done', g.renderGoal(r2));
+  assert.deepEqual(b.log, ['seek', 'tap:Settings', 'tap:Larger Text']);
+
+  const c = goalApp();
+  const r3 = await g.runGoal(c.driver, { goal: 'find Assets' });
+  assert.equal(r3.status, 'done');
+  assert.deepEqual(c.log, [], 'a find goal taps nothing');
+});
+
+test('goal mode stops, with a reason, rather than guess or cross the barrier', async () => {
+  const g = await import('../src/goal.js');
+  const blocked = await g.runGoal(goalApp().driver, { goal: 'Delete Draft' });
+  assert.equal(blocked.status, 'blocked');
+  assert.match(g.renderGoal(blocked), /blocked by the verify barrier/);
+
+  const a = goalApp();
+  await a.driver.tap({ label: 'More' });
+  await a.driver.tap({ label: 'Settings' });
+  const ambiguous = await g.runGoal(a.driver, { goal: 'Larger' });
+  assert.equal(ambiguous.status, 'ambiguous');
+  assert.equal(ambiguous.reason, 'ambiguous_intent');
+  assert.match(g.renderGoal(ambiguous), /candidates: \[0\] "Larger Text"/);
+
+  const missing = await g.runGoal(goalApp().driver, { goal: 'open Invoices' });
+  assert.equal(missing.status, 'not-found');
+  assert.ok(metricsReasons.includes(missing.reason));
+
+  const unconfirmed = goalApp();
+  unconfirmed.driver.tap = async () => ({ ok: true, verdict: 'no-visible-change' });
+  const r = await g.runGoal(unconfirmed.driver, { goal: 'open More' });
+  assert.equal(r.status, 'failed', 'a tap that changed nothing is not done');
+
+  for (const res of [blocked, ambiguous, missing, r]) assert.ok(metricsReasons.includes(res.reason), res.reason);
+});
+const metricsReasons = ['unknown_screen', 'ambiguous_intent', 'verification_failed', 'novel_dialog', 'no_plan'];

@@ -418,6 +418,7 @@ steer the model is a tool surface the model uses wrong.
 | `sim_ui` | **Start here.** The screen as a numbered text map: region, type, label, state, tap point, source. A tenth the cost of a screenshot and strictly more useful. |
 | `sim_do` | **The main tool.** A whole flow in one call — tap, type, scroll, wait, assert — each step settling before the next and verified against what it did last time. |
 | `sim_state` | The cheapest question there is: has anything changed **since your last look**, and which regions moved. |
+| `sim_goal` | Get somewhere in one call: drives locally through remembered routes, the screen and a bounded search, and returns at a milestone (done with evidence, blocked, ambiguous, not found, budget). |
 | `sim_map` | Crawl an app unattended, read-only by default, and record every screen and transition so later goals run from memory. Opt-in; minutes, not seconds. |
 | `sim_goto` | Walk to a screen simframe has been to before, planning the route through remembered transitions. A route that types asks for the text in `text: {"<field>": "..."}` — the graph keeps none. |
 | `sim_flow_run` | Replay a saved flow — **zero model calls**, which is the only path to human wall clock. A first traversal saves as *provisional*; one replay in which every step passed confirms it. A run with a contradicted step, a failed step, or one that never reached its last step is refused and says which. |
@@ -663,6 +664,27 @@ without a word. They are now re-fingerprinted from their stored readings on the
 first read and kept. Whatever had no reading to rebuild from is reported by
 `simframe doctor` as `memory … warn` with counts, and by `simframe screens`. See
 [DEFERRED 196](DEFERRED.md).
+
+### Goal mode: one call to get somewhere
+
+`simframe goal "<goal>"` (MCP: `sim_goal`) drives to a goal on its own and
+returns only at a milestone: **done** with evidence, **blocked** by the verify
+barrier, **ambiguous**, **not found**, or **budget spent**.
+
+```bash
+simframe goal "open Time Sheets"
+simframe goal "find Larger Text"                 # stops when it is on screen; taps nothing at the end
+simframe goal "Settings > General > About"       # targets in order, ">" or "then"
+```
+
+For each target, cheapest first: on screen now; a remembered route (to a screen
+of that name, or through a door with that label, found by labels when the
+graph has split or merged screens); otherwise one bounded search of at most six
+actions. Every lookup is a fresh read, because memory can confirm a control that
+belongs to a screen the graph confused with this one. It never taps a control
+the barrier forbids, even when the goal names it, and it never reports done on a
+screen it has not read. Every other milestone carries one of the five escalation
+reasons and is logged.
 
 ### Mapping an app on purpose
 

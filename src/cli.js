@@ -40,6 +40,10 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe screens [device]          list screens this device has learned
   simframe storage [bundle-id] [--device=<name|udid>]   what the app saved (no boot needed)
   simframe goto    <screen>          walk to a known screen through known steps
+  simframe goal    "<goal>"          drive to a goal locally and return at a milestone
+                                     ("open Time Sheets", "find Larger Text",
+                                      "Settings > Accessibility > Display & Text Size";
+                                      --actions=30 --minutes=2)
   simframe map     <bundle-id>       crawl an app on purpose and record every screen and transition
                                      (read-only by default; --minutes=10 --actions=200
                                       --allow-create opens write flows but never commits;
@@ -885,6 +889,19 @@ async function main() {
         ],
       );
       process.exitCode = res.ok ? 0 : 1;
+      return;
+    }
+
+    case 'goal': {
+      const text = positional.join(' ').trim();
+      const { goal } = await import('./goal.js');
+      const res = await goal(flags.device, text, {
+        options,
+        maxActions: flags.actions != null ? num(flags.actions, 30) : undefined,
+        minutes: flags.minutes != null ? Number(flags.minutes) : undefined,
+      });
+      emit(flags, res.result, res.text);
+      if (res.result.status !== 'done') process.exitCode = 1;
       return;
     }
 

@@ -5008,3 +5008,29 @@ of text reads `ok … its text changed in place`.
 Found while checking: `PrefersHorizontalText = 1` and a stored Hover Text colour
 in `com.apple.Accessibility` on this device. Both are off by default, and both
 correlate with an earlier crawl window. They are left for the owner to reset.
+
+## Goal mode, first live runs — 2026-10-03
+
+`326464A4`, Settings from its root, N=1 each, after the fixes the runs found.
+
+| goal | result | actions | wall |
+| --- | --- | --- | --- |
+| open Display & Text Size | done, route found by labels (Accessibility > Display & Text Size) | 2 | 4.9 s |
+| find Larger Text | done, "Larger Text, Off" on screen, nothing tapped at the end | 2 | 8.7 s |
+| Settings > General > About | done (the "Settings" title is not tapped) | 2 | 3.2 s |
+
+Each is one call where an agent has needed three to six. What the first runs
+found:
+- **Routes from a confused start.** The graph took the Settings root for a
+  screen holding "Display & Text Size", and the walk failed at once. A route
+  whose first step is not a visible control is now dropped before it costs a
+  tap.
+- **Memory confirmed what was not there.** The same merge made a recalled
+  screen "find" that door, so goal mode reads fresh for every lookup, about
+  2 s each.
+- **A split broke the chain.** Accessibility has three identities, with its
+  doors on one and the way in on another. Routes by labels join screens by name
+  as well.
+- **The search used a looser door list than the crawler.** `seek`, which goal
+  mode uses to search, now uses the crawler's door rules, so it can no longer
+  open MARK ALL READ, CHECK IN, or an option in a filter sheet.
