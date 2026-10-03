@@ -55,7 +55,9 @@ claude mcp add --scope user simframe -- npx -y simframe mcp
 The plugin also ships a **driver agent** (`simframe:simframe-driver`): your
 main session hands it a goal, it drives on Sonnet with only simframe's tools,
 and it returns a short report. Limited to simframe, even a small model uses it;
-with every tool on offer, Haiku never did.
+with every tool on offer, Haiku never did. **The driver needs the plugin
+install above.** It is wired to the plugin's own tool names, so a server added
+with `claude mcp add` alone does not get it.
 
 Pick one, not both: two installs mean two servers driving the same device. If
 you added it with `claude mcp add` before, `claude mcp remove simframe` first.

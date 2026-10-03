@@ -27,14 +27,18 @@ to run `npm install -g simframe`.
 
 ## Delegate the driving
 
-If the `simframe:simframe-driver` agent is available (it ships with the
-plugin), hand it anything that takes more than one or two simulator actions:
+If the `simframe:simframe-driver` agent is available, hand it anything that takes more than one or two simulator actions:
 the device UDID, the app, the goal, what "done" looks like, and what it must not
 do. It drives on a faster model with only simframe's tools, so it cannot drift
 into other simulator tools, and its tool output stays out of your context. It
 returns a short report: outcome, evidence, cost, app observations. You stay the
 judge: whether the app behaved correctly, and what to try next, are your calls.
 It stops in front of anything irreversible your brief did not name.
+
+It exists only when simframe is installed as the Claude Code plugin: it is
+wired to the plugin's tool names (`mcp__plugin_simframe_simframe__*`). With the
+server added by `claude mcp add`, the agent is absent; drive with the protocol
+below yourself.
 
 ## The protocol: plan once, execute once, think only when told to
 

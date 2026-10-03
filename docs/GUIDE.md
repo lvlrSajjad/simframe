@@ -155,6 +155,13 @@ claude mcp add --scope user simframe -- npx -y simframe mcp
 `--scope user` makes it available in every session; without it the server is
 registered only for the directory you ran the command in.
 
+That installs the server alone. The plugin (`claude plugin marketplace add
+lvlrSajjad/simframe`, then `claude plugin install simframe@simframe`) adds the
+skill and the **driver agent**, `simframe:simframe-driver`: a Sonnet subagent
+limited to simframe's tools that a main session hands a goal to. The driver
+exists only with the plugin install, because it names the plugin's tools; with
+the server alone it is absent. Use one install, not both.
+
 ### Any other MCP client
 
 ```json
