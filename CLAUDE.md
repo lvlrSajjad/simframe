@@ -147,7 +147,10 @@ human tester's speed and accuracy. Rationale and sources are in
   second occurrence is an escalation. Every firing is logged and shown to the
   human in the flow summary.
 - **Waiting is learned, not fixed.** No fixed sleeps anywhere after Phase 11.
-  Timeouts are p95 + margin per graph edge; the hard cap is 10 s.
+  Timeouts are p95 + margin per graph edge; the hard cap is 10 s. One
+  exception, decided by the owner on 2026-10-03: waiting for an app to finish
+  launching may take up to 30 s, because a warm relaunch of a React Native debug
+  build measured 9–16 s. It still ends as soon as the app can be operated.
 - **Perception is incremental with a safety valve.** ROI/damage-rect perception
   always falls back to full perception on an unrecognised fingerprint and
   unconditionally every 10th settle. Full perception stays as ground truth for

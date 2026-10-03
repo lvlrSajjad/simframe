@@ -12,6 +12,7 @@ their conditions live in `docs/BENCHMARKS.md`, and the working state lives in
 
 | date | decision | verdict | what settled it |
 |---|---|---|---|
+| 2026-10-03 | An app launch may wait past the 10 s cap, up to 30 s | **ADOPTED** | Warm RN debug relaunch 9–16 s; crawls ended on the cap |
 | 2026-10-01 | Web testing belongs in another tool | **ADOPTED** | The owner: simframe's job is mobile QA at human parity |
 | 2026-10-01 | The cartographer as many bounded attempts | **ADOPTED** | It satisfies "six actions per attempt" as written |
 | 2026-10-01 | Goal mode and the cartographer | **GO** | ~1.1 actions per model call in the field; 78% of hand-backs absorbable |

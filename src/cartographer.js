@@ -33,8 +33,14 @@ import * as store from './store.js';
 import * as vocabulary from './vocabulary.js';
 
 export const ATTEMPT_ACTIONS = 6;
-/** The longest a crawl waits for an app to leave its launch screen. */
-export const LAUNCH_CAP_MS = 10000;
+/**
+ * The longest a crawl waits for an app to leave its launch screen. Every other
+ * wait is capped at 10 s (CLAUDE.md); a launch is the owner's exception, decided
+ * 2026-10-03 after a warm relaunch of the Ecotrak debug build measured 9-16 s
+ * and ended crawl after crawl at the 10 s cap. The wait still ends the moment
+ * the app has something to operate — this is a ceiling, not a sleep.
+ */
+export const LAUNCH_CAP_MS = 30000;
 export const STATE_VERSION = 1;
 /**
  * Rows of one shape are opened until two of them land on the same screen (or
