@@ -2511,6 +2511,47 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+199. **Two field runs of a React Native create-service-request flow on 0.22.0**
+   (Opus and Sonnet, 2026-10-03; reports kept by the owner, not committed: they
+   hold app data). Both completed, the Opus run in about 20 calls for about 30
+   steps. FIXED the same day, each checked against the stored readings of the
+   screens involved (replayed offline, counts in the commits) unless marked:
+
+   - **Memory looked empty to both runs.** This checkout's MCP server had
+     carried the device to fingerprint rules v10 while 0.22.0 reads v9, so every
+     screen was "new" and no step verified `ok`. Mine; it ends with the release.
+   - **A multiline input was invisible until focused.** `TextArea` was missing
+     from seven role lists. Fixed everywhere except the fingerprint, and an
+     unlabeled field now takes its caption's name (`labelFrom: 'caption'`).
+   - **`tap "Done"` and `type into <testID>` refused** over a synonym "Close":
+     synonyms are whole words, never inside identifiers, never against the
+     caller's own word; exact spelling breaks a tie.
+   - **"chain without looking" on a list still loading** (search field, nothing
+     under it) and on a map recalled from another session.
+   - **Sweep said "budget spent"** when it had stopped on a handled fill; it now
+     says why it stopped and FOUND / NOT FOUND.
+   - **`simframe do '[…]'`** now takes inline JSON.
+   - **Messages:** `typed into "undefined"`, a false "focus is on another
+     element", `changed from "radio button" to "radio button"`, an unnamed
+     repeated label, `= <typed>` printed as live, glyph aliases (`~ V`).
+   - **Layers:** the overlap warning fired on 47% of field-app readings, almost
+     all OCR misreads; now on 12%, mostly toasts, banners and sheets. A sheet's
+     background, rows under a pinned footer and app buttons under the keyboard
+     are marked `behind?`.
+   - **An empty tree is said** (review screen and success modal came back
+     OCR-only).
+   - **`scrollTo` already in view** returns at once and `ok`.
+   - **"value is gone"** over a value an earlier session typed: a relaunch
+     forgets the journal.
+   - **`known, 0 known exits`** now reads as not known.
+   - **Wrong-layout typing** is said on the step.
+   - *Open:* why the review screen's tree came back empty (the app had no
+     overlay registered). The recall tolerance (20) admits more pairs of
+     different screens than of the same screen at distances 0–4 on the field
+     app (137 vs 81 within ≤4), which belongs to 174. A cold first `ui` took
+     28 s; that was the one-time carry, and it should say so while it runs.
+     OCR garbles small text ("CANUEL DELEU"); nothing to fix without a model.
+
 198. **A partial name flipped a real switch on the bench device.** FIXED,
    2026-10-03, the same hour. I ran the Settings bench flow's steps with a
    plain `launch`, and Settings resumed on the Larger Text page instead of its

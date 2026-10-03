@@ -292,6 +292,13 @@ Steps — every place a control is named accepts a selector:
 | `#3` | the number `simframe ui` gave it. Cheap and exact, but only within the round trip that numbered it |
 | `@120,400` | raw point coordinates. Last resort; it cannot tell you it missed. |
 
+A field with no label of its own answers to the caption printed on its top edge
+(`type into "Description"` reaches a multiline input under "Description*"), a
+trailing `*` is not part of a name, and the exact spelling breaks a tie ("Done"
+the toolbar button, not "done" the keyboard key). A synonym never competes with
+a control that carries your word. A switch, slider or checkbox is changed only
+by its full name or a ref: a partial name that lands on one is refused.
+
 **Prefer a label to a number**, and this order is a correction. Four peer rounds
 in a row reported the same thing: intent resolution worked every time, including
 on labels a string matcher should not have managed, while refs renumbered
@@ -316,7 +323,14 @@ the next call should change.
 | --- | --- |
 | `[unconfirmed — nothing on this screen reads back the field's contents]` | the text was sent and **nothing verified it landed**. Common on web views, where the accessibility tree carries no field contents. Re-read, or `assert` the value |
 | `a value simframe wrote here is gone: …` | a field simframe filled is on screen and its contents are not. Something cleared it — a reload, a pull-to-refresh, a navigation. Re-fill before continuing |
-| `N element(s) on this screen overlap and disagree about what is there` | a sheet or overlay is probably covering the screen behind it, and some elements belong to the layer underneath |
+| `N element(s) on this screen overlap and disagree about what is there (e.g. "X" over "Y")` | a sheet, toast or banner is probably covering part of the screen, and some elements belong to the layer underneath |
+| `a sheet or alert looks open: N label(s) above it … probably belong to the screen behind` | text read from pixels above an open sheet. Those rows say `behind?`; dismiss the sheet before acting on them |
+| `N row(s) sit under the bar at the bottom of the screen` / `… is under the keyboard` | the row or button is in the tree but covered by a pinned footer or the keyboard. Rows say `behind?`; scroll them up, or dismiss the keyboard, first |
+| `the accessibility tree was read and is EMPTY for this screen` | every element came from OCR: roles are guesses (a button prints as `text`), and a tap point is the middle of the words |
+| `next: a search field with nothing under it — the list may still be loading` | a settle cannot see a network call. `waitFor` a row you expect, or re-read in a moment, before chaining |
+| `next: these elements were recalled from memory, not read now` | the map is from another session. Read with `refresh` before chaining |
+| `(seen before; nothing learned from here yet — treat it as new)` | the hash matched, nothing has been learned on it, and a merged identity looks exactly like this. Read it before trusting remembered labels |
+| `text changed: "…" → "…"` | the last action changed text in place, below the pixel signal: it landed. `NOT MOVED SINCE THE ACTION` is the opposite — nothing changed at all |
 | `WARNING: this image is Ns older than the screen state` | the picture is very likely not what is on the device. Use `sim_ui`, which is read live |
 | `#N cannot be trusted here — … layout distance D, tolerance T` | pixel drift, **not** a different screen. The identity may be unchanged; re-issue by label |
 | `#N cannot be trusted here — … this is a different screen` | the screen really did change. Read it again |

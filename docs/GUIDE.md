@@ -464,7 +464,18 @@ When the elements were recalled from screen memory rather than looked at just
 now, the header says so and how long ago — `elements recalled from 41s ago —
 pass refresh for what is there now`. Identity is cached on purpose, because a
 list with new rows is the same screen; contents are exactly what changes without
-the screen changing, so the age is worth seeing.
+the screen changing, so the age is worth seeing. A map recalled from more than
+ten minutes ago never ends in "chain the next steps without looking": it says to
+read first.
+
+A row marked `behind?` is in the tree and probably not reachable by a tap: text
+OCR read above an open sheet, a row scrolled under a pinned footer, or an app
+button under the keyboard. The header says which, and the resolver ranks such a
+row below anything in front with the same name; it is a flag rather than a
+filter because the shape is inferred. Other header lines that change the next
+call: `the accessibility tree was read and is EMPTY` (every role is a guess),
+`a search field with nothing under it — the list may still be loading`, and
+`seen before; nothing learned from here yet` in place of `known, 0 known exits`.
 
 Three ways to name a control, anywhere one is named:
 
