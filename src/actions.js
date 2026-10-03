@@ -2,6 +2,7 @@
 // here as a single call: act, wait for the screen to settle, assert, repeat.
 // Waiting uses a baseline captured BEFORE each action, which is the whole
 // reason these scripts are reliable rather than racy.
+import fs from 'node:fs';
 import * as api from './index.js';
 import * as cartographer from './cartographer.js';
 import * as frontmost from './frontmost.js';
@@ -3753,6 +3754,20 @@ export function partialHitOnSetting(found) {
   return `"${t.label}" is a ${String(t.type).toLowerCase()} and only part of its name matched (${found.score.toFixed(2)}) — `
     + 'tapping it would change a setting, so it was not tapped. Name it in full to change it, '
     + 'or name the control you meant; it may not be on this screen.';
+}
+
+/**
+ * A script from a file, or inline. The skill shows `simframe do '[ … ]'` and
+ * the CLI read only files, so the documented form failed with ENOENT (field
+ * report, 0.22.0). Inline JSON is an array, a `{ "steps": [...] }` wrapper or
+ * a single step; anything else is a path.
+ */
+export function scriptSteps(arg, read = (f) => fs.readFileSync(f, 'utf8')) {
+  const text = String(arg).trim();
+  const parsed = JSON.parse(/^[[{]/.test(text) ? text : read(arg));
+  if (Array.isArray(parsed)) return parsed;
+  if (Array.isArray(parsed?.steps)) return parsed.steps;
+  return [parsed];
 }
 
 /**

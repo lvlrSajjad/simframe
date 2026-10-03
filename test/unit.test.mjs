@@ -3489,6 +3489,15 @@ test('a typed field is not slowed or flagged by a settle the pixels cannot satis
   assert.match(act, /timeoutMs: graph\.STAYS_ON_SCREEN\.has\(step\.action\) \? STAYS_PUT_BUDGET_MS : timeoutMs,/);
 });
 
+test('simframe do takes a script inline, as the skill shows (field report, 0.22.0)', async () => {
+  const { scriptSteps } = await import('../src/actions.js');
+  const noFile = () => { throw new Error('read a file'); };
+  assert.deepEqual(scriptSteps('[{"tap":"Done"}]', noFile), [{ tap: 'Done' }]);
+  assert.deepEqual(scriptSteps(' {"steps":[{"tap":"A"}]}', noFile), [{ tap: 'A' }]);
+  assert.deepEqual(scriptSteps('{"tap":"A"}', noFile), [{ tap: 'A' }], 'one step');
+  assert.deepEqual(scriptSteps('flow.json', () => '[{"tap":"B"}]'), [{ tap: 'B' }], 'a path is still a path');
+});
+
 test('a synonym never competes with the name the caller wrote (field report, 0.22.0)', async () => {
   const m = await import('../src/matching.js');
   const screen = { width: 402, height: 874 };

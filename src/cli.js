@@ -36,7 +36,7 @@ const USAGE = `simframe — always-warm iOS Simulator frames
   simframe ui      [device]          the screen as a numbered element map
   simframe find    "<intent>"        resolve an intent to one control
   simframe tap     <selector>        tap #3, "Save", or @120,400
-  simframe do      <script.json>     run a scripted flow (see below)
+  simframe do      <script.json|'[…]'> run a scripted flow, from a file or inline (see below)
   simframe screens [device]          list screens this device has learned
   simframe storage [bundle-id] [--device=<name|udid>]   what the app saved (no boot needed)
   simframe goto    <screen>          walk to a known screen through known steps
@@ -845,8 +845,8 @@ async function main() {
 
     case 'do': {
       const file = positional[0];
-      if (!file) throw new Error('usage: simframe do <script.json>');
-      const steps = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (!file) throw new Error("usage: simframe do <script.json | '[{...}, ...]'>");
+      const steps = actions.scriptSteps(file);
       const res = await actions.runScript(flags.device, {
         steps,
         autoSettle: flags.autoSettle !== 'false',
