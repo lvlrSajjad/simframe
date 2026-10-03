@@ -669,7 +669,7 @@ export async function screenMap(deviceQuery, {
  * cheerfully says "carry on" into an unknown screen would be worse than no hint
  * at all.
  */
-export function nextHint({ ok, escalated, settled, unmoved, loading, known, hash, exits, elements, ambiguous, repeated, filtered, exitList, staleExits, recalledAgeMs = null } = {}) {
+export function nextHint({ ok, escalated, settled, unmoved, loading, known, hash, exits, elements, ambiguous, repeated, filtered, exitList, staleExits, recalledAgeMs = null, mayBeLoading = false } = {}) {
   if (ok === false) {
     return 'next: the flow stopped here — this is the moment to think. sim_recall shows how you got here; sim_ui re-reads the screen.';
   }
@@ -718,6 +718,9 @@ export function nextHint({ ok, escalated, settled, unmoved, loading, known, hash
   // screen is recalled after almost every step of a working session, and that
   // is the speed the graph exists for. Memory older than this came from
   // another session.
+  if (mayBeLoading) {
+    return 'next: a search field with nothing under it — the list may still be loading. waitFor a row you expect (or re-read in a moment) before chaining steps on this screen.';
+  }
   if (recalledAgeMs != null && recalledAgeMs >= RECALL_TOO_OLD_TO_CHAIN_MS) {
     return 'next: these elements were recalled from memory, not read now — read the screen (refresh) before chaining steps on them.';
   }
@@ -773,6 +776,7 @@ export function hintFor(map, { flowOk = true, escalated = false } = {}) {
     ambiguous: ambiguousLabels(map?.rows),
     repeated: repeatedLabels(map?.rows),
     recalledAgeMs: Number.isFinite(map?.identity?.entry?.at) ? Date.now() - map.identity.entry.at : null,
+    mayBeLoading: listMayBeLoading(map?.rows, map?.screen),
   });
 }
 
@@ -832,6 +836,30 @@ export function exitsLine(exitList, { limit = 6, stale = 0 } = {}) {
     return `${e.action} ${JSON.stringify(label)}${e.count > 1 ? ` (${e.count}x)` : ''}`;
   });
   return `worked here before: ${parts.join(', ')}`;
+}
+
+/**
+ * A search field with nothing under it, on a screen with room for a list.
+ *
+ * Both field runs (0.22.0) were told "settled … chain the next steps" on a
+ * location list and an asset list whose rows had not arrived: the stored
+ * readings before and after show a search field and then nothing for 500pt,
+ * and the same field over 4 and 78 rows two seconds later. A settle cannot
+ * see a network call; an empty region under a search box is what a person
+ * reads as "still loading". Only changes the hint.
+ */
+const SEARCHISH = /search/i;
+export function listMayBeLoading(rows, screen) {
+  const h = screen?.height;
+  if (!h) return false;
+  const inContent = (r) => !['tab-bar', 'keyboard', 'status-bar', 'nav-bar'].includes(r.region ?? 'content');
+  const search = (rows ?? []).filter((r) => inContent(r) && /field/i.test(String(r.type ?? ''))
+    && SEARCHISH.test(`${r.type ?? ''} ${r.label ?? ''} ${r.identifier ?? ''}`));
+  if (!search.length) return false;
+  const top = Math.max(...search.map((r) => r.y));
+  const below = (rows ?? []).filter((r) => inContent(r) && r.y > top + 60 && r.y < h);
+  const lastY = below.length ? Math.max(...below.map((r) => r.y)) : top;
+  return h * 0.85 - lastY > h * 0.35;
 }
 
 /**

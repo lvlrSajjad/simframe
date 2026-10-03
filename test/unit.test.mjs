@@ -3518,6 +3518,18 @@ test('overlap is reported only when another layer shows, and the screen behind a
   assert.equal(sm.markBehindSheet([ocr('Page', 174), ocr('Text', 268), ax('Back', 830), ax('Cancel', 835)], screen), 0);
 });
 
+test('a search field with nothing under it is not told to chain without looking (field report, 0.22.0)', async () => {
+  const v = await import('../src/view.js');
+  const screen = { width: 402, height: 874 };
+  const row = (label, type, y, extra = {}) => ({ label, type, y, x: 201, region: 'content', ...extra });
+  const loading = [row('Location', 'StaticText', 236), row(null, 'TextField', 310, { identifier: 'location-search-field' }), row('Locations around me', 'StaticText', 361)];
+  assert.equal(v.listMayBeLoading(loading, screen), true);
+  const loaded = [...loading, ...[460, 593, 725, 857].map((y, i) => row(`Store ${i}`, 'Button', y))];
+  assert.equal(v.listMayBeLoading(loaded, screen), false);
+  assert.equal(v.listMayBeLoading([row('First Name', 'TextField', 160)], screen), false, 'a form is not a list');
+  assert.match(v.nextHint({ ok: true, settled: true, known: true, hash: 'abcdef12', mayBeLoading: true }), /may still be loading/);
+});
+
 test('the map says when the tree is empty, and never prints a masked value as live (field report, 0.22.0)', async () => {
   const v = await import('../src/view.js');
   const ocr = (label, y) => ({ label, type: 'Text', source: 'ocr', x: 40, y, frame: { x: 20, y: y - 6, width: 60, height: 12 } });
