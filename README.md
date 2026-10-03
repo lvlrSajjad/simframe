@@ -12,6 +12,25 @@ a screenshot, a model round trip and a re-read for every single step.
 
 ![simframe driving Settings on an iPhone 17 Pro simulator: one call, four verified steps, no screenshots, and the screen returned as text with tap points](https://raw.githubusercontent.com/lvlrSajjad/simframe/main/docs/simframe-demo.gif)
 
+**The same app session for a fraction of the tokens.** On a real React Native
+field app, agents did two jobs end to end, submitting for real: create a
+service request, and add an asset. Measured per run, 2026-10-03:
+
+| who drove | both jobs done | tool calls | screenshots | tokens |
+| --- | --- | --- | --- | --- |
+| Opus with Claude Code's built-in simulator tool, no simframe | yes | ~176 | 112 | **296k** |
+| Opus with simframe | service request (the session blocked the asset upload) | ~50 | ≥4 | **118k** |
+| Opus briefing a Sonnet driver with simframe (the plugin's driver agent) | yes | ~88 | few | **128k**, on the cheaper model |
+
+**Same model, with and without simframe: 2.5× fewer tokens and 3.5× fewer
+calls.** The Sonnet driver did everything the no-simframe run did, with 2.3×
+fewer tokens, half the calls and a handful of images where it took 112. It is one run per setup, so
+read it as a measured example, not a rate; the full write-up, including what it
+does not show, is in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md#who-drives-model-and-tool-comparison--2026-10-03).
+It is not faster than a person yet: these runs took 13–16 minutes for work a
+person does in 5–10, because each model turn costs seconds. Fewer turns per
+flow is what the roadmap is about.
+
 ## Install in ten seconds
 
 You need a Mac with Xcode (you have one if you have a simulator) and Node 18+.
@@ -30,6 +49,11 @@ or the MCP server alone:
 ```bash
 claude mcp add --scope user simframe -- npx -y simframe mcp
 ```
+
+The plugin also ships a **driver agent** (`simframe:simframe-driver`): your
+main session hands it a goal, it drives on Sonnet with only simframe's tools,
+and it returns a short report. Limited to simframe, even a small model uses it;
+with every tool on offer, Haiku never did.
 
 Pick one, not both: two installs mean two servers driving the same device. If
 you added it with `claude mcp add` before, `claude mcp remove simframe` first.
@@ -84,6 +108,7 @@ is on screen, and it still does not say what is tappable.
 | Reading a screen | an image, ~1,600 tokens, no tap points | **~330 tokens** of text, with tap points |
 | A 10-step flow | 10 turns, 10 images | **1 turn, 0 images** |
 | Same flow, again | every run is the first | replayed from memory, every step verified, **zero model calls** |
+| A real two-task app session | ~176 calls, 112 screenshots, 296k tokens | **~50 calls, 118k tokens** (same model) |
 
 Measured on an iPhone 17 Pro simulator, iOS 26.5, Apple Silicon, against a real
 production app; the full tables with N, median and p95 are in

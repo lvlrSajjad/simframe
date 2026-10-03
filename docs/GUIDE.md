@@ -835,6 +835,26 @@ Reproduce all of it with `npm run bench`, which prints the same table against
 your machine. Full detail, including the measurement traps, is in
 [`BENCHMARKS.md`](BENCHMARKS.md).
 
+### A real app session, five ways
+
+Two jobs on a React Native field app, end to end and submitted for real:
+create a service request, and add an asset. One run per setup (2026-10-03; the
+full table and its limits are in BENCHMARKS, "Who drives").
+
+| who drove | both jobs | calls | screenshots | tokens |
+| --- | --- | --- | --- | --- |
+| Opus, Claude Code's built-in simulator tool, no simframe | yes | ~176 | 112 | **296k** |
+| Opus + simframe | request only (the session blocked the upload) | ~50 | ≥4 | **118k** |
+| Opus briefing the Sonnet driver agent + simframe | yes | ~88 | few | **128k** |
+| Sonnet + simframe | asset only (the session blocked the submit) | ~132 | few | 144k |
+| Haiku driver + simframe | request only (a radio row, since fixed) | 38 | — | 116k |
+
+Same model with and without simframe: **2.5× fewer tokens, 3.5× fewer calls**.
+The no-simframe run took most screenshots twice, because the first one after an
+action still showed the screen before it. All of them took 13–16 minutes,
+against a person's 5–10: the cost is the number of model turns, which is what
+batching, goal mode and replay from memory exist to cut.
+
 ### Tokens and model calls per verified flow
 
 Measured on two suite flows, three runs each, all verified

@@ -155,6 +155,26 @@
   </div>
 </header>
 
+<h2>The same app session, a fraction of the tokens</h2>
+<p>Two jobs on a real React Native field app, end to end and submitted for real:
+create a service request, and add an asset. One run per setup, 2026-10-03.</p>
+<table>
+  <thead><tr><th>Who drove</th><th>Both jobs</th><th>Calls</th><th>Screenshots</th><th>Tokens</th></tr></thead>
+  <tbody>
+    <tr><td>Opus, Claude Code&rsquo;s built-in simulator tool, no simframe</td><td>yes</td><td class="num">~176</td><td class="num">112</td><td class="num">296k</td></tr>
+    <tr><td>Opus + simframe</td><td>request only*</td><td class="num">~50</td><td class="num">&ge;4</td><td class="num"><strong>118k</strong></td></tr>
+    <tr><td>Opus briefing a Sonnet driver + simframe</td><td>yes</td><td class="num">~88</td><td class="num">few</td><td class="num"><strong>128k</strong></td></tr>
+  </tbody>
+</table>
+<p class="note">
+  <strong>Same model, with and without simframe: 2.5&times; fewer tokens and 3.5&times; fewer
+  calls.</strong> The Sonnet driver did everything the no-simframe run did with 2.3&times; fewer
+  tokens on a cheaper model. * The session&rsquo;s own permission check blocked that
+  run&rsquo;s asset upload. Not yet human speed: these runs took 13&ndash;16 minutes for work a
+  person does in 5&ndash;10, because every model turn costs seconds.
+  <a href="https://github.com/lvlrSajjad/simframe/blob/main/docs/BENCHMARKS.md#who-drives-model-and-tool-comparison--2026-10-03">Full table and its limits</a>.
+</p>
+
 <h2>What changed, measured</h2>
 <p>The same four-tab navigation flow, on a real production app:</p>
 <table>

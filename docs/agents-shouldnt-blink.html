@@ -1036,6 +1036,38 @@ worked here before: tap "NEW REQUEST" (7x)</code></pre>
   </section>
 
   <section>
+    <p class="sec-label">Update, 3 October 2026</p>
+    <h2>The same app session, a fraction of the tokens</h2>
+    <div class="track">
+      <p class="lede">Everything above measured parts. This measured the whole: agents doing two real jobs on a real app, end to end, submitting for real &mdash; and the same jobs done without simframe at all.</p>
+      <p>The app was a React Native field app on its development server. The jobs: create a service request through a seven-step wizard, and add an asset through a long form that saves offline and then syncs. Five setups ran them, one run each; one of them used only Claude Code&rsquo;s built-in simulator tool, which drives by screenshots and coordinate taps.</p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-label">Two jobs, end to end &mdash; who drove, and what it cost</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Who drove</th><th>Both jobs</th><th>Calls</th><th>Screenshots</th><th>Tokens</th></tr></thead>
+          <tbody>
+            <tr><td>Opus, built-in simulator tool, no simframe</td><td>yes</td><td>~176</td><td>112</td><td>296k</td></tr>
+            <tr><td>Opus + simframe</td><td>request only*</td><td>~50</td><td>&ge;4</td><td><b>118k</b></td></tr>
+            <tr><td>Opus briefing a Sonnet driver + simframe</td><td>yes</td><td>~88</td><td>few</td><td><b>128k</b></td></tr>
+            <tr><td>Sonnet + simframe</td><td>asset only*</td><td>~132</td><td>few</td><td>144k</td></tr>
+            <tr><td>Haiku driver + simframe</td><td>request only**</td><td>38</td><td>&mdash;</td><td>116k</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="track">
+      <p><b>The same model with and without simframe: 2.5&times; fewer tokens and 3.5&times; fewer calls.</b> The Sonnet driver &mdash; the agent the plugin now ships &mdash; did everything the screenshot run did with 2.3&times; fewer tokens, half the calls, a handful of images against 112, and on a cheaper model. The screenshot run paid twice for most of its looks: the first screenshot after an action still showed the screen from before it, so nearly every step needed a second. That is this article&rsquo;s first section, measured from the other side.</p>
+      <p>* The session&rsquo;s own permission check refused one write in each of those runs &mdash; an upload in one, the final submit in the other &mdash; and the agent stopped, as instructed. ** A radio row that only responds at its edge; simframe now finds the edge by itself.</p>
+      <p>Two findings I did not expect. Haiku, offered every tool in a normal session, never used simframe at all &mdash; it picked the built-in tool. Limited to simframe&rsquo;s tools, it used them throughout and finished the wizard in sixteen calls. Tool choice, not model size, decided whether the cheaper path was taken. And the briefed driver was the only simframe setup to finish both jobs: the planner wrote one brief, and the driver&rsquo;s eighty-eight tool results never entered the planner&rsquo;s context.</p>
+      <p>What it does not show is human speed. Every setup took thirteen to sixteen minutes for work a person does in five to ten, and the reason is the one the round-trip section already named: each model turn costs seconds, and these runs made fifty to a hundred and thirty of them. One run per setup is an example, not a rate. The next measurement is the same driver twice in a row, the second time with the app already in memory, against a recorded human doing the same two jobs.</p>
+    </div>
+  </section>
+
+  <section>
     <p class="sec-label">What three strangers agreed on</p>
     <h2>The bill for a confident wrong answer</h2>
     <div class="track">

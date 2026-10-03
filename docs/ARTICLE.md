@@ -535,6 +535,32 @@ The first draft of this paragraph called that independent replication on another
 
 The embarrassing part is the last one. The replay path — the only route that reaches human latency — had been *unreachable*, because a flow could only be saved if every step verified, and a first traversal is all-unverified by construction: there is nothing to compare it against yet. So no flow could ever be recorded, so replay could never be used, and a reporter hit the wall with a clean ten-of-ten batch in hand. A gate nobody can pass protects nothing, and this one was sitting in front of the fastest thing here.
 
+*Update, 3 October 2026*
+
+## The same app session, a fraction of the tokens
+
+Everything above measured parts. This measured the whole: agents doing two real jobs on a real app, end to end, submitting for real — and the same jobs done without simframe at all.
+
+The app was a React Native field app on its development server. The jobs: create a service request through a seven-step wizard, and add an asset through a long form that saves offline and then syncs. Five setups ran them, one run each; one of them used only Claude Code’s built-in simulator tool, which drives by screenshots and coordinate taps.
+
+**Two jobs, end to end — who drove, and what it cost**
+
+| Who drove | Both jobs | Calls | Screenshots | Tokens |
+| --- | --- | --- | --- | --- |
+| Opus, built-in simulator tool, no simframe | yes | ~176 | 112 | 296k |
+| Opus + simframe | request only* | ~50 | ≥4 | **118k** |
+| Opus briefing a Sonnet driver + simframe | yes | ~88 | few | **128k** |
+| Sonnet + simframe | asset only* | ~132 | few | 144k |
+| Haiku driver + simframe | request only** | 38 | — | 116k |
+
+**The same model with and without simframe: 2.5× fewer tokens and 3.5× fewer calls.** The Sonnet driver — the agent the plugin now ships — did everything the screenshot run did with 2.3× fewer tokens, half the calls, a handful of images against 112, and on a cheaper model. The screenshot run paid twice for most of its looks: the first screenshot after an action still showed the screen from before it, so nearly every step needed a second. That is this article’s first section, measured from the other side.
+
+* The session’s own permission check refused one write in each of those runs — an upload in one, the final submit in the other — and the agent stopped, as instructed. ** A radio row that only responds at its edge; simframe now finds the edge by itself.
+
+Two findings I did not expect. Haiku, offered every tool in a normal session, never used simframe at all — it picked the built-in tool. Limited to simframe’s tools, it used them throughout and finished the wizard in sixteen calls. Tool choice, not model size, decided whether the cheaper path was taken. And the briefed driver was the only simframe setup to finish both jobs: the planner wrote one brief, and the driver’s eighty-eight tool results never entered the planner’s context.
+
+What it does not show is human speed. Every setup took thirteen to sixteen minutes for work a person does in five to ten, and the reason is the one the round-trip section already named: each model turn costs seconds, and these runs made fifty to a hundred and thirty of them. One run per setup is an example, not a rate. The next measurement is the same driver twice in a row, the second time with the app already in memory, against a recorded human doing the same two jobs.
+
 *What three strangers agreed on*
 
 ## The bill for a confident wrong answer
