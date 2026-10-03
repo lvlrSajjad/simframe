@@ -120,6 +120,8 @@ const FOCUS_TIMEOUT_MS = 3000;
  */
 const STAYS_PUT_STILLNESS_MS = 200;
 const STAYS_PUT_BUDGET_MS = 600;
+/** Below this a scrollTo match is not arrival; see the scrollTo step. */
+export const SCROLL_TO_MIN_SCORE = 0.6;
 const POLL_MS = 250;
 /** A list that has not produced the target in this many screens does not contain it. */
 const MAX_SCROLLS = 20;
@@ -3310,6 +3312,13 @@ async function runStep(deviceQuery, udid, step, ctx) {
       for (let i = 0; i <= max; i += 1) {
         try {
           const found = await api.locate(deviceQuery, query, { index: step.index, refresh: i > 0 });
+          // A weak match is not arrival. `scrollTo "SAVE"` stopped on a help
+          // sentence containing "save" (0.52) and never scrolled (field run,
+          // 2026-10-03); below this it keeps looking.
+          if (Number.isFinite(found.score) && found.score < SCROLL_TO_MIN_SCORE) {
+            lastMiss = 'absent';
+            throw new Error(`only a weak match here: "${found.target.label}" (${found.score.toFixed(2)})`);
+          }
           if (!inViewport(found.target)) {
             lastMiss = 'off-view';
             throw new Error(
@@ -3320,7 +3329,12 @@ async function runStep(deviceQuery, udid, step, ctx) {
           // after this step waited for it until it gave up — "already in view"
           // followed by "never settled after 2.5s" (field report, 0.22.0).
           if (!scrolled.length && ctx.landing) ctx.landing.movedNothing = true;
-          return `"${found.target.label ?? query}" is in view at ${found.target.x},${found.target.y}${arrivedHow()}`;
+          // Not exactly what was asked: say so, so a caller can tell "Asset Name
+          // Plate" from the "Asset Name*" field it meant.
+          const inexact = matching.norm(found.target.label) !== matching.norm(query) && Number.isFinite(found.score) && found.score < 1
+            ? ` [matched "${found.target.label}" for "${query}" at ${found.score.toFixed(2)}, not exactly — scroll on if that is not it]`
+            : '';
+          return `"${found.target.label ?? query}" is in view at ${found.target.x},${found.target.y}${arrivedHow()}${inexact}`;
         } catch (err) {
           if (lastMiss !== 'off-view') lastMiss = 'absent';
           if (i === max) {

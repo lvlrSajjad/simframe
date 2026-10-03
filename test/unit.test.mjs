@@ -3683,6 +3683,22 @@ test('simframe do takes a script inline, as the skill shows (field report, 0.22.
   assert.deepEqual(scriptSteps('flow.json', () => '[{"tap":"B"}]'), [{ tap: 'B' }], 'a path is still a path');
 });
 
+test('a short word inside a long row is not "the only element containing" it (field run, 2026-10-03)', async () => {
+  const m = await import('../src/matching.js');
+  const screen = { width: 402, height: 874 };
+  const row = { label: 'Spare part 12, More options, Air Compressor, Downtown | Store #12, Available', type: 'GenericElement', x: 201, y: 445, region: 'content', source: 'ax' };
+  assert.equal(m.resolve([row], 'More', { screen }).status, 'none');
+  const heading = { label: 'Record #1234567', type: 'StaticText', x: 201, y: 100, region: 'content', source: 'ax' };
+  assert.equal(m.resolve([heading], '1234567', { screen }).status, 'ok', 'a distinctive fragment still resolves');
+});
+
+test('scrollTo does not arrive on a weak match, and says when a match is not exact (field run, 2026-10-03)', () => {
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /export const SCROLL_TO_MIN_SCORE = 0\.6;/);
+  assert.match(src, /found\.score < SCROLL_TO_MIN_SCORE\) \{\n\s+lastMiss = 'absent';/);
+  assert.match(src, /not exactly — scroll on if that is not it/);
+});
+
 test('a radio row that ignores its centre is selected at its edge, and checked (field runs, 2026-10-03)', async () => {
   const a = await import('../src/actions.js');
   assert.match('radio button, unchecked', a.SELECTION_VALUE);

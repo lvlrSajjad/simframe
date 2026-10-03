@@ -33,7 +33,7 @@ const REGION_HINTS = [
 ];
 
 // A trailing required marker is not part of a name: "Description*" is "Description".
-const norm = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim().replace(/\s*\*+$/, '');
+export const norm = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim().replace(/\s*\*+$/, '');
 
 /** Levenshtein distance, capped: beyond the cap the exact value is irrelevant. */
 export function editDistance(a, b, cap = 8) {
@@ -306,9 +306,14 @@ export function rank(targets, intent, { screen, role } = {}) {
   // ambiguity check downstream still has something honest to weigh.
   if (!scored.some((c) => c.score >= MINIMUM_SCORE)) {
     const q = norm(bare) || norm(intent);
+    // And the query is a real part of that name: four letters of a ninety-
+    // character row ("…, More options, …") sent `tap "More"` into an asset
+    // instead of the tab OCR had not read (field run, 2026-10-03). A record
+    // number in "Record #1234567" is 41% of its label.
+    const coverage = (n) => q.replace(/[^\p{L}\p{N}]/gu, '').length / Math.max(1, norm(n).replace(/[^\p{L}\p{N}]/gu, '').length);
     const holds = (t) => [t.label, t.identifier, ...(t.aliases ?? [])]
       .filter(Boolean)
-      .some((n) => norm(n).includes(q) && norm(n) !== q);
+      .some((n) => norm(n).includes(q) && norm(n) !== q && coverage(n) >= 0.25);
     const only = q.length >= 3 ? visible.filter(holds) : [];
     if (only.length === 1) {
       const t = only[0];
