@@ -3683,6 +3683,18 @@ test('simframe do takes a script inline, as the skill shows (field report, 0.22.
   assert.deepEqual(scriptSteps('flow.json', () => '[{"tap":"B"}]'), [{ tap: 'B' }], 'a path is still a path');
 });
 
+test('a radio row that ignores its centre is selected at its edge, and checked (field runs, 2026-10-03)', async () => {
+  const a = await import('../src/actions.js');
+  assert.match('radio button, unchecked', a.SELECTION_VALUE);
+  assert.match('checkbox, checked', a.SELECTION_VALUE);
+  assert.doesNotMatch('1', a.SELECTION_VALUE, 'a switch is not this');
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /const toggled = await selectionLanded\(deviceQuery, udid, query, found, step\);/);
+  // Never twice at one place: left edge, then right edge, stopping at the first change.
+  assert.match(src, /\[\['left edge', [^\]]+\], \['right edge', [^\]]+\]\]/);
+  assert.match(src, /if \(now != null && now !== before\) \{/);
+});
+
 test('a daemon that outlived its device\'s reboot is restarted, not trusted (2026-10-03)', async () => {
   const { startedBeforeBoot } = await import('../src/index.js');
   const { etimeMs } = await import('../src/platform/ios.js');

@@ -2841,6 +2841,8 @@ async function runStep(deviceQuery, udid, step, ctx) {
       const partial = partialHitOnSetting(found);
       if (partial) throw metrics.tag(new Error(partial), 'ambiguous_intent', { candidates: [found.target], intent: query });
       await input.tapPoint(udid, found.target.x, found.target.y, { durationMs: step.durationMs });
+      const toggled = await selectionLanded(deviceQuery, udid, query, found, step);
+      if (toggled) return toggled;
       return `tapped "${found.target.label}" at ${found.target.x},${found.target.y} (${found.from}${found.from === 'memory' ? ` d=${found.distance}` : ''}, via ${found.target.source})`
         + relabelledNote(found);
     }
@@ -3810,6 +3812,48 @@ export function settleEvidence(w) {
  * reading as no change on 2026-10-01 — and retrying on a false one is how a
  * tap fires twice, which the verify barrier forbids.
  */
+/**
+ * A radio or checkbox row that did not take the tap at its centre.
+ *
+ * React Native renders an option as a full-width row whose value reads
+ * "radio button, unchecked", while only the circle at its edge responds: the
+ * centre tap changed nothing, and two field runs could not set a required
+ * date choice by its name — one gave up, one used a coordinate (2026-10-03).
+ * The value is in the tree, so this checks itself: when it did not change,
+ * the left edge is tried, then the right, stopping at the first change.
+ * Nothing is tapped twice at one place, so a checkbox is never flipped back.
+ * Returns the step's detail when it had to move, or null.
+ */
+export const SELECTION_VALUE = /^(radio button|checkbox|check box)\b/i;
+async function selectionLanded(deviceQuery, udid, query, found, step) {
+  const t = found.target;
+  if (!SELECTION_VALUE.test(String(t.value ?? '')) || !t.frame || (t.frame.width ?? 0) < 120) return null;
+  const valueNow = async () => {
+    await api.waitFor(deviceQuery, { mode: 'settle', stableMs: 200, timeoutMs: 1200 }).catch(() => null);
+    try {
+      const again = await api.locate(deviceQuery, query, { index: step.index, refresh: true });
+      return String(again.target.value ?? '');
+    } catch {
+      return null;
+    }
+  };
+  const before = String(t.value);
+  let now = await valueNow();
+  if (now == null || now !== before) return null;
+  const y = Math.round(t.frame.y + t.frame.height / 2);
+  for (const [where, x] of [['left edge', Math.round(t.frame.x + 14)], ['right edge', Math.round(t.frame.x + t.frame.width - 14)]]) {
+    await input.tapPoint(udid, x, y, { durationMs: step.durationMs });
+    now = await valueNow();
+    if (now != null && now !== before) {
+      return `tapped "${t.label}" — the row's centre did not select it, its ${where} (${x},${y}) did: ${JSON.stringify(before)} → ${JSON.stringify(now)}`;
+    }
+  }
+  throw metrics.tag(
+    new Error(`tapped "${t.label}" at its centre and both edges and it still reads ${JSON.stringify(before)} — not selected. Read the screen: the control that selects it may be a separate element.`),
+    'verification_failed',
+  );
+}
+
 /**
  * A tap that would change a setting on a name the caller only partly wrote.
  *
