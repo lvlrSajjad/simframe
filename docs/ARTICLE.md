@@ -559,7 +559,9 @@ The app was a React Native field app on its development server. The jobs: create
 
 Two findings I did not expect. Haiku, offered every tool in a normal session, never used simframe at all — it picked the built-in tool. Limited to simframe’s tools, it used them throughout and finished the wizard in sixteen calls. Tool choice, not model size, decided whether the cheaper path was taken. And the briefed driver was the only simframe setup to finish both jobs: the planner wrote one brief, and the driver’s eighty-eight tool results never entered the planner’s context.
 
-What it does not show is human speed. Every setup took thirteen to sixteen minutes for work a person does in five to ten, and the reason is the one the round-trip section already named: each model turn costs seconds, and these runs made fifty to a hundred and thirty of them. One run per setup is an example, not a rate. The next measurement is the same driver twice in a row, the second time with the app already in memory, against a recorded human doing the same two jobs.
+What it does not show is human speed, and that is now measured too. I recorded myself doing the same two jobs on the same simulator, five runs each: **39 seconds** for the service request and **49 seconds** for the asset, medians. About a minute and a half for both, against thirteen to sixteen minutes for every agent setup — **nine to ten times slower**. I had guessed five to ten minutes for a person before measuring; the guess flattered the agents by a factor of five.
+
+The recording shows where the difference lives. A person takes the first sensible option on every screen, types the minimum, and never reads a screen they already know; the only waiting is the app’s own spinners. The agents read and verify every step, and each check is a model turn — fifty to a hundred and thirty of them. That is the round-trip section again, at full scale. One run per agent setup is an example, not a rate; the next measurement is the same driver twice in a row, the second time with the app already in memory.
 
 *What three strangers agreed on*
 

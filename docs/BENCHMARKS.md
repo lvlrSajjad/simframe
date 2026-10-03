@@ -5164,6 +5164,30 @@ What it does not show: anything per-model with N=1, or wall time under
 contention. The permission check refused different writes in different arms,
 so A's and B's missing rows are about the session, not the arm.
 
+**A person, same jobs, same simulator (`simframe baseline record`, five runs
+each).** The owner, who knows the app, at a relaxed pace; timed from Enter to
+Enter, so the app's own loading is included:
+
+| job | runs (s) | median | IQR |
+| --- | --- | --- | --- |
+| service request | 51.4, 40.8, 36.3, 32.4, 39.1 | **39.1 s** | 36.3–40.8 |
+| add asset and sync | 56.5, 80.5, 38.6, 47.2, 48.9 | **48.9 s** | 47.2–56.5 |
+
+About 1.5 minutes for both jobs, against 13–16 for every agent setup: the
+agents were **9–10× slower**. The guess before measuring was "5–10 minutes for
+a person", which flattered the agents by about five times. A screen recording
+of one run shows why: the first sensible option on every screen, the minimum
+typed, no screen read twice, and the only waiting is the app's spinners. The
+agents read and verify every step, and each check is a model turn. The step
+counts the recorder printed are undercounts on runs over 90 s (its frame
+history), and are not used.
+
+**Haiku again, after the fixes (D2, clone, 2026-10-03):** service request in
+**11 calls** (16 before), work order created; the asset was blocked again,
+this time because it never found the warranty radio rows and went looking for
+a date picker, so the radio fix was never reached. 130k tokens, 127 tool uses.
+Sonnet stays the driver's model.
+
 Fixed from these runs (DEFERRED 200): radio rows that ignore their centre, a
 field preferred by `type`, synonyms on multi-word names, scrollTo arriving on
 weak matches, the last-resort match inside long rows, the keyboard read back as

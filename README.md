@@ -27,9 +27,11 @@ calls.** The Sonnet driver did everything the no-simframe run did, with 2.3×
 fewer tokens, half the calls and a handful of images where it took 112. It is one run per setup, so
 read it as a measured example, not a rate; the full write-up, including what it
 does not show, is in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md#who-drives-model-and-tool-comparison--2026-10-03).
-It is not faster than a person yet: these runs took 13–16 minutes for work a
-person does in 5–10, because each model turn costs seconds. Fewer turns per
-flow is what the roadmap is about.
+**It is not near human speed yet, and that is measured too.** A person who
+knows the app did the same two jobs in **about 1.5 minutes** (medians of five
+runs: 39 s and 49 s). The agents took 13–16 minutes, **9–10× slower**, because
+they read and verify every step and each model turn costs seconds. Fewer turns
+per flow, and flows replayed from memory, are what the roadmap is about.
 
 ## Install in ten seconds
 

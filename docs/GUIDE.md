@@ -851,9 +851,11 @@ full table and its limits are in BENCHMARKS, "Who drives").
 
 Same model with and without simframe: **2.5× fewer tokens, 3.5× fewer calls**.
 The no-simframe run took most screenshots twice, because the first one after an
-action still showed the screen before it. All of them took 13–16 minutes,
-against a person's 5–10: the cost is the number of model turns, which is what
-batching, goal mode and replay from memory exist to cut.
+action still showed the screen before it. All of them took 13–16 minutes.
+A person who knows the app, recorded with `simframe baseline record` on the
+same simulator, did the two jobs in **39 s and 49 s** (medians of five runs
+each): the agents were 9–10× slower. The cost is the number of model turns,
+which is what batching, goal mode and replay from memory exist to cut.
 
 ### Tokens and model calls per verified flow
 
