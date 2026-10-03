@@ -7763,3 +7763,9 @@ test('an unlabeled top-left button is a way back whatever region it was given, a
   assert.equal(carto.isBackAffordance({ label: undefined, type: 'Button', region: 'content', x: 360, y: 132 }), false);
   assert.equal(carto.classify({ label: 'loading', type: 'StaticText' }).open, false);
 });
+
+test('a top-left button is a way back even when it carries the parent title and sits in content', async () => {
+  const carto = await import('../src/cartographer.js');
+  assert.equal(carto.isBackAffordance({ label: 'General', type: 'Button', region: 'content', x: 38, y: 84 }), true);
+  assert.equal(carto.isBackAffordance({ label: 'General', type: 'Button', region: 'content', x: 201, y: 300 }), false);
+});

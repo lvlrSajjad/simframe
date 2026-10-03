@@ -92,7 +92,10 @@ export function isBackAffordance(row, { locale } = {}) {
   // And an unlabeled button in the top-left corner, wherever the region
   // priors put it: Ecotrak's chevron is often read as content, and a crawl
   // that could not find it fell back to edge swipes that did nothing.
-  if (!label && /button/i.test(String(row?.type ?? '')) && (row?.x ?? 999) <= 60 && (row?.y ?? 999) <= 130) return true;
+  // Labelled or not: iOS titles the back button with the parent screen
+  // ("General"), and on some screens the region priors put it in content. A
+  // Settings crawl took it for a door nine times in one run.
+  if (/button/i.test(String(row?.type ?? '')) && (row?.x ?? 999) <= 60 && (row?.y ?? 999) <= 130) return true;
   return /(^|[-_ ])back([-_ ]|$)|header-back|toolbar-back/i.test(label);
 }
 

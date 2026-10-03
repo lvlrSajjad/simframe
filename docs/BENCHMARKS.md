@@ -4933,3 +4933,11 @@ Two measurements matter for the next decision. A tap that changes nothing
 costs 13–22 s of verification, and a warm relaunch of this debug build takes
 9–16 s to reach home. Both are larger than the actions the crawl exists to
 take, so most of a 15-minute budget goes to recovery and verification.
+
+**Settings regression after the Ecotrak fixes (2026-10-03, `326464A4`).** 23
+screens and 23 transitions in 61 actions and 367 s, 0 relaunches. Appearance,
+text size, languages and the Settings defaults domain were identical before
+and after. It found one more fault: iOS 26 titles the back button with the
+parent screen, the region priors sometimes put it in content, and the crawl
+recorded it nine times as a "picked option". A button in the top-left corner
+is now a back affordance whatever its label or region.
