@@ -4969,3 +4969,27 @@ tabs are no longer reported as picked options.
 **Icon glyphs:** 0 of the targets read in this run carried an icon-font
 character. With real labels in place the tree no longer passes the glyph, so
 the glyph route is still unverified on a live screen.
+
+## Icon glyphs named live on the testbed — 2026-10-03
+
+`326464A4`, the RN testbed rebuilt with Feather.ttf (MIT) under `UIAppFonts`
+and a new Icons tab holding seven glyph-only buttons with no accessibility
+label. `simframe ui` before this change listed them as unlabeled. After it:
+
+| button | read as |
+| --- | --- |
+| U+F11E | bell (icon) |
+| U+F1D0 | search (icon) |
+| U+F1A8 | more horizontal (icon) |
+| U+F124 (with a testID) | bookmark (icon) |
+| U+F1F5 | trash 2 (icon) |
+| U+F1D1 | send (icon) |
+| U+F195 | log out (icon) |
+| glyph + "Settings" | Settings |
+
+7 of 7 named, 0 wrong. A three-minute crawl opened bell, search and more
+horizontal, and refused bookmark (writes when tapped), trash 2, send and log out.
+It found that "trash" was missing from the destructive vocabulary, now added. It
+also found two over-cautious rules, both fixed. A "send" icon marked the whole
+grid as a form, so an icon now counts as a commit only beside a text field. A
+selected tab made its siblings a selection list, so tabs are navigation.

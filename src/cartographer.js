@@ -239,7 +239,10 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
     }
     return { doors, refused: refused.filter((r) => r.kind !== 'skipped-dialog'), skipped: [], dialog };
   }
-  const optionShapes = new Set(ordered.filter((r) => r.selected === true).map(shapeOf).filter(Boolean));
+  // A selected tab marks a tab bar, not a selection list: switching tabs is
+  // navigation ("Plants, tab, 1 of 4").
+  const isTabRow = (r) => /\btab\b/i.test(String(r.label ?? '')) || /^tab$/i.test(String(r.type ?? ''));
+  const optionShapes = new Set(ordered.filter((r) => r.selected === true && !isTabRow(r)).map(shapeOf).filter(Boolean));
   // The accessibility tree is authoritative when it is describing this screen's
   // controls (CLAUDE.md's perception order). Then what it calls static text is
   // static, and tapping it costs a full no-change verification — 13-22 s each,
@@ -251,7 +254,12 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
   // but read-only means not editing a form either, and RN radios carry no
   // `selected` trait to warn by.
   const commits = vocabulary.load(locale).cartographer?.formCommit ?? [];
-  const commit = allowCreate ? null : ordered.find((r) => /button/i.test(String(r.type ?? '')) && commits.some((w) => alnum(r.label) === alnum(w)));
+  // A commit read off an icon ("send") only marks a form when there is a field
+  // to commit — a compose bar. A grid of icon buttons is not a form.
+  const hasField = ordered.some((r) => /field|textview|searchfield/i.test(String(r.type ?? '')));
+  const commit = allowCreate ? null : ordered.find((r) => /button/i.test(String(r.type ?? ''))
+    && commits.some((w) => alnum(r.label) === alnum(w))
+    && (r.labelFrom !== 'icon' || hasField));
   const lowest = Math.max(0, ...ordered.map((r) => (r.frame?.y ?? r.y ?? 0) + (r.frame?.height ?? 0)));
   const bottomBand = lowest * 0.88;
   const treeKnowsControls = ordered.some((r) => /ax/.test(String(r.source ?? '')) && /button|cell|link|switch|tab/i.test(String(r.type ?? '')));

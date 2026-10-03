@@ -1,7 +1,7 @@
 /**
  * simframe's testbed: an app that fails on purpose, reproducibly.
  *
- * Three tabs, each a real `native-stack` so the nav bars are
+ * Four tabs, each a real `native-stack` so the nav bars are
  * `UINavigationController` bars rather than styled views — large titles on the
  * roots, compact bars with back buttons on anything pushed. That pair is item
  * 110's subject and neither shape can be reproduced on a hosted runner inside
@@ -22,6 +22,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ItemsStack } from './src/screens/Items';
 import { FormsStack } from './src/screens/Forms';
 import { DiagnosticsStack } from './src/screens/Diagnostics';
+import { IconsStack } from './src/screens/Icons';
 import { reseed } from './src/seed';
 import { setMode } from './src/api';
 
@@ -70,6 +71,8 @@ export default function App() {
             options={{ title: 'Forms', tabBarIcon: icon('✎') }} />
           <Tabs.Screen name="DiagnosticsTab" component={DiagnosticsStack}
             options={{ title: 'Diagnostics', tabBarIcon: icon('◔') }} />
+          <Tabs.Screen name="IconsTab" component={IconsStack}
+            options={{ title: 'Icons', tabBarIcon: icon('◇') }} />
         </Tabs.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>

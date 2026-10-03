@@ -54,7 +54,10 @@
       "place order",
       "confirm order",
       "submit order",
-      "cancel order"
+      "cancel order",
+      "trash",
+      "trash can",
+      "bin"
     ],
     "notWords": {
       "note": "Labels that are NOT destructive despite containing a destructive word. Matched against the WHOLE label, not as a phrase inside it: a bare 'Cancel' declines a dialog and must stay tappable, while 'Cancel order' is a different act and falls through to the list above. The bare noun 'order' is deliberately absent from that list for the same reason - 'Work Orders' and 'Order Details' are navigation, and only the verb phrase places one.",

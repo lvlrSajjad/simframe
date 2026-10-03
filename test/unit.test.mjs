@@ -7841,3 +7841,23 @@ test('a developer error overlay is an app error to report, never a door, and Rel
   assert.equal(carto.classify(b('Reload JS (⌘R)', 200, 800)).kind, 'barrier');
   assert.equal(carto.dialogDismiss(rows).label, 'Dismiss (ESC)');
 });
+
+test('icon names read off a glyph meet the barrier: trash, send and log out are refused', async () => {
+  const carto = await import('../src/cartographer.js');
+  const icon = (label) => ({ label, labelFrom: 'icon', type: 'Button', region: 'content', source: 'ax', x: 200, y: 300, frame: { x: 170, y: 270, width: 60, height: 60 } });
+  for (const name of ['trash 2', 'trash can outline', 'send', 'log out', 'delete']) assert.equal(carto.classify(icon(name)).kind, 'barrier', name);
+  for (const name of ['bell', 'search', 'more horizontal']) assert.equal(carto.classify(icon(name)).open, true, name);
+  assert.equal(carto.classify(icon('cabinet')).open, true, 'whole words only');
+});
+
+test('a send icon makes a form only beside a field, and a selected tab is not a selection list', async () => {
+  const carto = await import('../src/cartographer.js');
+  const icon = (label, x) => ({ label, labelFrom: 'icon', type: 'Button', region: 'content', source: 'ax', x, y: 260, frame: { x: x - 30, y: 230, width: 60, height: 60 } });
+  const grid = [icon('bell', 48), icon('search', 124), icon('send', 200)];
+  assert.deepEqual(carto.doorsOf(grid).doors.map((d) => d.label), ['bell', 'search']);
+  const compose = [...grid, { label: 'Message', type: 'TextField', region: 'content', source: 'ax', x: 200, y: 700, frame: { x: 20, y: 680, width: 300, height: 40 } }];
+  assert.ok(carto.doorsOf(compose).refused.some((r) => /form committed by "send"/.test(r.reason)));
+  const tab = (label, x, selected) => ({ label, type: 'Button', region: 'content', source: 'ax', selected, x, y: 816, frame: { x: x - 45, y: 796, width: 90, height: 40 } });
+  const tabs = [tab('Plants, tab, 1 of 4', 50, false), tab('Forms, tab, 2 of 4', 151, false), tab('Icons, tab, 4 of 4', 352, true)];
+  assert.ok(carto.doorsOf(tabs).doors.length >= 2);
+});
