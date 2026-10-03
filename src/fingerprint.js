@@ -81,8 +81,17 @@ import * as regions from './regions.js';
  *     for the same screen, which is what this number exists to declare. The
  *     lesson worth keeping is that the rules version is not a version of *this
  *     file*; it is a version of the token set, and the token set has an input.
+ *
+ * 10 — the keyboard, again an input. `regions.detectKeyboardTop` counted
+ *     elements scrolled below the screen as sitting beside the keys, so on a
+ *     long form with the keyboard up the key share fell under its bar and the
+ *     keyboard went undetected. Its keys became content tokens, the screen took
+ *     a new identity per keyboard state, and refs numbered before typing were
+ *     refused after it (peer test 0.21.0, F11). Off-screen elements no longer
+ *     count, so those screens now drop the keyboard as intended and hash
+ *     differently.
  */
-export const TOKEN_RULES_VERSION = 9;
+export const TOKEN_RULES_VERSION = 10;
 
 /** Frames are quantised to this, so sub-pixel drift and a nudged row do not matter. */
 export const GRID = 24;

@@ -2567,9 +2567,22 @@ worth more than the verdict.
      stripped from selectors.
    - **No summary on Ctrl-C (F8).** The first interrupt now ends the step,
      saves and reports.
-   - *Open:* `type` into a label that matches both the field and its caption is
-     ambiguous; the keyboard coming up invalidates refs, so a form cannot be
-     filled by ref in one script; screens are named after tab-bar chrome; a
+   - **A field and its caption (F11).** FIXED 2026-10-03. `type into "First
+     Name"` was refused as ambiguous between the field and the caption printed
+     above it: apart, so nothing merged them, both scoring 1. A caption that
+     only repeats the label of a control ranked above it is now dropped from
+     the ambiguity check (`matching.dropEchoedCaptions`); two controls with one
+     name still refuse.
+   - **Refs did not survive the keyboard (F11).** FIXED 2026-10-03. Two causes.
+     Keyboard detection counted fields scrolled below the screen as sitting
+     beside the keys, so on a long form the keyboard went undetected, its keys
+     became content tokens, and raising it gave the screen a new identity
+     (TOKEN_RULES_VERSION 10; the carry on `326464A4` kept 555 of 563 screen
+     maps on the same identity and lost 29 of 409 edges). And a ref refused as
+     "a different screen" is now honoured when the keyboard state is what
+     changed and the same label is found again within 6 pt of where it was
+     numbered. Verified live: three `type` steps by ref in one `do`, 3/3.
+   - *Open:* screens are named after tab-bar chrome; a
      list row under the tab bar is offered as tappable; crawl maps keep
      customer names and notification text in `refused` keys and `samples`.
    - *Open:* the global `simframe` on this Mac is 0.20.1, and the plugin's

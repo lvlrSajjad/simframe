@@ -27,6 +27,7 @@ import * as screenmap from './screenmap.js';
 import * as metrics from './metrics.js';
 import { capabilitiesFor, resolveDevice, resize, screenshot } from './platform/index.js';
 import * as store from './store.js';
+import { maskTyped } from './typed.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(HERE, 'cli.js');
@@ -1686,7 +1687,29 @@ async function locateWith(
       // coincidence rather than evidence — measured: `#1` numbered "Reminders"
       // in Reminders re-resolved in Contacts onto the status-bar back-to-app
       // breadcrumb "• Reminders", and reported ok.
-      if (!err.staleRef || !err.staleLabel || err.staleKind !== 'drift') throw err;
+      //
+      // One exception to that, held to a stricter bar: the keyboard. Raising it
+      // changes the screen's identity and nothing about the fields above it, so
+      // a form could not be filled by ref in one script — the second field was
+      // refused as "a different screen" (peer test 0.21.0, F11). It is honoured
+      // only when the keyboard is what changed and the same label is found
+      // again at the same place.
+      if (!err.staleRef || !err.staleLabel) throw err;
+      if (err.staleKind !== 'drift') {
+        const keyboardMoved = (err.staleKind === 'identity' || err.staleKind === 'unknown-screen')
+          && typeof err.staleKeyboard === 'boolean' && err.staleAt;
+        if (!keyboardMoved) throw err;
+        let same;
+        try {
+          same = await locateWith(deviceQuery, err.staleLabel, {
+            index, refresh: true, useAx, useOcr, settleMs, options, escalated,
+          });
+        } catch {
+          throw err;
+        }
+        if (!keyboardOnlyChange(err, same)) throw err;
+        return { ...same, from: 'ref-keyboard', relabelled: { ref: selector.ref, label: err.staleLabel, why: 'the keyboard changed the screen; the element is where it was numbered' } };
+      }
       let again;
       try {
         again = await locateWith(deviceQuery, err.staleLabel, {
@@ -1966,6 +1989,23 @@ export const IDENTITY_SETTLE_TIMEOUT_MS = 2500;
 const STRUCTURAL_SETTLE_SAMPLES = 3;
 
 /**
+ * The ref's element is where it was numbered, and only the keyboard changed.
+ * Pure. Same label (near-exact), same type when known, within a few points,
+ * on a screen whose keyboard state differs from the table's.
+ */
+export const KEYBOARD_REF_SLOP_PT = 6;
+export function keyboardOnlyChange(err, found) {
+  const at = err?.staleAt;
+  const target = found?.target;
+  if (!at || !target || typeof err.staleKeyboard !== 'boolean') return false;
+  if (Boolean(found.entry?.keyboard) === err.staleKeyboard) return false;
+  if (Number.isFinite(found.score) && found.score < RELABEL_MIN_SCORE) return false;
+  if (!regions.offerable(target.region ?? 'content')) return false;
+  if (at.type && target.type && at.type !== target.type) return false;
+  return Math.abs(target.x - at.x) <= KEYBOARD_REF_SLOP_PT && Math.abs(target.y - at.y) <= KEYBOARD_REF_SLOP_PT;
+}
+
+/**
  * What screen is this?
  *
  * `settled` is a question about pixels, and it is answered before a screen has
@@ -2020,7 +2060,9 @@ export async function screenIdentity(deviceQuery, { options, confirmNovel = true
       // Two witnesses, either enough: the step that made the action saw the
       // text change (its own before/after), or memory holds older text.
       quietChange = store.textChangeOf(udid, store.lastActionAt(udid))
-        ?? (recalled ? screenmap.textChange(recalled, entry) : null);
+        // Masked on both sides: memory holds field values as <typed>, so an
+        // unmasked fresh read would differ on every filled field.
+        ?? (recalled ? screenmap.textChange(maskTyped(recalled), maskTyped(entry)) : null);
       // The screen is still, so this reading is the one to remember: the next
       // comparison must start from the new text, or a tap that really missed
       // would be credited with this change again.

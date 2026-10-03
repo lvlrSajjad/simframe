@@ -523,7 +523,7 @@ export async function screenMap(deviceQuery, {
   const screen = identity.points;
 
   const { rows, truncated, collapsed } = rowsFor(entry, { screen, filter, interactive, all, limit });
-  writeRefs(udid, { structuralHash: identity.hash, layoutHash: identity.layoutHash, rows });
+  writeRefs(udid, { structuralHash: identity.hash, layoutHash: identity.layoutHash, keyboard: identity.keyboard, rows });
 
   const found = identity.hash ? graph.nearestScreen(udid, identity) : null;
   const node = found?.node ?? null;

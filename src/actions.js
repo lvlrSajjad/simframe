@@ -2111,6 +2111,13 @@ async function awaitFocus(deviceQuery, target, ctx) {
   return last;
 }
 
+// Text in a field is a change the daemon's pixel signal is too coarse to see,
+// so the screen read would say the typing did not land. Recorded against the
+// action, without the text: the field is named, its contents are not.
+function noteFieldChange(udid, field, back) {
+  if (back.landed) store.noteTextChange(udid, typed.maskCredentials(`${field.where} now holds the typed text`));
+}
+
 async function focusField(deviceQuery, udid, step, ctx) {
   const found = await api.locate(deviceQuery, step.into, { index: step.index, refresh: step.refresh });
   const tappedAt = Date.now();
@@ -2836,9 +2843,11 @@ async function runStep(deviceQuery, udid, step, ctx) {
             );
           }
           journalWrite(udid, step, sent, back, ctx);
+          noteFieldChange(udid, field, back);
           return `typed into ${field.where}${back.note} [took two attempts; the first keystrokes did not land]`;
         }
         journalWrite(udid, step, sent, back, ctx);
+        noteFieldChange(udid, field, back);
         return `typed into ${field.where}${back.note}${back.landed ? '' : field.quiet}`;
       }
       // **Refusing here was tried and reverted — see DEFERRED 161.** The idea
@@ -2884,6 +2893,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
           );
         }
         journalWrite(udid, step, sent, back, ctx);
+        noteFieldChange(udid, field, back);
         return `pasted into ${field.where}${back.note}${back.landed ? '' : field.quiet}`;
       }
       await input.pasteText(udid, step.text ?? step.value);

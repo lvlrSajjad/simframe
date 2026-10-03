@@ -3431,6 +3431,45 @@ test('a control below the fold is not absent, and waiting will not help', async 
   assert.equal(api.offScreenMatch([above], 'REVIEW', points)?.y, -40);
 });
 
+test('a ref survives the keyboard coming up, and nothing else (peer test 0.21.0, F11)', async () => {
+  const { keyboardOnlyChange } = await import('../src/index.js');
+  // Three type steps by ref: the first raised the keyboard, the screen took a
+  // new identity, and the second was refused as "a different screen".
+  const err = { staleAt: { x: 201, y: 371, type: 'TextField' }, staleKeyboard: false };
+  const found = (over = {}) => ({ score: 1, entry: { keyboard: true }, target: { label: 'Phone', type: 'TextField', x: 201, y: 371, region: 'content' }, ...over });
+  assert.equal(keyboardOnlyChange(err, found()), true);
+  assert.equal(keyboardOnlyChange(err, found({ entry: { keyboard: false } })), false, 'the keyboard is not what changed');
+  assert.equal(keyboardOnlyChange(err, found({ target: { ...found().target, y: 420 } })), false, 'not where it was numbered');
+  assert.equal(keyboardOnlyChange(err, found({ target: { ...found().target, type: 'StaticText' } })), false, 'its caption, not the field');
+  assert.equal(keyboardOnlyChange(err, found({ score: 0.64 })), false, 'a weak match is a guess');
+  assert.equal(keyboardOnlyChange({ staleAt: err.staleAt }, found()), false, 'a table that never recorded the keyboard cannot vouch');
+  // The table records the keyboard; a refusal carries where the ref pointed.
+  const refs = await import('../src/refs.js');
+  const udid = freshDevice('kb-refs');
+  refs.writeRefs(udid, { structuralHash: 'aaaa', layoutHash: null, keyboard: false, rows: [{ ref: 10, label: 'Phone', x: 201, y: 371, type: 'TextField' }] });
+  assert.throws(() => refs.resolveRef(udid, 10, { structuralHash: 'bbbb', structuralDistance: 0 }),
+    (e) => e.staleKind === 'identity' && e.staleKeyboard === false && e.staleAt.y === 371);
+});
+
+test('a caption printed above its field is not a second candidate (peer test 0.21.0, F11)', async () => {
+  const m = await import('../src/matching.js');
+  // The testbed's Long form: "First Name" as text at (17,127), the field named
+  // "First Name" at (201,160) — apart, so nothing merges them, both scoring 1.
+  // `type into "First Name"` was refused as ambiguous between the two.
+  const caption = { label: 'First Name', type: 'text', x: 17, y: 127, source: 'ax', frame: { x: 17, y: 118, width: 80, height: 18 }, region: 'content' };
+  const field = { label: 'First Name', type: 'TextField', x: 201, y: 160, source: 'ax', frame: { x: 17, y: 142, width: 368, height: 36 }, region: 'content' };
+  const lastCaption = { ...caption, label: 'Last Name', y: 197, frame: { ...caption.frame, y: 188 } };
+  const lastField = { ...field, label: 'Last Name', y: 231, frame: { ...field.frame, y: 213 } };
+  for (const targets of [[caption, field, lastCaption, lastField], [field, caption, lastField, lastCaption]]) {
+    const r = m.resolve(targets, 'First Name');
+    assert.equal(r.status, 'ok');
+    assert.equal(r.target.y, 160, 'the field, not its caption');
+  }
+  // A caption alone still answers, and two fields with one name still refuse.
+  assert.equal(m.resolve([caption], 'First Name').status, 'ok');
+  assert.equal(m.resolve([field, { ...field, y: 400, frame: { ...field.frame, y: 382 } }, caption], 'First Name').status, 'ambiguous');
+});
+
 test('a caption never wins over the control it names', async () => {
   const m = await import('../src/matching.js');
   // Reported: `tap "Problem"` hit the caption at (49,486) and did nothing,
@@ -4483,7 +4522,28 @@ test('a summary screen is not a keyboard, and its content stays in its identity'
   // 9: not a rule change at all — item 122 changed the *input*. Accessibility
   // nodes with no name are no longer dropped, so a screen with an icon-only
   // control carries a token it did not carry before and hashes differently.
-  assert.equal(fingerprint.TOKEN_RULES_VERSION, 9);
+  // 10: the input again — keyboard detection counted off-screen form fields
+  // beside the keys and missed a real keyboard, so its keys became tokens.
+  assert.equal(fingerprint.TOKEN_RULES_VERSION, 10);
+});
+
+test('a keyboard is found when a long form keeps fields below the fold (peer test 0.21.0, F11)', async () => {
+  const regions = await import('../src/regions.js');
+  const screen = { width: 402, height: 874 };
+  const key = (label, x, y, w = 40) => ({ label, type: 'Button', frame: { x, y, width: w, height: 54 } });
+  const keys = [];
+  'qwertyuiop'.split('').forEach((c, i) => keys.push(key(c, 5 + i * 39.5, 590)));
+  'asdfghjkl'.split('').forEach((c, i) => keys.push(key(c, 24 + i * 39.5, 644)));
+  'zxcvbnm'.split('').forEach((c, i) => keys.push(key(c, 64 + i * 39.5, 698)));
+  keys.push(key('shift', 5, 698, 51), key('delete', 348, 698, 52), key('numbers', 5, 752, 49), key('return', 301, 752, 99));
+  // Fields the form scrolled below the screen, still in the tree.
+  const below = [];
+  for (let y = 900; y < 1200; y += 70) {
+    below.push({ label: `Field ${y}`, type: 'StaticText', frame: { x: 16, y, width: 370, height: 15 } });
+    below.push({ label: `Field ${y}`, type: 'TextField', frame: { x: 16, y: y + 19, width: 370, height: 31 } });
+  }
+  const top = regions.detectKeyboardTop([...keys, ...below], screen);
+  assert.ok(top != null && top <= 590, `keyboard top ${top}`);
 });
 
 test('a band is only the keyboard if there is a keyboard in it', async () => {
@@ -7079,7 +7139,7 @@ test('a text change too small for the pixel signal is not reported as NOT MOVED 
   const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
   // An unmoved screen is read fresh, never recalled, and its text decides.
   assert.match(src, /let entry = stale \? null : recalled;/);
-  assert.match(src, /quietChange = store\.textChangeOf\(udid, store\.lastActionAt\(udid\)\)\n\s+\?\? \(recalled \? screenmap\.textChange\(recalled, entry\) : null\);/);
+  assert.match(src, /quietChange = store\.textChangeOf\(udid, store\.lastActionAt\(udid\)\)\n\s+[^\n]*\n(?:\s+\/\/[^\n]*\n)*\s+\?\? \(recalled \? screenmap\.textChange\(maskTyped\(recalled\), maskTyped\(entry\)\) : null\);/);
   // The step that saw the change says so, keyed to its own action: a later
   // action makes the note stale by itself.
   const store = await import('../src/store.js');
@@ -7093,6 +7153,8 @@ test('a text change too small for the pixel signal is not reported as NOT MOVED 
   // What reaches disk is described from masked readings.
   const act = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
   assert.match(act, /textChange\(typed\.maskTyped\(beforeScreen\.entry\), typed\.maskTyped\(again\.entry\)\)/);
+  // Typing records its change too, naming the field and not its contents.
+  assert.match(act, /store\.noteTextChange\(udid, typed\.maskCredentials\(`\$\{field\.where\} now holds the typed text`\)\)/);
   assert.match(src, /if \(quietChange\) \{ stale = false; screenmap\.remember\(udid, entry\); \}/);
   assert.match(src, /settled: settled \|\| Boolean\(quietChange\)/);
 });

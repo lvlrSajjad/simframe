@@ -52,10 +52,13 @@ const refsFile = (udid) => path.join(store.deviceDir(udid), 'refs.json');
  * ref against a different screen is an error rather than a tap somewhere
  * unintended.
  */
-export function writeRefs(udid, { structuralHash, layoutHash, rows }) {
+export function writeRefs(udid, { structuralHash, layoutHash, keyboard, rows }) {
   const body = {
     structuralHash: structuralHash ?? null,
     layoutHash: layoutHash ?? null,
+    // Whether the keyboard was up when these numbers were drawn. It changes the
+    // screen's identity and nothing about the fields above it; see `locateWith`.
+    ...(keyboard != null ? { keyboard: Boolean(keyboard) } : {}),
     at: Date.now(),
     refs: rows.map((r) => ({
       ref: r.ref,
@@ -127,9 +130,18 @@ export function resolveRef(udid, n, { structuralHash, layoutHash, screenKnown, s
   // back-to-app breadcrumb "• Reminders" at 0.64, and returned a tappable point
   // in the status bar — a region the map itself refuses to offer. A refusal had
   // become a confident wrong answer.
+  const numbered = table.refs?.find((r) => r.ref === n) ?? null;
   const staleError = (why, kind) => Object.assign(
     new Error(`#${n} cannot be trusted here —${issued} ${why}. Read the screen again (sim_ui) to renumber`),
-    { staleRef: true, staleLabel: labelFor, staleKind: kind },
+    {
+      staleRef: true,
+      staleLabel: labelFor,
+      staleKind: kind,
+      // Where the number pointed, and whether the keyboard was up then: enough
+      // for the caller to tell "the keyboard came up" from "somewhere else".
+      staleAt: numbered ? { x: numbered.x, y: numbered.y, type: numbered.type ?? null } : null,
+      ...(typeof table.keyboard === 'boolean' ? { staleKeyboard: table.keyboard } : {}),
+    },
   );
 
   // Structural identity first, because it is the question actually being asked:

@@ -397,7 +397,13 @@ export function looksLikeKey(t) {
 export function detectKeyboardTop(elements, screen) {
   if (!screen?.height || elements.length < 12) return null;
   const threshold = screen.height * (1 - KEYBOARD_MIN_FRACTION);
-  const low = elements.filter((e) => e.frame && e.frame.y > threshold);
+  // Inside the viewport only. A scrolling form keeps its fields below the
+  // fold in the tree, and with the keyboard up those fields sat "low" beside
+  // the keys: measured on the testbed's long form, 11 of 42 low elements were
+  // off screen, the key share fell under the bar, and a keyboard with all its
+  // keys in view was not detected — so raising it gave the screen a new
+  // identity and invalidated every ref on it.
+  const low = elements.filter((e) => e.frame && e.frame.y > threshold && e.frame.y < screen.height);
   if (low.length < 12) return null;
   const heights = low.map((e) => heightOf(e.frame)).sort((a, b) => a - b);
   const median = heights[heights.length >> 1];

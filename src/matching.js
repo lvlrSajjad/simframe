@@ -466,6 +466,29 @@ export function preferTheControl(ranked) {
   return [promoted, ...ranked.filter((_, idx) => idx !== i)];
 }
 
+/**
+ * A caption that only repeats the name of a control ranked above it is the
+ * same match seen twice, not a second candidate.
+ *
+ * `preferTheControl` covers the caption ranking first; this covers it ranking
+ * second. A form prints "First Name" above the field that is named "First
+ * Name", both score 1, and `type into "First Name"` was refused as ambiguous
+ * between the field and its own caption (peer test 0.21.0, F11). Only an exact
+ * echo of a control's label is dropped, so a heading still answers when
+ * nothing else does.
+ */
+export function dropEchoedCaptions(ranked) {
+  const controls = new Set();
+  return ranked.filter((c) => {
+    const name = norm(c.target.label);
+    if (!namesOnly(c.target)) {
+      if (name) controls.add(name);
+      return true;
+    }
+    return !(name && controls.has(name));
+  });
+}
+
 function collapseSamePlace(ranked) {
   const kept = [];
   for (const c of ranked) {
@@ -499,7 +522,7 @@ function collapseSamePlace(ranked) {
  * @returns {{status: 'ok'|'ambiguous'|'none', target?, score?, reasons?, alternatives?}}
  */
 export function resolve(targets, intent, options = {}) {
-  const ranked = preferTheControl(collapseSamePlace(rank(targets, intent, options).filter((c) => c.score >= MINIMUM_SCORE)));
+  const ranked = dropEchoedCaptions(preferTheControl(collapseSamePlace(rank(targets, intent, options).filter((c) => c.score >= MINIMUM_SCORE))));
   if (!ranked.length) return { status: 'none', alternatives: [] };
   const [best, second] = ranked;
   if (second && best.score - second.score < AMBIGUITY_MARGIN) {
