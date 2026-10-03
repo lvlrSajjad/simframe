@@ -3803,6 +3803,19 @@ test('field report 2026-10-04: repeats skip background rows, a bare count reads 
   assert.match(a.stateDelta(before, after).detail, /^"Option B" changed/);
 });
 
+test('a centred dialog marks the background below it as well as above (field report, 2026-10-04)', async () => {
+  const sm = await import('../src/screenmap.js');
+  const screen = { width: 402, height: 874 };
+  const ocr = (label, y) => ({ label, type: 'Text', source: 'ocr', x: 60, y, frame: { x: 20, y: y - 6, width: 120, height: 12 }, region: 'content' });
+  const ax = (label, y, h = 44) => ({ label, type: 'Button', source: 'ax', x: 201, y, frame: { x: 40, y: y - h / 2, width: 322, height: h }, region: 'content' });
+  const modal = [ocr('Trade', 180), ocr('Asset', 230), ax('Close', 330), ax('Order #1 created', 400), ax('VIEW', 500), ocr('Priority | L1', 640), ocr('SUBMIT', 760)];
+  assert.equal(sm.markBehindSheet(modal, screen), 4);
+  assert.equal(modal[5].behind, true, 'below the dialog');
+  // A bottom sheet reaching the bottom marks nothing below it.
+  const sheet = [ocr('Asset', 180), ocr('Location', 230), ax('Close', 470), ax('Option A', 560), ax('Option C', 840)];
+  assert.equal(sm.markBehindSheet(sheet, screen), 2);
+});
+
 test('a keyboard key never competes with an app control of the same name (field report, 2026-10-04)', async () => {
   const m = await import('../src/matching.js');
   const screen = { width: 402, height: 874 };

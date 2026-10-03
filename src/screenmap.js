@@ -735,8 +735,15 @@ export function markBehindSheet(targets, screen) {
   const above = placed.filter((t) => t.source === 'ocr' && t.frame.y + (t.frame.height ?? 0) <= top);
   // One stray word above a form (a logo) is not a screen behind a sheet.
   if (above.length < 2) return 0;
-  for (const t of above) t.behind = true;
-  return above.length;
+  // A centred dialog leaves the background showing below it too: a success
+  // modal's rows under it ("Priority | L1 - Emergency", "SUBMIT …") read as
+  // live data (field report, 2026-10-04). Only when the panel stops well short
+  // of the bottom, so a bottom sheet's own lower content is never marked.
+  const below = bottom < screen.height - 60
+    ? placed.filter((t) => t.source === 'ocr' && t.frame.y >= bottom && t.region !== 'tab-bar' && t.region !== 'keyboard')
+    : [];
+  for (const t of [...above, ...below]) t.behind = true;
+  return above.length + below.length;
 }
 
 /**
