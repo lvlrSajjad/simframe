@@ -3,6 +3,7 @@
 // Waiting uses a baseline captured BEFORE each action, which is the whole
 // reason these scripts are reliable rather than racy.
 import * as api from './index.js';
+import * as cartographer from './cartographer.js';
 import * as frontmost from './frontmost.js';
 import * as graph from './graph.js';
 import * as input from './input.js';
@@ -1833,6 +1834,24 @@ const LATE_CHANGE_MS = 700;
  * from how it was *before* the action, the action changed it.
  */
 /**
+ * Wait for the app in front to show something a person could operate, up to
+ * the launch ceiling. Reads end the wait; nothing sleeps a fixed time. Returns
+ * `{ operable, waitedMs }`.
+ */
+async function untilOperable(deviceQuery, options, capMs) {
+  const cap = Math.min(capMs ?? cartographer.LAUNCH_CAP_MS, cartographer.LAUNCH_CAP_MS);
+  const t0 = Date.now();
+  for (let first = true; ; first = false) {
+    const id = await api.screenIdentity(deviceQuery, { options, confirmNovel: false, fresh: !first }).catch(() => null);
+    if (cartographer.placeLike({ rows: id?.entry?.targets ?? [] })) return { operable: true, waitedMs: Date.now() - t0 };
+    const left = cap - (Date.now() - t0);
+    if (left <= 0) return { operable: false, waitedMs: Date.now() - t0 };
+    // Until the screen changes, or what is left of the ceiling.
+    await api.waitFor(deviceQuery, { mode: 'change', timeoutMs: Math.min(left, 5000), options }).catch(() => null);
+  }
+}
+
+/**
  * Text that differs between two readings of one screen, outside the status
  * bar, or null. Pure. The first difference is described; that is enough to
  * say the tap landed.
@@ -2949,8 +2968,17 @@ async function runStep(deviceQuery, udid, step, ctx) {
         );
       }
       if (ctx.landing) ctx.landing.verdict = landed.verdict;
+      // In front is not ready. A React Native debug build sits on its splash for
+      // 9-16 s after a warm relaunch, and the next step of a flow then failed on
+      // a screen with nothing on it. The owner's exception to the 10 s cap
+      // (CLAUDE.md, 2026-10-03) covers exactly this wait, so the launch step now
+      // waits for something to operate, up to that ceiling — never a fixed
+      // sleep: it ends at the first reading that has a control.
+      const ready = await untilOperable(deviceQuery, ctx.options, step.timeoutMs);
       return `launched ${bundleId}${step.relaunch ? ' (relaunched)' : ''}`
         + (landed.verdict === 'fronted' ? ` (frontmost after ${landed.ms}ms)` : '')
+        + (ready.waitedMs > 0 && ready.operable ? ` (operable after ${ready.waitedMs}ms)` : '')
+        + (!ready.operable ? ` [still nothing to operate after ${ready.waitedMs}ms — the app may not have finished launching]` : '')
         + (shell.attempts > 1
           ? ` [the guest's SpringBoard crashed and came back; launched again after ${shell.waitedMs}ms`
             + `, on attempt ${shell.attempts}]`
