@@ -547,7 +547,29 @@ function geometry() {
  * A false positive costs one session rebuild and no action, so the ordering
  * prefers the most boot-specific marker and falls back rather than guessing.
  */
+/**
+ * `ps` elapsed time, `[[dd-]hh:]mm:ss`, in milliseconds. Pure.
+ */
+export function etimeMs(etime) {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(String(etime ?? '').trim());
+  if (!m) return null;
+  const [, d = 0, h = 0, min, sec] = m;
+  return (((Number(d) * 24 + Number(h)) * 60 + Number(min)) * 60 + Number(sec)) * 1000;
+}
+
 function bootedAt(udid) {
+  // The device's own launchd: it starts with the boot and nothing touches it
+  // afterwards. The file markers below are touched later — syslog.pid read
+  // eight minutes after a boot measured on 2026-10-03 — which hid a daemon
+  // that had outlived its device's reboot.
+  try {
+    const out = execFileSync('ps', ['-axo', 'etime=,command='], { encoding: 'utf8', timeout: 2000 });
+    const line = out.split('\n').find((l) => l.includes('launchd_sim') && l.includes(`/Devices/${udid}/`));
+    const ms = line ? etimeMs(line.trim().split(/\s+/)[0]) : null;
+    if (ms != null) return Date.now() - ms;
+  } catch {
+    /* fall back to the markers */
+  }
   const dir = path.join(
     os.homedir(), 'Library', 'Developer', 'CoreSimulator', 'Devices', udid,
   );

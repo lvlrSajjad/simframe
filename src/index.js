@@ -25,7 +25,7 @@ import * as matching from './matching.js';
 import * as refs from './refs.js';
 import * as screenmap from './screenmap.js';
 import * as metrics from './metrics.js';
-import { capabilitiesFor, resolveDevice, resize, screenshot } from './platform/index.js';
+import { bootedAtFor, capabilitiesFor, resolveDevice, resize, screenshot } from './platform/index.js';
 import * as store from './store.js';
 import { maskTyped } from './typed.js';
 
@@ -164,6 +164,26 @@ export function daemonStatus(udid) {
 }
 
 /**
+ * Did this daemon start before its device's current boot? Pure apart from the
+ * boot time, which is cached for a few seconds: this runs on every request.
+ */
+const bootCache = new Map();
+export function startedBeforeBoot(startedAt, bootedAt, slackMs = 2000) {
+  return Number.isFinite(startedAt) && Number.isFinite(bootedAt) && bootedAt > startedAt + slackMs;
+}
+function outlivedItsDevice(udid, meta) {
+  const now = Date.now();
+  let hit = bootCache.get(udid);
+  if (!hit || now - hit.at > 5000) {
+    let value = null;
+    try { value = bootedAtFor(udid); } catch { value = null; }
+    hit = { at: now, value };
+    bootCache.set(udid, hit);
+  }
+  return startedBeforeBoot(meta?.startedAt, hit.value);
+}
+
+/**
  * Make sure a capture loop is running for `deviceQuery`, then return once a
  * frame is actually available. Safe to call on every request: it is a stat
  * when the daemon is already up.
@@ -175,6 +195,14 @@ export async function ensureDaemon(deviceQuery, options = {}) {
 
   const existing = daemonStatus(device.udid);
   if (existing.stale) stopDaemon(device.udid);
+  else if (existing.running && outlivedItsDevice(device.udid, existing.meta)) {
+    // The device was shut down and booted again under a running daemon, which
+    // kept serving a display that no longer exists: every read then waited 60 s
+    // for a frame (2026-10-03, after cloning a device). A daemon older than
+    // its device's boot is restarted, not trusted.
+    stopDaemon(device.udid);
+    existing.alive = false;
+  }
   // A dead daemon leaves its last state.json behind. Anything captured before
   // we (re)started the loop is not evidence of a live screen, so ignore it.
   const minCapturedAt = existing.alive ? 0 : Date.now();

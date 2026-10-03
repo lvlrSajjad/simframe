@@ -3683,6 +3683,19 @@ test('simframe do takes a script inline, as the skill shows (field report, 0.22.
   assert.deepEqual(scriptSteps('flow.json', () => '[{"tap":"B"}]'), [{ tap: 'B' }], 'a path is still a path');
 });
 
+test('a daemon that outlived its device\'s reboot is restarted, not trusted (2026-10-03)', async () => {
+  const { startedBeforeBoot } = await import('../src/index.js');
+  const { etimeMs } = await import('../src/platform/ios.js');
+  assert.equal(etimeMs('27:44'), (27 * 60 + 44) * 1000);
+  assert.equal(etimeMs('10:49:03'), ((10 * 60 + 49) * 60 + 3) * 1000);
+  assert.equal(etimeMs('2-01:00:00'), 49 * 3600 * 1000);
+  assert.equal(etimeMs('nonsense'), null);
+  assert.equal(startedBeforeBoot(1000, 60000), true, 'the device booted after the daemon started');
+  assert.equal(startedBeforeBoot(60000, 1000), false);
+  assert.equal(startedBeforeBoot(60000, 61000), false, 'within the slack of a daemon started with the boot');
+  assert.equal(startedBeforeBoot(60000, null), false, 'no boot time, no claim');
+});
+
 test('a name of several words is not a synonym, and the keyboard is not a field\'s contents (comparison runs, 2026-10-03)', async () => {
   const m = await import('../src/matching.js');
   const screen = { width: 402, height: 874 };
