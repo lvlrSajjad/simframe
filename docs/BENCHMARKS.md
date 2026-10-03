@@ -5097,3 +5097,26 @@ call, the figure the `hpi` latency model uses.
   through simframe, not by coordinates a model read off an image, so it
   measures the protocol's cost. A real screenshot tool would add the model's
   own mis-taps and retries, and nothing here counts those.
+
+## Typing a form: reads after a typed field no longer wait for pixels — 2026-10-03
+
+`326464A4` (iPhone 17 Pro, iOS 26.5), M2 Pro, Xcode 27.0, the testbed's Long
+form, `simframe do` from the CLI, wall time including process start. N=2 per
+row, after the fixes in DEFERRED 197 (refs survive the keyboard).
+
+| script | before | after |
+| --- | --- | --- |
+| one `type` into a named field | 6.3–6.8 s | 2.6 s |
+| three `type` steps by ref | 16.6–19.7 s | 5.9 s (flow 5.1 s) |
+
+Where the time went, measured with temporary timestamps on one field: the
+type itself (locate, tap, focus, clear, keystrokes, read back) took 0.8–2.6 s.
+The rest was waits for the screen to move "since the action". A few typed
+characters fall below the daemon's coarse change signal, so every later read
+(the step's verification, the next step's before-read, the final map) waited
+its whole 2.5 s timeout. The step now records the field change against the
+action, and a read after such an action accepts the stillness. The read-back
+is still what verifies the text. The `never settled` tag on a typed field is
+no longer printed, because its short settle timing out means nothing; a capture
+stall still prints.
+

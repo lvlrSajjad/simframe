@@ -1052,7 +1052,7 @@ function stepLines(res) {
     actions.flowSummary(res),
   ];
   for (const r of res.results) {
-    const settle = r.settled
+    const settle = actions.settleWorthSaying(r.settled)
       ? r.settled.ok
         ? ` · settled in ${r.settled.waitedMs}ms`
         : ` · WARNING: ${r.settled.stalled ? 'capture stalled' : 'never settled'} after ${r.settled.waitedMs}ms`

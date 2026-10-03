@@ -671,6 +671,10 @@ export async function runScript(
         return {
           ok: w.satisfied,
           waitedMs: w.waitedMs,
+          // Verified by reading back, not by settling: an unsatisfied wait here
+          // is not news, and printing "never settled" made agents re-check
+          // fields that had been read back already.
+          ...(staysPut ? { staysPut: true } : {}),
           sawChange: w.sawChange,
           stalled: Boolean(w.stalled),
           noVisibleChange: Boolean(w.noVisibleChange),
@@ -767,7 +771,14 @@ export async function runScript(
       if (verify && ACTION_STEPS.has(step.action) && beforeScreen?.hash) {
         const afterState = (await api.getState(deviceQuery, { options })).state;
         const kind = afterState.transition?.kind;
-        const afterScreen = await api.screenIdentity(deviceQuery, { options, settleMs: stableMs, timeoutMs, confirmNovel });
+        // A step verified by reading its field back stays put, and what it
+        // changed is often below the pixel signal, so a settle "since the
+        // action" can only time out: measured, 2.5 s of every typed field was
+        // this wait. It gets the stays-put budget, as its own settle does.
+        const afterScreen = await api.screenIdentity(deviceQuery, {
+          options, settleMs: stableMs, confirmNovel,
+          timeoutMs: graph.STAYS_ON_SCREEN.has(step.action) ? STAYS_PUT_BUDGET_MS : timeoutMs,
+        });
         afterReading = afterScreen;
         verification = {
           ...withWayBack(
@@ -2777,6 +2788,8 @@ async function runStep(deviceQuery, udid, step, ctx) {
       const query = step.value ?? step.target ?? step.label;
       // Screen memory first: a familiar screen needs no tree read and no OCR.
       const found = await api.locate(deviceQuery, query, { index: step.index, refresh: step.refresh });
+      const partial = partialHitOnSetting(found);
+      if (partial) throw metrics.tag(new Error(partial), 'ambiguous_intent', { candidates: [found.target], intent: query });
       await input.tapPoint(udid, found.target.x, found.target.y, { durationMs: step.durationMs });
       return `tapped "${found.target.label}" at ${found.target.x},${found.target.y} (${found.from}${found.from === 'memory' ? ` d=${found.distance}` : ''}, via ${found.target.source})`
         + relabelledNote(found);
@@ -3722,6 +3735,36 @@ export function settleEvidence(w) {
  * reading as no change on 2026-10-01 — and retrying on a false one is how a
  * tap fires twice, which the verify barrier forbids.
  */
+/**
+ * A tap that would change a setting on a name the caller only partly wrote.
+ *
+ * Measured on the bench device, 2026-10-03: a flow written for the Settings
+ * root ran on the Larger Text page, and `tap "Accessibility"` resolved to the
+ * switch "Larger Accessibility Sizes" — the only element containing the word,
+ * at 0.46 against a 0.45 floor — and turned it on. A partial name may still
+ * open a row; it may not flip a switch, move a slider or tick a box. Those
+ * need their name (≥ RELABEL_MIN_SCORE) or a ref. Returns the refusal, or null.
+ */
+const SETTING_TYPES = /^(switch|toggle|slider|checkbox|stepper|segmentedcontrol|radiobutton|picker|datepicker)$/i;
+export function partialHitOnSetting(found) {
+  const t = found?.target;
+  if (!t || !SETTING_TYPES.test(String(t.type ?? ''))) return null;
+  if (found.from === 'ref' || !Number.isFinite(found.score) || found.score >= api.RELABEL_MIN_SCORE) return null;
+  return `"${t.label}" is a ${String(t.type).toLowerCase()} and only part of its name matched (${found.score.toFixed(2)}) — `
+    + 'tapping it would change a setting, so it was not tapped. Name it in full to change it, '
+    + 'or name the control you meant; it may not be on this screen.';
+}
+
+/**
+ * Whether a step's settle is worth printing. A stays-put step (type, paste,
+ * key) is verified by reading back, and its short settle timing out says
+ * nothing — unless capture itself stalled.
+ */
+export function settleWorthSaying(settled) {
+  if (!settled) return false;
+  return !(settled.staysPut && !settled.ok && !settled.stalled);
+}
+
 export function stepMark(r) {
   if (!r?.ok) return 'FAIL';
   return r.unconfirmed || metrics.ESCALATING_VERDICTS.has(r.verification?.verdict) ? 'WARN' : 'ok  ';

@@ -2511,6 +2511,26 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+198. **A partial name flipped a real switch on the bench device.** FIXED,
+   2026-10-03, the same hour. I ran the Settings bench flow's steps with a
+   plain `launch`, and Settings resumed on the Larger Text page instead of its
+   root. `tap "Accessibility"` resolved to the switch "Larger Accessibility
+   Sizes", the only element containing the word, at **0.46 against a 0.45
+   floor**, and turned it on (`largeTextUsesExtendedRange = true` in
+   `com.apple.preferences-framework`, file rewritten that minute). I switched
+   it back off, checked the file, and removed both taps from the graph.
+
+   A partial name may still open a row. It may no longer flip a switch, move
+   a slider, or tick a box: on those, the `tap` step refuses below
+   `RELABEL_MIN_SCORE` (0.8), says what matched and how weakly, and asks for
+   the full name or a ref (`actions.partialHitOnSetting`). Verified live: the
+   same tap now refuses, and the switch stays at 0.
+
+   *Open:* the 0.45 floor plus the "only element containing the word" bonus
+   still lets a one-word query resolve to any longer label. Rows are safe to
+   open and back out of; a destructive row is behind the verify barrier. Raise
+   the floor only with a measurement of what it would refuse.
+
 197. **Peer test of 0.21.0 (the cartographer): a read-only crawl wrote to real data.**
    Report: `peer-reports/0.21.0-phase1.md` (not committed; it holds field-app
    data). FIXED the same day unless marked open.

@@ -3451,6 +3451,35 @@ test('a ref survives the keyboard coming up, and nothing else (peer test 0.21.0,
     (e) => e.staleKind === 'identity' && e.staleKeyboard === false && e.staleAt.y === 371);
 });
 
+test('a partial name never flips a switch (bench device, 2026-10-03)', async () => {
+  const a = await import('../src/actions.js');
+  // `tap "Accessibility"` on the Larger Text page hit "Larger Accessibility
+  // Sizes" at 0.46 and turned it on.
+  const sw = { label: 'Larger Accessibility Sizes', type: 'Switch', x: 337, y: 161 };
+  assert.match(a.partialHitOnSetting({ target: sw, score: 0.46, from: 'memory' }), /only part of its name matched \(0\.46\).*not tapped/);
+  assert.equal(a.partialHitOnSetting({ target: sw, score: 1, from: 'memory' }), null, 'its full name may change it');
+  assert.equal(a.partialHitOnSetting({ target: sw, from: 'ref' }), null, 'so may its ref');
+  assert.equal(a.partialHitOnSetting({ target: { ...sw, type: 'Button' }, score: 0.46, from: 'memory' }), null, 'a partial name may still open a row');
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /const partial = partialHitOnSetting\(found\);\n\s+if \(partial\) throw/);
+});
+
+test('a typed field is not slowed or flagged by a settle the pixels cannot satisfy', async () => {
+  const a = await import('../src/actions.js');
+  // Read back, so a short settle that timed out is not news.
+  assert.equal(a.settleWorthSaying({ ok: false, staysPut: true, waitedMs: 600 }), false);
+  assert.equal(a.settleWorthSaying({ ok: false, staysPut: true, stalled: true }), true, 'a capture stall still says so');
+  assert.equal(a.settleWorthSaying({ ok: false, waitedMs: 4000 }), true, 'a tap that never settled still says so');
+  assert.equal(a.settleWorthSaying(null), false);
+  // A read after an action that already recorded its quiet change does not
+  // wait for pixels that will never move (2.5 s per read, several per field).
+  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(src, /const changedQuietly = store\.textChangeOf\(udid, actedAt\) != null;/);
+  assert.match(src, /const fresh = changedQuietly \|\| stillSinceActing\(state, actedAt\);/);
+  const act = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(act, /timeoutMs: graph\.STAYS_ON_SCREEN\.has\(step\.action\) \? STAYS_PUT_BUDGET_MS : timeoutMs,/);
+});
+
 test('a caption printed above its field is not a second candidate (peer test 0.21.0, F11)', async () => {
   const m = await import('../src/matching.js');
   // The testbed's Long form: "First Name" as text at (17,127), the field named

@@ -1435,6 +1435,11 @@ export async function settledState(udid, { settleMs = MEMORY_SETTLE_MS, timeoutM
   // What we are settling *after*. A caller that knows may say; otherwise it is
   // the last launch, openUrl or gesture this device was given.
   const actedAt = since ?? store.lastActionAt(udid);
+  // An action already known to have changed text below the pixel signal (a
+  // typed field, a label rewritten in place) has nothing left for this wait to
+  // prove, and the pixels will never move for it: every read after a typed
+  // field waited its whole timeout here, 2.5 s each, several per step.
+  const changedQuietly = store.textChangeOf(udid, actedAt) != null;
   let state = store.readJson(p.state);
   let stale = false;
   while (Date.now() < deadline) {
@@ -1450,7 +1455,7 @@ export async function settledState(udid, { settleMs = MEMORY_SETTLE_MS, timeoutM
     // that returns chrome with the content missing and no loading marker is
     // indistinguishable from a screen that is genuinely empty, so an agent
     // reports "this filter returns zero results" and means it.
-    const fresh = stillSinceActing(state, actedAt);
+    const fresh = changedQuietly || stillSinceActing(state, actedAt);
     if (!fresh) stale = true;
     else {
       // The daemon runs a real settle detector that can tell a spinner from a
