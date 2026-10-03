@@ -3493,6 +3493,12 @@ test('a typed field is not slowed or flagged by a settle the pixels cannot satis
   assert.match(act, /const staysPut = graph\.STAYS_ON_SCREEN\.has\(step\.action\) \|\| landing\.movedNothing === true;/);
 });
 
+test('a relaunch forgets what was typed, so a fresh form is not reported cleared (field report, 0.22.0)', () => {
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(step\.relaunch === true\) wrote\.forget\(udid\);/);
+  assert.match(src, /await terminateApp\(udid, step\.value \?\? step\.bundleId\);\n\s+wrote\.forget\(udid\);/);
+});
+
 test('a sweep says why it stopped and whether it found what it was sent for (field report, 0.22.0)', () => {
   const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
   assert.match(src, /stopped: every field asked for was handled/);

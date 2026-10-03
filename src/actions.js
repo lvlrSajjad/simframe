@@ -2986,6 +2986,10 @@ async function runStep(deviceQuery, udid, step, ctx) {
         env: step.env ?? {},
         terminateFirst: step.relaunch === true,
       }, shell);
+      // A relaunched app has no form left to have been cleared. Without this
+      // a value typed by an earlier session was reported "gone" on the next
+      // session's fresh form (field report, 0.22.0).
+      if (step.relaunch === true) wrote.forget(udid);
       // Item 169: simctl returning ok means the process started, not that the
       // app came forward, and the two came apart repeatedly on a loaded
       // runner — leaving the device on the previous app under a step that
@@ -3045,6 +3049,7 @@ async function runStep(deviceQuery, udid, step, ctx) {
     }
     case 'terminate':
       await terminateApp(udid, step.value ?? step.bundleId);
+      wrote.forget(udid);
       return `terminated ${step.value ?? step.bundleId}`;
     case 'openUrl':
       await openUrl(udid, step.value ?? step.url);
