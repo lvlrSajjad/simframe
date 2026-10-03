@@ -2511,6 +2511,35 @@ worth more than the verdict.
    is measured. It is the remaining known-fragile step and it is why 144's cold
    Safari problem is worth fixing rather than routing around.
 
+200. **The model and tool comparison runs (2026-10-03; BENCHMARKS, "Who drives").**
+   FIXED the same day unless marked open:
+   - **Radio and checkbox rows ignored a tap at their centre** (React Native
+     rows whose value reads "radio button, unchecked"). A tap on one reads the
+     value back and tries the left, then the right edge; still unchanged, it
+     fails. Verified live.
+   - **`type into "Search"` went into a row named Search**: a type step asks
+     for a field.
+   - **A multi-word name pulled in a synonym group** ("New asset sub" vs three
+     "Add" buttons).
+   - **scrollTo arrived on a weak match** ("SAVE" on a help sentence at 0.52)
+     and did not say when a match was inexact. It said "stopped moving both
+     ways" for a label that does not exist.
+   - **The last-resort match picked a long row** for "More" (4 of 90 letters).
+   - **The read-back took the keyboard's next-layout key** as the field's
+     contents and reported a wrong layout.
+   - **A stale "value is gone"** after a save reset its form.
+   - **A daemon outlived its device's reboot** and served a dead display; it is
+     now restarted, with the boot time read from the device's `launchd_sim`.
+   - **A same-titled screen under a split identity failed as
+     `unexpected-screen`** and stopped batches; it is `unverified` with the
+     split named.
+   - *Open:* Settings' root and the field app's lists keep splitting (174).
+     `goal` said "Settings fits 2 remembered screens" from deeper screens, and
+     opened several screens hunting a target that does not exist (read-only,
+     but surprising). The radio fallback costs about 16 s and should be
+     learned per screen. One field-app asset vanished from the app's offline
+     queue across a device reboot; unexplained, and possibly the app's.
+
 199. **Two field runs of a React Native create-service-request flow on 0.22.0**
    (Opus and Sonnet, 2026-10-03; reports kept by the owner, not committed: they
    hold app data). Both completed, the Opus run in about 20 calls for about 30

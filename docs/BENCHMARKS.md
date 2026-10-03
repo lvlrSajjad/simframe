@@ -5120,3 +5120,54 @@ is still what verifies the text. The `never settled` tag on a typed field is
 no longer printed, because its short settle timing out means nothing; a capture
 stall still prints.
 
+## Who drives: model and tool comparison — 2026-10-03
+
+M2 Pro, Xcode 27.0, iOS 26.5. Each arm is one subagent given the same task text,
+N=1 per arm, so these are observations, not rates. simframe arms used this
+checkout's CLI; arm E used Claude Code's built-in iOS Simulator tool
+(screenshots and coordinate taps) and no simframe. Calls are tool calls the arm
+made; tokens are the subagent's reported total.
+
+**Settings, read-only (`326464A4`):** report Larger Accessibility Sizes, the iOS
+version, and Appearance. The task named "Display & Brightness", which simulator
+Settings does not have; the value lives under Developer > Dark Appearance.
+Settings preferences were compared before and after each arm: unchanged in all.
+
+| arm | values right | simframe calls | tokens | wall |
+| --- | --- | --- | --- | --- |
+| A Opus | 3/3 (found Developer > Dark Appearance) | 10 | 72k | 153 s |
+| B Sonnet | 2/3 | 19 | 77k | 171 s |
+| C Sonnet driver, briefed by Opus in one call | 2/3 | 20 | 72k | 126 s |
+
+**A React Native field app on DEV, submitted for real:** create a service
+request end to end, and add an asset (which this app saves offline and then
+syncs). A ran alone on the original device; B–E ran at the same time on four
+devices (three clones), so their wall times include contention.
+
+| arm | driver | service request | asset on the server | calls | tokens | wall |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | Opus + simframe | created | no — the session's permission check refused the upload | ~50 | 118k | 14.4 min |
+| B | Sonnet + simframe | no — the permission check refused the submit | created | ~132 | 144k | 16.5 min |
+| C | Sonnet driver + simframe | created | created | ~88 | 128k | 13.2 min |
+| D | Haiku driver + simframe | created (16 calls) | no — a radio row would not select by name | 38 | 116k | 14.2 min |
+| E | Opus, built-in tool, no simframe | created | created | ~176 (112 screenshots) | 296k | 15.4 min |
+
+What this shows, measured:
+- The same model with simframe (A) against without (E): about 3.5× fewer calls
+  and 2.5× fewer tokens. E took most screenshots twice, because the first one
+  after an action showed the screen before it.
+- Haiku, told to use only simframe, used it throughout. In the owner's own run,
+  with every tool available, it never used simframe at all.
+- The Sonnet driver (C) finished both tasks with fewer calls than Sonnet alone.
+
+What it does not show: anything per-model with N=1, or wall time under
+contention. The permission check refused different writes in different arms,
+so A's and B's missing rows are about the session, not the arm.
+
+Fixed from these runs (DEFERRED 200): radio rows that ignore their centre, a
+field preferred by `type`, synonyms on multi-word names, scrollTo arriving on
+weak matches, the last-resort match inside long rows, the keyboard read back as
+a field's contents, a stale write warning after a save, a daemon outliving its
+device's reboot, and a same-titled screen under a split identity failing as
+`unexpected-screen`.
+
