@@ -126,6 +126,34 @@ export function dialogDismiss(rows, { locale } = {}) {
     && buttons.some((o) => o !== b && Math.abs((o.y ?? 0) - (b.y ?? 0)) <= 12)) ?? null;
 }
 
+/**
+ * A name for a control that has no label, read from its identifier. React
+ * Native's `testID` becomes the iOS accessibility identifier, and in the app
+ * that mattered it named 185 of 188 unlabeled controls:
+ * `home-header-notifications-button`, `time-track-note-input-send-button`.
+ * Words only — split on dashes, underscores and camel case — so the same
+ * vocabulary barrier that reads labels reads these: "send" is refused either
+ * way. A numeric tail (`attachment-list-item-4004921`) is dropped.
+ * See docs/research/07-icon-naming.md.
+ */
+export function nameFromIdentifier(identifier) {
+  const raw = String(identifier ?? '').trim();
+  if (!raw) return null;
+  const words = raw
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[-_.\s/]+/)
+    .filter((w) => w && !/^\d+$/.test(w))
+    .map((w) => w.toLowerCase());
+  return words.length ? words.join(' ') : null;
+}
+
+/** The row's label, or the words of its identifier when it has none. */
+export function labelOf(row) {
+  const own = String(row?.label ?? '').trim();
+  if (own && own !== 'undefined' && !/^\(icon-only\)$/i.test(own)) return own;
+  return nameFromIdentifier(row?.identifier);
+}
+
 /** A stable name for a control on a screen. */
 export function controlKey(row) {
   return `${row.region ?? 'content'}|${alnum(row.label)}`;
@@ -171,7 +199,13 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
   const refused = [];
   const skipped = [];
   const seenKeys = new Set();
-  const ordered = [...(rows ?? [])].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  // An unlabeled control is named by its identifier, and marked so the report
+  // can say where the name came from.
+  const ordered = [...(rows ?? [])]
+    .map((r) => (String(r.label ?? '').trim() && r.label !== 'undefined') || !r.identifier
+      ? r
+      : { ...r, label: labelOf(r), labelFrom: 'identifier' })
+    .sort((a, b) => (a.y - b.y) || (a.x - b.x));
   // A row that is selected marks a selection list, and choosing another of its
   // options changes a setting by itself — no Save, no write word on the label.
   // A dialog is up: everything behind it is out of reach, and what is in it

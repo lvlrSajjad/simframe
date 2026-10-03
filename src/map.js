@@ -25,7 +25,9 @@ function selectorFor(door, before) {
   const same = (before?.rows ?? []).filter((r) => String(r.label ?? '').trim() === String(door.label).trim());
   // A label that names one thing is the replayable selector. Two things wearing
   // it means the label is not an address; the point is.
-  return same.length <= 1 ? { tap: door.label } : { tapAt: { x: Math.round(door.x), y: Math.round(door.y) } };
+  // One thing wearing the label: the label is the replayable selector. None
+  // (a name read from an identifier, not shown on screen) or several: the point.
+  return same.length === 1 ? { tap: door.label } : { tapAt: { x: Math.round(door.x), y: Math.round(door.y) } };
 }
 
 /** The driver the crawl is handed, for one device and one app. */

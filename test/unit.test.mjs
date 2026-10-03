@@ -7769,3 +7769,14 @@ test('a top-left button is a way back even when it carries the parent title and 
   assert.equal(carto.isBackAffordance({ label: 'General', type: 'Button', region: 'content', x: 38, y: 84 }), true);
   assert.equal(carto.isBackAffordance({ label: 'General', type: 'Button', region: 'content', x: 201, y: 300 }), false);
 });
+
+test('an unlabeled control is named by its identifier, and that name meets the same barrier', async () => {
+  const carto = await import('../src/cartographer.js');
+  assert.equal(carto.nameFromIdentifier('home-header-notifications-button'), 'home header notifications button');
+  assert.equal(carto.nameFromIdentifier('PageFormatMenuButton'), 'page format menu button');
+  assert.equal(carto.nameFromIdentifier('attachment-list-item-4004921'), 'attachment list item');
+  const b = (identifier, x, y) => ({ label: undefined, identifier, type: 'Button', region: 'content', x, y, source: 'ax', frame: { x: x - 20, y: y - 20, width: 40, height: 40 } });
+  const { doors, refused } = carto.doorsOf([b('home-header-notifications-button', 358, 164), b('time-track-note-input-send-button', 380, 700), b('screen-toolbar-back-button', 30, 91)]);
+  assert.deepEqual(doors.map((d) => d.label), ['home header notifications button']);
+  assert.ok(refused.some((r) => r.label === 'time track note input send button' && r.kind === 'barrier'), JSON.stringify(refused));
+});
