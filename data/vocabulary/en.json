@@ -203,6 +203,7 @@
       "searchfield",
       "securetextfield",
       "textview",
+      "textarea",
       "checkbox",
       "stepper",
       "picker",

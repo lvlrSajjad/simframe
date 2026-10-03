@@ -20,7 +20,7 @@ const SYNONYMS = {
 
 /** Words that say what kind of control the caller means. */
 const ROLE_HINTS = [
-  { pattern: /\b(type|enter|fill|input)\b/i, roles: /field|textfield|textview|searchfield/i },
+  { pattern: /\b(type|enter|fill|input)\b/i, roles: /field|textfield|textview|textarea|searchfield/i },
   { pattern: /\b(tap|press|click|hit)\b/i, roles: /button|link|cell|tab/i },
   { pattern: /\b(toggle|switch|enable|disable|turn)\b/i, roles: /switch|toggle|checkbox/i },
   { pattern: /\b(tab)\b/i, roles: /tab/i },
@@ -32,7 +32,8 @@ const REGION_HINTS = [
   { pattern: /\b(back|nav|title|toolbar)\b/i, region: 'nav-bar' },
 ];
 
-const norm = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+// A trailing required marker is not part of a name: "Description*" is "Description".
+const norm = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim().replace(/\s*\*+$/, '');
 
 /** Levenshtein distance, capped: beyond the cap the exact value is irrelevant. */
 export function editDistance(a, b, cap = 8) {
@@ -240,7 +241,7 @@ export function rank(targets, intent, { screen } = {}) {
       reasons.push(`region ${t.region}`);
     }
     // A caption is not a control. Prefer something tappable when the names tie.
-    if (/button|link|cell|field|switch|tab/i.test(t.type ?? '')) {
+    if (/button|link|cell|field|textarea|textview|switch|tab/i.test(t.type ?? '')) {
       score += 0.05;
       reasons.push('interactive');
     }
@@ -337,7 +338,7 @@ export const SAME_CONTROL_POINTS = 12;
  * and the accessibility one wins, because it is the actual hit target and its
  * label has not been through OCR.
  */
-const INTERACTIVE_ROLE = /button|field|cell|row|link|switch|slider|tab|menu|segment|checkbox/i;
+const INTERACTIVE_ROLE = /button|field|textarea|textview|cell|row|link|switch|slider|tab|menu|segment|checkbox/i;
 
 /**
  * Is this target the accessibility tree's reading of a control?

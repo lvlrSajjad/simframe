@@ -37,7 +37,10 @@ export const DEFAULT_LIMIT = 60;
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 
 /** Types that are hit targets rather than description. */
-const INTERACTIVE = /button|field|cell|link|switch|slider|tab|menu|segment|checkbox/i;
+// Text areas and text views are fields too. Without them an unfocused multiline
+// React Native input (`TextArea`, no label) was scenery: hidden from the map,
+// so `type into` and `fill` could not reach it (field report, 0.22.0).
+const INTERACTIVE = /button|field|textarea|textview|cell|link|switch|slider|tab|menu|segment|checkbox/i;
 
 /** A label past this length is a paragraph, and no selector needs a paragraph. */
 const MAX_LABEL = 64;

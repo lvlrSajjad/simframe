@@ -105,5 +105,5 @@ export async function confirm(udid, { geo } = {}) {
 }
 
 export function isTextInput(node) {
-  return /TextField|TextView|SearchField/i.test(node.type || '');
+  return /TextField|TextView|TextArea|SearchField/i.test(node.type || '');
 }

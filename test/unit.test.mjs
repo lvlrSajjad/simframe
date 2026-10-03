@@ -3489,6 +3489,31 @@ test('a typed field is not slowed or flagged by a settle the pixels cannot satis
   assert.match(act, /timeoutMs: graph\.STAYS_ON_SCREEN\.has\(step\.action\) \? STAYS_PUT_BUDGET_MS : timeoutMs,/);
 });
 
+test('an unlabeled multiline field is listed, and named by its caption (field report, 0.22.0)', async () => {
+  const sm = await import('../src/screenmap.js');
+  const v = await import('../src/view.js');
+  const m = await import('../src/matching.js');
+  const screen = { width: 402, height: 874 };
+  // A React Native form: captions above inputs that carry a testID and no label.
+  const targets = [
+    { label: 'Category*', type: 'StaticText', x: 26, y: 610, frame: { x: 25, y: 609, width: 58, height: 14 }, source: 'ax', region: 'content' },
+    { label: '', identifier: 'form-category-input', type: 'TextField', x: 201, y: 639, frame: { x: 25, y: 623, width: 352, height: 31 }, source: 'ax', region: 'content' },
+    { label: 'Description*', type: 'StaticText', x: 63, y: 704, frame: { x: 25, y: 696, width: 76, height: 16 }, source: 'ax', region: 'content' },
+    { label: '', identifier: 'form-notes-input', type: 'TextArea', x: 30, y: 706, frame: { x: 25, y: 698, width: 352, height: 72 }, source: 'ax', region: 'content' },
+  ];
+  sm.nameFieldsByCaption(targets);
+  assert.equal(targets[3].label, 'Description');
+  assert.equal(targets[3].labelFrom, 'caption', 'derived, so it never enters a fingerprint');
+  const rows = v.rowsFor({ targets }, { screen });
+  const list = Array.isArray(rows) ? rows : rows.rows;
+  assert.ok(list.some((r) => r.type === 'TextArea'), 'a text area is not scenery');
+  for (const q of ['Description', 'Description*', 'Category']) {
+    const r = m.resolve(targets, q, { screen });
+    assert.equal(r.status, 'ok', q);
+    assert.match(r.target.type, /TextArea|TextField/, q);
+  }
+});
+
 test('result strings say what happened (field report, 0.22.0)', async () => {
   const a = await import('../src/actions.js');
   const v = await import('../src/view.js');

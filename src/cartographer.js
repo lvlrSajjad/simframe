@@ -113,7 +113,7 @@ export function isBackAffordance(row, { locale } = {}) {
 export function placeLike(reading) {
   // By type only. Region is geometry: a splash's version string sits where a
   // tab bar would and was read as one, which called the splash "arrived".
-  return (reading?.rows ?? []).some((r) => /button|cell|link|switch|tab|field|segment|search|slider|picker/i.test(String(r.type ?? '')));
+  return (reading?.rows ?? []).some((r) => /button|cell|link|switch|tab|field|textarea|textview|segment|search|slider|picker/i.test(String(r.type ?? '')));
 }
 
 /**
@@ -269,7 +269,7 @@ export function doorsOf(rows, { allowCreate = false, locale } = {}) {
   const commits = vocabulary.load(locale).cartographer?.formCommit ?? [];
   // A commit read off an icon ("send") only marks a form when there is a field
   // to commit — a compose bar. A grid of icon buttons is not a form.
-  const hasField = ordered.some((r) => /field|textview|searchfield/i.test(String(r.type ?? '')));
+  const hasField = ordered.some((r) => /field|textview|textarea|searchfield/i.test(String(r.type ?? '')));
   const commit = allowCreate ? null : ordered.find((r) => /button/i.test(String(r.type ?? ''))
     && commits.some((w) => alnum(r.label) === alnum(w))
     && (r.labelFrom !== 'icon' || hasField));

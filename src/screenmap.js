@@ -393,6 +393,7 @@ export async function build(udid, {
       // An icon-only control whose label was one icon-font glyph is named from
       // the app's own font. Never fails a read: no fonts, no names.
       await glyphs.nameIcons(udid, targets).catch(() => {});
+      nameFieldsByCaption(targets);
     } catch (err) {
       /* no idb, or the tree read failed; OCR alone is still useful */
       degraded.push(`accessibility: ${err.message}`);
@@ -561,7 +562,7 @@ export async function build(udid, {
 
 const norm = (s) => String(s ?? '').toLowerCase().trim();
 
-const INTERACTIVE = /button|field|cell|link|checkbox|switch|slider|tab|menu|segment/i;
+const INTERACTIVE = /button|field|textarea|textview|cell|link|checkbox|switch|slider|tab|menu|segment/i;
 
 export function isInteractive(target) {
   return INTERACTIVE.test(target.type || '');
@@ -639,3 +640,35 @@ export function textChange(before, after) {
   const clip = (x) => (x.length > 60 ? `${x.slice(0, 57)}…` : x);
   return gone && came ? `"${clip(gone)}" → "${clip(came)}"` : came ? `"${clip(came)}" appeared` : `"${clip(gone)}" went away`;
 }
+
+/**
+ * An unlabeled field takes the name of the caption printed on its top edge.
+ *
+ * React Native inputs often carry a testID and no accessibility label, with
+ * the visible name in a separate text node above ("Description*"). The field
+ * report (0.22.0) could not `type into "Description"` or `fill` it, while
+ * "Requested By*" worked through a different path. The name is marked
+ * `labelFrom: 'caption'`, so it never enters a fingerprint, and the required
+ * marker and a trailing colon are dropped.
+ */
+const FIELD_ROLE = /field|textarea|textview/i;
+const CAPTION_ROLE = /^(statictext|text|label)$/i;
+export function nameFieldsByCaption(targets) {
+  const captions = targets.filter((t) => CAPTION_ROLE.test(String(t.type ?? '')) && String(t.label ?? '').trim() && t.frame);
+  for (const f of targets) {
+    if (!FIELD_ROLE.test(String(f.type ?? '')) || String(f.label ?? '').trim() || !f.frame) continue;
+    const top = f.frame.y;
+    const best = captions
+      .filter((c) => {
+        const mid = c.frame.y + (c.frame.height ?? 0) / 2;
+        const overlapsX = c.frame.x < f.frame.x + (f.frame.width ?? 0) && c.frame.x + (c.frame.width ?? 0) > f.frame.x;
+        return overlapsX && mid >= top - 30 && mid <= top + 14;
+      })
+      .sort((a, b) => Math.abs(a.frame.y + a.frame.height / 2 - top) - Math.abs(b.frame.y + b.frame.height / 2 - top))[0];
+    if (!best) continue;
+    const name = String(best.label).trim().replace(/\s*[*:]+\s*$/, '').trim();
+    if (name) { f.label = name; f.labelFrom = 'caption'; }
+  }
+  return targets;
+}
+
