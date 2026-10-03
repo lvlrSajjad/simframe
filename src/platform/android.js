@@ -1060,6 +1060,9 @@ async function readPropertyList() {
 }
 /** Not known on Android yet: a relaunch is assumed to need nothing on the host. */
 async function relaunchNeeds() { return null; }
+/** Not read on Android yet: no icon fonts, so no glyph names. */
+async function appIconFonts() { return []; }
+async function bundleForPid() { return null; }
 
 /** @type {import('./index.js').Platform} */
 export const platform = {
@@ -1081,6 +1084,8 @@ export const platform = {
   appContainer,
   readPropertyList,
   relaunchNeeds,
+  appIconFonts,
+  bundleForPid,
   setPermission,
   setPasteboard,
   getPasteboard,

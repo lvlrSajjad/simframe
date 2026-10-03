@@ -1544,6 +1544,8 @@ test('the platform surface is satisfiable by something that is not a simulator',
     toolchain: () => [{ name: 'nothing', level: 'ok', detail: 'no tools needed' }],
     // A relaunch of a fake app needs nothing on the host.
     relaunchNeeds: async () => null,
+    appIconFonts: async () => [],
+    bundleForPid: async () => null,
     // Reading what an app persisted. A fake device stores nothing, and the
     // honest implementation of that is a refusal in its own vocabulary — the
     // same shape Android uses, for the same reason.
@@ -7779,4 +7781,53 @@ test('an unlabeled control is named by its identifier, and that name meets the s
   const { doors, refused } = carto.doorsOf([b('home-header-notifications-button', 358, 164), b('time-track-note-input-send-button', 380, 700), b('screen-toolbar-back-button', 30, 91)]);
   assert.deepEqual(doors.map((d) => d.label), ['home header notifications button']);
   assert.ok(refused.some((r) => r.label === 'time track note input send button' && r.kind === 'barrier'), JSON.stringify(refused));
+});
+
+// A minimal TrueType font: a format-12 cmap and a version-2 post table, which
+// is all glyphs.js reads. Built here so the test needs no font on disk.
+function tinyIconFont(entries) {
+  const be16 = (v) => { const b = Buffer.alloc(2); b.writeUInt16BE(v); return b; };
+  const be32 = (v) => { const b = Buffer.alloc(4); b.writeUInt32BE(v >>> 0); return b; };
+  // cmap: one format-12 subtable, one group per entry; glyph ids 1..n.
+  const groups = entries.map(([cp], i) => Buffer.concat([be32(cp), be32(cp), be32(i + 1)]));
+  const sub = Buffer.concat([be16(12), be16(0), be32(16 + 12 * groups.length), be32(0), be32(groups.length), ...groups]);
+  const cmap = Buffer.concat([be16(0), be16(1), be16(3), be16(10), be32(12), sub]);
+  // post v2: glyph 0 = .notdef (standard 0), glyphs 1..n custom names.
+  const names = entries.map(([, n]) => Buffer.concat([Buffer.from([n.length]), Buffer.from(n, 'latin1')]));
+  const post = Buffer.concat([be32(0x00020000), Buffer.alloc(28), be16(entries.length + 1), be16(0),
+    ...entries.map((_, i) => be16(258 + i)), ...names]);
+  const tablesIn = [['cmap', cmap], ['post', post]];
+  const headerLen = 12 + 16 * tablesIn.length;
+  let offset = headerLen;
+  const dir = [];
+  for (const [tag, body] of tablesIn) { dir.push(Buffer.concat([Buffer.from(tag, 'latin1'), be32(0), be32(offset), be32(body.length)])); offset += body.length; }
+  return Buffer.concat([be32(0x00010000), be16(tablesIn.length), be16(0), be16(0), be16(0), ...dir, ...tablesIn.map(([, b]) => b)]);
+}
+
+test('an icon-font glyph in a label is named from the app\'s own font, exactly or not at all', async () => {
+  const g = await import('../src/glyphs.js');
+  const mdi = g.parseFont(tinyIconFont([[0xF009C, 'bell-outline'], [0xF01B4, 'delete'], [0xF048A, 'send']]));
+  assert.equal(mdi.get(0xF009C), 'bell-outline');
+  assert.deepEqual(g.codepointsOf('\u{F009C}'), [0xF009C]);
+  assert.deepEqual(g.codepointsOf('\u{F009C}, My Tools'), [0xF009C]);
+  assert.equal(g.iconName([0xF009C], [mdi]), 'bell outline');
+  // Two fonts that put different icons at one code point: no name, not a guess.
+  const other = g.parseFont(tinyIconFont([[0xF009C, 'heart']]));
+  assert.equal(g.iconName([0xF009C], [mdi, other]), null);
+  assert.equal(g.iconName([0xE001], [mdi]), null, 'an unknown glyph stays unnamed');
+
+  // The name passes through the same barrier as any label.
+  const carto = await import('../src/cartographer.js');
+  const icon = (label) => ({ label, labelFrom: 'icon', type: 'Button', region: 'content', source: 'ax', x: 300, y: 400, frame: { x: 280, y: 380, width: 40, height: 40 } });
+  assert.equal(carto.classify(icon(g.iconName([0xF01B4], [mdi]))).kind, 'barrier');
+  assert.equal(carto.classify(icon(g.iconName([0xF048A], [mdi]))).kind, 'barrier');
+
+  // A derived name never moves a screen's identity.
+  const fp = await import('../src/fingerprint.js');
+  const nav = { label: undefined, type: 'Button', region: 'nav-bar', navSlot: 'trailing', x: 360, y: 90, frame: { x: 340, y: 70, width: 40, height: 40 } };
+  const screen = { width: 402, height: 874 };
+  assert.equal(fp.fingerprint([nav], screen).hash, fp.fingerprint([{ ...nav, label: 'bell outline', labelFrom: 'icon' }], screen).hash);
+
+  const view = await import('../src/view.js');
+  assert.equal(view.displayName(icon('bell outline')), 'bell outline (icon)');
 });

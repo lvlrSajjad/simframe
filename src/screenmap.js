@@ -16,6 +16,7 @@ import * as matching from './matching.js';
 import * as regions from './regions.js';
 import { informative } from './refs.js';
 import * as store from './store.js';
+import * as glyphs from './glyphs.js';
 import { maskCredentials } from './typed.js';
 
 export const MAP_VERSION = 9; // ax targets carry value, selected and focused
@@ -359,6 +360,9 @@ export async function build(udid, {
           // control usually does have was invisible in the map and worked if
           // you guessed it.
           identifier: n.identifier ?? undefined,
+          // The icon-font characters the label carried before cleanLabel took
+          // them out: an exact address into the app's own icon font. See glyphs.js.
+          ...(glyphs.codepointsOf(n.rawLabel).length ? { glyphs: glyphs.codepointsOf(n.rawLabel) } : {}),
           // What the control *contains*, whether it is on, and whether it has
           // focus. All three come off the accessibility tree, the daemon has
           // asked for all three since 0.6.0, and all three were dropped before
@@ -386,6 +390,9 @@ export async function build(udid, {
           source: 'ax',
         });
       }
+      // An icon-only control whose label was one icon-font glyph is named from
+      // the app's own font. Never fails a read: no fonts, no names.
+      await glyphs.nameIcons(udid, targets).catch(() => {});
     } catch (err) {
       /* no idb, or the tree read failed; OCR alone is still useful */
       degraded.push(`accessibility: ${err.message}`);

@@ -649,6 +649,69 @@ async function probePackager(port = 8081) {
   });
 }
 
+/** The installed .app directory for a bundle id, or null. */
+async function appBundlePath(udid, bundleId) {
+  const root = path.join(deviceRoot(udid), 'data/Containers/Bundle/Application');
+  for (const dir of safeReaddir(root)) {
+    for (const name of safeReaddir(path.join(root, dir)).filter((n) => n.endsWith('.app'))) {
+      try {
+        const { stdout } = await run('plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', path.join(root, dir, name, 'Info.plist')]);
+        if (stdout.trim() === bundleId) return path.join(root, dir, name);
+      } catch { /* not readable; not this one */ }
+    }
+  }
+  return null;
+}
+
+/**
+ * The font files an app ships, from `UIAppFonts` in its Info.plist — the
+ * authoritative list for React Native's icon fonts — found anywhere inside the
+ * .app. Listed names that are not present are left out; a bundle can declare
+ * fonts it never copied (Ecotrak declares three Material fonts and ships one).
+ */
+async function appIconFonts(udid, bundleId) {
+  const app = await appBundlePath(udid, bundleId);
+  if (!app) return [];
+  let declared = [];
+  try {
+    const { stdout } = await run('plutil', ['-extract', 'UIAppFonts', 'json', '-o', '-', path.join(app, 'Info.plist')]);
+    declared = JSON.parse(stdout);
+  } catch { return []; }
+  const wanted = new Set(declared.map((f) => path.basename(String(f))));
+  const found = [];
+  const walk = (dir, depth) => {
+    for (const name of safeReaddir(dir)) {
+      const full = path.join(dir, name);
+      if (wanted.has(name)) found.push(full);
+      else if (depth < 4 && !/\.(png|jpg|car|nib|storyboardc|lproj)$/i.test(name)) {
+        try { if (fs.statSync(full).isDirectory()) walk(full, depth + 1); } catch { /* skip */ }
+      }
+    }
+  };
+  walk(app, 0);
+  return found;
+}
+
+/**
+ * Which app a pid belongs to, from launchd inside the simulator: an app's job
+ * is labelled `UIKitApplication:<bundle id>[…]`. The frontmost pid comes from
+ * the daemon; this turns it into the bundle whose fonts name its icons.
+ */
+async function bundleForPid(udid, pid) {
+  if (pid == null) return null;
+  try {
+    const { stdout } = await run('xcrun', ['simctl', 'spawn', udid, 'launchctl', 'list'], { timeout: 5000 });
+    for (const line of stdout.split('\n')) {
+      const [p, , label] = line.trim().split(/\s+/);
+      if (Number(p) === pid) {
+        const m = /UIKitApplication:([^\[]+)/.exec(label ?? '');
+        return m ? m[1] : null;
+      }
+    }
+  } catch { /* cannot say */ }
+  return null;
+}
+
 /** @type {import('./index.js').Platform} */
 export const platform = {
   id: 'ios',
@@ -670,6 +733,8 @@ export const platform = {
   appContainer,
   readPropertyList,
   relaunchNeeds,
+  appIconFonts,
+  bundleForPid,
   setPermission,
   setPasteboard,
   permissionServices: () => PERMISSION_SERVICES,

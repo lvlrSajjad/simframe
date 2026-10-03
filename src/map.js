@@ -27,7 +27,9 @@ function selectorFor(door, before) {
   // it means the label is not an address; the point is.
   // One thing wearing the label: the label is the replayable selector. None
   // (a name read from an identifier, not shown on screen) or several: the point.
-  return same.length === 1 ? { tap: door.label } : { tapAt: { x: Math.round(door.x), y: Math.round(door.y) } };
+  // A name simframe derived (an icon glyph) is not what the tree calls it, so
+  // the point is the reliable address.
+  return same.length === 1 && !same[0].labelFrom ? { tap: door.label } : { tapAt: { x: Math.round(door.x), y: Math.round(door.y) } };
 }
 
 /** The driver the crawl is handed, for one device and one app. */

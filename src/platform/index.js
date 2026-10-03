@@ -64,7 +64,7 @@ export const PLATFORM_SURFACE = Object.freeze([
   'geometry', 'inputDriver',
   'screenshot', 'launchApp', 'terminateApp', 'openUrl', 'restartDevice',
   'setPermission', 'setPasteboard', 'permissionServices', 'capabilities', 'toolchain',
-  'listApps', 'appContainer', 'readPropertyList', 'relaunchNeeds',
+  'listApps', 'appContainer', 'readPropertyList', 'relaunchNeeds', 'appIconFonts', 'bundleForPid',
   'bootedAt',
 ]);
 
@@ -243,6 +243,10 @@ export const appContainer = (udid, ...args) => platformFor(udid).appContainer(ud
 export const readPropertyList = (udid, file) => platformFor(udid).readPropertyList(file);
 /** What a relaunch of this app depends on, on the host, or null. */
 export const relaunchNeeds = (udid, bundleId) => platformFor(udid).relaunchNeeds(udid, bundleId);
+/** Font files an installed app ships (its icon fonts among them). */
+export const appIconFonts = (udid, bundleId) => platformFor(udid).appIconFonts(udid, bundleId);
+/** The bundle id of the app a pid belongs to, or null. */
+export const bundleForPid = (udid, pid) => platformFor(udid).bundleForPid(udid, pid);
 
 /**
  * The permission services a device understands, or every service any backend

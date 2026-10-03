@@ -412,6 +412,8 @@ function valueNote(r) {
  * existed, were tappable, and could be reached by no selector at all.
  */
 export function displayName(r) {
+  // A name read off an icon's glyph says so: it is the icon, not the app's words.
+  if (r.labelFrom === 'icon' && trim(r.label)) return `${trim(r.label)} (icon)`;
   return trim(r.label)
     || trim(r.identifier)
     // Only an alias with a word in it. OCR reads the three dots of an overflow

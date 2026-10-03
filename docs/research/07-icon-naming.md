@@ -212,3 +212,14 @@ bet with unknown coverage: on the app that matters it is 98% coverage today, and
 a tokeniser over the identifier plus the existing vocabulary barrier. The pixel routes
 remain for apps without identifiers (21% of the bench device's unlabeled controls, and
 anything a developer did not tag).
+
+**Icon fonts are text, which makes rank 2 a lookup, not a match.** An icon
+drawn by react-native-vector-icons is one private-use character set in the icon
+font, and the accessibility tree hands that character over in the label
+(simframe stripped it in `input.cleanLabel`). So for those apps no pixels are
+needed: the code point is looked up in the app's own font, which names the
+glyph exactly. Parsed from Ecotrak's bundle: `MaterialDesignIcons.ttf` resolves
+7,447 code points to names (U+F009C `bell-outline`, U+F01B4 `delete`, U+F048A
+`send`, U+F0433 `qrcode-scan`). Implemented in `src/glyphs.js`. **Not yet
+verified live:** the app was signed out when this was written, and the sign-in
+screen has no icon glyphs.

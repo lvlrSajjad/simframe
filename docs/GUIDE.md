@@ -706,6 +706,16 @@ visits. Both are leads for screen-identity work (DEFERRED 174), not verdicts.
 Crawl failures are logged as resolved locally with no model turns, so a crawl
 does not distort `simframe escalations`.
 
+**Icon-only controls are named from the app's own icon font.** React Native
+and other icon-font apps draw each icon as one private-use character, which the
+accessibility tree passes along in the label. simframe used to strip it. It now
+looks the code point up in the app's bundled fonts (`UIAppFonts`, their `cmap`
+and `post` tables) and names the control after the glyph: `bell outline (icon)`.
+A name is given only when exactly one font resolves it. It never enters a
+screen's fingerprint, and the vocabulary barrier reads it like any label, so a
+`delete` icon is refused like a "Delete" button. SF Symbols are images, not
+text, and are not named this way. See `docs/research/07-icon-naming.md`.
+
 ### What the memory is worth, isolated
 
 Three agent sessions drove the same task family on the same production app. The

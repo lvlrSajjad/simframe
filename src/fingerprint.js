@@ -245,7 +245,9 @@ export function tokens(targets, screen) {
     // identical structure differ by their title, and nothing else says so. But
     // only where the element is plausibly chrome — a nav bar has slots, and a
     // tab label is narrow; content that merely fell into the band is not a name.
-    const labelWorthKeeping = CHROME.has(region)
+    // A name simframe derived (an icon's glyph name) is not the screen's own
+    // text and must not move its identity: every stored screen would split.
+    const labelWorthKeeping = !t.labelFrom && CHROME.has(region)
       && t.label
       && !isVolatileLabel(t.label)
       && (region !== 'tab-bar' || (frame.width ?? 0) <= screen.width * TAB_LABEL_MAX_WIDTH_FRACTION);
