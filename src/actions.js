@@ -120,6 +120,8 @@ const FOCUS_TIMEOUT_MS = 3000;
  */
 const STAYS_PUT_STILLNESS_MS = 200;
 const STAYS_PUT_BUDGET_MS = 600;
+/** The prefix of a note that the last step moved the screen; see view.render. */
+export const SCREEN_MOVED_NOTE = 'the screen moved';
 /** Below this a scrollTo match is not arrival; see the scrollTo step. */
 export const SCROLL_TO_MIN_SCORE = 0.6;
 const POLL_MS = 250;
@@ -1936,6 +1938,9 @@ async function confirmNoChange(deviceQuery, verification, { beforeScreen, option
       lateArrival: again,
     };
   }
+  // The map read after this must not then say "not moved" (field report,
+  // 2026-10-04: the two lines contradicted each other).
+  if (again.udid) store.noteTextChange(again.udid, `${SCREEN_MOVED_NOTE} after the step's verdict was taken`);
   return {
     ...verification,
     verdict: 'unverified',
@@ -2804,6 +2809,10 @@ async function sweep(deviceQuery, udid, step, ctx) {
 
   const all = [...seen.values()];
   ctx.sweep = all;
+  // A sweep scrolls, fills and raises the keyboard. Its last gesture may move
+  // nothing (the bottom), and the map after it said "NOT MOVED SINCE THE
+  // ACTION … it did not land" after a 23 s sweep (field report, 2026-10-04).
+  if (sections.length > 1 || filled.length) store.noteTextChange(udid, `${SCREEN_MOVED_NOTE} during the sweep`);
   const hits = wanted ? all.filter((r) => sweepHolds(r, wanted)) : [];
   // The element dump is the answer only to a bare inventory sweep. With a
   // target or a fill it was forty entries on one line around the one fact

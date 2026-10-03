@@ -3803,6 +3803,17 @@ test('field report 2026-10-04: repeats skip background rows, a bare count reads 
   assert.match(a.stateDelta(before, after).detail, /^"Option B" changed/);
 });
 
+test('after a sweep or a late arrival the header says the screen moved, not that it did not (field report, 2026-10-04)', async () => {
+  const v = await import('../src/view.js');
+  const a = await import('../src/actions.js');
+  const text = v.render({ device: { name: 'iPhone' }, identity: { hash: 'abcdef012345', settled: true, unmoved: false, quietChange: `${a.SCREEN_MOVED_NOTE} during the sweep` }, rows: [] });
+  assert.match(text, /the screen moved during the sweep/);
+  assert.doesNotMatch(text, /NOT MOVED|text changed: the screen/);
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /store\.noteTextChange\(udid, `\$\{SCREEN_MOVED_NOTE\} during the sweep`\)/);
+  assert.match(src, /store\.noteTextChange\(again\.udid, `\$\{SCREEN_MOVED_NOTE\} after the step's verdict was taken`\)/);
+});
+
 test('a centred dialog marks the background below it as well as above (field report, 2026-10-04)', async () => {
   const sm = await import('../src/screenmap.js');
   const screen = { width: 402, height: 874 };

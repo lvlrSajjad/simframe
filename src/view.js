@@ -926,7 +926,9 @@ export function render({ device, identity, rows, truncated, collapsed, screen, n
     identity?.keyboard ? 'keyboard up' : null,
     identity?.settled === false ? (identity?.unmoved ? 'NOT MOVED SINCE THE ACTION' : 'STILL MOVING') : null,
     // A change too small for the pixel signal, found by reading the text.
-    identity?.quietChange ? `text changed: ${identity.quietChange}` : null,
+    identity?.quietChange
+      ? (/^the screen moved/.test(identity.quietChange) ? identity.quietChange : `text changed: ${identity.quietChange}`)
+      : null,
     // Still and finished are not the same thing.
     identity?.loading === true ? 'STILL LOADING' : null,
     // How old the *frame* this map was read from is.
