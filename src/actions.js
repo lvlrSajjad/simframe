@@ -2679,6 +2679,11 @@ async function sweep(deviceQuery, udid, step, ctx) {
   // silently discarded the final section.
   let prev = null;
   let stalls = 0;
+  // Why it stopped. "budget spent before the bottom" was printed for a sweep
+  // that had stopped because every fill key was handled — one of them by
+  // failing — after one section, and the reader blamed the budget (field
+  // report, 0.22.0).
+  let stopped = null;
   for (; section < limit; section += 1) {
     const here = await sectionHere(deviceQuery, options);
     if (prev) {
@@ -2742,8 +2747,8 @@ async function sweep(deviceQuery, udid, step, ctx) {
       }
     }
 
-    if (wanted && [...seen.values()].some((r) => sweepHolds(r, wanted))) break;
-    if (fill && !Object.keys(fill).length) break;
+    if (wanted && [...seen.values()].some((r) => sweepHolds(r, wanted))) { stopped = 'found'; break; }
+    if (fill && !Object.keys(fill).length) { stopped = 'filled'; break; }
     prev = here;
     await scrollOne(deviceQuery, udid, 'down', ctx);
   }
@@ -2751,17 +2756,24 @@ async function sweep(deviceQuery, udid, step, ctx) {
   const all = [...seen.values()];
   ctx.sweep = all;
   const hits = wanted ? all.filter((r) => sweepHolds(r, wanted)) : [];
-  const listed = (wanted ? hits : all).slice(0, 30)
+  // The element dump is the answer only to a bare inventory sweep. With a
+  // target or a fill it was forty entries on one line around the one fact
+  // the caller asked for.
+  const listed = (wanted ? hits : fill ? [] : all).slice(0, 30)
     .map((r) => `[${r.section}] ${JSON.stringify(String(r.label).slice(0, 36))} @${r.x},${r.y}`);
   const unfilled = fill ? Object.keys(fill) : [];
+  const why = stopped === 'found' ? `, stopped: ${JSON.stringify(wanted)} found`
+    : stopped === 'filled' ? ', stopped: every field asked for was handled'
+      : atBottom ? ', reached the bottom'
+        : `, stopped after the ${limit}-section budget, before the bottom`;
   return `swept ${sections.length} section(s)`
     + `${upSteps ? ` after ${upSteps} up to reach the ${atTop ? 'top' : 'start'}` : ''}`
-    + `${atBottom ? ', reached the bottom' : ', budget spent before the bottom'}`
+    + why
     + `${travelled.length ? ` (each gesture moved ${travelled.map((t) => Math.abs(t)).join(', ')}pt)` : ''};`
     + ` ${all.length} distinct element(s)`
     + (filled.length ? `; filled ${filled.join(', ')}` : '')
     + (unfilled.length ? `; NOT FOUND anywhere: ${unfilled.map((u) => JSON.stringify(u)).join(', ')}` : '')
-    + (wanted ? `; ${hits.length} match ${JSON.stringify(wanted)}` : '')
+    + (wanted ? (hits.length ? `; FOUND ${JSON.stringify(wanted)} (${hits.length})` : `; ${JSON.stringify(wanted)} NOT FOUND`) : '')
     + (listed.length ? `: ${listed.join(', ')}` : '');
 }
 

@@ -3489,6 +3489,15 @@ test('a typed field is not slowed or flagged by a settle the pixels cannot satis
   assert.match(act, /timeoutMs: graph\.STAYS_ON_SCREEN\.has\(step\.action\) \? STAYS_PUT_BUDGET_MS : timeoutMs,/);
 });
 
+test('a sweep says why it stopped and whether it found what it was sent for (field report, 0.22.0)', () => {
+  const src = fs.readFileSync(new URL('../src/actions.js', import.meta.url), 'utf8');
+  assert.match(src, /stopped: every field asked for was handled/);
+  assert.match(src, /stopped after the \$\{limit\}-section budget, before the bottom/);
+  assert.match(src, /FOUND \$\{JSON\.stringify\(wanted\)\}/);
+  assert.match(src, /NOT FOUND`\)/);
+  assert.match(src, /\(wanted \? hits : fill \? \[\] : all\)/, 'no element dump around a fill');
+});
+
 test('an unlabeled multiline field is listed, and named by its caption (field report, 0.22.0)', async () => {
   const sm = await import('../src/screenmap.js');
   const v = await import('../src/view.js');
