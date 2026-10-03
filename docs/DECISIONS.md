@@ -583,3 +583,24 @@ whether the store should be screen-keyed or control-pattern-keyed. For the web
 the answer is control-pattern-keyed. For iOS it is not yet established and the
 uniform-actuation argument suggests the screen graph remains right there — but
 the question is now on the record rather than assumed.
+
+## 2026-10-03 — The driver is Sonnet; human-likeness is the goal, tokens are the proof
+
+**Decided by the owner, from measurement.** Five agent setups ran the same two
+jobs on a real app (BENCHMARKS, "Who drives"), and the owner recorded a human
+baseline for the same jobs.
+
+- **The plugin's driver agent runs on Sonnet with only simframe's tools.** It
+  was the only setup to finish both jobs with simframe. Limiting the tools is
+  what makes a model use simframe at all: Haiku with every tool never did, and
+  Haiku limited to simframe did. Haiku is not the default: it missed an
+  unfamiliar control twice. The main session plans and judges; the driver
+  drives and reports.
+- **The token saving leads the docs, because it is measured:** the same model
+  used 2.5× fewer tokens and 3.5× fewer calls with simframe than without.
+- **The goal is driving like a person, and that is measured too.** A person
+  took 39 s and 49 s; agents took 9–10× longer. A guess ("5–10 minutes for a
+  person") had been in the docs and flattered the agents five times over. No
+  human time is quoted again without a recording behind it. Phase 20 is the
+  plan.
+

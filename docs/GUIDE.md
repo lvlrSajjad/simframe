@@ -1318,12 +1318,20 @@ because the agent chose it and then asked for it by name.
 
 ## Roadmap
 
-Updated 2026-09-25. Ordered by what it costs to leave undone. The working
+Updated 2026-10-03. Ordered by what it costs to leave undone. The working
 detail, with evidence, is in [`DEFERRED.md`](DEFERRED.md); item
 numbers below refer to it.
 
 **Now**
 
+- **Drive like a person (Phase 20).** Measured on 2026-10-03: a person who
+  knows the app did a service request in 39 s and an add-asset in 49 s
+  (medians of five); every agent took 13–16 minutes for the pair, 9–10×
+  slower, because it made 50–130 model calls where the person made about 12
+  decisions. In order: a forward step that diagnoses a failed save locally,
+  satisficing in the driver, habits (saved flows with slots, replayed), glance
+  instead of read on known screens, places after words. The person's own
+  account is in `docs/research/08-how-a-person-drives.md`.
 - **Never describe a screen that is no longer there.** A read that reports
   the previous screen with confidence is worse than a refusal, because every
   decision after it rests on it. Two fixes for this ship in **0.19.0**: a

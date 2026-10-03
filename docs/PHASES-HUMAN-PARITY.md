@@ -1,4 +1,4 @@
-# simframe — human-parity phases (10–16)
+# simframe — human-parity phases (10–20)
 
 Goal for this series: when an agent uses simframe to test something, it should
 reach or beat a human tester's speed and accuracy. Every phase is scored by the
@@ -459,6 +459,61 @@ client cannot set, and no global WebSocket on Node 18 or 20). Do not port the
 five escalation reasons; derive them. Do not weaken the verify barrier — a
 real page can be a production system.
 ```
+
+---
+
+## Phase 20 — Drive like a person — **next, set 2026-10-03**
+
+The first phase with a measured human behind it. The owner recorded both field
+jobs: a service request in **39.1 s** and an add-asset in **48.9 s** (medians of
+five). Every agent setup took 13–16 minutes for the pair, **9–10× slower**.
+The cause is measured as well: about 12 decisions for the person, 50–130 model
+calls for the agents. Perception and input are already fast. The source,
+including the owner's own account of how they drive, is
+`docs/research/08-how-a-person-drives.md`.
+
+Scored on: model calls per job, wall time per job against the medians above,
+and wrong taps (must stay zero). Every item is measured against the same two
+jobs before and after it lands.
+
+In priority order, by how much of the gap each closes and what it costs:
+
+1. **The forward step, with surprises handled locally.** The map names the
+   screen's primary action ("the big button under the screen"); a forward step
+   taps it. Success is arriving on another screen, with nothing re-read. When
+   it does not move, simframe scrolls the form, collects the validation
+   messages and any error toast itself, and returns them in one line ("not
+   saved: Warranty Start Date is required"). The person only thinks "when I get
+   surprised"; the agent should be handed the surprise already diagnosed.
+   Never a destructive or barrier control as forward.
+2. **Satisficing in the driver.** The brief says what matters; every other
+   option gets the first valid choice and every other required text a minimal
+   valid value ("my task is just finish CSR … not typing something specific").
+   Verify at the milestone ("Work Order #"), not after every tap. This is
+   instructions plus small helpers; it should take the service request from
+   30–90 calls to under ten on a first run.
+3. **Habits.** A flow the driver completed is saved with its choices as slots
+   and replayed next time: taps as soon as targets appear, checks only at the
+   milestone. The replay path exists; saving what worked is the missing half.
+   Target: a repeat run within 1.5× of the person's median.
+4. **Glance, don't read.** On a known screen, return what changed and the
+   forward control, not the whole map. The person gave "Previous Work Orders"
+   and "AI Insights" a glance and pressed NEXT.
+5. **Places after words.** Labels stay the selector. The graph already keeps
+   positions; on screens seen many times they become a prior that shortens the
+   search ("the second time I may look at the places too").
+
+Measurement that comes with it:
+- **Keep the field suite out of the repo** (it names the app); keep a generic
+  twin in the testbed (a wizard and a long form with a radio-row date choice),
+  so CI and `simframe hpi` can track it.
+- **Run the Sonnet driver twice in a row,** cold and warm, against the person's
+  medians.
+
+What stays open from the comparison runs and blocks this phase's numbers:
+- One screen under two identities (DEFERRED 174) still costs re-reads.
+- `goal` ambiguity between same-named screens.
+- The radio fallback costs about 16 s until it is learned per screen.
 
 ---
 
