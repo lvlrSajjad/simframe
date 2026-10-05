@@ -97,14 +97,34 @@ function ran(res) {
  * under test — so the JSON has to be readable either way, or the test cannot
  * tell "the flow reported a wrong turn" from "the command blew up".
  */
+// Above simframe's own worst case, so that simframe is the one to say what hung.
+//
+// It was 180s, set when simctl's budget was 20s, and item 146 then raised that
+// to 90s without looking here. A `relaunch` is a terminate and a launch, 90s
+// each, so a runner on which simctl hangs reaches simframe's own diagnosis —
+// "simctl did not return within 90s", which `SIMCTL_FLAKE` retries — at 180s,
+// the very moment this killed it. The scheduled run of 2026-10-04 lost exactly
+// that race: three minutes of silence, then "did not return JSON: " and nothing
+// after the colon. 300s covers both simctl verbs, the 30s launch wait and the
+// rest of the flow.
+const CLI_TIMEOUT_MS = 300_000;
+
 async function cli(args, { expectFail = false, allowFail = false } = {}) {
   const full = device ? [...args, `--device=${device}`] : args;
   try {
-    const { stdout } = await run('node', [CLI, ...full], { timeout: 180_000, maxBuffer: 32 << 20 });
+    const { stdout } = await run('node', [CLI, ...full], { timeout: CLI_TIMEOUT_MS, maxBuffer: 32 << 20 });
     if (expectFail) throw Object.assign(new Error('expected a non-zero exit'), { unexpectedSuccess: true, stdout });
     return stdout;
   } catch (err) {
     if (err.unexpectedSuccess) throw err;
+    // A kill is not a failure the command reported, and `allowFail` must not
+    // turn it into one: killed, it has printed nothing, and an empty string
+    // handed upward reads as "did not return JSON: " — a parse error about a
+    // payload that never existed. Name who stopped it, and after how long.
+    if (err.killed || err.signal) {
+      throw new Error(`simframe ${full.join(' ')} was killed by this harness after ${CLI_TIMEOUT_MS / 1000}s`
+        + ` (${err.signal ?? 'timeout'}) without finishing — simframe's own budgets did not end it first`);
+    }
     if (expectFail || allowFail) return `${err.stdout ?? ''}${err.stderr ?? ''}`;
     const why = (err.stdout || err.stderr || err.message || '').trim();
     // Noted here, not in `check`: by the time a failure reaches a check its
