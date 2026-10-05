@@ -68,6 +68,22 @@ export const DEVICE_STATE = [
     /system shell \(SpringBoard[^)]*\) probably crashed/i,
     "the guest's SpringBoard crashed, so nothing can be fronted",
   ],
+  // The capture wedge, in settle's own words rather than the daemon's. The
+  // scheduled run of 2026-10-05 pressed home three times and failed each with
+  // `screen did not settle within 26358ms — still for 49508ms of the 500ms
+  // required; … 158 black frame(s) — see the capture wedge`: a screen still
+  // for a hundred times the window, refused because what was still was black.
+  // The table knew "display surface could not be read" and not this, so the
+  // condition DEFERRED already calls the simulator's display read as the code.
+  //
+  // Narrowed to a failed settle with ten or more black frames. The count is
+  // per 60 ms poll, so a launch's black flash adds a handful, and a screen
+  // that is genuinely still animating must keep failing on its merits; that
+  // run had 158, 387 and 374.
+  [
+    /did not settle[^\n]*?\b\d{2,} black frame\(s\) — see the capture wedge/i,
+    'the display went black and stayed black (the capture wedge)',
+  ],
 ];
 
 /** The condition this output shows, or null when the check failed on its merits. */

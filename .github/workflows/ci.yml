@@ -361,56 +361,10 @@ jobs:
         #
         # The frame HASH is the assertion; `seq` resets when the daemon
         # restarts, so it is reported only.
-        run: |
-          set -o pipefail
-          read_state() {
-            simframe state --device="$DEVICE" --json \
-              | node -e 'const s=JSON.parse(require("fs").readFileSync(0,"utf8")); process.stdout.write(s.hash+" "+s.seq)'
-          }
-          # Setup, not the assertion: get to a known screen that is not the home
-          # screen. Retried, because `simctl launch` is merely slow on a loaded
-          # runner rather than broken, and a launch that has not happened makes
-          # the step below meaningless rather than failing.
-          printf '[{"launch":{"value":"com.apple.Preferences","relaunch":true}},{"settle":{"timeoutMs":25000}}]\n' > /tmp/setup.json
-          for attempt in 1 2 3; do
-            if simframe do /tmp/setup.json --device="$DEVICE"; then
-              break
-            fi
-            if [ "$attempt" = 3 ]; then
-              echo "FAIL could not reach a known screen in 3 attempts — nothing below would mean anything" >&2
-              simframe state --device="$DEVICE" --json || true
-              simframe ui --device="$DEVICE" || true
-              exit 1
-            fi
-            echo "     (setup launch failed on attempt $attempt — retrying)"
-            sleep 5
-          done
-          BEFORE=$(read_state)
-          # The assertion. Pressing home from inside an app always changes the
-          # screen, and it is simframe's own HID path end to end.
-          printf '[{"button":"home"},{"settle":{"timeoutMs":25000}}]\n' > /tmp/flow.json
-          for attempt in 1 2 3; do
-            if simframe do /tmp/flow.json --device="$DEVICE"; then
-              break
-            fi
-            if [ "$attempt" = 3 ]; then
-              echo "FAIL home through simframe failed $attempt times; this is not the runner" >&2
-              simframe ui --device="$DEVICE" || true
-              exit 1
-            fi
-            echo "     (the home flow failed on attempt $attempt — retrying)"
-            sleep 5
-          done
-          AFTER=$(read_state)
-          node -e '
-            const [bh, bs] = process.argv[1].split(" ");
-            const [ah, as] = process.argv[2].split(" ");
-            const moved = bh !== ah;
-            console.log(`${moved ? "ok  " : "FAIL"} frame hash changed: ${bh.slice(0, 10)} -> ${ah.slice(0, 10)}`);
-            console.log(`     seq ${bs} -> ${as}`);
-            if (!moved) console.error("a step ran cleanly but capture saw no change; the pipeline is not live");
-            process.exit(moved ? 0 : 1);
-          ' "$BEFORE" "$AFTER"
+        # Under the guard, setup included: a revive leaves the device on the
+        # home screen, so the retry has to relaunch Settings before it presses
+        # home again. See scripts/ci-home-step.sh.
+        run: node scripts/ci-device-guard.mjs "$DEVICE" -- bash scripts/ci-home-step.sh "$DEVICE"
 
       - name: The memory layer — screen map, refs, graph, verdicts, flows
         if: matrix.shard == 'memory'

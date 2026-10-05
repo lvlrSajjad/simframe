@@ -7023,6 +7023,17 @@ test('the CI guard tells a wedged device from a check that failed on its merits'
     + ' (killed by simframe, not refused by simctl — the host is loaded or the device is not answering)',
   ), 'simctl being killed at its timeout is the device');
 
+  // The scheduled run of 2026-10-05: home pressed, then a still black screen.
+  assert.ok(deviceCause(
+    'FAIL [1] settle: screen did not settle within 26358ms — still for 49508ms of the 500ms required;'
+    + ' 66 frame(s) arrived while waiting; 158 black frame(s) — see the capture wedge',
+  ), 'a settle refused for a long black screen is the device');
+  // And a launch's black flash on a screen that really is still animating is not.
+  assert.equal(deviceCause(
+    'FAIL [1] settle: screen did not settle within 25000ms — the movement is top right (92% of it);'
+    + ' still for 40ms of the 500ms required; 300 frame(s) arrived while waiting; 3 black frame(s) — see the capture wedge',
+  ), null, 'a few black frames on a moving screen is the check failing on its merits');
+
   // The half that matters more, and the one an over-eager signature destroys:
   // a tour asking for a label that is genuinely not there must keep failing.
   // This is the exact text item 168 was about — a real tour fault.
