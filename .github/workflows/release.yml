@@ -231,3 +231,47 @@ jobs:
           echo "simframe@${{ steps.kind.outputs.version }} is on npm under @next."
           echo "The MCP Registry was deliberately skipped: it lists the version to install."
           echo "Install it with: npm i simframe@next"
+
+  # The GitHub Release, which this workflow never used to make: they were
+  # written by hand, and when that stopped the repo's sidebar said 0.19.0 for
+  # seven versions while npm had 0.23.1. Nothing was red, because nothing here
+  # had ever claimed the job.
+  #
+  # A job of its own so `contents: write` is never held alongside `id-token:
+  # write` by the job that executes a downloaded `mcp-publisher`. After
+  # `publish`, so a release page never announces a version npm does not have.
+  # Tag pushes only: a manual run has no tag to release.
+  github-release:
+    needs: publish
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The notes are the commits since the previous tag, so it needs tags
+          # and the history between them, not the default single commit.
+          fetch-depth: 0
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Optional. Subjects matching it are withheld from the page, as
+          # `check-private` would flag them; unset, nothing is withheld.
+          SIMFRAME_PRIVATE_STRINGS: ${{ secrets.SIMFRAME_PRIVATE_STRINGS }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          # A release written by hand before this ran is the better one; keep it.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already has a GitHub Release — leaving it as written"
+            exit 0
+          fi
+          node scripts/release-notes.mjs "$TAG" > "$RUNNER_TEMP/notes.md"
+          case "$TAG" in
+            # A prerelease must not become "Latest", for the same reason it is
+            # published to npm under @next.
+            *-*) gh release create "$TAG" --verify-tag --prerelease --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" ;;
+            *)   gh release create "$TAG" --verify-tag --latest --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" ;;
+          esac
+          echo "created the GitHub Release for $TAG"

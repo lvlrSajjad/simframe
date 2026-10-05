@@ -8523,3 +8523,30 @@ test('goal mode backs out toward a target the graph knows before it searches for
   assert.equal(r.status, 'done', g.renderGoal(r));
   assert.deepEqual(a.log, ['back', 'back'], 'backed out twice and never searched');
 });
+
+test('release notes drop version bumps and link the diff from the previous tag', async () => {
+  const { releaseNotes, isVersionBump } = await import('../scripts/release-notes.mjs');
+  assert.ok(isVersionBump('0.23.1') && isVersionBump('v0.6.0-rc.0'));
+  assert.ok(!isVersionBump('0.23.1 broke the launch wait'));
+  const body = releaseNotes({
+    tag: 'v0.23.1', previous: 'v0.23.0', registryName: 'io.github.lvlrSajjad/simframe',
+    subjects: ['A keyboard key never competes with an app control', '0.23.1', '', 'Handoff for 2026-10-04: what is next'],
+  });
+  assert.match(body, /simframe@0\.23\.1/);
+  assert.match(body, /^- A keyboard key never competes with an app control$/m);
+  assert.doesNotMatch(body, /^- 0\.23\.1$/m);
+  assert.doesNotMatch(body, /Handoff/);
+  assert.match(body, /compare\/v0\.23\.0\.\.\.v0\.23\.1/);
+  let withheld = 0;
+  const kept = releaseNotes({
+    tag: 'v1.0.1', previous: 'v1.0.0', registryName: 'x', privatePatterns: ['acmecorp'],
+    subjects: ['A crawl of the AcmeCorp app', `A bundle ${['com', 'someone', 'app'].join('.')} leaked`, 'A tap lands'],
+    onWithheld: (n) => { withheld = n; },
+  });
+  assert.equal(withheld, 2);
+  assert.doesNotMatch(kept, /acmecorp|someone/i);
+  assert.match(kept, /^- A tap lands$/m);
+  const empty = releaseNotes({ tag: 'v1.0.0', previous: null, registryName: 'x', subjects: ['1.0.0'] });
+  assert.match(empty, /No changes beyond the version/);
+  assert.match(empty, /commits\/v1\.0\.0/);
+});
